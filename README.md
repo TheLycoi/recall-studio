@@ -301,27 +301,103 @@ Before returning, check your answer against the input: every id you used appears
 
 A chat panel in the Recall sidebar (toggle **Inbox | Chat** in the header,
 or run **Ask the notes**), for asking questions against the topic notes the
-digest has written.
+digest has written, and for running Recall's commands without leaving the
+box. It answers only from the vault.
 
-Retrieval is lexical, not an embedding or a vector store: every `.md` under
-the **Topic notes folder** is indexed into evidence units — every highlight
-callout/embed under `## Highlights`, plus any bullet under `## Key claims`
-that ends in a wikilink — scored against your question with Obsidian's own
-`prepareSimpleSearch`, plus a smaller weight for a match in the note title.
-The best matches (setting **Evidence per question**, default 12, capped at
-half from any one note) are numbered `[1]…[k]` and sent with your question
-and the last few turns of conversation (**Conversation turns kept**,
-default 10) in a single model call. The answer comes back citing `[n]`
-after each sentence it supports; a citation outside the evidence range is
-stripped mechanically before you see it. The evidence is then rendered
-underneath the answer as the same PDF++ callouts (or a quote block, for a
-claim with no PDF link) — clickable into the PDF or the source note, same
-as in a topic note (`src/retrieval.ts`, `src/chatPanel.ts`).
+**Retrieval** is lexical, not an embedding or a vector store: every `.md`
+under the **Topic notes folder** is indexed into evidence units — every
+highlight callout/embed under `## Highlights`, plus any bullet under
+`## Key claims` that ends in a wikilink — scored against your question with
+Obsidian's own `prepareSimpleSearch`, plus a smaller weight for a match in
+the note title. The best matches (**Evidence per question**, default 12,
+capped at half from any one note) are numbered `[1]…[k]`
+(`src/retrieval.ts`).
+
+**No evidence, no model.** When nothing under the topic folder matches the
+question, the panel answers at once, without a model call: *Your notes
+don't cover this…*, naming the question and suggesting which lecture to
+digest (`noEvidenceAnswer` in `src/askCheck.ts`). A hole in the notes is
+reported as a hole, not filled from memory.
+
+**How an answer is assembled.** The model does not write the finished
+answer. It returns a structured draft (`AskOut` in `src/schemas.ts`):
+
+- `coverage`: `full`, `partial`, or `none`;
+- `quotes`: the verbatim passages it relied on, each with the evidence
+  number it came from;
+- `sentences`: the answer one sentence at a time, each marked `claim` or
+  `gap` and, for a claim, the evidence numbers that state it. The text
+  carries no `[n]` markers, links, or ids.
+
+Code then does the checking (`checkAnswer` in `src/askCheck.ts`):
+
+- a quote is **verified** only if, after normalising case, accents, and
+  punctuation, it is a substring of the evidence it cites; otherwise it is
+  rejected and counted;
+- a **claim** sentence keeps only citations inside the evidence range, and a
+  claim with none left is **removed** and counted; when coverage is `none`
+  every claim is removed, since such an answer may only describe the gap;
+- a **gap** sentence is kept as written and carries no citation;
+- the citations are appended by code after each kept claim (`Text. [1][3]`),
+  so a sentence cannot claim something and quietly omit where it came from.
+
+Under the answer sits a **grounding line** — for example *Grounding: partial
+coverage · 3 sentences kept · 1 unsupported removed · 2 quotes verified* —
+with an **unverified** badge whenever anything was removed or rejected
+(setting **Show the grounding line under answers**). The verified quotes
+follow as a blockquote, and the evidence list below marks the items the
+answer cited. When every sentence was removed the panel says so instead of
+showing an empty answer.
+
+**Optional verify pass.** With **Verify answers with a second model call**
+on, the draft goes back to the model as a checker (`VERIFY_SYSTEM`): each
+sentence is judged supported only if the evidence it cited states it, and
+unsupported claims are removed before assembly. It doubles the cost of a
+question and is off by default. If the checker call fails, the answer is
+still assembled and the failure is shown on the turn.
 
 **Without a configured provider**, the model call fails and the panel shows
 an error line — but the evidence list still appears beneath it, built and
-ranked with no model involved, so the sources for a question remain useful
-even with no provider at all.
+ranked with no model involved, and the no-evidence answer above needs no
+provider at all.
+
+**Commands from the chat.** The same box runs Recall's commands
+(`src/chatCommands.ts`, `src/commands.ts`):
+
+- `/help` (or `/commands`, `/?`) lists every command with its aliases and
+  whether it is available right now;
+- `/extract`, `/digest`, `/export` … — a slash followed by an alias, an id,
+  or a command name runs it immediately; an unknown name is reported;
+- a message equal to a command's name or alias (case-insensitive, trailing
+  `…` ignored) also runs it;
+- a plain sentence of eight words or fewer that does not end in `?` and
+  shares at least two words with a command name or alias (for example
+  *extract pdf highlights*) shows a **Run** chip with an **Ask instead**
+  button, so a question is never mistaken for an order;
+- anything else is a question for the model.
+
+A command that is not available (for example `/extract` with a note rather
+than a PDF active) says so with its hint. Commands behave exactly as from
+the command palette, modals and notices included; the chat logs that they
+ran.
+
+| Command | Aliases | Available |
+| --- | --- | --- |
+| Send selection to inbox | `/capture`, `/send` | needs an open note |
+| Send PDF selection to inbox | `/pdf` | needs an open PDF |
+| Send PDF selection to inbox with instructions… | `/pdf-instruct` | needs an open PDF |
+| Send selection to inbox with instructions… | `/capture-instruct` | needs an open note |
+| Send all ==highlights== in this note to inbox | `/highlights`, `/sweep` | needs an open note |
+| AI-highlight this note and write cards | `/ai` | needs an open note |
+| AI-highlight this note with instructions… | `/ai-instruct` | needs an open note |
+| Add transcript for document highlighting | `/transcript` | needs an open note |
+| Extract PDF highlights to manifest | `/extract` | needs an open PDF |
+| Digest PDF highlights into topic notes… | `/digest` | needs an open PDF or manifest note |
+| Digest PDF highlights from pasted model output… | `/digest-json`, `/paste` | needs an open PDF or manifest note |
+| Ask the notes | `/chat`, `/ask` | always |
+| Open inbox | `/inbox` | always |
+| Export all reviewed cards to Anki | `/export` | always |
+| Retry failed highlights | `/retry` | always |
 
 <details>
 <summary><code>ASK_SYSTEM</code> (the Ask system prompt, verbatim)</summary>
@@ -329,36 +405,83 @@ even with no provider at all.
 ```
 You answer a student's question about their own class notes, using numbered evidence taken from those notes. Each piece of evidence is something they highlighted in a lecture PDF or a claim they wrote down themselves, and it carries the note it came from and the page it was highlighted on. Your answer goes into a small sidebar beside their notes, with the evidence listed underneath it, so the reader can check every sentence you write against the passage it came from.
 
-<answer_only_from_the_evidence>
-The evidence is the whole of what you may assert. You know a great deal about most of these subjects, and none of it belongs in the answer: the reader is revising for an exam set on this material, and a true sentence their course never taught them is one they cannot rely on and cannot trace. When the evidence answers the question, answer it. When the evidence answers part of it, answer that part and say plainly which part is missing, naming what would settle it ("the evidence here defines affinity but says nothing about how it is measured"). When the evidence does not touch the question at all, say so in a sentence and stop. That is a useful answer: it tells the reader their notes have a hole in them, which is what they would want to know.
+You do not write the finished answer. You return the passages you leaned on and then the answer one sentence at a time, each sentence saying which evidence states it, and the software assembles what the reader sees. It also checks you: a quote that is not in the evidence is dropped, and a claim that names no evidence is removed from the answer and counted. Those checks run on every answer, so treat them as the shape of the work rather than as a warning.
 
-Cite by writing [n] immediately after the sentence the evidence supports, with n the number in front of that piece. A sentence resting on two pieces carries both, as [2][5]. Every sentence that asserts something carries at least one citation; the only sentences that do not are the ones saying that the evidence is missing or thin, since there is nothing to cite for an absence. Never invent a number: if the evidence stops at [8], there is no [9].
+<answer_only_from_the_evidence>
+The evidence is the whole of what you may assert. You know a great deal about most of these subjects, and none of it belongs here: the reader is revising for an exam set on this material, and a true sentence their course never taught them is one they cannot rely on and cannot trace back to a slide. If a fact is not in the evidence in front of you, it is not in the answer, however certain you are of it.
+
+The conversation so far, when there is one, is there so that a follow-up makes sense: it tells you what "it" refers to and what has already been said. It is not evidence. Nothing said in an earlier turn may be asserted in this one unless the evidence in front of you now states it.
 </answer_only_from_the_evidence>
+
+<when_the_notes_do_not_cover_it>
+Saying that the notes do not answer the question is a correct answer, and often the most useful one: it tells the reader their notes have a hole in them, which is exactly what they would want to know before an exam. It is never a failure to reach for.
+
+Set coverage to full when the evidence answers the question, partial when it answers some of it, and none when it does not touch the question at all. A none answer is one or two gap sentences and no quotes: say what the evidence does hold and what it does not, naming what would settle the question ("nothing here gives a half-life for any drug"). Do not attach a claim to a none answer; there is nothing for it to rest on. A partial answer carries both kinds: the part the evidence settles, then a gap sentence for the part it leaves open.
+</when_the_notes_do_not_cover_it>
+
+<quotes_first>
+Before you write a sentence, copy into quotes the passages your answer will rest on: the words themselves, character for character, from the evidence they appear in, with the number of that piece. Not a paraphrase, not a tidied version, not two fragments spliced with an ellipsis. The software looks each one up in the evidence you named and shows the reader only the ones it finds, so a quote you smoothed out is a quote that disappears.
+
+Extracting them first is the point of the exercise, not bookkeeping after the fact. Finding the exact words that carry the answer is what tells you whether the answer is there at all; often the passage you were sure you remembered turns out to say something narrower, and the sentence you were about to write becomes a gap sentence instead. Keep them short, a clause or a sentence, and copy only the spans doing the work. Leave quotes empty when coverage is none.
+</quotes_first>
+
+<sentences_and_their_numbers>
+Write the answer one sentence per entry, in the order the reader will read them. Do not write [1] or any other marker inside the text; the software appends the citations from the numbers you list, and a marker you typed yourself is stripped out.
+
+A claim sentence asserts something, and it lists in cited every evidence number that states it: one number, or both when the sentence rests on two pieces. A claim whose cited list is empty is removed from the answer before the reader sees it, so if you cannot name the evidence for a sentence, either find the number or rewrite the sentence as what the evidence does say. Never invent a number: if the evidence stops at [8], there is no [9], and a sentence citing one is removed.
+
+A gap sentence says what the evidence does not cover, and it cites nothing, because there is no passage to point at for an absence. That is the one kind of sentence that carries no numbers.
+
+A sentence that is a list item starts with "- " and is one entry like any other.
+</sentences_and_their_numbers>
 
 <how_to_write_it>
 Prefer the reader's own wording. These are their highlights, in the vocabulary their lecturer used, and an answer in that vocabulary is one they can match against the slide. Where two pieces of evidence use different words for the same thing, use the one the question used.
 
-Be short. A few sentences, or a small list when the question asks for several things. This is a sidebar, not an essay, and the evidence is right there underneath; you do not need to quote it at length, only to say what it means for the question. Plain markdown, bold and code at most, no headings.
-
-The conversation so far, when there is one, is there so that a follow-up makes sense: it tells you what "it" refers to and what has already been said. It is not evidence. Nothing from an earlier turn may be asserted in this one unless the evidence in front of you now supports it.
+Be short. A few sentences, or a small list when the question asks for several things. This is a sidebar, not an essay, and the evidence is right there underneath: you do not need to reproduce it, only to say what it means for the question. Plain markdown, bold and code at most, no headings, no links, no ids.
 </how_to_write_it>
 
 <examples>
 <example>
 <evidence>[1] (Receptors, p.4) Receptors have 2 important properties: they bind ligands with relatively high affinity, and they transduce a signal to produce a biological effect (this distinguishes receptors from inert binding sites such as albumin, which binds and carries many drugs but does not transduce a signal).</evidence>
 <question>What distinguishes a receptor from albumin?</question>
-<answer>Both bind drugs, but only a receptor transduces a signal to produce a biological effect; albumin binds and carries drugs without transducing anything, which is why it counts as an inert binding site [1].</answer>
-<note>One sentence, one citation, in the note's own words. Nothing is added about albumin's structure or its other roles, true though that would be.</note>
+<output>Coverage is full. One quote, from [1]: "transduce a signal to produce a biological effect (this distinguishes receptors from inert binding sites such as albumin, which binds and carries many drugs but does not transduce a signal)". Two claim sentences. The first, "Both bind drugs, but only a receptor transduces a signal to produce a biological effect.", cites [1]. The second, "Albumin binds and carries drugs without transducing anything, which is what makes it an inert binding site.", cites [1] as well.</output>
+<note>The quote is the span that actually carries the distinction, copied whole rather than trimmed to look neat. Both sentences rest on the same piece, so both name it. Nothing is added about albumin's structure or its other roles, true though that would be.</note>
 </example>
 <example>
 <evidence>[1] (Pharmacology, p.2) Pharmacokinetics = what the body does to drugs. [2] (Drug Disposition, p.7) Metabolism converts drugs into more water-soluble forms for excretion.</evidence>
 <question>What is the half-life of aspirin?</question>
-<answer>Your notes do not cover this. The evidence here defines pharmacokinetics [1] and describes metabolism in general terms [2], but nothing in it gives a half-life for aspirin or any other drug. If half-life was on a slide, it has not been highlighted yet.</answer>
-<note>The gap is named rather than filled. The two citations describe what the evidence does say; the claim about aspirin's half-life is never made, because no evidence carries it.</note>
+<output>Coverage is none. No quotes. Two gap sentences, neither citing anything: "Your notes do not cover this." and "The evidence here defines pharmacokinetics and describes metabolism in general terms, but nothing in it gives a half-life for aspirin or for any other drug."</output>
+<note>The gap is named rather than filled. Half-life is a number worth knowing and one you could supply from memory, which is exactly why it must not appear: the reader would have no way to tell it apart from what their lecturer taught. No sentence is a claim here, so no sentence cites anything, and there is nothing to quote.</note>
 </example>
 </examples>
 
-Before answering, read back what you wrote: every [n] is a number you were actually given, every asserted sentence carries one, and nothing in the answer is something you know rather than something the evidence says.
+Before you return, read each sentence back against the evidence you cited for it. Ask of every claim whether that piece of evidence, on its own, says what the sentence says, and not merely something compatible with it; if it does not, drop the sentence or turn it into a gap sentence. Check that every quote is in the evidence you attributed it to, word for word, and that every number you used is one you were given.
+```
+
+</details>
+
+<details>
+<summary><code>VERIFY_SYSTEM</code> (the verify-pass system prompt, verbatim)</summary>
+
+```
+You check an answer that has already been written. You are not the writer: you do not improve sentences, fill gaps, or suggest better wording, and no sentence changes because of what you say beyond being kept or removed.
+
+You are given numbered evidence from a student's notes and the sentences drafted from it, each printed with the evidence numbers it cited. For each sentence, say whether the evidence it cited states what the sentence says.
+
+Supported means stated. Not plausible, not likely, not true as far as you know, not something the cited passage is consistent with or implies to a reader who already knows the subject. If the sentence names a number, the cited evidence carries that number; if it names a mechanism, the cited evidence describes that mechanism. Evidence that is about the right topic but does not carry the sentence's claim is not support. A sentence citing nothing, or citing a number that is not in the evidence, is unsupported.
+
+Judge each sentence only against the pieces it cited, not against the evidence as a whole: a sentence that is stated somewhere else in the list but not in what it pointed at is unsupported, because the reader will follow the citation it was given. The reason is one clause naming which words are or are not there.
+
+<example>
+<evidence>[1] (Receptors, p.4) Receptors bind ligands with relatively high affinity and transduce a signal to produce a biological effect. [2] (Drug Disposition, p.7) Metabolism converts drugs into more water-soluble forms for excretion.</evidence>
+<draft>
+0. Receptors transduce a signal to produce a biological effect. [1]
+1. Receptor binding is saturable, so the response plateaus at high doses. [1]
+</draft>
+<verdicts>0 supported: [1] states transduction of a signal to produce a biological effect in those words. 1 not supported: [1] mentions affinity and transduction but says nothing about saturation or a plateau.</verdicts>
+<note>The second sentence is true of receptors and would pass a reader who knew the subject. It is unsupported anyway, because the passage it cites does not say it.</note>
+</example>
 ```
 
 </details>
@@ -375,6 +498,8 @@ Before answering, read back what you wrote: every [n] is a number you were actua
 | Evidence per question | 12 | how many ranked evidence units Ask sends per question |
 | Conversation turns kept | 10 | how many prior turns Ask keeps for follow-ups |
 | Standing instructions for Ask | *(empty)* | appended to every Ask prompt |
+| Verify answers with a second model call | off | re-checks each drafted sentence against its cited evidence before assembly; doubles the cost of a question |
+| Show the grounding line under answers | on | the coverage / kept / removed / verified summary and the unverified badge |
 
 **Limitations:**
 
@@ -388,6 +513,11 @@ Before answering, read back what you wrote: every [n] is a number you were actua
   and related topics are never edited by a later digest run.
 - Retrieval is lexical: a question phrased with none of a note's own words
   will find nothing there. The evidence list is what makes that visible.
+- Grounding is checked one sentence at a time: a claim can cite evidence
+  that is only loosely related and pass. The optional verify pass tightens
+  this at the cost of a second call. Best-of-N sampling is not implemented.
+- Quote verification is a normalised substring check, so a paraphrase is
+  rejected even when its meaning is in the evidence. That is intended.
 - No live model call for digest or Ask has been exercised yet; both prompts
   are covered by message-assembly and schema tests, and the digest path end
   to end by the pasted-JSON route.
@@ -601,6 +731,10 @@ Layout:
 - `src/digest.ts` — the extract and digest commands' flow (model or pasted JSON, preview, write, flashcards)
 - `src/retrieval.ts` — Ask: evidence index, lexical ranking, citation check, evidence rendering
 - `src/chatPanel.ts` — the Chat half of the sidebar
+- `src/askCheck.ts` — Ask answer assembly: quote verification, citation appending, unsupported-claim removal, the grounding report
+- `src/commandTable.ts` — the fifteen commands as pure data (ids, names, aliases, hints)
+- `src/commands.ts` — their availability checks and bodies; `main.ts` registers them in one loop
+- `src/chatCommands.ts` — `/slash`, exact-name, and Run-chip matching for the chat box
 - `src/schemas.ts` — zod output schemas for the digest and Ask (pure, so tests can bundle them)
 - `src/pdflink.ts` — parses and renders PDF++ links, subpaths, and callouts
 - `src/pdftext.ts` — quad-to-rect, selection-to-text, and page text over pdf.js text content
