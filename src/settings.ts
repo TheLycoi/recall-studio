@@ -62,6 +62,10 @@ export interface RecallSettings {
   askEvidenceCount: number;
   askMaxTurns: number;
   askInstructions: string;
+  /** Second model call per question that re-checks each drafted sentence against the evidence it cited. */
+  askVerifyPass: boolean;
+  /** Show the line under an answer reporting what was kept, removed, verified, and rejected. */
+  askShowGrounding: boolean;
 
   // Sidebar
   /** Persisted by the view; no setting UI. */
@@ -121,6 +125,8 @@ export const DEFAULT_SETTINGS: RecallSettings = {
   askEvidenceCount: 12,
   askMaxTurns: 10,
   askInstructions: "",
+  askVerifyPass: false,
+  askShowGrounding: true,
 
   sidebarMode: "inbox",
 
@@ -542,6 +548,27 @@ export class RecallSettingTab extends PluginSettingTab {
           save();
         });
       });
+
+    new Setting(containerEl)
+      .setName("Verify answers with a second model call")
+      .setDesc(
+        "After drafting, the model re-checks each sentence against its cited evidence and unsupported ones are removed. Doubles the cost of a question.",
+      )
+      .addToggle((t) =>
+        t.setValue(s.askVerifyPass).onChange((v) => {
+          s.askVerifyPass = v;
+          save();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Show the grounding line under answers")
+      .addToggle((t) =>
+        t.setValue(s.askShowGrounding).onChange((v) => {
+          s.askShowGrounding = v;
+          save();
+        }),
+      );
 
     new Setting(containerEl).setName("Anki").setHeading();
 

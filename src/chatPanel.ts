@@ -1,14 +1,7 @@
 import { ItemView, MarkdownRenderer, TAbstractFile, TFile, prepareSimpleSearch } from "obsidian";
 import type RecallPlugin from "./main";
 import { describeError } from "./llm";
-import {
-  indexNote,
-  numberEvidence,
-  rankEvidence,
-  renderEvidenceMarkdown,
-  validateCitations,
-  type EvidenceUnit,
-} from "./retrieval";
+import { indexNote, numberEvidence, rankEvidence, renderEvidenceMarkdown, type EvidenceUnit } from "./retrieval";
 import type { AskHistoryTurn } from "./prompt";
 
 /** One turn in the chat log. An assistant turn carries the evidence it was answered from, error or not. */
@@ -148,8 +141,13 @@ export class ChatPanel {
         history: this.history(),
         standingInstructions: this.plugin.settings.askInstructions,
       });
-      const checked = validateCitations(draft.answer, draft.cited, evidence.length);
-      this.turns.push({ role: "assistant", text: checked.answer, evidence });
+      // Temporary: the draft is now structured, and `checkAnswer` (src/askCheck.ts)
+      // is what assembles and grounds it. Until that lands, join the sentences
+      // and append their citations so the panel keeps compiling and answering.
+      const text = draft.sentences
+        .map((s) => s.text + (s.cited.length ? " " + s.cited.map((n) => `[${n}]`).join("") : ""))
+        .join(" ");
+      this.turns.push({ role: "assistant", text, evidence });
     } catch (e) {
       this.turns.push({ role: "assistant", text: "", evidence, error: describeError(e) });
     } finally {

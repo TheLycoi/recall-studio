@@ -1,19 +1,17 @@
 import { MarkdownView, Notice, Plugin, TFile, normalizePath } from "obsidian";
 import { RECALL_ICON, registerRecallIcon } from "./icon";
 import { AnkiClient, exportToAnki, finalizeHighlights, buildNote } from "./anki";
-import { aiHighlightNote, captureMarkdownHighlights, capturePdfSelection, captureReadingSelection, captureSelection } from "./capture";
+import { captureSelection } from "./capture";
+import { RECALL_COMMANDS } from "./commands";
 import { Generator } from "./generator";
 import { Highlighter } from "./highlighter";
-import { isPdfFile, readPdfSelection } from "./pdf";
-import { isManifestNote } from "./pdfHighlights";
-import { digestPdf, extractPdfHighlights } from "./digest";
 import { InboxView, VIEW_TYPE_INBOX } from "./inboxView";
 import { LlmClient } from "./llm";
-import { askInstruction, askTranscript, pickDeck } from "./modals";
+import { askInstruction, pickDeck } from "./modals";
 import type { Card, Highlight } from "./model";
 import { DEFAULT_SETTINGS, RecallSettingTab, type RecallSettings } from "./settings";
 import { InboxStore } from "./store";
-import { buildAnkiTextImport, normalizeTranscript, truncateTranscript } from "./util";
+import { buildAnkiTextImport } from "./util";
 
 export default class RecallPlugin extends Plugin {
   settings: RecallSettings = { ...DEFAULT_SETTINGS };
@@ -49,171 +47,16 @@ export default class RecallPlugin extends Plugin {
     this.refreshStatusBar();
 
     // ---- commands -------------------------------------------------------
-    this.addCommand({
-      id: "capture-selection",
-      name: "Send selection to inbox",
-      checkCallback: (checking) => {
-        const view = this.activeMarkdown();
-        if (!view?.file) return false;
-        if (!checking) {
-          if (view.getMode() === "preview") void captureReadingSelection(this, view, activeWindow);
-          else void captureSelection(this, view.editor, view.file);
-        }
-        return true;
-      },
-    });
-    this.addCommand({
-      id: "capture-pdf-selection",
-      name: "Send PDF selection to inbox",
-      checkCallback: (checking) => {
-        const file = this.app.workspace.getActiveFile();
-        if (!isPdfFile(file)) return false;
-        if (!checking) {
-          const sel = readPdfSelection(activeWindow);
-          if (!sel) new Notice("Recall: select text inside a PDF page first.");
-          else capturePdfSelection(this, file, sel);
-        }
-        return true;
-      },
-    });
-    this.addCommand({
-      id: "capture-pdf-selection-with-instruction",
-      name: "Send PDF selection to inbox with instructions…",
-      checkCallback: (checking) => {
-        const file = this.app.workspace.getActiveFile();
-        if (!isPdfFile(file)) return false;
-        if (!checking) {
-          const sel = readPdfSelection(activeWindow);
-          if (!sel) {
-            new Notice("Recall: select text inside a PDF page first.");
-            return true;
-          }
-          void askInstruction(this.app, "Instructions for this highlight", "e.g. one cloze on the number").then((inst) => {
-            if (inst !== null) capturePdfSelection(this, file, sel, { instruction: inst });
-          });
-        }
-        return true;
-      },
-    });
-    this.addCommand({
-      id: "capture-selection-with-instruction",
-      name: "Send selection to inbox with instructions…",
-      editorCallback: async (editor, ctx) => {
-        if (!ctx.file) return;
-        const inst = await askInstruction(this.app, "Instructions for this highlight", "e.g. one cloze on the number; cards in Dutch; focus on the mechanism");
-        if (inst === null) return;
-        await captureSelection(this, editor, ctx.file, inst);
-      },
-    });
-    this.addCommand({
-      id: "capture-markdown-highlights",
-      name: "Send all ==highlights== in this note to inbox",
-      checkCallback: (checking) => {
-        const file = this.app.workspace.getActiveFile();
-        if (!file || file.extension !== "md") return false;
-        if (!checking) void captureMarkdownHighlights(this, file);
-        return true;
-      },
-    });
-    this.addCommand({
-      id: "ai-highlight",
-      name: "AI-highlight this note and write cards",
-      checkCallback: (checking) => {
-        const file = this.app.workspace.getActiveFile();
-        if (!file || file.extension !== "md") return false;
-        if (!checking) aiHighlightNote(this, file);
-        return true;
-      },
-    });
-    this.addCommand({
-      id: "ai-highlight-with-instruction",
-      name: "AI-highlight this note with instructions…",
-      checkCallback: (checking) => {
-        const file = this.app.workspace.getActiveFile();
-        if (!file || file.extension !== "md") return false;
-        if (!checking) {
-          void askInstruction(this.app, "What should the highlighter look for?", "e.g. only the definitions and the numbers in the Results section").then((inst) => {
-            if (inst !== null) aiHighlightNote(this, file, inst);
-          });
-        }
-        return true;
-      },
-    });
-    this.addCommand({
-      id: "add-transcript",
-      name: "Add transcript for document highlighting",
-      checkCallback: (checking) => {
-        const file = this.app.workspace.getActiveFile();
-        if (!file || file.extension !== "md") return false;
-        if (!checking) {
-          void askTranscript(this.app, this.store.getTranscript(file.path)).then((choice) => {
-            if (choice === null) return;
-            if (choice.action === "clear") {
-              this.store.clearTranscript(file.path);
-              new Notice("Recall: transcript removed.");
-              return;
-            }
-            const cleaned = normalizeTranscript(choice.text);
-            const { text: kept, truncated } = truncateTranscript(cleaned, this.settings.transcriptMaxChars);
-            this.store.setTranscript(file.path, {
-              text: kept,
-              origin: choice.origin,
-              sourceFile: choice.sourceFile,
-              addedAt: new Date().toISOString(),
-              truncated,
-            });
-            new Notice(`Recall: transcript saved (${kept.length.toLocaleString()} characters)${truncated ? ", cut to the size limit" : ""}.`);
-          });
-        }
-        return true;
-      },
-    });
-    this.addCommand({
-      id: "extract-pdf-highlights",
-      name: "Extract PDF highlights to manifest",
-      checkCallback: (checking) => {
-        const file = this.app.workspace.getActiveFile();
-        if (!isPdfFile(file)) return false;
-        if (!checking) void extractPdfHighlights(this, file);
-        return true;
-      },
-    });
-    this.addCommand({
-      id: "digest-pdf-highlights",
-      name: "Digest PDF highlights into topic notes…",
-      checkCallback: (checking) => {
-        const file = this.app.workspace.getActiveFile();
-        if (!file || !(isPdfFile(file) || isManifestNote(this, file))) return false;
-        if (!checking) void digestPdf(this, file, "model");
-        return true;
-      },
-    });
-    this.addCommand({
-      id: "digest-pdf-highlights-from-json",
-      name: "Digest PDF highlights from pasted model output…",
-      checkCallback: (checking) => {
-        const file = this.app.workspace.getActiveFile();
-        if (!file || !(isPdfFile(file) || isManifestNote(this, file))) return false;
-        if (!checking) void digestPdf(this, file, "paste");
-        return true;
-      },
-    });
-    this.addCommand({ id: "open-chat", name: "Ask the notes", callback: () => void this.openChat() });
-    this.addCommand({ id: "open-inbox", name: "Open inbox", callback: () => void this.openInbox() });
-    this.addCommand({
-      id: "export-reviewed",
-      name: "Export all reviewed cards to Anki",
-      callback: () => void this.exportHighlights(this.store.all().filter((h) => h.status === "ready")),
-    });
-    this.addCommand({
-      id: "retry-failed",
-      name: "Retry failed highlights",
-      callback: () => {
-        let n = 0;
-        for (const h of this.store.all()) if (h.status === "error") (this.generator.enqueue(h), n++);
-        new Notice(`Recall: retrying ${n}.`);
-      },
-    });
+    for (const c of RECALL_COMMANDS)
+      this.addCommand({
+        id: c.id,
+        name: c.name,
+        checkCallback: (checking) => {
+          if (!c.available(this)) return false;
+          if (!checking) void c.run(this);
+          return true;
+        },
+      });
 
     // ---- editor context menu --------------------------------------------
     this.registerEvent(

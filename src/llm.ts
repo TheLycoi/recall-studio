@@ -5,10 +5,10 @@ import type { LlmBackend } from "./backend";
 import { CodexBackend, CodexError } from "./codex";
 import { buildExamplesBlock } from "./examples";
 import type { BloomLevel, Card, Highlight } from "./model";
-import type { AskMessageArgs, DigestMessageArgs } from "./prompt";
-import { buildAskMessage, buildDigestMessage, buildHighlighterMessage } from "./prompt";
-import { AskOut as AskOutSchema, DigestOut as DigestOutSchema } from "./schemas";
-import type { AskDraft, DigestDraft } from "./schemas";
+import type { AskMessageArgs, DigestMessageArgs, VerifyMessageArgs } from "./prompt";
+import { buildAskMessage, buildDigestMessage, buildHighlighterMessage, buildVerifyMessage } from "./prompt";
+import { AskOut as AskOutSchema, DigestOut as DigestOutSchema, VerifyOut as VerifyOutSchema } from "./schemas";
+import type { AskDraft, DigestDraft, VerifyDraft } from "./schemas";
 import type { RecallSettings } from "./settings";
 
 const CardOut = z.object({
@@ -437,9 +437,8 @@ export class LlmClient {
 
   /**
    * "ask": one question against numbered evidence from the reader's own notes.
-   * The `[n]` citations are checked by the caller (`validateCitations` in
-   * retrieval.ts), which is the same check the pasted-JSON path runs, so
-   * nothing is validated here.
+   * The draft is structured, not prose: the caller assembles the answer from
+   * it and checks the quotes and citations, so nothing is validated here.
    */
   async ask(args: AskMessageArgs): Promise<AskDraft> {
     return this.backend().complete({
@@ -448,6 +447,23 @@ export class LlmClient {
       schema: AskOutSchema,
       label: "answer",
       maxTokens: 4000,
+    });
+  }
+
+  /**
+   * "verify": the optional second pass over an answer already drafted, judging
+   * each sentence against the evidence it cited. Costs a second call per
+   * question, which is why it sits behind `askVerifyPass` and is off by
+   * default. Stray indices are the caller's problem to ignore, as with
+   * `critiqueCards` above.
+   */
+  async verifyAnswer(args: VerifyMessageArgs): Promise<VerifyDraft> {
+    return this.backend().complete({
+      system: VERIFY_SYSTEM,
+      user: buildVerifyMessage(args),
+      schema: VerifyOutSchema,
+      label: "verdicts",
+      maxTokens: 2000,
     });
   }
 }
@@ -509,43 +525,101 @@ Before returning, check your answer against the input: every id you used appears
 
 /**
  * Ask system prompt: answer a question from numbered evidence taken from the
- * reader's own notes. The `[n]` citations are checked mechanically afterwards
- * (T7 strips any outside the range), which is why the prompt asks for them
- * plainly rather than elaborately.
+ * reader's own notes.
+ *
+ * Same register as WRITER_SYSTEM above: prose with the reason attached to each
+ * rule, examples that show the shape rather than restate it. What it encodes
+ * comes from the vault's own wiki pages on reducing hallucinations —
+ * external knowledge restriction, permission to say "I don't know", direct
+ * quotes for factual grounding, verification by citation, and a closing
+ * self-check in place of a full chain-of-thought pass.
+ *
+ * The output is structured rather than prose: the software (src/askCheck.ts)
+ * checks each quote against the evidence, appends the citations, and removes a
+ * claim that cited nothing. The prompt says so, because a rule the model knows
+ * will be checked is one it follows.
  */
 const ASK_SYSTEM = `You answer a student's question about their own class notes, using numbered evidence taken from those notes. Each piece of evidence is something they highlighted in a lecture PDF or a claim they wrote down themselves, and it carries the note it came from and the page it was highlighted on. Your answer goes into a small sidebar beside their notes, with the evidence listed underneath it, so the reader can check every sentence you write against the passage it came from.
 
-<answer_only_from_the_evidence>
-The evidence is the whole of what you may assert. You know a great deal about most of these subjects, and none of it belongs in the answer: the reader is revising for an exam set on this material, and a true sentence their course never taught them is one they cannot rely on and cannot trace. When the evidence answers the question, answer it. When the evidence answers part of it, answer that part and say plainly which part is missing, naming what would settle it ("the evidence here defines affinity but says nothing about how it is measured"). When the evidence does not touch the question at all, say so in a sentence and stop. That is a useful answer: it tells the reader their notes have a hole in them, which is what they would want to know.
+You do not write the finished answer. You return the passages you leaned on and then the answer one sentence at a time, each sentence saying which evidence states it, and the software assembles what the reader sees. It also checks you: a quote that is not in the evidence is dropped, and a claim that names no evidence is removed from the answer and counted. Those checks run on every answer, so treat them as the shape of the work rather than as a warning.
 
-Cite by writing [n] immediately after the sentence the evidence supports, with n the number in front of that piece. A sentence resting on two pieces carries both, as [2][5]. Every sentence that asserts something carries at least one citation; the only sentences that do not are the ones saying that the evidence is missing or thin, since there is nothing to cite for an absence. Never invent a number: if the evidence stops at [8], there is no [9].
+<answer_only_from_the_evidence>
+The evidence is the whole of what you may assert. You know a great deal about most of these subjects, and none of it belongs here: the reader is revising for an exam set on this material, and a true sentence their course never taught them is one they cannot rely on and cannot trace back to a slide. If a fact is not in the evidence in front of you, it is not in the answer, however certain you are of it.
+
+The conversation so far, when there is one, is there so that a follow-up makes sense: it tells you what "it" refers to and what has already been said. It is not evidence. Nothing said in an earlier turn may be asserted in this one unless the evidence in front of you now states it.
 </answer_only_from_the_evidence>
+
+<when_the_notes_do_not_cover_it>
+Saying that the notes do not answer the question is a correct answer, and often the most useful one: it tells the reader their notes have a hole in them, which is exactly what they would want to know before an exam. It is never a failure to reach for.
+
+Set coverage to full when the evidence answers the question, partial when it answers some of it, and none when it does not touch the question at all. A none answer is one or two gap sentences and no quotes: say what the evidence does hold and what it does not, naming what would settle the question ("nothing here gives a half-life for any drug"). Do not attach a claim to a none answer; there is nothing for it to rest on. A partial answer carries both kinds: the part the evidence settles, then a gap sentence for the part it leaves open.
+</when_the_notes_do_not_cover_it>
+
+<quotes_first>
+Before you write a sentence, copy into quotes the passages your answer will rest on: the words themselves, character for character, from the evidence they appear in, with the number of that piece. Not a paraphrase, not a tidied version, not two fragments spliced with an ellipsis. The software looks each one up in the evidence you named and shows the reader only the ones it finds, so a quote you smoothed out is a quote that disappears.
+
+Extracting them first is the point of the exercise, not bookkeeping after the fact. Finding the exact words that carry the answer is what tells you whether the answer is there at all; often the passage you were sure you remembered turns out to say something narrower, and the sentence you were about to write becomes a gap sentence instead. Keep them short, a clause or a sentence, and copy only the spans doing the work. Leave quotes empty when coverage is none.
+</quotes_first>
+
+<sentences_and_their_numbers>
+Write the answer one sentence per entry, in the order the reader will read them. Do not write [1] or any other marker inside the text; the software appends the citations from the numbers you list, and a marker you typed yourself is stripped out.
+
+A claim sentence asserts something, and it lists in cited every evidence number that states it: one number, or both when the sentence rests on two pieces. A claim whose cited list is empty is removed from the answer before the reader sees it, so if you cannot name the evidence for a sentence, either find the number or rewrite the sentence as what the evidence does say. Never invent a number: if the evidence stops at [8], there is no [9], and a sentence citing one is removed.
+
+A gap sentence says what the evidence does not cover, and it cites nothing, because there is no passage to point at for an absence. That is the one kind of sentence that carries no numbers.
+
+A sentence that is a list item starts with "- " and is one entry like any other.
+</sentences_and_their_numbers>
 
 <how_to_write_it>
 Prefer the reader's own wording. These are their highlights, in the vocabulary their lecturer used, and an answer in that vocabulary is one they can match against the slide. Where two pieces of evidence use different words for the same thing, use the one the question used.
 
-Be short. A few sentences, or a small list when the question asks for several things. This is a sidebar, not an essay, and the evidence is right there underneath; you do not need to quote it at length, only to say what it means for the question. Plain markdown, bold and code at most, no headings.
-
-The conversation so far, when there is one, is there so that a follow-up makes sense: it tells you what "it" refers to and what has already been said. It is not evidence. Nothing from an earlier turn may be asserted in this one unless the evidence in front of you now supports it.
+Be short. A few sentences, or a small list when the question asks for several things. This is a sidebar, not an essay, and the evidence is right there underneath: you do not need to reproduce it, only to say what it means for the question. Plain markdown, bold and code at most, no headings, no links, no ids.
 </how_to_write_it>
 
 <examples>
 <example>
 <evidence>[1] (Receptors, p.4) Receptors have 2 important properties: they bind ligands with relatively high affinity, and they transduce a signal to produce a biological effect (this distinguishes receptors from inert binding sites such as albumin, which binds and carries many drugs but does not transduce a signal).</evidence>
 <question>What distinguishes a receptor from albumin?</question>
-<answer>Both bind drugs, but only a receptor transduces a signal to produce a biological effect; albumin binds and carries drugs without transducing anything, which is why it counts as an inert binding site [1].</answer>
-<note>One sentence, one citation, in the note's own words. Nothing is added about albumin's structure or its other roles, true though that would be.</note>
+<output>Coverage is full. One quote, from [1]: "transduce a signal to produce a biological effect (this distinguishes receptors from inert binding sites such as albumin, which binds and carries many drugs but does not transduce a signal)". Two claim sentences. The first, "Both bind drugs, but only a receptor transduces a signal to produce a biological effect.", cites [1]. The second, "Albumin binds and carries drugs without transducing anything, which is what makes it an inert binding site.", cites [1] as well.</output>
+<note>The quote is the span that actually carries the distinction, copied whole rather than trimmed to look neat. Both sentences rest on the same piece, so both name it. Nothing is added about albumin's structure or its other roles, true though that would be.</note>
 </example>
 <example>
 <evidence>[1] (Pharmacology, p.2) Pharmacokinetics = what the body does to drugs. [2] (Drug Disposition, p.7) Metabolism converts drugs into more water-soluble forms for excretion.</evidence>
 <question>What is the half-life of aspirin?</question>
-<answer>Your notes do not cover this. The evidence here defines pharmacokinetics [1] and describes metabolism in general terms [2], but nothing in it gives a half-life for aspirin or any other drug. If half-life was on a slide, it has not been highlighted yet.</answer>
-<note>The gap is named rather than filled. The two citations describe what the evidence does say; the claim about aspirin's half-life is never made, because no evidence carries it.</note>
+<output>Coverage is none. No quotes. Two gap sentences, neither citing anything: "Your notes do not cover this." and "The evidence here defines pharmacokinetics and describes metabolism in general terms, but nothing in it gives a half-life for aspirin or for any other drug."</output>
+<note>The gap is named rather than filled. Half-life is a number worth knowing and one you could supply from memory, which is exactly why it must not appear: the reader would have no way to tell it apart from what their lecturer taught. No sentence is a claim here, so no sentence cites anything, and there is nothing to quote.</note>
 </example>
 </examples>
 
-Before answering, read back what you wrote: every [n] is a number you were actually given, every asserted sentence carries one, and nothing in the answer is something you know rather than something the evidence says.`;
+Before you return, read each sentence back against the evidence you cited for it. Ask of every claim whether that piece of evidence, on its own, says what the sentence says, and not merely something compatible with it; if it does not, drop the sentence or turn it into a gap sentence. Check that every quote is in the evidence you attributed it to, word for word, and that every number you used is one you were given.`;
 
-/** The digest and Ask schemas are defined in schemas.ts so tests can bundle them without obsidian; re-exported here so callers have one import. */
-export { DigestOut, AskOut } from "./schemas";
-export type { DigestDraft, AskDraft } from "./schemas";
+/**
+ * Verify system prompt: the optional second pass, off by default.
+ *
+ * Deliberately short. The first prompt is long because writing a grounded
+ * answer needs the reasons; judging one needs a single distinction held
+ * firmly, and every extra paragraph here is another thing for the checker to
+ * weigh against the only question it should be asking.
+ */
+const VERIFY_SYSTEM = `You check an answer that has already been written. You are not the writer: you do not improve sentences, fill gaps, or suggest better wording, and no sentence changes because of what you say beyond being kept or removed.
+
+You are given numbered evidence from a student's notes and the sentences drafted from it, each printed with the evidence numbers it cited. For each sentence, say whether the evidence it cited states what the sentence says.
+
+Supported means stated. Not plausible, not likely, not true as far as you know, not something the cited passage is consistent with or implies to a reader who already knows the subject. If the sentence names a number, the cited evidence carries that number; if it names a mechanism, the cited evidence describes that mechanism. Evidence that is about the right topic but does not carry the sentence's claim is not support. A sentence citing nothing, or citing a number that is not in the evidence, is unsupported.
+
+Judge each sentence only against the pieces it cited, not against the evidence as a whole: a sentence that is stated somewhere else in the list but not in what it pointed at is unsupported, because the reader will follow the citation it was given. The reason is one clause naming which words are or are not there.
+
+<example>
+<evidence>[1] (Receptors, p.4) Receptors bind ligands with relatively high affinity and transduce a signal to produce a biological effect. [2] (Drug Disposition, p.7) Metabolism converts drugs into more water-soluble forms for excretion.</evidence>
+<draft>
+0. Receptors transduce a signal to produce a biological effect. [1]
+1. Receptor binding is saturable, so the response plateaus at high doses. [1]
+</draft>
+<verdicts>0 supported: [1] states transduction of a signal to produce a biological effect in those words. 1 not supported: [1] mentions affinity and transduction but says nothing about saturation or a plateau.</verdicts>
+<note>The second sentence is true of receptors and would pass a reader who knew the subject. It is unsupported anyway, because the passage it cites does not say it.</note>
+</example>`;
+
+/** The digest, Ask and verify schemas are defined in schemas.ts so tests can bundle them without obsidian; re-exported here so callers have one import. */
+export { DigestOut, AskOut, VerifyOut } from "./schemas";
+export type { DigestDraft, AskDraft, VerifyDraft } from "./schemas";
