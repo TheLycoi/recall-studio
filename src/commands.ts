@@ -69,7 +69,11 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
   // active-markdown test and the same `view.editor` / `view.file` pair that
   // `capture-selection` uses.
   "capture-selection-with-instruction": {
-    available: (p) => !!p.activeMarkdown()?.file,
+    available: (p) => {
+      // The old editorCallback never fired in reading view; keep that boundary.
+      const view = p.activeMarkdown();
+      return !!view?.file && view.getMode() !== "preview";
+    },
     run: async (p) => {
       const view = p.activeMarkdown();
       if (!view?.file) return;
