@@ -547,3 +547,51 @@ body.recall-highlighter-active .textLayer ::selection {
   gap: var(--size-4-2);
   margin-top: var(--size-4-2);
 }
+
+/* Commands and grounding in the chat ------------------------------------- */
+/* The panel's own voice: a command running, a hint, /help. Never the model. */
+.recall-chat-turn.is-system {
+  padding-left: var(--size-4-2);
+  border-left: 2px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  white-space: pre-wrap;
+}
+.recall-chat-turn.is-system p:first-child {
+  margin-top: 0;
+}
+.recall-chat-turn.is-system p:last-child {
+  margin-bottom: 0;
+}
+/* What the checks did to the answer, under the answer. */
+.recall-chat-grounding {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  margin-top: var(--size-4-2);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+.recall-chat-grounding.is-unverified {
+  color: var(--color-orange);
+}
+/* The verified quotes: the words the answer rests on, checked against the evidence. */
+.recall-chat-quotes {
+  margin-top: var(--size-4-1);
+  font-size: var(--font-ui-smaller);
+}
+.recall-chat-quotes blockquote {
+  margin: 0;
+  color: var(--text-muted);
+}
+/* The chip row for a line that resembles a command without being one. */
+.recall-chat-offer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--size-4-2);
+}
+/* Evidence the answer actually cited, marked so the rest reads as context. */
+.recall-chat-evidence.is-cited {
+  border-left: 3px solid var(--interactive-accent);
+}

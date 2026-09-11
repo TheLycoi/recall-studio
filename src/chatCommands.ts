@@ -37,7 +37,7 @@ export type FuzzyScorer = (query: string) => (text: string) => number | null;
 // tests use. Expect to retune this constant against the real scorer once the
 // chip has been seen in the app; too low offers chips for ordinary questions,
 // too high never offers one.
-export const OFFER_THRESHOLD = 3;
+export const OFFER_THRESHOLD = 2;
 
 /** Only short lines are considered command-like; longer ones read as prose. */
 const MAX_OFFER_WORDS = 8;
@@ -125,4 +125,23 @@ export function renderHelp(commands: Array<CommandLike & { hint: string; availab
   return commands
     .map((c) => `- **/${c.aliases[0] ?? c.id}** ${c.name} — ${c.hint} (${c.available ? "available" : "not now"})`)
     .join("\n");
+}
+
+/**
+ * Deterministic scorer for the offer decision: how many distinct words of the
+ * query appear in the text (lowercased, split on non-alphanumerics; hyphenated
+ * names such as "AI-highlight" split into their parts). Null when none do. The
+ * chat panel injects this rather than Obsidian's `prepareFuzzySearch`, whose
+ * score scale is undocumented (obsidian.d.ts:5244-5252), so `OFFER_THRESHOLD`
+ * means "at least this many shared words" in tests and in the app alike.
+ */
+export function tokenOverlapScorer(query: string): (text: string) => number | null {
+  const tokens = (v: string) => new Set(v.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 0));
+  const q = tokens(query);
+  return (text) => {
+    const t = tokens(text);
+    let n = 0;
+    for (const w of q) if (t.has(w)) n++;
+    return n > 0 ? n : null;
+  };
 }

@@ -111,10 +111,10 @@ test("matchCommand: a short command-like sentence is offered, not run", () => {
   const cmds = COMMANDS();
   // "extract pdf highlights" is neither a name nor an alias. Against the name
   // "Extract PDF highlights to manifest" all three query tokens are present,
-  // so the injected scorer computes 3 — at OFFER_THRESHOLD (3), an offer.
+  // so the injected scorer computes 3 — at or above OFFER_THRESHOLD (2), an offer.
   const scored = fuzzy("extract pdf highlights")("Extract PDF highlights to manifest");
   assert.equal(scored, 3);
-  assert.equal(cc.OFFER_THRESHOLD, 3);
+  assert.equal(cc.OFFER_THRESHOLD, 2);
   assert.deepEqual(cc.matchCommand("extract pdf highlights", cmds, fuzzy), {
     kind: "offer",
     id: "extract-pdf-highlights",
