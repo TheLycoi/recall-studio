@@ -518,9 +518,9 @@ Judge each sentence only against the pieces it cited, not against the evidence a
   this at the cost of a second call. Best-of-N sampling is not implemented.
 - Quote verification is a normalised substring check, so a paraphrase is
   rejected even when its meaning is in the evidence. That is intended.
-- No live model call for digest or Ask has been exercised yet; both prompts
-  are covered by message-assembly and schema tests, and the digest path end
-  to end by the pasted-JSON route.
+- Digest, Ask, the verify pass, and the card writer have each run live
+  through the Claude Code provider (2026-09-12); the digest command's modal
+  flow and an export have not been driven in that session.
 - Handwritten professor annotations on scanned decks are images, not
   extractable text, and are out of scope.
 
