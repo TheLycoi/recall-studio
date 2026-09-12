@@ -348,7 +348,7 @@ export class InboxView extends ItemView {
       [
         isPdfHighlight(h) ? "PDF" : h.heading ? `§ ${h.heading}` : null,
         h.page ? `page ${h.page}` : `line ${h.line + 1}`,
-        h.origin === "highlighter" ? "highlighter" : h.origin === "ai" ? "AI pick" : null,
+        h.origin === "highlighter" ? "highlighter" : h.origin === "ai" ? "AI pick" : h.origin === "quiz" ? "quiz miss" : null,
         fmtDate(h.createdAt),
       ]
         .filter(Boolean)

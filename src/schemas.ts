@@ -99,3 +99,53 @@ export const VerifyOut = z.object({
 export type DigestDraft = z.infer<typeof DigestOut>;
 export type AskDraft = z.infer<typeof AskOut>;
 export type VerifyDraft = z.infer<typeof VerifyOut>;
+
+/**
+ * One quiz question, generated from a single numbered piece of evidence.
+ *
+ * `evidence_n` and `quote` exist so the software can check the question before
+ * the reader sees it: src/quiz.ts looks the number up in the pool it sent and
+ * checks the quote is in that evidence, the same substring check Ask uses for
+ * its quotes. A question whose quote fails verification is regenerated once
+ * and then dropped, so the model is never the last word on whether its own
+ * question is grounded.
+ */
+export const QuizQuestionOut = z.object({
+  question: z
+    .string()
+    .describe(
+      "One focused, precise question with exactly one correct answer, answerable from the cited evidence alone, in the reader's own vocabulary; no [n] markers, links, or ids.",
+    ),
+  answer: z.string().describe("The expected answer in one short phrase or sentence, as the evidence states it. Never 'yes' or 'no'."),
+  evidence_n: z.number().describe("The number of the one piece of evidence this question tests."),
+  quote: z
+    .string()
+    .describe("The passage from that evidence which states the answer, copied verbatim, character for character."),
+  hint: z.string().describe("One clause that narrows the question without giving the answer away."),
+  kind: z
+    .enum(["recall", "why", "distinguish"])
+    .describe("recall: one fact, a definition, a number, a name; why: a mechanism or reason; distinguish: a contrast or an application."),
+});
+
+/**
+ * One grade of a free-recall answer, judged against the single piece of
+ * evidence the question came from.
+ *
+ * `quote` is checked the same way the question's is and shown only when it
+ * verifies, which is what lets the reader overrule a grade they disagree with:
+ * the passage that settled it is printed underneath the verdict.
+ */
+export const QuizGradeOut = z.object({
+  verdict: z
+    .enum(["correct", "partial", "incorrect"])
+    .describe(
+      "correct: the answer states what the evidence states, in any wording; partial: it states part of it, or is right but vague; incorrect: otherwise.",
+    ),
+  feedback: z
+    .string()
+    .describe("One or two sentences in the evidence's own words naming what the answer got right and what it missed. No new facts."),
+  quote: z.string().describe("The passage from the evidence that settles the grade, copied verbatim, character for character."),
+});
+
+export type QuizQuestionDraft = z.infer<typeof QuizQuestionOut>;
+export type QuizGradeDraft = z.infer<typeof QuizGradeOut>;

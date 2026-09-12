@@ -84,7 +84,7 @@ export interface Highlight {
   generatedAt: string | null;
   exportedAt: string | null;
   cards: Card[];
-  origin: "selection" | "markdown-highlight" | "ai" | "highlighter" | "pdf";
+  origin: "selection" | "markdown-highlight" | "ai" | "highlighter" | "pdf" | "quiz";
   /** PDF++ subpath (page=…&selection=…|annotation=…|rect=…) when the highlight came from a PDF++ link; lets the inbox open the exact highlight. */
   subpath?: string;
 }

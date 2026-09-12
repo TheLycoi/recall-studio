@@ -166,3 +166,81 @@ export function buildVerifyMessage(a: VerifyMessageArgs): string {
     `Judge each sentence: supported only if the cited evidence states it.`,
   ].join("\n\n");
 }
+
+/** A quiz question is written from the same numbered evidence Ask answers from, so the two share one shape. */
+export type QuizEvidenceIn = AskEvidenceIn;
+
+export interface QuizQuestionMessageArgs {
+  evidence: QuizEvidenceIn[];
+  difficulty: 1 | 2 | 3;
+  askedQuestions: string[];
+  retryOfN: number | null;
+  retryAngle: string;
+  standingInstructions: string;
+  failure: string;
+}
+
+/** What each difficulty tier asks for, spelled out rather than left to the model's sense of "harder". */
+const QUIZ_DIFFICULTY: Record<1 | 2 | 3, string> = {
+  1: "a definition, a number, a name: recall of one fact",
+  2: "a mechanism or reason: why or how something happens",
+  3: "a distinction or application: what separates two similar things, or which case a rule applies to",
+};
+
+/**
+ * Build the user message for one quiz question.
+ *
+ * Same order as the ask message: the evidence is the long input and goes
+ * first, the questions already asked follow it so the model can see what not
+ * to repeat, and the instructions narrow from there — the tier, then the retry
+ * angle when there is one, then the reader's standing instructions, then the
+ * reason the last attempt was rejected. The closing line is one sentence,
+ * because by then everything it needs is above it.
+ *
+ * `already_asked` is omitted rather than printed empty: an empty block reads
+ * as "nothing has been asked", which is true, but it also invites the model to
+ * fill it, and an omitted block cannot be misread at all.
+ */
+export function buildQuizQuestionMessage(a: QuizQuestionMessageArgs): string {
+  const asked = a.askedQuestions.map((q) => q.trim()).filter(Boolean);
+  const standing = a.standingInstructions.trim();
+  const failure = a.failure.trim();
+  const angle = a.retryAngle.trim();
+  return [
+    `<evidence>\n${askEvidenceLines(a.evidence)}\n</evidence>`,
+    asked.length ? `<already_asked>\n${asked.join("\n")}\n</already_asked>` : "",
+    `Difficulty ${a.difficulty}: ${QUIZ_DIFFICULTY[a.difficulty]}.`,
+    a.retryOfN === null ? "" : `Ask again about evidence [${a.retryOfN}] from a different angle than: ${angle}`,
+    standing ? `Standing instructions: ${standing}` : "",
+    failure ? `The previous attempt was rejected: ${failure}. Fix that.` : "",
+    `Write one question.`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+export interface QuizGradeMessageArgs {
+  evidence: QuizEvidenceIn;
+  question: string;
+  expected: string;
+  userAnswer: string;
+}
+
+/**
+ * Build the user message for one grade.
+ *
+ * The grader sees one piece of evidence, not the pool: the question was
+ * written from that passage and is graded against it, and handing over the
+ * rest would invite a verdict that rests on something the reader was never
+ * asked about. The student's answer comes last of the four inputs, directly
+ * above the task, because it is the thing being judged.
+ */
+export function buildQuizGradeMessage(a: QuizGradeMessageArgs): string {
+  return [
+    `<evidence>\n${askEvidenceLines([a.evidence])}\n</evidence>`,
+    `<question>\n${a.question.trim()}\n</question>`,
+    `<expected_answer>\n${a.expected.trim()}\n</expected_answer>`,
+    `<student_answer>\n${a.userAnswer.trim()}\n</student_answer>`,
+    `Grade the student's answer against the evidence.`,
+  ].join("\n\n");
+}

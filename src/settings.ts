@@ -70,6 +70,9 @@ export interface RecallSettings {
   askVerifyPass: boolean;
   /** Show the line under an answer reporting what was kept, removed, verified, and rejected. */
   askShowGrounding: boolean;
+  quizQuestions: number;
+  quizPoolSize: number;
+  quizInstructions: string;
 
   // Sidebar
   /** Persisted by the view; no setting UI. */
@@ -133,6 +136,9 @@ export const DEFAULT_SETTINGS: RecallSettings = {
   askInstructions: "",
   askVerifyPass: false,
   askShowGrounding: true,
+  quizQuestions: 5,
+  quizPoolSize: 20,
+  quizInstructions: "",
 
   sidebarMode: "inbox",
 
@@ -603,6 +609,44 @@ export class RecallSettingTab extends PluginSettingTab {
           save();
         }),
       );
+
+    new Setting(containerEl)
+      .setName("Questions per quiz")
+      .addSlider((sl) =>
+        sl
+          .setLimits(3, 15, 1)
+          .setValue(s.quizQuestions)
+          .setDynamicTooltip()
+          .onChange((v) => {
+            s.quizQuestions = v;
+            save();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Evidence pool per quiz")
+      .setDesc("How many matching highlights and claims a quiz draws its questions from.")
+      .addSlider((sl) =>
+        sl
+          .setLimits(5, 60, 5)
+          .setValue(s.quizPoolSize)
+          .setDynamicTooltip()
+          .onChange((v) => {
+            s.quizPoolSize = v;
+            save();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Standing instructions for quizzes")
+      .addTextArea((t) => {
+        t.inputEl.rows = 3;
+        t.inputEl.cols = 50;
+        t.setValue(s.quizInstructions).onChange((v) => {
+          s.quizInstructions = v;
+          save();
+        });
+      });
 
     new Setting(containerEl).setName("Anki").setHeading();
 

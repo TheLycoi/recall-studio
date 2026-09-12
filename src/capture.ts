@@ -17,6 +17,7 @@ import {
 import { describeError } from "./llm";
 import type { Manifest, ManifestHighlight } from "./manifest";
 import { renderPdfSubpath } from "./pdflink";
+import type { EvidenceUnit } from "./retrieval";
 
 function stripMarks(s: string): string {
   return s.replace(/==/g, "");
@@ -396,5 +397,75 @@ export function captureManifestHighlights(
     added++;
   }
   new Notice(`Recall: ${added} highlight${added === 1 ? "" : "s"} queued as flashcards${skipped ? `, ${skipped} skipped` : ""}.`);
+  return { added, skipped };
+}
+
+/**
+ * Queue quiz-missed evidence units as inbox highlights, so the writer /
+ * critique / linter chain turns a missed question into card material. A
+ * PDF-backed unit resolves back to the PDF file (so the inbox opens the exact
+ * PDF++ highlight, as `captureManifestHighlights` does above); otherwise the
+ * note itself is the source.
+ */
+export function captureEvidenceUnits(
+  plugin: RecallPlugin,
+  units: EvidenceUnit[],
+  title: string,
+): { added: number; skipped: number } {
+  let added = 0;
+  let skipped = 0;
+  for (const unit of units) {
+    const text = unit.text.trim();
+    if (text.length < 3) {
+      skipped++;
+      continue;
+    }
+    let sourcePath: string;
+    let page: number | null;
+    let heading: string | null;
+    let subpath: string | undefined;
+    if (unit.pdfBasename && unit.target) {
+      const pdf = plugin.app.metadataCache.getFirstLinkpathDest(`${unit.pdfBasename}.pdf`, unit.notePath);
+      if (pdf) {
+        sourcePath = pdf.path;
+        page = unit.page;
+        heading = `page ${unit.page}`;
+        subpath = renderPdfSubpath(unit.target);
+      } else {
+        sourcePath = unit.notePath;
+        page = null;
+        heading = unit.noteTitle;
+      }
+    } else {
+      sourcePath = unit.notePath;
+      page = null;
+      heading = unit.noteTitle;
+    }
+    if (plugin.store.hasDuplicate(sourcePath, normalizeWs(text))) {
+      skipped++;
+      continue;
+    }
+    const h = makeHighlight({
+      sourcePath,
+      sourceTitle: basenameNoExt(sourcePath),
+      text,
+      before: "",
+      after: "",
+      line: 0,
+      page,
+      heading,
+      title,
+      subpath,
+      origin: "quiz",
+    });
+    plugin.store.add(h);
+    plugin.generator.enqueue(h);
+    added++;
+  }
+  new Notice(
+    added === 0 && skipped === 0
+      ? "Recall: nothing to send."
+      : `Recall: ${added} passage${added === 1 ? "" : "s"} sent to the inbox from the quiz (${skipped} already there).`,
+  );
   return { added, skipped };
 }

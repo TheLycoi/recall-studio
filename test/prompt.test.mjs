@@ -378,3 +378,137 @@ test("AskOut and VerifyOut serialize strictly at every level", () => {
     "z.boolean is a plain JSON Schema type, not a union",
   );
 });
+
+/* ---------------------------------------------------------------- quiz mode */
+
+const quizEvidence = [
+  { n: 1, noteTitle: "Receptors", page: 4, text: "Receptors bind ligands with high affinity and transduce a signal." },
+  { n: 2, noteTitle: "Drug Disposition", page: null, text: "Metabolism converts drugs into more water-soluble forms." },
+];
+
+const quizBase = {
+  evidence: quizEvidence,
+  difficulty: 2,
+  askedQuestions: [],
+  retryOfN: null,
+  retryAngle: "",
+  standingInstructions: "",
+  failure: "",
+};
+
+test("the quiz question message puts the evidence first and the task last, omitting the optional blocks", () => {
+  const msg = p.buildQuizQuestionMessage({ ...quizBase });
+  assert.ok(msg.startsWith("<evidence>"), "the evidence is the first block");
+  assert.ok(msg.includes("[1] (Receptors, p.4) Receptors bind ligands"), "evidence lines carry the note title and page");
+  assert.ok(msg.includes("[2] (Drug Disposition) Metabolism"), "a claim with no page prints without one");
+  assert.ok(!msg.includes("<already_asked>"), "no already_asked block when nothing has been asked");
+  assert.ok(!msg.includes("Ask again about evidence"), "no retry line when retryOfN is null");
+  assert.ok(!msg.includes("Standing instructions:"), "no standing line when blank");
+  assert.ok(!msg.includes("was rejected"), "no rejection line when there was no failure");
+  assert.ok(
+    msg.includes("Difficulty 2: a mechanism or reason: why or how something happens."),
+    "the tier is spelled out, not left as a number",
+  );
+  assert.ok(msg.endsWith("Write one question."), "the closing instruction is last");
+});
+
+test("the quiz question blocks appear in the order the prompt expects", () => {
+  const msg = p.buildQuizQuestionMessage({
+    ...quizBase,
+    askedQuestions: ["What is affinity?", "  "],
+    retryOfN: 1,
+    retryAngle: "What is affinity?",
+    standingInstructions: "prefer mechanisms",
+    failure: "the quote was not in evidence 1",
+  });
+  const at = (s) => {
+    const i = msg.indexOf(s);
+    assert.notEqual(i, -1, `${s} is present`);
+    return i;
+  };
+  const order = [
+    at("<evidence>"),
+    at("<already_asked>"),
+    at("Difficulty 2:"),
+    at("Ask again about evidence [1] from a different angle than: What is affinity?"),
+    at("Standing instructions: prefer mechanisms"),
+    at("The previous attempt was rejected: the quote was not in evidence 1. Fix that."),
+    at("Write one question."),
+  ];
+  assert.deepEqual(order, [...order].sort((a, b) => a - b), "the blocks run in the documented order");
+  assert.ok(msg.includes("<already_asked>\nWhat is affinity?\n</already_asked>"), "blank asked questions are dropped");
+  assert.ok(msg.endsWith("Write one question."), "the closing instruction is still last");
+});
+
+test("each difficulty tier prints its own description", () => {
+  assert.ok(
+    p.buildQuizQuestionMessage({ ...quizBase, difficulty: 1 }).includes("Difficulty 1: a definition, a number, a name: recall of one fact."),
+  );
+  assert.ok(
+    p
+      .buildQuizQuestionMessage({ ...quizBase, difficulty: 3 })
+      .includes("Difficulty 3: a distinction or application: what separates two similar things, or which case a rule applies to."),
+  );
+});
+
+test("the grade message shows one piece of evidence, then the question, expected, and student answer", () => {
+  const msg = p.buildQuizGradeMessage({
+    evidence: quizEvidence[0],
+    question: "  What does a receptor do after binding?  ",
+    expected: "It transduces a signal.",
+    userAnswer: "it passes the signal on",
+  });
+  const at = (s) => {
+    const i = msg.indexOf(s);
+    assert.notEqual(i, -1, `${s} is present`);
+    return i;
+  };
+  const order = [at("<evidence>"), at("<question>"), at("<expected_answer>"), at("<student_answer>"), at("Grade the student's answer")];
+  assert.deepEqual(order, [...order].sort((a, b) => a - b), "the four inputs precede the task");
+  assert.ok(msg.includes("[1] (Receptors, p.4) Receptors bind ligands"), "the one evidence line is numbered as in Ask");
+  assert.ok(!msg.includes("Metabolism"), "the rest of the pool is not sent to the grader");
+  assert.ok(msg.includes("<question>\nWhat does a receptor do after binding?\n</question>"), "the question is trimmed");
+  assert.ok(msg.endsWith("Grade the student's answer against the evidence."), "the closing instruction is last");
+});
+
+test("QuizQuestionOut accepts a grounded draft and rejects an unknown kind or a missing field", () => {
+  const draft = {
+    question: "What are the two properties of a receptor?",
+    answer: "Binding with high affinity and transducing a signal.",
+    evidence_n: 1,
+    quote: "bind ligands with high affinity",
+    hint: "One is about what it attaches to.",
+    kind: "recall",
+  };
+  const ok = schemas.QuizQuestionOut.safeParse(draft);
+  assert.equal(ok.success, true, "a full draft parses");
+  assert.deepEqual(ok.data, draft, "and comes back unchanged");
+
+  assert.equal(schemas.QuizQuestionOut.safeParse({ ...draft, kind: "trivia" }).success, false, "kind is one of the three");
+  assert.equal(schemas.QuizQuestionOut.safeParse({ ...draft, evidence_n: "1" }).success, false, "evidence_n is a number");
+  const { hint, ...noHint } = draft;
+  assert.equal(schemas.QuizQuestionOut.safeParse(noHint).success, false, "hint is required, not optional");
+});
+
+test("QuizGradeOut accepts a verdict with feedback and a quote", () => {
+  const ok = schemas.QuizGradeOut.safeParse({ verdict: "partial", feedback: "f", quote: "q" });
+  assert.equal(ok.success, true, "a partial grade parses");
+  assert.deepEqual(ok.data, { verdict: "partial", feedback: "f", quote: "q" });
+
+  assert.equal(schemas.QuizGradeOut.safeParse({ verdict: "maybe", feedback: "f", quote: "q" }).success, false, "verdict is one of three");
+  assert.equal(schemas.QuizGradeOut.safeParse({ verdict: "correct", feedback: "f" }).success, false, "quote is required");
+});
+
+test("QuizQuestionOut and QuizGradeOut serialize strictly at every level", () => {
+  const question = z.toJSONSchema(schemas.QuizQuestionOut);
+  assertStrict(question, "QuizQuestionOut");
+  assert.deepEqual(question.properties.kind.enum, ["recall", "why", "distinguish"], "the kind enum is a string enum");
+  assert.equal(question.properties.evidence_n.type, "number", "evidence_n is a plain number");
+  for (const [k, v] of Object.entries(question.properties)) {
+    assert.ok(typeof v.description === "string" && v.description.length > 0, `${k} carries a description`);
+  }
+
+  const grade = z.toJSONSchema(schemas.QuizGradeOut);
+  assertStrict(grade, "QuizGradeOut");
+  assert.deepEqual(grade.properties.verdict.enum, ["correct", "partial", "incorrect"]);
+});
