@@ -69,6 +69,19 @@ A worked example, from a vault note on Wozniak's minimum information
 principle. Four highlights, four cards, nothing in an answer that isn't
 stated in the span above it.
 
+Two rules shape what the writer drafts before any of this reaches the
+critique. An **open list** — one signalled by "include", "such as", "for
+example", "among others" — is never asked for as a closed answer or
+clozed member by member the way a closed list (one that states its full
+membership) is; instead the writer tests the membership criterion where
+the highlight states one, and each named example in the example →
+category direction. And when a highlight defines or explains a
+**concept**, the writer traces its edges — what's always, sometimes, or
+never true of it, what it's confused with, what it contains and belongs
+to, what it does and why, why it matters — using only the lenses the
+highlight actually supports, so every answer is still stated in the
+highlight (`src/llm.ts`, `WRITER_SYSTEM`).
+
 **Highlight** — *"Simplicity improves the accuracy of interval scheduling,
 because recall of a simple item is closer to all-or-nothing."*
 
@@ -880,7 +893,11 @@ without knowing how the thing works. This is not a push toward the higher
 end of the ladder: a highlight that states a plain definition and nothing
 more is correctly a "remember" card, and the critique says so rather than
 asking for a harder question the source doesn't support
-(`src/llm.ts:185`, `src/model.ts:31-32`).
+(`src/llm.ts:185`, `src/model.ts:31-32`). The level shows as a badge on
+every judged card in the inbox, and the header shows a stat for cards
+at remember, turning red once every judged card sits there and there
+are at least five — the sign that a set has settled into testing
+labels rather than understanding (`src/inboxView.ts`).
 
 **Deterministic lint** (`src/lint.ts`) runs on every card regardless of
 whether the critique is on, both on the freshly drafted cards and again on
@@ -980,7 +997,11 @@ writing, 7 to review), or the **Open inbox** command.
 Cards are tagged `recall` and `source::<note-slug>`. The `source::` tag is the
 namespace the Anki Wiki Sync add-on resolves back to vault pages, so synced
 deck pages link to the note the card came from. The extra field carries the
-verbatim highlight and an `obsidian://` link to the source.
+verbatim highlight and an `obsidian://` link to the source. A card whose
+highlight reached the inbox through a **Both** digest also carries a
+`Topic:` link to the topic note it was digested into, right after the
+source link; cards captured any other way are unchanged
+(`src/anki.ts`, `src/model.ts`).
 
 ## Setup
 
