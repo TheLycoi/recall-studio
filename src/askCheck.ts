@@ -112,11 +112,16 @@ function stripMarkers(text: string): string {
 /** Kept sentences in order; list items start their own line so consecutive ones read as a list. */
 function renderAnswer(kept: Array<{ text: string; cited: number[] }>): string {
   let out = "";
+  let prevWasItem = false;
   for (const s of kept) {
     if (!s.text) continue;
+    const isItem = s.text.startsWith("- ");
     const piece = s.cited.length ? `${s.text} ${s.cited.map((n) => `[${n}]`).join("")}` : s.text;
     if (!out) out = piece;
-    else out += (s.text.startsWith("- ") ? "\n" : " ") + piece;
+    // A list item starts its own line; a plain sentence after a list starts a
+    // new paragraph, so it is not glued onto the last item.
+    else out += (isItem ? "\n" : prevWasItem ? "\n\n" : " ") + piece;
+    prevWasItem = isItem;
   }
   return out.trim();
 }

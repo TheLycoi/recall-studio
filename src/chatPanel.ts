@@ -1,7 +1,7 @@
-import { ItemView, MarkdownRenderer, TAbstractFile, TFile, prepareSimpleSearch } from "obsidian";
+import { ItemView, MarkdownRenderer, TAbstractFile, TFile } from "obsidian";
 import type RecallPlugin from "./main";
 import { describeError } from "./llm";
-import { indexNote, numberEvidence, rankEvidence, renderEvidenceMarkdown, type EvidenceUnit } from "./retrieval";
+import { indexNote, numberEvidence, rankEvidence, renderEvidenceMarkdown, type EvidenceUnit, questionScorer } from "./retrieval";
 import { applyVerdicts, checkAnswer, noEvidenceAnswer, renderGroundingLine, type GroundingReport } from "./askCheck";
 import { matchCommand, renderHelp, tokenOverlapScorer } from "./chatCommands";
 import { RECALL_COMMANDS, type RecallCommand } from "./commands";
@@ -263,8 +263,7 @@ export class ChatPanel {
       // `prepareSimpleSearch` (obsidian.d.ts:5260) returns null for no match and
       // a `SearchResult` whose `score` (:5593) `rankEvidence` reads as
       // higher-is-better (src/retrieval.ts:128-134).
-      const search = prepareSimpleSearch(q);
-      const scorer = (t: string) => search(t)?.score ?? null;
+      const scorer = questionScorer(q);
       evidence = rankEvidence(units, q, scorer, this.plugin.settings.askEvidenceCount);
 
       if (evidence.length === 0) {

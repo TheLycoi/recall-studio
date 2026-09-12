@@ -316,3 +316,11 @@ test("renderEvidenceMarkdown renders a PDF-linked claim as a callout at its page
   assert.ok(lines[1].startsWith("> [!PDF] [["), lines[1]);
   assert.ok(lines[1].includes("#page=2|p.2]]"));
 });
+
+test("questionScorer counts significant shared words, ignoring stopwords and plurals", () => {
+  const score = r.questionScorer("What are the five stages of change and what does the coach do in the contemplation stage?");
+  assert.equal(score("Contemplation: the client intends to change within the next six months and weighs pros and cons."), 2);
+  assert.equal(score("The coach listens carefully and shares benefits only with permission."), 1);
+  assert.equal(score("Receptors bind ligands with high affinity."), null);
+  assert.equal(r.questionScorer("the and of")("anything"), null);
+});

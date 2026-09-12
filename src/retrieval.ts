@@ -219,3 +219,46 @@ export function renderEvidenceMarkdown(u: EvidenceUnit, n: number): string {
       : `> ${u.text}`;
   return `${head}\n${body}`;
 }
+
+// ---- question scoring --------------------------------------------------------
+
+/** Words that carry no retrieval signal in a study question. */
+const STOPWORDS = new Set(
+  "the a an and or of to in on at for from by with as is are was were be been being do does did what which who whom whose when where why how this that these those it its into than then there their they them can could should would will not no yes about between each all any some such more most other over under out up down off again further once here also very just than too each both few own same so than".split(
+    " ",
+  ),
+);
+
+function stem(w: string): string {
+  return w.length > 4 && w.endsWith("s") ? w.slice(0, -1) : w;
+}
+
+function significantTokens(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((w) => w.length >= 3 && !STOPWORDS.has(w))
+    .map(stem);
+}
+
+/**
+ * The scorer the chat injects into `rankEvidence` for a question: the number
+ * of distinct significant words of the question that appear in the text
+ * (stopwords dropped, a trailing plural "s" ignored), or null when none do.
+ *
+ * Obsidian's `prepareSimpleSearch` was the first choice, but it matches only
+ * when every space-separated word of the query occurs in the text, so a real
+ * question ("what are the five stages of change and what does the coach do")
+ * matched no unit at all. Counting shared words is what a lexical evidence
+ * search over short highlights actually needs.
+ */
+export function questionScorer(question: string): (text: string) => number | null {
+  const tokens = [...new Set(significantTokens(question))];
+  return (text) => {
+    if (tokens.length === 0) return null;
+    const have = new Set(significantTokens(text));
+    let n = 0;
+    for (const w of tokens) if (have.has(w)) n++;
+    return n > 0 ? n : null;
+  };
+}

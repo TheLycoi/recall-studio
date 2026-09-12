@@ -183,3 +183,15 @@ test("renderGroundingLine uses the singular for one sentence and says no coverag
   });
   assert.equal(line, "Grounding: no coverage · 1 sentence kept");
 });
+
+test("a plain sentence after list items starts a new paragraph", () => {
+  const evidence = [{ n: 1, noteTitle: "T", page: 1, text: "alpha beta" }, { n: 2, noteTitle: "T", page: 1, text: "gamma delta" }];
+  const draft = { coverage: "full", quotes: [], sentences: [
+    { text: "The stages are:", kind: "claim", cited: [1] },
+    { text: "- Alpha", kind: "claim", cited: [1] },
+    { text: "- Gamma", kind: "claim", cited: [2] },
+    { text: "Alpha comes first.", kind: "claim", cited: [1] },
+  ] };
+  const { answer } = a.checkAnswer(draft, evidence);
+  assert.equal(answer, "The stages are: [1]\n- Alpha [1]\n- Gamma [2]\n\nAlpha comes first. [1]");
+});
