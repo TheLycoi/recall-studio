@@ -120,11 +120,33 @@ export function matchCommand(input: string, commands: CommandLike[], fuzzy: Fuzz
   return { kind: "question" };
 }
 
-/** Markdown for `/help`: one line per command, with its first alias and availability. */
-export function renderHelp(commands: Array<CommandLike & { hint: string; available: boolean }>): string {
-  return commands
+/**
+ * The chat-local quiz commands, which are not in the registry (src/quiz.ts:102)
+ * and so have no `available` state to report — they are available exactly when
+ * a quiz is running, which the lines themselves say.
+ */
+export const QUIZ_HELP = [
+  "- **/quiz** [this | words] — start a quiz on all topic notes, the active note, or matching passages",
+  "- **/hint** — one clue for the current question",
+  "- **/skip** — skip the current question",
+  "- **/idk** — I don't know: show the answer without counting it wrong",
+  "- **/stop** — end the quiz and show the score",
+].join("\n");
+
+/**
+ * Markdown for `/help`: one line per command, with its first alias and
+ * availability. `quiz` appends the chat-local block below the registry lines;
+ * it is a parameter rather than unconditional so the command lines can still
+ * be counted on their own.
+ */
+export function renderHelp(
+  commands: Array<CommandLike & { hint: string; available: boolean }>,
+  quiz = false,
+): string {
+  const lines = commands
     .map((c) => `- **/${c.aliases[0] ?? c.id}** ${c.name} — ${c.hint} (${c.available ? "available" : "not now"})`)
     .join("\n");
+  return quiz ? `${lines}\n${QUIZ_HELP}` : lines;
 }
 
 /**

@@ -5,6 +5,27 @@ import { indexNote, numberEvidence, rankEvidence, renderEvidenceMarkdown, type E
 import { applyVerdicts, checkAnswer, noEvidenceAnswer, renderGroundingLine, type GroundingReport } from "./askCheck";
 import { matchCommand, renderHelp, tokenOverlapScorer } from "./chatCommands";
 import { RECALL_COMMANDS, type RecallCommand } from "./commands";
+import { captureEvidenceUnits } from "./capture";
+import {
+  acceptQuestion,
+  applyGrade,
+  checkQuestion,
+  dropUnit,
+  isDontKnow,
+  nextRequest,
+  parseQuizCommand,
+  renderGradeMarkdown,
+  renderQuestionMarkdown,
+  renderSummaryMarkdown,
+  resolvePool,
+  startSession,
+  summary,
+  usableUnits,
+  verifyGradeQuote,
+  type QuizScope,
+  type QuizSession,
+  type Verdict,
+} from "./quiz";
 import type { AskHistoryTurn } from "./prompt";
 
 /**
@@ -17,6 +38,13 @@ import type { AskHistoryTurn } from "./prompt";
  * the model. An `offer` turn is the one-click chip the matcher asks for when a
  * plain sentence merely resembles a command (src/chatCommands.ts:119): it
  * carries the question it was typed as, so "Ask instead" can still ask it.
+ *
+ * A `quiz` turn is one of the three shapes a quiz puts in the log — the
+ * question, the grade, the closing summary. The marker is what `history()`
+ * filters on (a quiz is not a conversation the model should see on the next
+ * Ask) and what `renderTurn` styles on, and it carries only what the DOM needs
+ * that the markdown does not already say: the index for the badge, the verdict
+ * for the border colour, the missed units for the summary's chip.
  */
 interface ChatTurn {
   role: "user" | "assistant" | "system";
@@ -25,6 +53,13 @@ interface ChatTurn {
   error?: string;
   report?: GroundingReport;
   offer?: { id: string; name: string; question: string };
+  quiz?: {
+    kind: "question" | "grade" | "summary";
+    index?: number;
+    total?: number;
+    verdict?: Verdict;
+    misses?: EvidenceUnit[];
+  };
 }
 
 /**
@@ -56,6 +91,16 @@ export class ChatPanel {
   private eventsRegistered = false;
   /** The element the panel was last mounted into, so an answer can redraw itself. */
   private root: HTMLElement | null = null;
+  /**
+   * The quiz being run, or null. Public because it is the whole of the quiz's
+   * state: the live run reads it through `view.chat.session` between turns, and
+   * `null` is the one test for "is a quiz running" everywhere in this file.
+   */
+  session: QuizSession | null = null;
+  /** What the last finished quiz was and what was missed, kept for the summary's two chips. */
+  private lastQuiz: { scope: QuizScope; query: string; misses: EvidenceUnit[] } | null = null;
+  /** Set by the first `/quiz` typed during a quiz; the next one restarts, any other message clears it. */
+  private restartArmed = false;
 
   constructor(
     private plugin: RecallPlugin,
@@ -121,7 +166,10 @@ export class ChatPanel {
     const keep = Math.max(0, this.plugin.settings.askMaxTurns);
     return this.turns
       .filter((t): t is ChatTurn & { role: "user" | "assistant" } => t.role === "user" || t.role === "assistant")
-      .filter((t) => !t.error && !t.offer && t.text.trim().length > 0)
+      // Quiz turns are excluded for the same reason: a question the model was
+      // told to write and an answer typed to it are not a conversation about
+      // the notes, and replaying them would have the next Ask answer the quiz.
+      .filter((t) => !t.error && !t.offer && !t.quiz && t.text.trim().length > 0)
       .slice(-keep)
       .map((t) => ({ role: t.role, text: t.text }));
   }
@@ -145,8 +193,64 @@ export class ChatPanel {
    * has been seen in the app.
    */
   async ask(text: string): Promise<void> {
+    if (this.busy) return;
     const q = text.trim();
-    if (!q || this.busy) return;
+
+    // The quiz is tried before the command matcher, because `/quiz`, `/hint`,
+    // `/skip`, `/idk` and `/stop` are chat-local and not in the registry
+    // (src/quiz.ts:102-126). `parseQuizCommand` returning null is what lets a
+    // mistyped `/skpi` still reach `matchCommand` and get its ordinary line.
+    const quizCommand = parseQuizCommand(q);
+    if (quizCommand) {
+      this.draft = "";
+      if (quizCommand.kind === "start") {
+        if (this.session && !this.restartArmed) {
+          this.restartArmed = true;
+          this.pushSystem("A quiz is running. Type /quiz again to restart it.");
+          return;
+        }
+        this.restartArmed = false;
+        await this.startQuiz(quizCommand.scope, quizCommand.query);
+        return;
+      }
+      this.restartArmed = false;
+      if (!this.session) {
+        this.pushSystem("No quiz is running. Type /quiz.");
+        return;
+      }
+      switch (quizCommand.kind) {
+        case "stop":
+          await this.finishQuiz();
+          return;
+        case "skip":
+          await this.gradeWithout("skipped", "");
+          return;
+        case "hint":
+          this.showHint();
+          return;
+        default:
+          await this.gradeWithout("dontknow", q);
+          return;
+      }
+    }
+
+    this.restartArmed = false;
+
+    // Anything that is not a slash command, while a quiz is running, is an
+    // answer — including an empty one, which `isDontKnow` (src/quiz.ts:148)
+    // reads as "I don't know" so the grader's promise that a blank never
+    // reaches it is kept here rather than in the prompt.
+    if (this.session && !q.startsWith("/")) {
+      this.draft = "";
+      if (isDontKnow(q)) {
+        await this.gradeWithout("dontknow", q);
+        return;
+      }
+      await this.answerQuiz(q);
+      return;
+    }
+
+    if (!q) return;
 
     const match = matchCommand(q, RECALL_COMMANDS, tokenOverlapScorer);
 
@@ -188,7 +292,10 @@ export class ChatPanel {
 
   /** `/help`: every command, its first alias, its hint, and whether it can run right now. */
   private helpText(): string {
-    return renderHelp(RECALL_COMMANDS.map((c) => ({ ...c, available: c.available(this.plugin) })));
+    return renderHelp(
+      RECALL_COMMANDS.map((c) => ({ ...c, available: c.available(this.plugin) })),
+      true,
+    );
   }
 
   /** Push a system turn and redraw. System turns are the panel's own voice. */
@@ -313,11 +420,324 @@ export class ChatPanel {
     }
   }
 
+  // ------------------------------------------------------------------ quiz
+
+  /**
+   * Start a quiz: resolve the pool, then ask the first question.
+   *
+   * An empty pool is answered here and the provider is never called — the same
+   * rule `askQuestion` follows for retrieval finding nothing (above), and the
+   * reason `/quiz receptors` in a vault with no digested notes costs nothing
+   * and answers instantly. The line names the scope, because "no evidence" is
+   * ambiguous between "this note has none" and "the whole folder has none".
+   */
+  private async startQuiz(scope: "all" | "this" | "query", query: string): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    this.status = "gathering evidence…";
+    this.draft = "";
+    this.rerender();
+
+    let pool: EvidenceUnit[] = [];
+    let label = "";
+    try {
+      const units = await this.buildIndex();
+      // obsidian.d.ts:1954 (getActiveFile): null when nothing is open, which
+      // `resolvePool` reads as "this note has no evidence".
+      const activePath = this.plugin.app.workspace.getActiveFile()?.path ?? null;
+      const resolved = resolvePool(
+        scope,
+        query,
+        units,
+        activePath,
+        questionScorer(query || ""),
+        this.plugin.settings.quizPoolSize,
+      );
+      pool = resolved.pool;
+      label = resolved.label;
+    } catch (e) {
+      this.turns.push({ role: "assistant", text: "", error: describeError(e) });
+      this.busy = false;
+      this.status = "";
+      this.trim();
+      this.rerender();
+      return;
+    }
+
+    this.busy = false;
+    this.status = "";
+
+    if (pool.length === 0) {
+      this.session = null;
+      this.pushSystem(this.noEvidenceLine(scope, query));
+      return;
+    }
+
+    const kind: QuizScope["kind"] = scope === "all" ? "all" : scope === "this" ? "note" : "query";
+    this.session = startSession({ kind, label }, query, pool, Math.max(1, this.plugin.settings.quizQuestions));
+    this.pushSystem(
+      `Quiz on ${label}: ${this.session.total} questions. Answer in your own words; /hint, /skip, /idk, /stop.`,
+    );
+    await this.nextQuestion();
+  }
+
+  /** Why a scope has nothing to quiz on, in the scope's own words. */
+  private noEvidenceLine(scope: "all" | "this" | "query", query: string): string {
+    if (scope === "query") return `No highlights or claims match “${query.trim()}”.`;
+    if (scope === "this") return "The active note has no highlights or claims.";
+    return `No topic notes under ${this.folderPrefix()} yet.`;
+  }
+
+  /**
+   * Write the next question, checking its grounding before the reader sees it.
+   *
+   * The loop is the Design's two-strike rule: a draft that fails
+   * `checkQuestion` (src/quiz.ts:259) is asked for once more with the failure
+   * named in the prompt, and a second failure drops the cited unit
+   * (src/quiz.ts:379) rather than the question, so the numbering stays frozen
+   * and the next attempt has one fewer passage to get wrong. A draft whose
+   * `evidence_n` is out of range cannot be dropped by id, so that case breaks
+   * out instead of looping forever on a model that keeps citing [99].
+   */
+  private async nextQuestion(): Promise<void> {
+    const session = this.session;
+    if (!session) return;
+
+    this.busy = true;
+    this.status = "writing a question…";
+    this.rerender();
+
+    let failure = "";
+    try {
+      for (;;) {
+        const live = this.session;
+        if (!live) return;
+
+        if (usableUnits(live).length === 0) {
+          this.turns.push({ role: "system", text: "No more passages to quiz on." });
+          this.busy = false;
+          this.status = "";
+          await this.finishQuiz();
+          return;
+        }
+
+        const req = nextRequest(live);
+        const draft = await this.plugin.llm.quizQuestion({
+          evidence: live.numbered,
+          difficulty: req.difficulty,
+          askedQuestions: req.askedQuestions,
+          retryOfN: req.retryOfN,
+          retryAngle: req.retryAngle,
+          standingInstructions: this.plugin.settings.quizInstructions,
+          failure,
+        });
+
+        const check = checkQuestion(draft, live);
+        if (check.ok) {
+          const next = acceptQuestion(live, check.question);
+          this.session = next;
+          const current = next.current;
+          if (!current) return;
+          this.turns.push({
+            role: "assistant",
+            text: renderQuestionMarkdown(current, next.total),
+            quiz: { kind: "question", index: current.n, total: next.total },
+          });
+          return;
+        }
+
+        if (!failure) {
+          failure = check.reason;
+          continue;
+        }
+
+        // Second failure on the same passage: drop it and start over clean.
+        failure = "";
+        const cited = live.pool[draft.evidence_n - 1];
+        if (!cited) {
+          this.turns.push({ role: "system", text: `The model could not write a grounded question (${check.reason}).` });
+          this.busy = false;
+          this.status = "";
+          await this.finishQuiz();
+          return;
+        }
+        this.session = dropUnit(live, cited.id);
+        this.turns.push({ role: "system", text: "Skipped a passage the model could not turn into a question." });
+        this.trim();
+        this.rerender();
+      }
+    } catch (e) {
+      this.turns.push({ role: "assistant", text: "", error: describeError(e) });
+      this.session = null;
+    } finally {
+      this.busy = false;
+      this.status = "";
+      this.trim();
+      this.rerender();
+    }
+  }
+
+  /**
+   * One typed answer: graded against the one passage its question came from.
+   *
+   * A failed model call keeps the session, because the answer is still on the
+   * screen and typing it again is the whole recovery — ending the quiz on a
+   * provider hiccup would throw away four graded questions.
+   */
+  private async answerQuiz(text: string): Promise<void> {
+    const session = this.session;
+    const current = session?.current;
+    if (!session || !current || this.busy) return;
+
+    this.busy = true;
+    this.status = "grading…";
+    this.draft = "";
+    this.turns.push({ role: "user", text, quiz: { kind: "grade" } });
+    this.trim();
+    this.rerender();
+
+    const evidence = session.numbered[current.evidenceN - 1];
+    try {
+      const grade = await this.plugin.llm.quizGrade({
+        evidence,
+        question: current.question,
+        expected: current.answer,
+        userAnswer: text,
+      });
+      // A grade quoting words the passage does not contain is exactly what the
+      // reader needs to spot, so an unverified quote is dropped rather than shown.
+      const gradeQuote = verifyGradeQuote(grade.quote, evidence.text);
+      this.pushGrade(applyGrade(session, grade.verdict, grade.feedback, gradeQuote, text), current.evidenceN);
+    } catch (e) {
+      this.turns.push({ role: "assistant", text: "", error: describeError(e) });
+      this.busy = false;
+      this.status = "";
+      this.trim();
+      this.rerender();
+      return;
+    }
+
+    this.busy = false;
+    this.status = "";
+    await this.afterGrade();
+  }
+
+  /**
+   * A verdict that needs no model call: `/skip` and `/idk` (and a blank line,
+   * which `ask` routes here). Both show the expected answer and the passage,
+   * because the point of "I don't know" in the reference quiz is to be told
+   * rather than to be marked wrong.
+   */
+  private async gradeWithout(verdict: Verdict, userAnswer: string): Promise<void> {
+    const session = this.session;
+    const current = session?.current;
+    if (!session || !current || this.busy) return;
+    if (verdict === "dontknow" && userAnswer.trim()) {
+      this.turns.push({ role: "user", text: userAnswer, quiz: { kind: "grade" } });
+    }
+    this.pushGrade(applyGrade(session, verdict, "", "", userAnswer), current.evidenceN);
+    await this.afterGrade();
+  }
+
+  /** Put the grade on the log and keep the new session. */
+  private pushGrade(next: QuizSession, evidenceN: number): void {
+    this.session = next;
+    const asked = next.asked[next.asked.length - 1];
+    const unit = next.pool[evidenceN - 1];
+    if (!asked || !unit) return;
+    this.turns.push({
+      role: "assistant",
+      text: renderGradeMarkdown(asked, unit),
+      quiz: { kind: "grade", verdict: asked.verdict },
+    });
+    this.trim();
+    this.rerender();
+  }
+
+  /** After any grade: the summary when the count is reached, otherwise the next question. */
+  private async afterGrade(): Promise<void> {
+    const session = this.session;
+    if (!session) return;
+    if (session.finished) await this.finishQuiz();
+    else await this.nextQuestion();
+  }
+
+  /** `/hint`: the generator's one clause, once. Asking twice says so rather than repeating it. */
+  private showHint(): void {
+    const session = this.session;
+    const current = session?.current;
+    if (!session || !current) return;
+    if (session.hintShown) {
+      this.pushSystem("Hint already shown.");
+      return;
+    }
+    this.session = { ...session, hintShown: true };
+    this.pushSystem(`Hint: ${current.hint || "none given for this question."}`);
+  }
+
+  /**
+   * End the quiz and offer the misses.
+   *
+   * The session goes to null, but the scope and the missed units stay on the
+   * panel: the two chips outlive the session they came from, so "Quiz again"
+   * still knows what was being quizzed after the summary has scrolled up.
+   */
+  private async finishQuiz(): Promise<void> {
+    const session = this.session;
+    if (!session) return;
+    const { misses } = summary(session);
+    const unitById = new Map(session.pool.map((u) => [u.id, u]));
+    const missedUnits = misses
+      .map((m) => unitById.get(m.unitId))
+      .filter((u): u is EvidenceUnit => Boolean(u));
+
+    this.lastQuiz = { scope: session.scope, query: session.query, misses: missedUnits };
+    this.turns.push({
+      role: "assistant",
+      text: renderSummaryMarkdown(session),
+      quiz: { kind: "summary", misses: missedUnits },
+    });
+    this.session = null;
+    this.restartArmed = false;
+    this.trim();
+    this.rerender();
+  }
+
+  /**
+   * The summary's first chip. Public because the live run drives it through
+   * `eval` on the view, and because the chip is the only thing in the plugin
+   * that writes to the inbox from a quiz — nothing is written without it.
+   */
+  async sendMissesToInbox(): Promise<void> {
+    const last = this.lastQuiz;
+    if (!last || last.misses.length === 0) {
+      this.pushSystem("Nothing was missed.");
+      return;
+    }
+    const { added, skipped } = captureEvidenceUnits(this.plugin, last.misses, "quiz");
+    this.pushSystem(
+      `Sent ${added} passage${added === 1 ? "" : "s"} to the inbox${skipped ? `, ${skipped} already there` : ""}.`,
+    );
+  }
+
+  /** The summary's second chip: the same scope and the same words, a fresh pool. */
+  async quizAgain(): Promise<void> {
+    const last = this.lastQuiz;
+    if (!last) {
+      this.pushSystem("No quiz to repeat. Type /quiz.");
+      return;
+    }
+    const scope = last.scope.kind === "all" ? "all" : last.scope.kind === "note" ? "this" : "query";
+    await this.startQuiz(scope, last.query);
+  }
+
   /** Empty the log. The index survives: nothing about the vault changed. */
   clear(): void {
     this.turns = [];
     this.draft = "";
     this.status = "";
+    this.session = null;
+    this.restartArmed = false;
     this.rerender();
   }
 
@@ -362,7 +782,17 @@ export class ChatPanel {
   private renderTurn(log: HTMLElement, turn: ChatTurn): void {
     const cls =
       turn.role === "user" ? "is-user" : turn.role === "system" ? "is-system" : "is-assistant";
-    const el = log.createDiv({ cls: `recall-chat-turn ${cls}` });
+    // The quiz classes are additive: a grade turn is still an assistant turn,
+    // it just carries a verdict-coloured border and its own spacing.
+    const quizCls =
+      turn.quiz && turn.role === "assistant"
+        ? turn.quiz.kind === "question"
+          ? " recall-quiz-question"
+          : turn.quiz.kind === "grade"
+            ? ` recall-quiz-grade is-${turn.quiz.verdict ?? "skipped"}`
+            : " recall-quiz-summary"
+        : "";
+    const el = log.createDiv({ cls: `recall-chat-turn ${cls}${quizCls}` });
     if (turn.role === "user") {
       el.setText(turn.text);
       return;
@@ -388,6 +818,11 @@ export class ChatPanel {
       void MarkdownRenderer.render(this.plugin.app, turn.text, el.createDiv(), "", this.view);
     }
     if (turn.error) el.createDiv({ cls: "recall-error", text: turn.error });
+
+    if (turn.quiz?.kind === "summary") {
+      this.renderSummaryChips(el, turn.quiz.misses ?? []);
+      return;
+    }
 
     const report = turn.report;
     if (report && this.plugin.settings.askShowGrounding) this.renderGrounding(el, report);
@@ -449,6 +884,29 @@ export class ChatPanel {
       this.dropTurn(turn);
       void this.askQuestion(offer.question);
     });
+  }
+
+  /**
+   * The two chips under a summary.
+   *
+   * The misses are on the turn rather than read from `lastQuiz`, so an old
+   * summary still says how many it was about; the buttons call the public
+   * methods, which read `lastQuiz` and therefore always act on the most recent
+   * quiz. Sending nothing is not offered: the chip is disabled at zero rather
+   * than writing an empty batch to the inbox.
+   */
+  private renderSummaryChips(el: HTMLElement, misses: EvidenceUnit[]): void {
+    const row = el.createDiv({ cls: "recall-chat-offer" });
+    const send = row.createEl("button", {
+      cls: "mod-cta",
+      text: `Send ${misses.length} missed to inbox`,
+    });
+    send.disabled = this.busy || misses.length === 0;
+    send.addEventListener("click", () => void this.sendMissesToInbox());
+
+    const again = row.createEl("button", { text: "Quiz again" });
+    again.disabled = this.busy;
+    again.addEventListener("click", () => void this.quizAgain());
   }
 
   /** Remove one turn by identity; the user turn that preceded an offer stays, because it was typed. */

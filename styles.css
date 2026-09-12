@@ -595,3 +595,49 @@ body.recall-highlighter-active .textLayer ::selection {
 .recall-chat-evidence.is-cited {
   border-left: 3px solid var(--interactive-accent);
 }
+
+/* Quiz mode in the chat ---------------------------------------------------- */
+/* A question: the only turn that must be read before anything is typed, so it
+   sits a little apart from the grades above it. */
+.recall-chat-turn.recall-quiz-question {
+  margin-top: var(--size-4-3);
+  font-size: var(--font-ui-small);
+}
+.recall-chat-turn.recall-quiz-question p:first-child {
+  margin-top: 0;
+}
+/* A grade: the verdict is the border colour, so a scrolled-back log reads as a
+   column of ✓/△/✗ without reading a word. */
+.recall-chat-turn.recall-quiz-grade {
+  padding-left: var(--size-4-2);
+  border-left: 3px solid var(--text-muted);
+}
+.recall-chat-turn.recall-quiz-grade.is-correct {
+  border-left-color: var(--color-green);
+}
+.recall-chat-turn.recall-quiz-grade.is-partial {
+  border-left-color: var(--color-yellow);
+}
+.recall-chat-turn.recall-quiz-grade.is-incorrect {
+  border-left-color: var(--color-red);
+}
+.recall-chat-turn.recall-quiz-grade.is-dontknow,
+.recall-chat-turn.recall-quiz-grade.is-skipped {
+  border-left-color: var(--text-muted);
+}
+.recall-chat-turn.recall-quiz-grade p:first-child {
+  margin-top: 0;
+}
+/* The closing summary and its two chips. */
+.recall-chat-turn.recall-quiz-summary {
+  padding: var(--size-4-2);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+}
+.recall-chat-turn.recall-quiz-summary p:first-child {
+  margin-top: 0;
+}
+.recall-chat-turn.recall-quiz-summary .recall-chat-offer {
+  margin-top: var(--size-4-2);
+}
