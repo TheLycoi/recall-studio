@@ -2,7 +2,7 @@ import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import type RecallPlugin from "./main";
 
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
-export type Provider = "anthropic" | "codex";
+export type Provider = "anthropic" | "codex" | "claudecli";
 export type MarkMode = "none" | "highlight" | "highlight+block";
 export type LintMode = "badge" | "hide" | "drop";
 
@@ -17,6 +17,10 @@ export interface RecallSettings {
   codexPath: string;
   /** Codex model slug, e.g. gpt-5.5. */
   codexModel: string;
+  /** Absolute path to the claude binary; empty = auto-detect (PATH, then ~/.local/bin). */
+  claudeCliPath: string;
+  /** Claude Code model alias or ID, e.g. sonnet. */
+  claudeCliModel: string;
   effort: Effort;
   maxCardsPerHighlight: number;
   contextChars: number;
@@ -86,6 +90,8 @@ export const DEFAULT_SETTINGS: RecallSettings = {
   model: "claude-opus-5",
   codexPath: "",
   codexModel: "gpt-5.5",
+  claudeCliPath: "",
+  claudeCliModel: "sonnet",
   effort: "high",
   maxCardsPerHighlight: 5,
   contextChars: 700,
@@ -153,10 +159,12 @@ export class RecallSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Provider")
-      .setDesc("Anthropic uses an API key. Codex uses OpenAI's Codex CLI signed in with your ChatGPT subscription, so no key is needed. Test sends one tiny request.")
+      .setDesc(
+        "Anthropic uses an API key. Codex uses OpenAI's Codex CLI signed in with your ChatGPT subscription, so no key is needed. Test sends one tiny request. Claude Code runs the `claude` CLI signed in to your Claude subscription; no key.",
+      )
       .addDropdown((d) =>
         d
-          .addOptions({ anthropic: "Anthropic (API key)", codex: "Codex (ChatGPT subscription)" })
+          .addOptions({ anthropic: "Anthropic (API key)", codex: "Codex (ChatGPT subscription)", claudecli: "Claude Code (Claude subscription)" })
           .setValue(s.provider)
           .onChange((v) => {
             s.provider = v as Provider;
@@ -200,6 +208,30 @@ export class RecallSettingTab extends PluginSettingTab {
             save();
           }),
         );
+    } else if (s.provider === "claudecli") {
+      new Setting(containerEl)
+        .setName("Claude Code CLI path")
+        .setDesc(
+          "Leave empty to auto-detect `claude` on the PATH or in ~/.local/bin. Otherwise paste the output of `which claude`. Sign in by running `claude` in a terminal; check with `claude auth status`.",
+        )
+        .addText((t) =>
+          t.setPlaceholder("auto-detect").setValue(s.claudeCliPath).onChange((v) => {
+            s.claudeCliPath = v.trim();
+            save();
+          }),
+        );
+
+      new Setting(containerEl)
+        .setName("Claude Code model")
+        .setDesc(
+          "An alias such as sonnet, opus, or fable, or a full model id. sonnet is the default because the Claude Code session limit is shared with your interactive Claude Code sessions; opus for quality.",
+        )
+        .addText((t) =>
+          t.setPlaceholder(DEFAULT_SETTINGS.claudeCliModel).setValue(s.claudeCliModel).onChange((v) => {
+            s.claudeCliModel = v.trim() || DEFAULT_SETTINGS.claudeCliModel;
+            save();
+          }),
+        );
     } else {
       new Setting(containerEl)
         .setName("Anthropic API key")
@@ -232,7 +264,9 @@ export class RecallSettingTab extends PluginSettingTab {
       .setDesc(
         s.provider === "codex"
           ? "Reasoning effort passed to Codex. Levels the chosen model does not support (gpt-5.5 stops at xhigh) are rounded down automatically."
-          : "How much reasoning the model spends per highlight. Highlights are small, so high is cheap.",
+          : s.provider === "claudecli"
+            ? "Passed to the CLI as --effort; all five levels are accepted."
+            : "How much reasoning the model spends per highlight. Highlights are small, so high is cheap.",
       )
       .addDropdown((d) =>
         d
