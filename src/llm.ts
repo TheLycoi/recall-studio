@@ -124,11 +124,15 @@ Optimized wording. Use the shortest question that points at the right memory. Cu
 
 Sets and enumerations. Do not ask for an unordered list of more than three items as a single answer; such cards are nearly unlearnable. Split the list across cards, ask what distinguishes each member, or use overlapping cloze deletions so each card hides one or two members with the rest visible. Test an ordered sequence with cloze cards that hide one step and show its neighbours.
 
+Closed and open lists. A closed list has a fixed, complete membership that the highlight states in full: the stages of a model, the steps of a process, the ingredients of a recipe. The rules above are written for it, because there the list really is the answer. An open list is a category whose members the highlight only samples, signalled by words like "include", "such as", "for example", and "among others"; the sample is not the set, so asking for the list as an answer or clozing its members in turn would teach the reader an arbitrary subset as though it were complete. Ask instead for what generalizes: when the highlight states a criterion for membership, test the criterion, and test each named example in the direction example to category, which has one answer, never category to list.
+
 Interference. When the highlight distinguishes similar things (two stages, two processes, two terms), write cards that hinge on the difference, and put a cue in the question that rules out the neighbour. Two cards whose questions read alike but want different answers will be confused with each other.
 
 Context cue. When a question would be ambiguous outside its subject, prefix it with a short cue drawn from the source title or section heading in the form "Subject: question" (for example "Stages of change: ..."). Omit the cue when the question already names its subject.
 
 Card type. Use qa for definitions, mechanisms, reasons, and distinctions. Use cloze for numbers, dates, names, terms inside a sentence, and enumerations. A cloze sentence is one sentence from the highlight, trimmed to what the deletion needs, with {{c1::...}} markers; each deletion hides a short span (a term, number, or name, not framing words), each independently tested deletion gets a new number, a card carries at most three deletions, and the visible text must be enough to recover the hidden span. Hidden text must appear verbatim in the highlight.
+
+Lenses for a concept. When the highlight defines or explains a concept rather than stating a bare fact, a card on its label alone is thin evidence of understanding, so choose cards that trace the concept's edges: what is always, sometimes, or never true of it; what it is easily confused with and what separates them; what it contains and what larger thing it belongs to; what it does and why; why it matters. Use only the lenses the highlight itself supports. The rule that every answer is stated in the highlight is unchanged here: a lens is a way of choosing which stated fact to test, not a licence to add one the highlight leaves unsaid. One good card per supported lens is worth more than several on the label.
 
 Redundancy. A second card on the same fact is welcome when it tests it from a genuinely different direction (term to definition and definition to term; cause to effect and effect to cause). It is not welcome when the same retrieval would answer both cards.
 
@@ -165,6 +169,16 @@ qa | Sets vs enumerations: which of the two is ordered? | the enumeration
 qa | Why are enumerations easier to learn than sets? | the fixed order gives each item a stable cue
 </cards>
 <note>Two similar terms: the first card hinges on the difference, the second tests the reason rather than restating the definitions.</note>
+</example>
+<example>
+<highlight>Modifiable risk factors for hypertension include obesity, high sodium intake, and physical inactivity; a risk factor is modifiable when the patient can change it.</highlight>
+<cards>
+qa | Hypertension: is obesity a modifiable or a non-modifiable risk factor? | modifiable
+qa | Hypertension: is high sodium intake a modifiable or a non-modifiable risk factor? | modifiable
+qa | Hypertension: is physical inactivity a modifiable or a non-modifiable risk factor? | modifiable
+qa | What makes a risk factor for hypertension modifiable? | the patient can change it
+</cards>
+<note>"include" marks an open list, so no card asks for the list and no cloze hides its members: the three named factors are a sample, not the set. Each one is tested in the direction example to category, and the criterion is the fact with lasting use, since it decides cases the highlight never named.</note>
 </example>
 <example>
 <highlight>As I mentioned in the previous chapter, this is where things get interesting, and I will come back to it later.</highlight>
