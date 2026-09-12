@@ -192,6 +192,6 @@ test("a plain sentence after list items starts a new paragraph", () => {
     { text: "- Gamma", kind: "claim", cited: [2] },
     { text: "Alpha comes first.", kind: "claim", cited: [1] },
   ] };
-  const { answer } = a.checkAnswer(draft, evidence);
+  const { answer } = ac.checkAnswer(draft, evidence);
   assert.equal(answer, "The stages are: [1]\n- Alpha [1]\n- Gamma [2]\n\nAlpha comes first. [1]");
 });
