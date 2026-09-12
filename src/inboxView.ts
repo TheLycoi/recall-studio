@@ -208,9 +208,24 @@ export class InboxView extends ItemView {
       const s = stats.createSpan({ cls: `recall-stat ${cls}` });
       s.createSpan({ cls: "recall-stat-n", text: String(n) });
       s.createSpan({ text: ` ${label}` });
+      return s;
     };
     if (!chat) {
       stat("to review", counts.toReview);
+      let withBloom = 0;
+      let remember = 0;
+      for (const h of this.plugin.store.all()) {
+        if (h.status !== "ready") continue;
+        for (const c of h.cards) {
+          if (c.status !== "pending" || !c.bloom) continue;
+          withBloom++;
+          if (c.bloom === "remember") remember++;
+        }
+      }
+      if (withBloom > 0) {
+        const s = stat("at remember", remember, remember === withBloom && withBloom >= 5 ? "is-flagged" : "");
+        s.title = "Cards the critique placed at Bloom 'remember'. When every judged card sits there, the set is testing labels, not understanding.";
+      }
       if (counts.flagged) stat("flagged", counts.flagged, "is-flagged");
       if (counts.queued + counts.generating) stat("writing", counts.queued + counts.generating, "is-busy");
       if (counts.errors) stat("failed", counts.errors, "is-error");
@@ -479,6 +494,10 @@ export class InboxView extends ItemView {
           .map((owner) => (owner.title ? `${owner.sourceTitle} \u2014 ${owner.title}` : owner.sourceTitle));
         const b = top.createSpan({ cls: "recall-badge recall-badge-notice", text: LINT_LABELS["cross-interference"] });
         b.title = where.length > 0 ? `Same answer as a card in: ${where.join("; ")}` : "Same answer as a card in another highlight";
+      }
+      if (c.bloom) {
+        const b = top.createSpan({ cls: "recall-badge recall-badge-bloom", text: c.bloom });
+        b.title = "Bloom level judged by the critique. 'remember' is right for a plain definition; a mechanism or reason turned into a what-is-it-called card is the case to watch for.";
       }
       if (c.critiqueReason) {
         const b = top.createSpan({ cls: "recall-badge recall-badge-critique", text: "critique" });

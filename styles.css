@@ -419,6 +419,9 @@ body.recall-highlighter-active .textLayer ::selection {
   color: var(--text-muted);
   background: var(--background-modifier-hover);
 }
+.recall-badge-bloom {
+  color: var(--color-cyan);
+}
 
 /* Digest preview modal --------------------------------------------------- */
 .recall-preview-counts {
