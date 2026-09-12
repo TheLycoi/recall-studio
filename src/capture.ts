@@ -366,6 +366,7 @@ export function captureManifestHighlights(
   manifest: Manifest,
   items: ManifestHighlight[],
   noteTitle: string,
+  topicPath: string | null,
 ): { added: number; skipped: number } {
   let added = 0;
   let skipped = 0;
@@ -390,6 +391,7 @@ export function captureManifestHighlights(
       heading: `page ${item.page}`,
       title: noteTitle,
       subpath: renderPdfSubpath(item.target),
+      topicPath: topicPath ?? undefined,
       origin: "pdf",
     });
     plugin.store.add(h);

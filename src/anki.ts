@@ -72,9 +72,18 @@ export function buildExtra(h: Highlight, ctx: ExportContext): string {
   const target = h.page ? `${pathNoExt}#page=${h.page}` : h.blockId ? `${pathNoExt}#^${h.blockId}` : pathNoExt;
   const uri = `obsidian://open?vault=${encodeURIComponent(ctx.vaultName)}&file=${encodeURIComponent(target)}`;
   const where = h.page ? ` › p. ${h.page}` : h.heading ? ` › ${escapeHtml(h.heading)}` : "";
+  // An atomic card with only a source link is disconnected trivia; when the
+  // highlight was digested into a topic note, link the card at its concept too.
+  let topic = "";
+  if (h.topicPath) {
+    const topicNoExt = h.topicPath.replace(/\.md$/i, "");
+    const topicUri = `obsidian://open?vault=${encodeURIComponent(ctx.vaultName)}&file=${encodeURIComponent(topicNoExt)}`;
+    topic = `<div class="recall-topic">Topic: <a href="${topicUri}">${escapeHtml(basenameNoExt(h.topicPath))}</a></div>`;
+  }
   return (
     `<blockquote class="recall-highlight">${escapeHtml(h.text).replace(/\n/g, "<br>")}</blockquote>` +
-    `<div class="recall-source">Source: <a href="${uri}">${escapeHtml(h.sourceTitle)}</a>${where}</div>`
+    `<div class="recall-source">Source: <a href="${uri}">${escapeHtml(h.sourceTitle)}</a>${where}</div>` +
+    topic
   );
 }
 

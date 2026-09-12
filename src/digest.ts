@@ -209,6 +209,7 @@ export async function digestPdf(plugin: RecallPlugin, source: TFile, mode: "mode
         manifest,
         manifest.highlights.filter((h) => h.text.trim().length > 0),
         "",
+        null,
       );
       return;
     }
@@ -290,7 +291,7 @@ export async function digestPdf(plugin: RecallPlugin, source: TFile, mode: "mode
       written++;
       appended += note.added;
       alreadyPresent += note.skipped;
-      if (product === "both") queued += captureManifestHighlights(plugin, manifest, note.highlights, note.title).added;
+      if (product === "both") queued += captureManifestHighlights(plugin, manifest, note.highlights, note.title, path).added;
     }
 
     const bits = [
