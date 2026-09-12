@@ -678,7 +678,7 @@ verbatim highlight and an `obsidian://` link to the source.
 
 ## Setup
 
-1. Settings → Recall → **Provider**. Two options:
+1. Settings → Recall → **Provider**. Three options:
    - **Codex (ChatGPT subscription)** — no API key. Recall runs OpenAI's
      Codex CLI (`codex exec`) signed in with your ChatGPT account. Leave
      *Codex CLI path* empty and Recall finds `codex` on the PATH or the copy
@@ -690,6 +690,16 @@ verbatim highlight and an `obsidian://` link to the source.
      with a read-only sandbox, `--ephemeral` (no session files) and
      `--ignore-user-config` (your `~/.codex/config.toml` hooks, plugins and
      MCP servers are not loaded), so the agent never sees the vault.
+   - **Claude Code (Claude subscription)** — no API key. Recall runs the
+     `claude` CLI signed in to your Claude subscription (`claude auth status`
+     shows `loggedIn: true`). It passes the system prompt and a JSON schema,
+     sends the message on stdin, disables the CLI's tools and settings
+     sources, never uses `--bare` (that would skip the keychain read that
+     holds the login), and strips `ANTHROPIC_API_KEY` from the child's
+     environment so billing stays on the subscription. Leave *Claude Code CLI
+     path* empty to auto-detect `claude` on the PATH or in `~/.local/bin`.
+     The session limit is shared with your interactive Claude Code sessions,
+     so the default model is `sonnet`; set `opus` for quality.
    - **Anthropic (API key)** — paste a key, or leave the field empty and
      Recall reads `ANTHROPIC_API_KEY` from the environment or from the macOS
      keychain (a generic password whose service is `ANTHROPIC_API_KEY` or
@@ -749,6 +759,7 @@ Layout:
 - `src/backend.ts` — the `LlmBackend` interface (`probe`, `complete`, `abort`)
 - `src/anthropic.ts` — Anthropic backend (SDK over Obsidian `requestUrl`, native structured outputs)
 - `src/codex.ts` — Codex backend (`codex exec --json --output-schema` over stdin, JSONL parsing, effort clamping)
+- `src/claudeCli.ts` — Claude Code backend (`claude -p --json-schema` with the prompt on stdin; structured output read from the JSON envelope)
 - `src/keys.ts` — Anthropic API key resolution (settings → environment → keychain)
 - `src/generator.ts` — background queue
 - `src/inboxView.ts` — the inbox and the Ask chat panel's host (Inbox | Chat toggle)

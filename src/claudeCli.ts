@@ -312,8 +312,6 @@ function runQuick(bin: string, args: string[]): Promise<{ stdout: string; stderr
   });
 }
 
-/** T2 adds `claudeCliPath` and `claudeCliModel` to RecallSettings in parallel; read them defensively until it lands. */
-type ClaudeCliSettings = RecallSettings & { claudeCliPath?: string; claudeCliModel?: string };
 
 export class ClaudeCliBackend implements LlmBackend {
   readonly name = "claudecli" as const;
@@ -321,8 +319,8 @@ export class ClaudeCliBackend implements LlmBackend {
   constructor(private getSettings: () => RecallSettings) {}
 
   private settings(): { path: string; model: string; effort: string } {
-    const s = this.getSettings() as ClaudeCliSettings;
-    return { path: s.claudeCliPath ?? "", model: s.claudeCliModel ?? "sonnet", effort: s.effort };
+    const s = this.getSettings();
+    return { path: s.claudeCliPath, model: s.claudeCliModel || "sonnet", effort: s.effort };
   }
 
   async probe(): Promise<{ model: string; via: string }> {

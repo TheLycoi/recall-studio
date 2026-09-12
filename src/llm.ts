@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { AnthropicBackend } from "./anthropic";
 import type { LlmBackend } from "./backend";
+import { ClaudeCliBackend, ClaudeCliError } from "./claudeCli";
 import { CodexBackend, CodexError } from "./codex";
 import { buildExamplesBlock } from "./examples";
 import type { BloomLevel, Card, Highlight } from "./model";
@@ -268,6 +269,7 @@ Give each span a label of at most six words that names the fact it carries.`;
 export class LlmClient {
   private anthropic: AnthropicBackend;
   private codex: CodexBackend;
+  private claudeCli: ClaudeCliBackend;
 
   /**
    * `getHighlights` mirrors the `getSettings` callback rather than importing
@@ -282,6 +284,7 @@ export class LlmClient {
   ) {
     this.anthropic = new AnthropicBackend(getSettings);
     this.codex = new CodexBackend(getSettings);
+    this.claudeCli = new ClaudeCliBackend(getSettings);
   }
 
   /**
@@ -295,7 +298,10 @@ export class LlmClient {
   }
 
   private backend(): LlmBackend {
-    return this.getSettings().provider === "codex" ? this.codex : this.anthropic;
+    const provider = this.getSettings().provider;
+    if (provider === "codex") return this.codex;
+    if (provider === "claudecli") return this.claudeCli;
+    return this.anthropic;
   }
 
   /** One tiny request, so the settings tab can say whether the provider works. */
@@ -305,7 +311,7 @@ export class LlmClient {
 
   /** Cancel in-flight work on every backend (plugin unload). */
   async abort(): Promise<void> {
-    await Promise.all([this.anthropic.abort(), this.codex.abort()]);
+    await Promise.all([this.anthropic.abort(), this.codex.abort(), this.claudeCli.abort()]);
   }
 
   /** "write cards": one highlight (plus context) in, a handful of cards out. */
@@ -469,6 +475,7 @@ export class LlmClient {
 }
 
 export function describeError(e: unknown): string {
+  if (e instanceof ClaudeCliError) return e.message;
   if (e instanceof CodexError) return e.message;
   if (e instanceof Anthropic.AuthenticationError) return "Invalid Anthropic API key.";
   if (e instanceof Anthropic.RateLimitError) return "Rate limited by the Anthropic API; will retry later.";
