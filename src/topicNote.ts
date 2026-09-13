@@ -451,8 +451,29 @@ export function mergeWikiHighlights(
   }
 
   const newCallouts = toAdd.map((h) => renderCallout(pdfBasename, h.target, wikiDisplay(pdfBasename, h.page), h.text));
-  const beforeTrimmed = existingMd.replace(/\n*$/, "");
-  const newMd = `${beforeTrimmed}\n\n## Highlights\n\n${newCallouts.join("\n\n")}\n`;
+  const sectionText = `## Highlights\n\n${newCallouts.join("\n\n")}`;
+
+  // Insert before the first of `## Related topics` or `## Flashcard Seeds`
+  // (Recall's own digest skeleton), whichever appears first; else append at EOF.
+  const relatedMatch = /^##\s+Related topics\s*$/m.exec(existingMd);
+  const seedsMatch = /^##\s+Flashcard Seeds\s*$/m.exec(existingMd);
+  let anchorMatch: RegExpExecArray | null = null;
+  if (relatedMatch && seedsMatch) {
+    anchorMatch = relatedMatch.index <= seedsMatch.index ? relatedMatch : seedsMatch;
+  } else {
+    anchorMatch = relatedMatch ?? seedsMatch;
+  }
+
+  let newMd: string;
+  if (anchorMatch) {
+    const before = existingMd.slice(0, anchorMatch.index);
+    const after = existingMd.slice(anchorMatch.index);
+    const beforeTrimmed = before.replace(/\n*$/, "");
+    newMd = `${beforeTrimmed}\n\n${sectionText}\n\n${after}`;
+  } else {
+    const beforeTrimmed = existingMd.replace(/\n*$/, "");
+    newMd = `${beforeTrimmed}\n\n${sectionText}\n`;
+  }
 
   return { md: newMd, added: toAdd.length, skipped };
 }

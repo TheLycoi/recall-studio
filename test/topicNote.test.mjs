@@ -455,3 +455,80 @@ Some unrelated notes.
   const newLinkIdx = result.md.indexOf("page=6&selection=0,0,3,0");
   assert.ok(highlightsIdx < newLinkIdx && newLinkIdx < notesIdx);
 });
+
+test("mergeWikiHighlights inserts a missing ## Highlights section before ## Related topics, ahead of ## Flashcard Seeds", () => {
+  const existing = `---
+class: PHED163
+---
+
+## Summary
+S.
+
+## Key claims
+- a
+
+## Related topics
+- [[X]]
+
+## Flashcard Seeds
+`;
+  const highlight = wikiHighlight();
+  const result = tn.mergeWikiHighlights(existing, PDF_BASENAME, "PHED163", [highlight]);
+  assert.equal(result.added, 1);
+  assert.equal(result.skipped, 0);
+
+  const keyClaimsIdx = existing.indexOf("## Key claims");
+  const beforeNewSection = result.md.slice(0, keyClaimsIdx + "## Key claims\n- a\n".length);
+  assert.equal(beforeNewSection, existing.slice(0, keyClaimsIdx + "## Key claims\n- a\n".length));
+
+  const highlightsIdx = result.md.indexOf("## Highlights");
+  const relatedIdx = result.md.indexOf("## Related topics");
+  const seedsIdx = result.md.indexOf("## Flashcard Seeds");
+  assert.ok(keyClaimsIdx < highlightsIdx);
+  assert.ok(highlightsIdx < relatedIdx);
+  assert.ok(relatedIdx < seedsIdx);
+  assert.ok(result.md.slice(relatedIdx).startsWith(existing.slice(existing.indexOf("## Related topics"))));
+});
+
+test("mergeWikiHighlights inserts a missing ## Highlights section before ## Flashcard Seeds when that is the only trailing heading", () => {
+  const existing = `---
+class: PHED163
+---
+
+## Summary
+S.
+
+## Flashcard Seeds
+`;
+  const highlight = wikiHighlight();
+  const result = tn.mergeWikiHighlights(existing, PDF_BASENAME, "PHED163", [highlight]);
+  assert.equal(result.added, 1);
+  assert.equal(result.skipped, 0);
+
+  const highlightsIdx = result.md.indexOf("## Highlights");
+  const seedsIdx = result.md.indexOf("## Flashcard Seeds");
+  assert.ok(highlightsIdx < seedsIdx);
+  assert.ok(result.md.slice(seedsIdx).startsWith(existing.slice(existing.indexOf("## Flashcard Seeds"))));
+});
+
+test("mergeWikiHighlights inserts a missing ## Highlights section before ## Related topics when there is no ## Flashcard Seeds", () => {
+  const existing = `---
+class: PHED163
+---
+
+## Summary
+S.
+
+## Related topics
+- [[X]]
+`;
+  const highlight = wikiHighlight();
+  const result = tn.mergeWikiHighlights(existing, PDF_BASENAME, "PHED163", [highlight]);
+  assert.equal(result.added, 1);
+  assert.equal(result.skipped, 0);
+
+  const highlightsIdx = result.md.indexOf("## Highlights");
+  const relatedIdx = result.md.indexOf("## Related topics");
+  assert.ok(highlightsIdx < relatedIdx);
+  assert.ok(result.md.slice(relatedIdx).startsWith(existing.slice(existing.indexOf("## Related topics"))));
+});

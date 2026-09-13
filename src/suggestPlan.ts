@@ -9,6 +9,7 @@ import type { SuggestDraft } from "./schemas";
 import { MANIFEST_CONTEXT_CHARS, sortAndAssignIds, type ManifestHighlight } from "./manifest";
 import { highlightKey, type PdfTarget } from "./pdflink";
 import { contextFor, pageText, selectionText, type SelectionRange } from "./pdftext";
+import { normalizeWs } from "./util";
 
 /**
  * 1-based inclusive page ranges of at most `perBatch` pages. A `perBatch`
@@ -141,7 +142,11 @@ export function toManifestHighlights(
   const rows: ManifestHighlight[] = spans.map((s) => {
     const map = maps.get(s.page);
     const items = map?.items ?? [];
-    const text = (map ? selectionText(items, s.sel) : null) ?? s.quote;
+    // singleLine (src/pdftext.ts:198-203) joins item slices with a single
+    // space at every break; when an item's own str already ends in a space
+    // that produces a double space in the callout quote, which must read the
+    // way the page reads.
+    const text = normalizeWs((map ? selectionText(items, s.sel) : null) ?? s.quote);
     const { before, after } = contextFor(pageText(items), text, contextChars);
     return {
       id: "",
@@ -184,6 +189,7 @@ function joinPath(folder: string, file: string): string {
 
 interface Group {
   title: string;
+  kind: "concept" | "entity";
   rows: ManifestHighlight[];
 }
 
@@ -191,8 +197,11 @@ interface Group {
  * Group verified spans into notes to write. A title the vault already has is
  * merged into (existing text untouched, same-key callouts skipped); a title the
  * model announced in `new_notes` is rendered fresh; anything else is an orphan
- * — the model pointed at a note that neither exists nor was announced, so its
- * rows go to a per-PDF catch-all note rather than being dropped.
+ * — the model pointed at a note that neither exists nor was announced — and is
+ * planned exactly like a `new_notes` group (kind from the span, no summary),
+ * kept under its own title rather than dumped into a note named after the
+ * source PDF. `orphanTitles` still records these, in first-seen order, so the
+ * preview can flag them.
  */
 export function planWikiNotes(
   spans: VerifiedSpan[],
@@ -217,24 +226,18 @@ export function planWikiNotes(
   const order: string[] = [];
   const orphanTitles: string[] = [];
 
-  const fallbackTitle = safeTitle(opts.pdfBasename);
-  const fallbackKey = fallbackTitle.toLowerCase();
-
   for (const s of spans) {
     const row = rowByKey.get(s.key);
     if (!row) continue;
 
-    let key = s.noteTitle.toLowerCase();
-    let title = s.noteTitle;
+    const key = s.noteTitle.toLowerCase();
     if (!wikiByTitle.has(key) && !newByTitle.has(key)) {
       if (!orphanTitles.includes(s.noteTitle)) orphanTitles.push(s.noteTitle);
-      key = fallbackKey;
-      title = fallbackTitle;
     }
 
     let group = groups.get(key);
     if (!group) {
-      group = { title, rows: [] };
+      group = { title: s.noteTitle, kind: s.noteKind, rows: [] };
       groups.set(key, group);
       order.push(key);
     }
@@ -268,7 +271,7 @@ export function planWikiNotes(
     }
 
     const proposed = newByTitle.get(key);
-    const kind = proposed?.kind ?? "concept";
+    const kind = proposed?.kind ?? group.kind;
     const summary = proposed?.summary ?? "";
     const folder = kind === "entity" ? opts.entitiesFolder : opts.conceptsFolder;
     const content = renderWikiNote({

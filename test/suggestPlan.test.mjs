@@ -159,6 +159,23 @@ test("toManifestHighlights builds S-prefixed rows in page order", () => {
   assert.notEqual(rows[0].after, "");
 });
 
+test("toManifestHighlights collapses the double space singleLine can leave at an item join", () => {
+  const page = [item("cost of ", false), item("changing", false)];
+  const m = new Map([[1, pm.buildPageMap(page)]]);
+  const res = sp.verifySpans(draftOf([span(1, "cost of changing")]), m, opts());
+  assert.equal(res.spans.length, 1);
+
+  const rows = sp.toManifestHighlights(res.spans, m);
+  assert.equal(rows[0].text, "cost of changing");
+});
+
+test("toManifestHighlights leaves an existing single-item selection's text unchanged", () => {
+  const m = maps();
+  const res = sp.verifySpans(draftOf([span(1, "Albumin is an inert binding protein.")]), m, opts());
+  const rows = sp.toManifestHighlights(res.spans, m);
+  assert.equal(rows[0].text, "Albumin is an inert binding protein.");
+});
+
 test("sortAndAssignIds keeps H ids when no prefix is given", () => {
   const m = maps();
   const res = sp.verifySpans(draftOf([span(1, "Albumin is an inert binding protein.")]), m, opts());
@@ -244,9 +261,13 @@ test("planWikiNotes takes the first summary when a new title is proposed twice",
   assert.ok(note.content.includes("First summary."));
 });
 
-test("planWikiNotes sends an unknown title to a per-PDF note", () => {
+test("planWikiNotes keeps an orphan span under its own title, not a per-PDF note", () => {
   const m = maps();
-  const res = sp.verifySpans(draftOf([span(1, "Albumin is an inert binding protein.", "Nowhere Land")]), m, opts());
+  const res = sp.verifySpans(
+    draftOf([span(1, "Albumin is an inert binding protein.", "Motivational Interviewing")]),
+    m,
+    opts(),
+  );
   const rows = sp.toManifestHighlights(res.spans, m);
   const out = sp.planWikiNotes(res.spans, rows, [], [], {
     classCode: CLASS_CODE,
@@ -255,11 +276,58 @@ test("planWikiNotes sends an unknown title to a per-PDF note", () => {
     entitiesFolder: "wiki/entities",
   });
 
-  assert.deepEqual(out.orphanTitles, ["Nowhere Land"]);
+  assert.deepEqual(out.orphanTitles, ["Motivational Interviewing"]);
   assert.equal(out.notes.length, 1);
-  assert.equal(out.notes[0].title, PDF_BASENAME);
-  assert.equal(out.notes[0].path, `wiki/concepts/${PDF_BASENAME}.md`);
-  assert.equal(out.notes[0].highlights.length, 1);
+  const note = out.notes[0];
+  assert.equal(note.title, "Motivational Interviewing");
+  assert.equal(note.exists, false);
+  assert.equal(note.summary, "");
+  assert.equal(note.path, "wiki/concepts/Motivational Interviewing.md");
+  assert.equal(note.highlights.length, 1);
+});
+
+test("planWikiNotes puts an entity-kind orphan under the entities folder", () => {
+  const m = maps();
+  const res = sp.verifySpans(
+    draftOf([span(1, "Albumin is an inert binding protein.", "Motivational Interviewing", "entity")]),
+    m,
+    opts(),
+  );
+  const rows = sp.toManifestHighlights(res.spans, m);
+  const out = sp.planWikiNotes(res.spans, rows, [], [], {
+    classCode: CLASS_CODE,
+    pdfBasename: PDF_BASENAME,
+    conceptsFolder: "wiki/concepts",
+    entitiesFolder: "wiki/entities",
+  });
+
+  assert.equal(out.notes.length, 1);
+  assert.equal(out.notes[0].path, "wiki/entities/Motivational Interviewing.md");
+});
+
+test("planWikiNotes never titles a note after the source PDF", () => {
+  const m = maps();
+  const res = sp.verifySpans(
+    draftOf([
+      span(1, "Albumin is an inert binding protein.", "Nowhere Land"),
+      span(1, "Affinity rises with structural fit.", "Somewhere Else"),
+    ]),
+    m,
+    opts(),
+  );
+  const rows = sp.toManifestHighlights(res.spans, m);
+  const out = sp.planWikiNotes(res.spans, rows, [], [], {
+    classCode: CLASS_CODE,
+    pdfBasename: PDF_BASENAME,
+    conceptsFolder: "wiki/concepts",
+    entitiesFolder: "wiki/entities",
+  });
+
+  assert.deepEqual(out.orphanTitles, ["Nowhere Land", "Somewhere Else"]);
+  assert.equal(out.notes.length, 2);
+  for (const note of out.notes) {
+    assert.notEqual(note.title, PDF_BASENAME);
+  }
 });
 
 test("planWikiNotes omits a group whose rows are all already present", () => {

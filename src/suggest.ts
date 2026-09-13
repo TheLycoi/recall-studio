@@ -102,8 +102,11 @@ export async function suggestPdfHighlights(plugin: RecallPlugin, pdf: TFile): Pr
     const { manifest, pages, warnings } = await collectPdfHighlights(plugin, pdf, { paperText: false, pages: true });
     await writeManifest(plugin, manifest);
     if (warnings.length) new Notice(`Recall: ${warnings.join("; ")}`, 8000); // obsidian.d.ts:4613
-    if (pages.length === 0) {
-      new Notice("Recall: this PDF has no text layer.");
+    // A scanned deck parses fine but every page comes back with no text items,
+    // so checking the page count alone would let the run reach the model with
+    // empty pages. Say what is actually wrong instead.
+    if (pages.length === 0 || pages.every((p) => p.items.length === 0)) {
+      new Notice("Recall: this PDF has no text layer — it looks like a scan, and needs OCR before highlights can be suggested.", 8000);
       return;
     }
     const maps = new Map<number, PageMap>(pages.map((p, i) => [i + 1, buildPageMap(p.items)]));
@@ -228,9 +231,8 @@ export async function suggestPdfHighlights(plugin: RecallPlugin, pdf: TFile): Pr
       if (title === undefined) continue; // unchecked in the preview
       keptSpans.push(title === sp.noteTitle ? sp : { ...sp, noteTitle: title });
 
-      // A title the user typed over a proposed one must still be announced as a
-      // new note, or `planWikiNotes` would treat it as an orphan and divert its
-      // spans to the catch-all note.
+      // A title the user typed over a proposed one is announced as a new note
+      // so it keeps the kind and summary the model gave the group it replaced.
       const key = title.toLowerCase();
       if (wikiTitles.has(key)) continue;
       if (newNotesEdited.some((n) => safeTitle(n.title).toLowerCase() === key)) continue;
@@ -249,9 +251,18 @@ export async function suggestPdfHighlights(plugin: RecallPlugin, pdf: TFile): Pr
     let spansWritten = 0;
     let newCount = 0;
     let queued = 0;
+    let refused = 0;
     for (const note of final.notes) {
       if (options.product !== "flashcards") {
         const path = normalizePath(note.path);
+        // A source is never a note. The planner cannot produce either of these
+        // today, but a note named after the PDF, or written into the folder the
+        // PDF itself lives in, would put generated prose where the reader keeps
+        // their originals — so refuse rather than trust the caller.
+        if (path.split("/").includes("sources") || safeTitle(note.title) === safeTitle(manifest.pdfBasename)) {
+          refused++;
+          continue;
+        }
         const file = plugin.app.vault.getAbstractFileByPath(path); // obsidian.d.ts:7369
         if (file instanceof TFile) {
           await plugin.app.vault.modify(file, note.content); // obsidian.d.ts:7467
@@ -275,9 +286,11 @@ export async function suggestPdfHighlights(plugin: RecallPlugin, pdf: TFile): Pr
       new Notice(`Recall: ${queued} highlight${queued === 1 ? "" : "s"} queued as flashcards.`, 8000);
       return;
     }
+    const written = final.notes.length - refused;
     const tail = queued > 0 ? `, ${queued} queued as flashcards` : "";
+    const refusedTail = refused > 0 ? `, ${refused} refused (a source is never a note)` : "";
     new Notice(
-      `Recall: wrote ${spansWritten} span${spansWritten === 1 ? "" : "s"} into ${final.notes.length} note${final.notes.length === 1 ? "" : "s"} (${newCount} new)${tail}.`,
+      `Recall: wrote ${spansWritten} span${spansWritten === 1 ? "" : "s"} into ${written} note${written === 1 ? "" : "s"} (${newCount} new)${tail}${refusedTail}.`,
       8000,
     );
   } catch (e) {
