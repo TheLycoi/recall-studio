@@ -26,10 +26,18 @@ export interface GroundingReport {
   quotesRejected: Array<{ n: number; quote: string }>;
   cited: number[];
   verified: boolean;
+  /** True when the optional verify pass ran and its verdicts were applied. */
+  verifyRan: boolean;
 }
 
 /** Shown when every sentence the model drafted was dropped. */
 const NOTHING_SUPPORTED = "Your notes don't say. None of the sentences the model drafted was supported by the evidence.";
+
+/** A gap sentence says what the evidence does not cover; it must read like one. */
+const GAP_MARKERS = /\b(not|no|nothing|none|missing|absent|silent|cover|covers|covered|mention|mentions|mentioned|does not|do not|doesn't|don't|isn't|aren't|unclear|unknown)\b|n't\b/i;
+export function isGapStatement(text: string): boolean {
+  return GAP_MARKERS.test(text);
+}
 
 /**
  * Check a draft against its evidence and assemble the answer.
@@ -58,8 +66,10 @@ export function checkAnswer(draft: AskDraft, evidence: AskEvidenceIn[]): { answe
   let removed = 0;
   for (const s of draft.sentences) {
     const cited = cleanCitations(s.cited, max);
-    if (s.kind === "claim") {
-      if (noneCoverage || cited.length === 0) {
+    if (s.kind === "claim" || !isGapStatement(s.text)) {
+      // A "gap" sentence that asserts something is a claim wearing the wrong
+      // label; it needs a citation like any other claim.
+      if (noneCoverage || cited.length === 0 || s.kind !== "claim") {
         removed++;
         continue;
       }
@@ -85,6 +95,7 @@ export function checkAnswer(draft: AskDraft, evidence: AskEvidenceIn[]): { answe
       quotesRejected,
       cited: [...cited].sort((a, b) => a - b),
       verified: removed === 0 && quotesRejected.length === 0,
+      verifyRan: false,
     },
   };
 }
@@ -160,6 +171,7 @@ export function noEvidenceAnswer(question: string): { answer: string; report: Gr
       quotesRejected: [],
       cited: [],
       verified: true,
+      verifyRan: false,
     },
   };
 }
@@ -173,6 +185,7 @@ export function renderGroundingLine(r: GroundingReport): string {
   if (r.removed > 0) parts.push(`${r.removed} unsupported removed`);
   if (r.quotesVerified.length > 0) parts.push(`${r.quotesVerified.length} ${plural(r.quotesVerified.length, "quote")} verified`);
   if (r.quotesRejected.length > 0) parts.push(`${r.quotesRejected.length} ${plural(r.quotesRejected.length, "quote")} rejected`);
+  if (r.verifyRan) parts.push("verify pass");
   return `Grounding: ${parts.join(" · ")}`;
 }
 

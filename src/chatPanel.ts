@@ -25,6 +25,8 @@ import {
   type QuizScope,
   type QuizSession,
   type Verdict,
+  feedbackGrounded,
+  disputeGrade,
 } from "./quiz";
 import type { AskHistoryTurn } from "./prompt";
 
@@ -59,6 +61,7 @@ interface ChatTurn {
     total?: number;
     verdict?: Verdict;
     misses?: EvidenceUnit[];
+    unverified?: boolean;
   };
 }
 
@@ -394,6 +397,7 @@ export class ChatPanel {
       // draft is still the best thing we have, so the answer is rendered and
       // the failure is stated on the turn rather than replacing it.
       let verifyError: string | undefined;
+      let verifyRan = false;
       if (this.plugin.settings.askVerifyPass) {
         this.status = "verifying…";
         this.rerender();
@@ -403,12 +407,14 @@ export class ChatPanel {
             sentences: draft.sentences.map((s, i) => ({ i, text: s.text, cited: s.cited })),
           });
           draft = applyVerdicts(draft, verdicts);
+          verifyRan = true;
         } catch (e) {
           verifyError = `verify pass failed: ${describeError(e)}`;
         }
       }
 
       const { answer, report } = checkAnswer(draft, numbered);
+      report.verifyRan = verifyRan;
       this.turns.push({ role: "assistant", text: answer, evidence, report, error: verifyError });
     } catch (e) {
       this.turns.push({ role: "assistant", text: "", evidence, error: describeError(e) });
@@ -607,7 +613,12 @@ export class ChatPanel {
       // A grade quoting words the passage does not contain is exactly what the
       // reader needs to spot, so an unverified quote is dropped rather than shown.
       const gradeQuote = verifyGradeQuote(grade.quote, evidence.text);
-      this.pushGrade(applyGrade(session, grade.verdict, grade.feedback, gradeQuote, text), current.evidenceN);
+      const extras = {
+        gradeQuoteRejected: !!grade.quote.trim() && !gradeQuote,
+        feedbackGrounded: feedbackGrounded(grade.feedback, evidence.text, text),
+        dispute: disputeGrade(text, current.answer, grade.verdict, !!gradeQuote),
+      };
+      this.pushGrade(applyGrade(session, grade.verdict, grade.feedback, gradeQuote, text, extras), current.evidenceN);
     } catch (e) {
       this.turns.push({ role: "assistant", text: "", error: describeError(e) });
       this.busy = false;
@@ -648,7 +659,7 @@ export class ChatPanel {
     this.turns.push({
       role: "assistant",
       text: renderGradeMarkdown(asked, unit),
-      quiz: { kind: "grade", verdict: asked.verdict },
+      quiz: { kind: "grade", verdict: asked.verdict, unverified: asked.gradeQuoteRejected || !asked.feedbackGrounded },
     });
     this.trim();
     this.rerender();
@@ -672,7 +683,7 @@ export class ChatPanel {
       return;
     }
     this.session = { ...session, hintShown: true };
-    this.pushSystem(`Hint: ${current.hint || "none given for this question."}`);
+    this.pushSystem(current.hint ? `Hint: ${current.hint}` : "No hint for this one.");
   }
 
   /**
@@ -789,7 +800,7 @@ export class ChatPanel {
         ? turn.quiz.kind === "question"
           ? " recall-quiz-question"
           : turn.quiz.kind === "grade"
-            ? ` recall-quiz-grade is-${turn.quiz.verdict ?? "skipped"}`
+            ? ` recall-quiz-grade is-${turn.quiz.verdict ?? "skipped"}${turn.quiz.unverified ? " is-unverified" : ""}`
             : " recall-quiz-summary"
         : "";
     const el = log.createDiv({ cls: `recall-chat-turn ${cls}${quizCls}` });
@@ -816,6 +827,9 @@ export class ChatPanel {
       // vault-absolute (`[[classes/HBIO250/Receptors|Receptors]]`), so there is
       // no relative link for a source path to resolve (obsidian.d.ts:4143).
       void MarkdownRenderer.render(this.plugin.app, turn.text, el.createDiv(), "", this.view);
+    }
+    if (turn.quiz?.kind === "grade" && turn.quiz.unverified) {
+      el.createDiv({ cls: "recall-chat-grounding is-unverified" }).createSpan({ cls: "recall-badge recall-badge-warn", text: "unverified" });
     }
     if (turn.error) el.createDiv({ cls: "recall-error", text: turn.error });
 

@@ -233,7 +233,7 @@ function stem(w: string): string {
   return w.length > 4 && w.endsWith("s") ? w.slice(0, -1) : w;
 }
 
-function significantTokens(text: string): string[] {
+export function significantTokens(text: string): string[] {
   return text
     .toLowerCase()
     .split(/[^\p{L}\p{N}]+/u)

@@ -23,7 +23,7 @@
  * number the prompt and the rendered evidence use.
  */
 import { normalizePlain } from "./util";
-import { numberEvidence, rankEvidence, renderEvidenceMarkdown, type EvidenceUnit } from "./retrieval";
+import { numberEvidence, rankEvidence, renderEvidenceMarkdown, type EvidenceUnit, significantTokens } from "./retrieval";
 import type { QuizQuestionDraft } from "./schemas";
 import type { AskEvidenceIn } from "./prompt";
 
@@ -62,6 +62,12 @@ export type AskedQuestion = QuizQuestion & {
   feedback: string;
   /** The grader's quote, kept only when it verified against the evidence; "" otherwise. */
   gradeQuote: string;
+  /** The grader returned a quote and it was not found in the evidence. */
+  gradeQuoteRejected: boolean;
+  /** The feedback's own words (minus the student's and grading vocabulary) are in the evidence. */
+  feedbackGrounded: boolean;
+  /** A note when the verdict contradicts plain word overlap; "" otherwise. */
+  dispute: string;
 };
 
 export interface QuizSession {
@@ -213,6 +219,13 @@ export function resolvePool(
     const label = pool[0]?.noteTitle || basename(activePath);
     return { pool, label };
   }
+  // Cap the whole-vault pool the way the query scope is capped, spread evenly so every note is represented.
+  if (units.length > poolSize && poolSize > 0) {
+    const step = units.length / poolSize;
+    const pool: EvidenceUnit[] = [];
+    for (let i = 0; i < poolSize; i++) pool.push(units[Math.floor(i * step)]);
+    return { pool, label: "all topic notes" };
+  }
   return { pool: units.slice(), label: "all topic notes" };
 }
 
@@ -269,6 +282,70 @@ export type QuestionCheck =
   | { ok: true; question: Omit<QuizQuestion, "n" | "difficulty"> }
   | { ok: false; reason: string };
 
+// ---- grounding arithmetic -----------------------------------------------------
+
+/** A crude root so "binds", "binding", "bound"-free forms compare: strip ing/ed/es/s from longer words. */
+function root(w: string): string {
+  if (w.length > 5 && w.endsWith("ing")) return w.slice(0, -3);
+  if (w.length > 4 && w.endsWith("ed")) return w.slice(0, -2);
+  if (w.length > 4 && w.endsWith("es")) return w.slice(0, -2);
+  if (w.length > 4 && w.endsWith("s")) return w.slice(0, -1);
+  return w;
+}
+
+function rootTokens(text: string): string[] {
+  return [...new Set(significantTokens(text).map(root))];
+}
+
+/** How many of `needle`'s distinct significant words appear in `hay`, and the fraction. */
+export function wordCoverage(needle: string, hay: string): { count: number; total: number; fraction: number } {
+  const tokens = rootTokens(needle);
+  const have = new Set(rootTokens(hay));
+  const count = tokens.filter((t) => have.has(t)).length;
+  return { count, total: tokens.length, fraction: tokens.length ? count / tokens.length : 0 };
+}
+
+const SET_QUESTION = /\b(two|three|four|five|six|both|all of the|list the)\b/i;
+
+/** Words a grader uses about the grading itself; they never need to appear in the passage. */
+const GRADING_LIST =
+  "evidence notes passage answer states stated mentions mention mentioned says said correct right wrong missing part partly exactly matches match matched not does did only also your you student expected instead rather however but";
+/** Normalised through the same tokeniser as the feedback, so "matches" and "match" compare equal. */
+const GRADING_WORDS = new Set(rootTokens(GRADING_LIST));
+
+/**
+ * Is the grader's feedback made of the passage's words? The student's own
+ * words and grading vocabulary are set aside first; what remains must mostly
+ * be in the evidence, or the feedback is teaching something the notes do not
+ * say (external-knowledge restriction, verify-with-citations).
+ */
+export function feedbackGrounded(feedback: string, evidenceText: string, userAnswer: string): boolean {
+  const student = new Set(rootTokens(userAnswer));
+  const remaining = rootTokens(feedback).filter((t) => !student.has(t) && !GRADING_WORDS.has(t));
+  if (remaining.length === 0) return true;
+  const have = new Set(rootTokens(evidenceText));
+  const hits = remaining.filter((t) => have.has(t)).length;
+  return hits / remaining.length >= 0.5;
+}
+
+/**
+ * A verdict the reader should look at twice: "incorrect" although the student
+ * wrote the expected wording, or "correct" with no overlap and no verified
+ * quote to back it. The grade stands; the note is what lets the reader
+ * overrule it (properties of effective prompts: consistent).
+ */
+export function disputeGrade(userAnswer: string, expected: string, verdict: Verdict, gradeQuoteVerified: boolean): string {
+  const cov = wordCoverage(expected, userAnswer);
+  if (verdict === "incorrect" && cov.total > 0 && cov.fraction >= 0.8) {
+    return "Your answer contains the expected wording; the grade may be too strict.";
+  }
+  if (verdict === "correct" && cov.count === 0 && !gradeQuoteVerified) {
+    return "The grade is not backed by a verified quote.";
+  }
+  return "";
+}
+
+
 /**
  * Check one generated question against the frozen evidence before the reader
  * ever sees it.
@@ -307,6 +384,27 @@ export function checkQuestion(draft: QuizQuestionDraft, session: QuizSession): Q
   const plainAnswer = answer.toLowerCase().replace(/[.!?]+$/, "").trim();
   if (plainAnswer === "yes" || plainAnswer === "no") return { ok: false, reason: "yes/no answer" };
 
+  // The expected answer is shown to the reader as fact, so it must be in the passage too.
+  const answerCov = wordCoverage(answer, unit.text);
+  const answerStated =
+    answerCov.total >= 2
+      ? answerCov.fraction >= 0.6
+      : answerCov.count === answerCov.total || normalizePlain(unit.text).includes(normalizePlain(answer));
+  if (!answerStated) return { ok: false, reason: `the expected answer is not stated in evidence [${n}]` };
+
+  // Answer leakage (litmus test for false positives): the wording must not contain the answer.
+  // One shared word ("bind" in both) is normal; the whole answer, or most of a
+  // longer one, appearing in the wording is what gives it away.
+  const leak = wordCoverage(answer, question);
+  if (normalizePlain(question).includes(normalizePlain(answer)) || (leak.total >= 3 && leak.fraction >= 0.67)) {
+    return { ok: false, reason: "the question contains its own answer" };
+  }
+
+  // Sets and enumerations: one member per question.
+  if (SET_QUESTION.test(question) || /, and /.test(answer) || answer.split(",").length >= 3) {
+    return { ok: false, reason: "asks for a set; ask about one member of it" };
+  }
+
   const needle = normalizePlain(draft.quote);
   if (!needle) return { ok: false, reason: "empty quote" };
   if (!normalizePlain(unit.text).includes(needle)) {
@@ -321,7 +419,7 @@ export function checkQuestion(draft: QuizQuestionDraft, session: QuizSession): Q
       question,
       answer,
       quote: draft.quote.trim(),
-      hint: draft.hint.trim(),
+      hint: wordCoverage(draft.hint, unit.text).count > 0 ? draft.hint.trim() : "",
       kind: draft.kind,
     },
   };
@@ -365,11 +463,24 @@ export function applyGrade(
   feedback: string,
   gradeQuote: string,
   userAnswer: string,
+  extras: { gradeQuoteRejected?: boolean; feedbackGrounded?: boolean; dispute?: string } = {},
 ): QuizSession {
   const current = session.current;
   if (!current) return session;
 
-  const asked: AskedQuestion[] = [...session.asked, { ...current, userAnswer, verdict, feedback, gradeQuote }];
+  const asked: AskedQuestion[] = [
+    ...session.asked,
+    {
+      ...current,
+      userAnswer,
+      verdict,
+      feedback,
+      gradeQuote,
+      gradeQuoteRejected: extras.gradeQuoteRejected ?? false,
+      feedbackGrounded: extras.feedbackGrounded ?? true,
+      dispute: extras.dispute ?? "",
+    },
+  ];
 
   let difficulty = session.difficulty;
   let retryOf: string | null = null;
@@ -485,9 +596,11 @@ const VERDICT_LINE: Record<Verdict, string> = {
  */
 export function renderGradeMarkdown(asked: AskedQuestion, unit: EvidenceUnit): string {
   const parts = [VERDICT_LINE[asked.verdict]];
+  if (asked.dispute) parts.push(`*${asked.dispute}*`);
   const feedback = asked.feedback.trim();
   if (feedback) parts.push(feedback);
   parts.push(`**Answer:** ${asked.answer}`);
+  if (asked.gradeQuote) parts.push(`> “${asked.gradeQuote}”`);
   parts.push(renderEvidenceMarkdown(unit, asked.evidenceN));
   return parts.join("\n\n");
 }

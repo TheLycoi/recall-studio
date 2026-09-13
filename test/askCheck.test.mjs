@@ -195,3 +195,18 @@ test("a plain sentence after list items starts a new paragraph", () => {
   const { answer } = ac.checkAnswer(draft, evidence);
   assert.equal(answer, "The stages are: [1]\n- Alpha [1]\n- Gamma [2]\n\nAlpha comes first. [1]");
 });
+
+test("a gap sentence must state a gap; otherwise it is an uncited claim and removed", () => {
+  const evidence = [{ n: 1, noteTitle: "T", page: 1, text: "Pharmacokinetics is what the body does to drugs." }];
+  const draft = { coverage: "partial", quotes: [], sentences: [
+    { text: "Your notes do not mention half-life.", kind: "gap", cited: [] },
+    { text: "Aspirin's half-life is 20 minutes.", kind: "gap", cited: [] },
+    { text: "Pharmacokinetics is what the body does to drugs.", kind: "claim", cited: [1] },
+  ] };
+  const { answer, report } = ac.checkAnswer(draft, evidence);
+  assert.equal(report.kept, 2);
+  assert.equal(report.removed, 1);
+  assert.doesNotMatch(answer, /20 minutes/);
+  assert.equal(report.verifyRan, false);
+  assert.match(ac.renderGroundingLine({ ...report, verifyRan: true }), / · verify pass$/);
+});

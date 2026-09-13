@@ -277,12 +277,14 @@ test("checkQuestion rejects a yes/no answer by the answer, not the question", ()
   assert.equal(no.ok, false);
   assert.equal(no.reason, "yes/no answer");
 
-  // A question that starts with "Does" is fine when its answer is a phrase.
+  // A question that starts with "Does" is fine when its answer is a phrase the
+  // question does not contain (an either/or that names the answer is rejected
+  // separately, as answer leakage).
   const ok = q.checkQuestion(
-    draft({ question: "Does a receptor bind a drug weakly or with high affinity?", answer: "with high affinity" }),
+    draft({ question: "Does a receptor hold on to a drug loosely, or how tightly does it bind?", answer: "with high affinity" }),
     session(),
   );
-  assert.equal(ok.ok, true);
+  assert.equal(ok.ok, true, ok.ok ? "" : ok.reason);
 });
 
 test("checkQuestion rejects an empty answer or question", () => {
@@ -588,4 +590,76 @@ test("parseQuizCommand understands plain phrases", () => {
   assert.deepEqual(q.parseQuizCommand("Stop.", true), { kind: "stop" });
   assert.deepEqual(q.parseQuizCommand("give me a hint", true), { kind: "hint" });
   assert.equal(q.parseQuizCommand("the next step is absorption", true), null);
+});
+
+// ---- lint rules (2026-09-12) ------------------------------------------------
+
+test("checkQuestion rejects an expected answer the passage does not state", () => {
+  const s = session();
+  const r = q.checkQuestion(draft({ answer: "the mitochondria produce the signal" }), s);
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /not stated in evidence \[1\]/);
+});
+
+test("checkQuestion rejects a question that contains its own answer, including an either/or", () => {
+  const s = session();
+  const r1 = q.checkQuestion(draft({ question: "Does a receptor bind a drug with high affinity?", answer: "a drug" }), s);
+  assert.equal(r1.ok, false);
+  assert.equal(r1.reason, "the question contains its own answer");
+  const r2 = q.checkQuestion(draft({ question: "Does a receptor bind a drug or a hormone?", answer: "a drug" }), s);
+  assert.equal(r2.ok, false);
+  assert.equal(r2.reason, "the question contains its own answer");
+});
+
+test("checkQuestion rejects a question that asks for a set", () => {
+  const s = session();
+  const r1 = q.checkQuestion(draft({ question: "What are the two things a receptor does?", answer: "a drug" }), s);
+  assert.equal(r1.ok, false);
+  assert.equal(r1.reason, "asks for a set; ask about one member of it");
+  const r2 = q.checkQuestion(draft({ evidence_n: 3, question: "How do agonists and antagonists act?", answer: "binds and activates, and binds and blocks", quote: "An agonist binds a receptor and activates it" }), s);
+  assert.equal(r2.ok, false);
+  assert.equal(r2.reason, "asks for a set; ask about one member of it");
+});
+
+test("checkQuestion blanks a hint that shares no word with the passage", () => {
+  const s = session();
+  const r = q.checkQuestion(draft({ hint: "Think about mitochondria." }), s);
+  assert.equal(r.ok, true);
+  assert.equal(r.question.hint, "");
+  const kept = q.checkQuestion(draft({ hint: "Think about what the macromolecule attaches to." }), s);
+  assert.equal(kept.question.hint, "Think about what the macromolecule attaches to.");
+});
+
+test("feedbackGrounded sets aside the student's words and grading vocabulary", () => {
+  const ev = "MRI shows structure only, while fMRI shows function, because active regions pull more blood.";
+  assert.equal(q.feedbackGrounded("The evidence does not mention mitochondria; it says active regions pull more blood.", ev, "the mitochondria"), true);
+  assert.equal(q.feedbackGrounded("Correct: fMRI depends on the BOLD contrast discovered by Ogawa in 1990.", ev, "blood flow"), false);
+  assert.equal(q.feedbackGrounded("Matches the evidence exactly.", ev, "active regions pull more blood"), true);
+});
+
+test("disputeGrade flags a strict incorrect and an unbacked correct", () => {
+  assert.equal(q.disputeGrade("active regions pull more blood", "Active brain regions pull more blood.", "incorrect", true), "Your answer contains the expected wording; the grade may be too strict.");
+  assert.equal(q.disputeGrade("the mitochondria", "Active brain regions pull more blood.", "correct", false), "The grade is not backed by a verified quote.");
+  assert.equal(q.disputeGrade("the mitochondria", "Active brain regions pull more blood.", "incorrect", true), "");
+  assert.equal(q.disputeGrade("active regions pull more blood", "Active brain regions pull more blood.", "correct", true), "");
+});
+
+test("resolvePool caps the all scope evenly across the ordered pool", () => {
+  const many = [];
+  for (let n = 0; n < 4; n++) for (let i = 0; i < 10; i++) many.push(unit(`n${n}-${i}`, `notes/n${n}.md`, `Note ${n}`, `Fact ${n}-${i} about something.`));
+  const { pool } = q.resolvePool("all", "", many, null, () => null, 10);
+  assert.equal(pool.length, 10);
+  const notes = new Set(pool.map((u) => u.notePath));
+  assert.equal(notes.size, 4);
+});
+
+test("renderGradeMarkdown shows the dispute note and the verified grade quote", () => {
+  let s = session(2);
+  const checked = q.checkQuestion(draft(), s);
+  s = q.acceptQuestion(s, checked.question);
+  s = q.applyGrade(s, "incorrect", "Not what the passage says.", "binds a drug with high affinity", "a drug", { dispute: "Your answer contains the expected wording; the grade may be too strict.", gradeQuoteRejected: false, feedbackGrounded: true });
+  const md = q.renderGradeMarkdown(s.asked[0], s.pool[0]);
+  assert.match(md, /^✗ Not quite\n\n\*Your answer contains the expected wording; the grade may be too strict\.\*\n\nNot what the passage says\.\n\n\*\*Answer:\*\* a drug\n\n> “binds a drug with high affinity”\n\n/);
+  assert.equal(s.asked[0].gradeQuoteRejected, false);
+  assert.equal(s.asked[0].feedbackGrounded, true);
 });
