@@ -48,6 +48,7 @@ Commands, for when the mode is off:
 | **Send all ==highlights== in this note to inbox** | Sweeps a note you highlighted while reading and queues every span not already in the inbox. |
 | **AI-highlight this note and write cards** | The "highlight" operation: the model picks spans worth remembering, each is verified verbatim against the note, marked, and queued. Use this for dense material. |
 | **AI-highlight this note with instructions…** | Same, with guidance for the highlighter ("only definitions and numbers"). |
+| **AI-highlight this PDF into the wiki…** | On an open PDF: the model suggests spans page by page, each verified verbatim and mapped to a PDF++ selection, assigned to a same-class wiki note or a proposed new one, previewed per span, then written as callouts. |
 
 Every highlight remembers its note, line, nearest heading and (optionally) a
 `^recall-…` block ID, so the inbox can jump straight back to the source. PDF
@@ -132,8 +133,9 @@ mention the transcript.
 
 Limitations:
 
-- Only markdown notes can be AI-highlighted, so a transcript attached to a
-  PDF has no effect.
+- **Add transcript for document highlighting** now also runs on an open
+  PDF, and the transcript it saves is picked up by **AI-highlight this PDF
+  into the wiki…**, below.
 - Transcripts are keyed by the note's file path. Renaming or moving a note
   detaches its transcript; re-add it with **Add transcript for document
   highlighting** afterward.
@@ -296,6 +298,120 @@ Before returning, check your answer against the input: every id you used appears
 ```
 
 </details>
+
+### Suggesting highlights in a PDF
+
+Digesting (above) starts from highlights you already made by hand. **AI-highlight this PDF into the wiki…** goes the other way: it reads a lecture PDF's own text layer and proposes the highlights, each one verified against the page before it's ever offered, assigned to an existing wiki note or a new one, and written straight into secondbrain-style notes — not a manifest, not a topic-note folder, but `wiki/concepts` and `wiki/entities`, the same notes you write and link by hand.
+
+The command is active on an open PDF and runs in nine steps: it reads the PDF's text page by page and any existing highlights already in a manifest for it; asks for (or reuses) the class code; picks up the transcript attached to the PDF's own path, if any; asks Notes / Flashcards / Both, as the digest does; collects the wiki notes this PDF may write into; sends the pages to the model in batches, each batch told what earlier batches and the manifest already hold; verifies every returned span and turns the survivors into manifest-shaped highlight rows; groups those rows into notes and shows a per-span preview; and, once you confirm (and possibly rename a note or uncheck a span), writes the callouts and queues flashcards if asked.
+
+**Granularity and limits**, under **AI highlights for PDFs** in settings:
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| Granularity | Standard | A per-page cap on spans: Minimal (1), Standard (2), Detailed (4) per page. |
+| Max suggestions per PDF | 40 | A slider, 5–100; the run stops early once this many spans are accepted, even mid-deck. |
+| Pages per batch | 8 | Pages sent to the model per request; a long PDF is processed batch by batch. |
+| Wiki concepts folder | `wiki/concepts` | Where same-class notes are looked for, and where new concept notes are created. |
+| Wiki entities folder | `wiki/entities` | Same, for entity notes. |
+| Standing instructions for PDF suggestions | *(empty)* | Free text appended to every request, same idiom as the highlighter's and digest's standing instructions. |
+
+**Which notes the model may reuse.** Every `.md` file under the two wiki folders whose `class` frontmatter matches the PDF's class code, or whose path already appears in the PDF's manifest as a source (which catches hand-written notes that carry no frontmatter at all), is offered to the model by title and kind (concept/entity). A span's `note_title` must be one of these or a title the model proposes in the same response's `new_notes`; anything else is treated as an orphan (below).
+
+**The batch loop and "already selected".** Long PDFs are split into page ranges (`batchPages`, `src/suggestPlan.ts`) and sent one batch at a time. Each request tells the model, cut to 80 characters, the passages the manifest already holds on those pages plus everything accepted so far in this run, so the model doesn't hand back a highlight already present and prefers the note a neighbouring passage already went to. This is the one idea borrowed from the Karpathy LLM Wiki plugin: its ingest prompt ("Analyze the following source file and output structured JSON… Extract the next batch… already extracted: …") is fixed inside the plugin's bundle and never reads a highlight at all — it converts and extracts from the whole file, with no notion of a PDF++ selection. Nothing else about that plugin's prompt, schema, or page types is reused; only the shape of "here is the next batch, and here is what you already have" carried over.
+
+**What's verified mechanically, not just asked for:**
+
+- Every span is located in the page's own text by exact string match first, then by a whitespace/case-insensitive fallback that is only accepted when the matched text really is the quote — a fuzzy hit that differs from the quote is rejected outright (`locateInPage`, `src/pageMap.ts`).
+- The located span is converted to a `selection=` range and round-tripped back through `selectionText` — PDF++'s own algorithm for rendering a selection to text — and only kept if that render equals the quote (`selectionFor`, `src/pageMap.ts`).
+- The per-page cap is enforced in the order the model returned spans, so an earlier span wins a page against a later one that would exceed it.
+- Every span is deduped by `highlightKey` (page + selection, ignoring color) against both the PDF's manifest and everything the run itself has already accepted.
+- Two spans on the same page whose selections overlap are not both kept; the earlier one wins.
+
+**The note shape.** New notes are the secondbrain style — `class:` frontmatter, a `## Summary`, and a `## Highlights` section of PDF++ callouts — with no `## Related topics` and no `## Flashcard Seeds` (those stay specific to the topic-note digest). `renderWikiNote` (`src/topicNote.ts`) emits, for two highlights on pages 2 and 4 of `HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf`:
+
+```markdown
+---
+class: HBIO250
+---
+
+## Summary
+S.
+
+## Highlights
+
+> [!PDF|yellow] [[HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=2&selection=1,0,5,0&color=yellow|HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.2]]
+> > Page two text
+
+> [!PDF|yellow] [[HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=4&selection=2,0,33,19&color=yellow|HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.4]]
+> > Page four text
+```
+
+The display text on every callout is always the full PDF basename plus the page (`<PDF name>, p.N`), the same string PDF++ itself writes — never a bare `p.N`.
+
+**Append-only into existing notes.** Writing into a note that already exists (`mergeWikiHighlights`, `src/topicNote.ts`) only ever adds callouts, checked by `highlightKey` over the *whole* note (hand-written wiki notes carry PDF++ links inside prose and under arbitrary headings, not only under `## Highlights`), so a highlight already present anywhere is skipped rather than duplicated. New callouts land under an existing `## Highlights` heading, or the heading is appended at the end of the file when there isn't one. Nothing else in the note — frontmatter, prose, other headings — is touched. A 0-byte stub (secondbrain has some, e.g. `Pharmacodynamics.md`) becomes a full note in the shape above the first time a span is assigned to it.
+
+**Notes, Flashcards, or Both**, same chooser as the digest: Notes writes only the wiki notes; Flashcards skips writing notes and queues every verified span into the inbox instead; Both does both.
+
+<details>
+<summary><code>SUGGEST_SYSTEM</code> (the suggest system prompt, verbatim)</summary>
+
+```
+You read the pages of a lecture PDF and choose the spans a student would highlight and later study, and you say which wiki note in their vault each span belongs to. The reader will revise from those notes for the rest of the course, so a span is worth selecting only if forgetting its content would matter, and a note is worth naming only if a reader would look it up by that name.
+
+Return each span as a verbatim quote copied exactly from the page, character for character, including punctuation. The span is located in the page by exact string match, so an ellipsis, a paraphrase, or a trimmed word makes it unusable. Start and end on sentence boundaries where possible.
+
+Each span is one to four sentences and self-contained: it carries a definition, a mechanism, a number, a name, a date, a causal claim, a distinction between similar things, or a memorable formulation, and it can be understood without the surrounding paragraph. Prefer the fundamentals a reader needs before the details, and prefer material with lasting use over trivia. Prefer fewer, denser spans over many thin ones.
+
+The pages are marked `[page N]` and each span reports the page it was copied from. A span never crosses a page marker: a sentence that runs over onto the next page is quoted from one side of the break or left alone, because a quote spanning two pages matches neither of them.
+
+A transcript, when one is present, is the recording of the lecture that accompanies the page. It tells you what the lecturer treated as important; it is not a source of quotes, so every span is still copied from the page itself. Prefer the passages the lecturer dwells on, repeats, calls important, or says will be tested, and pass over slide content that was skipped or read out without comment. Where the transcript and the page differ in wording, the page's wording is what gets quoted.
+
+The limit you are given is a ceiling, not a target. Over-highlighting fills the reader's inbox with cards they will delete, so returning fewer spans than the limit is the expected outcome, and returning none is right when nothing in the page is supported by the transcript.
+
+Give each span a label of at most six words that names the fact it carries.
+
+<which_note_a_span_belongs_to>
+Every span names its note. You are told which notes already exist for this class. When one of those titles is the topic a group of highlights belongs to, reuse the title exactly, character for character, because the plugin then appends those highlights to that note instead of creating a second one beside it. Reuse it only when it genuinely fits; a near-match that forces unrelated highlights together is worse than a new note.
+
+A title that is not on that list is a new note, and it appears in new_notes with its kind and a summary before any span may point at it. A note_title that is neither an existing title nor one of your new_notes points at nothing, and the spans under it are lost.
+
+A concept is something the reader would look up by name later: a mechanism, a classification, a definition together with what follows from it. An entity is a named person, organisation, drug, instrument, or law — WADA, acetaminophen, the Anti-Doping Code. Titles are short noun phrases in Title Case, the way an index entry reads, and unique within your response; two titles that differ only in case or in a plural are the same title, and one of the two notes will be lost.
+</which_note_a_span_belongs_to>
+
+<the_summary>
+Three to five sentences about this topic, drawn from the whole paper but weighted toward the spans you chose. The spans you chose tell you what the reader cares about; the rest of the paper tells you what those spans mean, and lets you write the sentence that connects two of them. Write in the reader's language, the one the paper is written in, and keep close to its wording so the summary reads as their own note rather than as a stranger's gloss.
+
+Nothing from outside the paper. If you know more about the subject than the paper says, that knowledge does not belong here: the reader will study from this note and cannot tell your additions from theirs. No citations, no links, no highlight ids, no page numbers in the prose. The spans appear underneath the summary in the finished note, so the summary does not need to quote them; it needs to say what they add up to.
+</the_summary>
+
+<what_is_already_held>
+The already-selected list is what earlier batches and the reader already hold, printed short so you can recognise it. Those passages are not picked again: offering one back gives the reader the same card twice and costs them the time to delete it. The notes those passages went to are the ones to prefer for a neighbouring span, because material from the same run of pages usually belongs in the same note, and a second note beside the first splits the topic in half.
+
+Slide titles, course logistics, figure captions, and a line the lecturer read out without comment are never spans. They carry no fact to forget, and a note that collects them is a note the reader stops opening.
+</what_is_already_held>
+
+<examples>
+<example>
+<input>[page 7] holds "Doping is defined as the occurrence of one or more of the anti-doping rule violations set out in the Code" under the slide title "Anti-Doping: Definitions", and [page 8] holds "The World Anti-Doping Agency was founded in 1999 to coordinate the fight against doping in sport across countries and sports." Existing notes: Doping (concept), Drug Testing (concept). Already selected: nothing.</input>
+<output>Two spans. The definition on page 7 goes to the existing title "Doping", copied exactly, kind concept. The sentence on page 8 goes to a new note "World Anti-Doping Agency", kind entity, listed in new_notes with a three-sentence summary of what the agency is and does as the paper describes it. The slide title "Anti-Doping: Definitions" is not a span.</output>
+<note>One existing title reused rather than a near-duplicate created, one entity proposed because a named organisation is what a reader looks up, and the slide title skipped because forgetting it costs nothing.</note>
+</example>
+</examples>
+
+Before returning, check your answer against the input: every note_title is either an existing title you were shown or a title in new_notes, every quote is copied character for character from the page it names, no span reports a page outside this batch, and no page carries more spans than the limit allows.
+```
+
+</details>
+
+Limitations:
+
+- `selection=` indices assume pdf.js's text items line up with PDF++'s own text layer; if they drift, the callout's quoted text is still authoritative and the link still opens the right page.
+- A quote that straddles a line-end hyphen (the page holds `"pharma-\ncology"`, the model quotes `"pharmacology"`) cannot be located — de-hyphenation isn't modelled — and the span is silently dropped (`test/pageMap.test.mjs`).
+- A long deck can propose more spans than the per-PDF ceiling allows; the run stops early once the ceiling is reached rather than continuing past it.
+- A proposed title that collides case-insensitively with an existing note in the *other* folder (a concept-folder title matching an entity-folder note, or vice versa) is still treated as a match and merged into that note.
+- The three older generated PSYC360 notes use `## Related topics`; because `mergeWikiHighlights` appends `## Highlights` at the end of the file when the heading is missing, on those three notes it lands after `## Flashcard Seeds`.
+- No live Obsidian run and no live model call has happened yet for this command.
 
 ### Ask
 
