@@ -43,7 +43,7 @@ import {
 import { basenameNoExt, normalizeWs, truncateTranscript } from "./util";
 
 /** One page's plain data, as src/pdftext.ts wants it. */
-interface PageData {
+export interface PageData {
   items: TextItem[];
   annots: Annot[];
 }
@@ -173,9 +173,12 @@ function linktextOf(md: string, ref: PdfReference, pdfFilename: string): string 
   return null;
 }
 
-/** Class code from the vault convention `sources/class notes/<CODE>/…`. */
+/**
+ * Class code from either vault convention: `sources/class notes/<CODE>/…` or
+ * `wiki/sources/classes/<CODE>/…`.
+ */
 function classCodeFromPath(pdfPath: string): string {
-  const m = /sources\/class notes\/([^/]+)\//.exec(pdfPath);
+  const m = /sources\/(?:class notes|classes)\/([^/]+)\//.exec(pdfPath);
   return m ? m[1] : "";
 }
 
@@ -184,6 +187,11 @@ export interface CollectResult {
   paperText: string;
   truncated: boolean;
   warnings: string[];
+  /**
+   * Per-page text items and annotations, kept only when `opts.pages` was set;
+   * empty otherwise.
+   */
+  pages: PageData[];
 }
 
 /**
@@ -198,7 +206,7 @@ export interface CollectResult {
 export async function collectPdfHighlights(
   plugin: RecallPlugin,
   pdf: TFile,
-  opts: { paperText: boolean },
+  opts: { paperText: boolean; pages?: boolean },
 ): Promise<CollectResult> {
   const warnings: string[] = [];
 
@@ -208,6 +216,10 @@ export async function collectPdfHighlights(
   const rows: ManifestHighlight[] = [];
   let paperText = "";
   let truncated = false;
+  // Hoisted so the return outside `finally` can see it. `TextItem`/`Annot` are
+  // plain data already copied out of pdf.js by readPage, so keeping them
+  // around after the document is destroyed in `finally` below is safe.
+  let kept: PageData[] = [];
 
   // (2) One document, one pass over the pages.
   const doc = await loadPdfDocument(plugin.app, pdf);
@@ -217,6 +229,7 @@ export async function collectPdfHighlights(
     for (let n = 1; n <= numPages; n++) {
       pages.push(await readPage(doc, n));
     }
+    if (opts.pages) kept = pages;
 
     const pageTexts = pages.map((p) => pageText(p.items));
     const pageDataFor = (n: number): PageData | null => pages[n - 1] ?? null;
@@ -319,7 +332,7 @@ export async function collectPdfHighlights(
     highlights,
   };
 
-  return { manifest, paperText, truncated, warnings };
+  return { manifest, paperText, truncated, warnings, pages: opts.pages ? kept : [] };
 }
 
 /** The `class` frontmatter of a note, when it has one. */

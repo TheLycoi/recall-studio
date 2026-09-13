@@ -120,11 +120,11 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
   "add-transcript": {
     available: (p) => {
       const file = p.app.workspace.getActiveFile();
-      return !!file && file.extension === "md";
+      return !!file && (file.extension === "md" || isPdfFile(file));
     },
     run: (p) => {
       const file = p.app.workspace.getActiveFile();
-      if (!file || file.extension !== "md") return;
+      if (!file || (file.extension !== "md" && !isPdfFile(file))) return;
       void askTranscript(p.app, p.store.getTranscript(file.path)).then((choice) => {
         if (choice === null) return;
         if (choice.action === "clear") {

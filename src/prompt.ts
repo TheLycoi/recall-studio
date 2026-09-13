@@ -244,3 +244,71 @@ export function buildQuizGradeMessage(a: QuizGradeMessageArgs): string {
     `Grade the student's answer against the evidence.`,
   ].join("\n\n");
 }
+
+/** One existing wiki note as the suggest prompt sees it: its title and which of the two kinds it is. */
+export interface SuggestExistingNote {
+  title: string;
+  kind: "concept" | "entity";
+}
+
+export interface SuggestMessageArgs {
+  pdfTitle: string;
+  classCode: string;
+  pages: Array<{ page: number; text: string }>;
+  transcript: string | null;
+  existingNotes: SuggestExistingNote[];
+  alreadySelected: Array<{ page: number; text: string }>;
+  perPage: number;
+  remaining: number;
+  standingInstructions: string;
+  instruction: string;
+}
+
+/** How much of an already-selected passage is shown before it is cut: enough to recognise, not enough to re-quote. */
+const ALREADY_SELECTED_CHARS = 80;
+
+/**
+ * Build the user message for a suggest request.
+ *
+ * Same order as the digest message: the long inputs first (the pages of this
+ * batch, then the transcript), the shorter lists next, and the instructions
+ * last, so the model reads the task with the material already in view. Each
+ * page is introduced by its own `[page N]` marker, because every span reports
+ * the page it came from and a span that crossed a marker could not name one.
+ *
+ * The already-selected passages are printed cut to their first eighty
+ * characters. They are there so the model does not offer the same passage
+ * twice and can see which notes the earlier batches fed; printing them in full
+ * would make the block rival the pages themselves for length and invite the
+ * model to quote from it rather than from the paper.
+ */
+export function buildSuggestMessage(a: SuggestMessageArgs): string {
+  const transcript = a.transcript?.trim() ? a.transcript.trim() : "";
+  const standing = a.standingInstructions.trim();
+  const instruction = a.instruction.trim();
+  const body = a.pages.map((p) => `[page ${p.page}]\n${p.text}`).join("\n\n");
+  const first = a.pages.length ? a.pages[0].page : 0;
+  const last = a.pages.length ? a.pages[a.pages.length - 1].page : 0;
+  const notes = a.existingNotes.map((n) => `${n.title} (${n.kind})`).join("\n");
+  const selected = a.alreadySelected.map((s) => `p.${s.page}: ${cut(s.text, ALREADY_SELECTED_CHARS)}`).join("\n");
+  const cap = transcript
+    ? `The transcript is a recording of the lecture that accompanies these pages. Select at most ${a.perPage} spans per page and at most ${a.remaining} in this batch, and fewer when the transcript supports fewer.`
+    : `Select at most ${a.perPage} spans per page and at most ${a.remaining} in this batch; fewer is the expected outcome.`;
+  return [
+    `<paper title="${a.pdfTitle}" class="${a.classCode}" pages="${first}-${last}">\n${body}\n</paper>`,
+    transcript ? `<transcript>\n${transcript}\n</transcript>` : "",
+    notes ? `<existing_notes>\n${notes}\n</existing_notes>` : "",
+    selected ? `<already_selected>\n${selected}\n</already_selected>` : "",
+    cap,
+    standing ? `Standing instructions: ${standing}` : "",
+    instruction ? `Instructions for this PDF: ${instruction}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+/** Cut a passage to `n` characters, marking the cut so a truncated line is never mistaken for the whole passage. */
+function cut(text: string, n: number): string {
+  const t = text.trim();
+  return t.length > n ? `${t.slice(0, n)}…` : t;
+}

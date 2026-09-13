@@ -1,6 +1,7 @@
 import { App, ButtonComponent, FuzzySuggestModal, Modal, Notice, Setting, SuggestModal, TFile } from "obsidian";
 import type { TranscriptRecord } from "./model";
 import type { PreparedNote } from "./topicNote";
+import type { ManifestHighlight } from "./manifest";
 
 /** Ask for a free-text instruction. Resolves null when cancelled. */
 export class InstructionModal extends Modal {
@@ -265,6 +266,7 @@ export class DigestOptionsModal extends Modal {
     app: App,
     private defaults: { product: DigestProduct; instruction: string },
     private resolve: (v: { product: DigestProduct; instruction: string } | null) => void,
+    private title = "Digest PDF highlights",
   ) {
     super(app);
     this.product = defaults.product;
@@ -274,7 +276,7 @@ export class DigestOptionsModal extends Modal {
   onOpen(): void {
     const { contentEl } = this;
     contentEl.addClass("recall-modal");
-    contentEl.createEl("h3", { text: "Digest PDF highlights" });
+    contentEl.createEl("h3", { text: this.title });
 
     new Setting(contentEl).setName("Produce").addDropdown((d) => {
       (Object.keys(DIGEST_PRODUCT_LABELS) as DigestProduct[]).forEach((key) =>
@@ -324,8 +326,9 @@ export class DigestOptionsModal extends Modal {
 export function askDigestOptions(
   app: App,
   defaults: { product: DigestProduct; instruction: string },
+  title = "Digest PDF highlights",
 ): Promise<{ product: DigestProduct; instruction: string } | null> {
-  return new Promise((resolve) => new DigestOptionsModal(app, defaults, resolve).open());
+  return new Promise((resolve) => new DigestOptionsModal(app, defaults, resolve, title).open());
 }
 
 /** Paste a model's raw JSON output (the interim, provider-less path). */
@@ -507,4 +510,152 @@ export function previewDigest(
   pdfBasename: string,
 ): Promise<PreparedNote[] | null> {
   return new Promise((resolve) => new DigestPreviewModal(app, notes, extras, pdfBasename, resolve).open());
+}
+
+export interface SuggestPreviewExtras {
+  flashcards: number;
+  unlocated: number;
+  orphanTitles: string[];
+  alreadyPresent: number;
+}
+
+export interface SuggestPreviewChoice {
+  note: PreparedNote;
+  title: string;
+  highlights: ManifestHighlight[];
+}
+
+/**
+ * Preview the highlights a suggestion run would write per note, with a
+ * per-highlight checkbox (not per-note). Titles are editable inline; a note
+ * with nothing checked is omitted from the resolved result.
+ */
+export class SuggestPreviewModal extends Modal {
+  private checked: boolean[][];
+  private titles: string[];
+  private resolved = false;
+  private writeBtn!: ButtonComponent;
+
+  constructor(
+    app: App,
+    private notes: PreparedNote[],
+    private extras: SuggestPreviewExtras,
+    private pdfBasename: string,
+    private resolve: (v: SuggestPreviewChoice[] | null) => void,
+  ) {
+    super(app);
+    this.checked = notes.map((n) => n.highlights.map(() => true));
+    this.titles = notes.map((n) => n.title);
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.addClass("recall-modal");
+    contentEl.addClass("recall-preview");
+    contentEl.createEl("h3", { text: `Suggested highlights for ${this.pdfBasename}` });
+
+    const totalSpans = this.notes.reduce((sum, n) => sum + n.highlights.length, 0);
+    let countsText =
+      `${this.notes.length} notes · ${totalSpans} spans · ${this.extras.alreadyPresent} already present · ` +
+      `${this.extras.unlocated} could not be located`;
+    if (this.extras.orphanTitles.length) {
+      countsText += ` · unmatched titles: ${this.extras.orphanTitles.join(", ")}`;
+    }
+    if (this.extras.flashcards > 0) countsText += ` · ${this.extras.flashcards} flashcards will be queued`;
+    contentEl.createEl("p", { text: countsText, cls: "recall-muted recall-preview-counts" });
+
+    const list = contentEl.createDiv();
+    this.notes.forEach((note, i) => {
+      const card = list.createDiv({ cls: "recall-preview-note" });
+      const head = card.createDiv({ cls: "recall-preview-head" });
+
+      const titleInput = head.createEl("input", { attr: { type: "text" } }) as HTMLInputElement;
+      titleInput.addClass("recall-inline-input");
+      titleInput.addClass("recall-preview-title");
+      titleInput.value = note.title;
+      titleInput.addEventListener("input", () => {
+        this.titles[i] = titleInput.value;
+      });
+
+      let badgeText: string;
+      if (!note.exists) {
+        const parent = note.path.slice(0, note.path.lastIndexOf("/"));
+        const kind = parent.endsWith("entities") ? "entity" : "concept";
+        badgeText = `new (${kind})`;
+      } else {
+        badgeText = `exists: +${note.added}, ${note.skipped} skipped`;
+      }
+      head.createSpan({ text: badgeText, cls: "recall-badge recall-preview-badge" });
+
+      card.createEl("div", { text: note.path, cls: "recall-muted" });
+      if (note.summary) card.createEl("p", { text: note.summary });
+
+      const hlList = card.createEl("ul", { cls: "recall-preview-highlights" });
+      note.highlights.forEach((h, j) => {
+        const li = hlList.createEl("li");
+        const checkbox = li.createEl("input", { attr: { type: "checkbox" } }) as HTMLInputElement;
+        checkbox.checked = this.checked[i][j];
+        checkbox.addEventListener("change", () => {
+          this.checked[i][j] = checkbox.checked;
+          this.updateWriteButton();
+        });
+        li.createEl("strong", { text: `p.${h.page} ` });
+        const cut = h.text.length > 120 ? `${h.text.slice(0, 120)}…` : h.text;
+        li.createSpan({ text: cut });
+      });
+    });
+
+    const buttons = new Setting(contentEl).addButton((b) => b.setButtonText("Cancel").onClick(() => this.close()));
+    buttons.addButton((b) => {
+      this.writeBtn = b;
+      b.setCta().onClick(() => this.submit());
+    });
+    this.updateWriteButton();
+  }
+
+  private counts(): { spans: number; notes: number } {
+    let spans = 0;
+    let notesWithAnySpan = 0;
+    this.checked.forEach((row) => {
+      const n = row.filter(Boolean).length;
+      spans += n;
+      if (n > 0) notesWithAnySpan += 1;
+    });
+    return { spans, notes: notesWithAnySpan };
+  }
+
+  private updateWriteButton(): void {
+    const { spans, notes } = this.counts();
+    this.writeBtn.setButtonText(`Write ${spans} spans into ${notes} notes`);
+    this.writeBtn.setDisabled(spans === 0);
+  }
+
+  private submit() {
+    const { spans } = this.counts();
+    if (spans === 0) return;
+    this.resolved = true;
+    const result: SuggestPreviewChoice[] = [];
+    this.notes.forEach((note, i) => {
+      const highlights = note.highlights.filter((_, j) => this.checked[i][j]);
+      if (highlights.length > 0) {
+        result.push({ note, title: this.titles[i], highlights });
+      }
+    });
+    this.resolve(result);
+    this.close();
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+    if (!this.resolved) this.resolve(null);
+  }
+}
+
+export function previewSuggestions(
+  app: App,
+  notes: PreparedNote[],
+  extras: SuggestPreviewExtras,
+  pdfBasename: string,
+): Promise<SuggestPreviewChoice[] | null> {
+  return new Promise((resolve) => new SuggestPreviewModal(app, notes, extras, pdfBasename, resolve).open());
 }

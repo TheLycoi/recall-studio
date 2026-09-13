@@ -296,3 +296,162 @@ test("safeTitle strips illegal characters and falls back to Untitled", () => {
   assert.equal(tn.safeTitle("   "), "Untitled");
   assert.equal(tn.safeTitle(""), "Untitled");
 });
+
+// ---- wiki notes
+
+function wikiHighlight(overrides) {
+  return {
+    id: "H01",
+    key: "page=4&selection=2,0,33,19",
+    page: 4,
+    kind: "selection",
+    color: "yellow",
+    target: { page: 4, selection: { beginIndex: 2, beginOffset: 0, endIndex: 33, endOffset: 19 }, color: "yellow" },
+    text: "Some highlight text",
+    before: "",
+    after: "",
+    origins: ["classes/HBIO250/Pharmacology.md"],
+    ...overrides,
+  };
+}
+
+test("renderWikiNote renders sorted highlights with a summary", () => {
+  const p4 = wikiHighlight({
+    id: "H04",
+    key: "page=4&selection=2,0,33,19",
+    page: 4,
+    target: { page: 4, selection: { beginIndex: 2, beginOffset: 0, endIndex: 33, endOffset: 19 }, color: "yellow" },
+    text: "Page four text",
+  });
+  const p2 = wikiHighlight({
+    id: "H02",
+    key: "page=2&selection=1,0,5,0",
+    page: 2,
+    target: { page: 2, selection: { beginIndex: 1, beginOffset: 0, endIndex: 5, endOffset: 0 }, color: "yellow" },
+    text: "Page two text",
+  });
+
+  const rendered = tn.renderWikiNote({
+    classCode: "HBIO250",
+    pdfBasename: PDF_BASENAME,
+    summary: "S.",
+    highlights: [p4, p2],
+  });
+
+  const expected = `---
+class: HBIO250
+---
+
+## Summary
+S.
+
+## Highlights
+
+> [!PDF|yellow] [[${PDF_BASENAME}.pdf#page=2&selection=1,0,5,0&color=yellow|${PDF_BASENAME}, p.2]]
+> > Page two text
+
+> [!PDF|yellow] [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|${PDF_BASENAME}, p.4]]
+> > Page four text
+`;
+  assert.equal(rendered, expected);
+  const calloutLines = rendered.split("\n").filter((l) => l.startsWith("> [!PDF"));
+  assert.ok(calloutLines[0].includes(`|${PDF_BASENAME}, p.2]]`));
+});
+
+test("renderWikiNote omits the Summary section when summary is empty", () => {
+  const p4 = wikiHighlight();
+  const rendered = tn.renderWikiNote({
+    classCode: "HBIO250",
+    pdfBasename: PDF_BASENAME,
+    summary: "",
+    highlights: [p4],
+  });
+  assert.ok(!rendered.includes("## Summary"));
+  assert.ok(rendered.startsWith("---\nclass: HBIO250\n---\n\n## Highlights\n\n"));
+});
+
+test("mergeWikiHighlights dedupes against a link under an arbitrary heading with no ## Highlights section", () => {
+  const existing = `**Potency**
+
+## Receptors
+Some prose here. [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|${PDF_BASENAME}, p.4]] continues the sentence.
+`;
+  const existingHighlight = wikiHighlight();
+  const newHighlight = wikiHighlight({
+    id: "H02",
+    key: "page=6&selection=0,0,3,0",
+    page: 6,
+    target: { page: 6, selection: { beginIndex: 0, beginOffset: 0, endIndex: 3, endOffset: 0 }, color: "yellow" },
+    text: "Brand new text",
+  });
+
+  const result = tn.mergeWikiHighlights(existing, PDF_BASENAME, "HBIO250", [existingHighlight, newHighlight]);
+  assert.equal(result.added, 1);
+  assert.equal(result.skipped, 1);
+
+  const expectedNewCallout = `> [!PDF|yellow] [[${PDF_BASENAME}.pdf#page=6&selection=0,0,3,0&color=yellow|${PDF_BASENAME}, p.6]]\n> > Brand new text`;
+  const expectedTail = `\n\n## Highlights\n\n${expectedNewCallout}\n`;
+  assert.ok(result.md.endsWith(expectedTail));
+
+  const existingTrimmed = existing.replace(/\n*$/, "");
+  assert.ok(result.md.startsWith(existingTrimmed));
+  assert.equal(result.md, existingTrimmed + expectedTail);
+});
+
+test("mergeWikiHighlights leaves a note with no frontmatter unchanged apart from the append", () => {
+  const existing = `**Potency**
+
+Some other content.
+`;
+  const highlight = wikiHighlight();
+  const result = tn.mergeWikiHighlights(existing, PDF_BASENAME, "HBIO250", [highlight]);
+  assert.equal(result.md.split("\n")[0], "**Potency**");
+  assert.ok(!result.md.startsWith("---"));
+  assert.equal(result.added, 1);
+  assert.equal(result.skipped, 0);
+});
+
+test("mergeWikiHighlights on an empty note renders a fresh wiki note", () => {
+  const h1 = wikiHighlight();
+  const h2 = wikiHighlight({
+    id: "H02",
+    key: "page=6&selection=0,0,3,0",
+    page: 6,
+    target: { page: 6, selection: { beginIndex: 0, beginOffset: 0, endIndex: 3, endOffset: 0 }, color: "yellow" },
+    text: "Another one",
+  });
+  const result = tn.mergeWikiHighlights("", PDF_BASENAME, "HBIO250", [h1, h2]);
+  assert.ok(result.md.startsWith("---\nclass: HBIO250\n---\n\n## Highlights"));
+  assert.equal(result.added, 2);
+  assert.equal(result.skipped, 0);
+});
+
+test("mergeWikiHighlights inserts the new callout inside an existing Highlights section, before a later section", () => {
+  const existing = `---
+class: HBIO250
+---
+
+## Highlights
+
+> [!PDF|yellow] [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|${PDF_BASENAME}, p.4]]
+> > Some highlight text
+
+## Notes
+Some unrelated notes.
+`;
+  const newHighlight = wikiHighlight({
+    id: "H02",
+    key: "page=6&selection=0,0,3,0",
+    page: 6,
+    target: { page: 6, selection: { beginIndex: 0, beginOffset: 0, endIndex: 3, endOffset: 0 }, color: "yellow" },
+    text: "New text",
+  });
+  const result = tn.mergeWikiHighlights(existing, PDF_BASENAME, "HBIO250", [wikiHighlight(), newHighlight]);
+  assert.equal(result.added, 1);
+  assert.equal(result.skipped, 1);
+
+  const highlightsIdx = result.md.indexOf("## Highlights");
+  const notesIdx = result.md.indexOf("## Notes");
+  const newLinkIdx = result.md.indexOf("page=6&selection=0,0,3,0");
+  assert.ok(highlightsIdx < newLinkIdx && newLinkIdx < notesIdx);
+});

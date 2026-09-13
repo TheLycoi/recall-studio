@@ -5,6 +5,8 @@ export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 export type Provider = "anthropic" | "codex" | "claudecli";
 export type MarkMode = "none" | "highlight" | "highlight+block";
 export type LintMode = "badge" | "hide" | "drop";
+export type SuggestGranularity = "minimal" | "standard" | "detailed";
+export const SUGGEST_PER_PAGE: Record<SuggestGranularity, number> = { minimal: 1, standard: 2, detailed: 4 };
 
 export interface RecallSettings {
   // LLM
@@ -61,6 +63,19 @@ export interface RecallSettings {
   digestMaxNotes: number;
   digestInstructions: string;
   paperTextMaxChars: number;
+
+  // AI highlights for PDFs
+  /** How many spans per page the model may pick when suggesting highlights. */
+  suggestGranularity: SuggestGranularity;
+  /** Upper bound on suggestions accepted across the whole PDF. */
+  suggestMaxPerPdf: number;
+  /** Pages sent to the model per batch request. */
+  suggestPagesPerBatch: number;
+  /** Folder for new concept notes created from suggested highlights. */
+  wikiConceptsFolder: string;
+  /** Folder for new entity notes created from suggested highlights. */
+  wikiEntitiesFolder: string;
+  suggestInstructions: string;
 
   // Ask
   askEvidenceCount: number;
@@ -130,6 +145,13 @@ export const DEFAULT_SETTINGS: RecallSettings = {
   digestMaxNotes: 6,
   digestInstructions: "",
   paperTextMaxChars: 60000,
+
+  suggestGranularity: "standard",
+  suggestMaxPerPdf: 40,
+  suggestPagesPerBatch: 8,
+  wikiConceptsFolder: "wiki/concepts",
+  wikiEntitiesFolder: "wiki/entities",
+  suggestInstructions: "",
 
   askEvidenceCount: 12,
   askMaxTurns: 10,
@@ -546,6 +568,80 @@ export class RecallSettingTab extends PluginSettingTab {
         t.inputEl.cols = 50;
         t.setValue(s.digestInstructions).onChange((v) => {
           s.digestInstructions = v;
+          save();
+        });
+      });
+
+    new Setting(containerEl).setName("AI highlights for PDFs").setHeading();
+
+    new Setting(containerEl)
+      .setName("Granularity")
+      .setDesc("How many spans the model may pick on each page when suggesting highlights in a PDF.")
+      .addDropdown((d) =>
+        d
+          .addOptions({ minimal: "Minimal (1 per page)", standard: "Standard (2 per page)", detailed: "Detailed (4 per page)" })
+          .setValue(s.suggestGranularity)
+          .onChange((v) => {
+            s.suggestGranularity = v as SuggestGranularity;
+            save();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Max suggestions per PDF")
+      .addSlider((sl) =>
+        sl
+          .setLimits(5, 100, 1)
+          .setValue(s.suggestMaxPerPdf)
+          .setDynamicTooltip()
+          .onChange((v) => {
+            s.suggestMaxPerPdf = v;
+            save();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Pages per batch")
+      .setDesc("Pages sent to the model per request; long decks are processed in batches.")
+      .addText((t) =>
+        t.setValue(String(s.suggestPagesPerBatch)).onChange((v) => {
+          const n = Number(v);
+          s.suggestPagesPerBatch = Number.isInteger(n) && n > 0 ? n : DEFAULT_SETTINGS.suggestPagesPerBatch;
+          save();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Wiki concepts folder")
+      .setDesc(
+        "Notes whose `class` frontmatter matches the PDF's class are offered to the model as targets; new concept notes are created here.",
+      )
+      .addText((t) =>
+        t.setValue(s.wikiConceptsFolder).onChange((v) => {
+          s.wikiConceptsFolder = v.trim() || DEFAULT_SETTINGS.wikiConceptsFolder;
+          save();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Wiki entities folder")
+      .setDesc(
+        "Notes whose `class` frontmatter matches the PDF's class are offered to the model as targets; new entity notes are created here.",
+      )
+      .addText((t) =>
+        t.setValue(s.wikiEntitiesFolder).onChange((v) => {
+          s.wikiEntitiesFolder = v.trim() || DEFAULT_SETTINGS.wikiEntitiesFolder;
+          save();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Standing instructions for PDF suggestions")
+      .addTextArea((t) => {
+        t.inputEl.rows = 3;
+        t.inputEl.cols = 50;
+        t.setValue(s.suggestInstructions).onChange((v) => {
+          s.suggestInstructions = v;
           save();
         });
       });

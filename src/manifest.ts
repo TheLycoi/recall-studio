@@ -41,7 +41,7 @@ function kindOf(t: PdfTarget): "selection" | "annotation" | "rect" {
  * pdf.js text-content order); they sort after the page's selections, in the
  * order they were given.
  */
-export function sortAndAssignIds(highlights: ManifestHighlight[]): ManifestHighlight[] {
+export function sortAndAssignIds(highlights: ManifestHighlight[], prefix = "H"): ManifestHighlight[] {
   const indexed = highlights.map((h, i) => ({ h, i }));
   indexed.sort((a, b) => {
     if (a.h.page !== b.h.page) return a.h.page - b.h.page;
@@ -51,7 +51,7 @@ export function sortAndAssignIds(highlights: ManifestHighlight[]): ManifestHighl
     return a.i - b.i;
   });
   const digits = Math.max(2, String(indexed.length).length);
-  return indexed.map(({ h }, i) => ({ ...h, id: `H${String(i + 1).padStart(digits, "0")}` }));
+  return indexed.map(({ h }, i) => ({ ...h, id: `${prefix}${String(i + 1).padStart(digits, "0")}` }));
 }
 
 function positionKey(h: ManifestHighlight): number {

@@ -3,7 +3,7 @@ import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
 import { z } from "zod";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -511,4 +511,144 @@ test("QuizQuestionOut and QuizGradeOut serialize strictly at every level", () =>
   const grade = z.toJSONSchema(schemas.QuizGradeOut);
   assertStrict(grade, "QuizGradeOut");
   assert.deepEqual(grade.properties.verdict.enum, ["correct", "partial", "incorrect"]);
+});
+
+// --- suggest ---------------------------------------------------------------
+
+const suggestBase = {
+  pdfTitle: "Doping in Sport",
+  classCode: "HBIO 250",
+  pages: [
+    { page: 3, text: "Doping is defined in the Code." },
+    { page: 4, text: "WADA was founded in 1999." },
+  ],
+  transcript: null,
+  existingNotes: [],
+  alreadySelected: [],
+  perPage: 3,
+  remaining: 12,
+  standingInstructions: "",
+  instruction: "",
+};
+
+test("buildSuggestMessage orders the blocks long input first, instructions last", () => {
+  const msg = p.buildSuggestMessage({
+    ...suggestBase,
+    transcript: "  The lecturer stressed the 1999 date.  ",
+    existingNotes: [
+      { title: "Doping", kind: "concept" },
+      { title: "WADA", kind: "entity" },
+    ],
+    alreadySelected: [{ page: 2, text: "An earlier passage." }],
+    standingInstructions: "Prefer definitions.",
+    instruction: "Focus on the Code.",
+  });
+
+  const paper = msg.indexOf("<paper");
+  const transcript = msg.indexOf("<transcript>");
+  const notes = msg.indexOf("<existing_notes>");
+  const selected = msg.indexOf("<already_selected>");
+  const cap = msg.indexOf("Select at most");
+  assert.ok(paper < transcript, "the paper precedes the transcript");
+  assert.ok(transcript < notes, "the transcript precedes the existing notes");
+  assert.ok(notes < selected, "the existing notes precede what is already selected");
+  assert.ok(selected < cap, "the cap line comes after every block of material");
+  assert.ok(cap < msg.indexOf("Standing instructions:"), "the standing instructions come after the cap");
+  assert.ok(msg.indexOf("Standing instructions:") < msg.indexOf("Instructions for this PDF:"), "the PDF instruction is last");
+
+  assert.ok(msg.includes('pages="3-4"'), "the paper block names the first and last page of the batch");
+  assert.ok(msg.includes("[page 3]") && msg.indexOf("[page 3]") < msg.indexOf("[page 4]"), "the pages are marked in order");
+  assert.ok(msg.includes("Doping (concept)") && msg.includes("WADA (entity)"), "each existing note prints its kind");
+  assert.ok(msg.includes("p.2: An earlier passage."), "an already-selected passage prints its page");
+  assert.ok(
+    msg.includes("The transcript is a recording of the lecture that accompanies these pages.") &&
+      msg.includes("and fewer when the transcript supports fewer."),
+    "the cap line is the transcript variant",
+  );
+  assert.ok(!msg.includes("fewer is the expected outcome"), "and not the plain variant");
+});
+
+test("buildSuggestMessage omits every empty block", () => {
+  const msg = p.buildSuggestMessage({ ...suggestBase, transcript: null, standingInstructions: "   ", instruction: "" });
+  assert.ok(!msg.includes("<transcript>"), "no transcript block");
+  assert.ok(!msg.includes("<already_selected>"), "no already-selected block");
+  assert.ok(!msg.includes("<existing_notes>"), "no existing-notes block");
+  assert.ok(!msg.includes("Standing instructions"), "no standing instructions");
+  assert.ok(!msg.includes("Instructions for this PDF"), "no per-PDF instruction");
+  assert.equal(
+    msg.includes("Select at most 3 spans per page and at most 12 in this batch; fewer is the expected outcome."),
+    true,
+    "the cap line is the plain variant",
+  );
+});
+
+test("buildSuggestMessage cuts an already-selected passage to eighty characters", () => {
+  const long = "x".repeat(100);
+  const msg = p.buildSuggestMessage({ ...suggestBase, alreadySelected: [{ page: 1, text: long }] });
+  const line = msg.split("\n").find((l) => l.startsWith("p.1: "));
+  assert.equal(line, `p.1: ${"x".repeat(80)}…`, "the passage is cut at eighty characters and marked");
+  assert.ok(!msg.includes("x".repeat(81)), "nothing longer than the cut survives");
+});
+
+test("SuggestOut accepts a draft of spans and new notes", () => {
+  const draft = {
+    spans: [
+      { page: 3, quote: "Doping is defined in the Code.", label: "Definition of doping", note_title: "Doping", note_kind: "concept" },
+      { page: 4, quote: "WADA was founded in 1999.", label: "WADA founded 1999", note_title: "WADA", note_kind: "entity" },
+    ],
+    new_notes: [{ title: "WADA", kind: "entity", summary: "One. Two. Three." }],
+  };
+  const ok = schemas.SuggestOut.safeParse(draft);
+  assert.equal(ok.success, true, "a full draft parses");
+  assert.deepEqual(ok.data, draft, "and comes back unchanged");
+
+  assert.equal(
+    schemas.SuggestOut.safeParse({ ...draft, spans: [{ ...draft.spans[0], note_kind: "topic" }] }).success,
+    false,
+    "note_kind is one of the two kinds",
+  );
+  assert.equal(
+    schemas.SuggestOut.safeParse({ ...draft, spans: [{ ...draft.spans[0], page: 3.5 }] }).success,
+    false,
+    "a page is a whole number",
+  );
+  assert.equal(schemas.SuggestOut.safeParse({ spans: [] }).success, false, "new_notes is required, not optional");
+});
+
+test("SuggestOut serializes strictly at every level", () => {
+  const json = z.toJSONSchema(schemas.SuggestOut);
+  assertStrict(json, "SuggestOut");
+  assert.deepEqual(json.properties.spans.items.properties.note_kind.enum, ["concept", "entity"], "note_kind is a string enum");
+  for (const [k, v] of Object.entries(json.properties.spans.items.properties)) {
+    assert.ok(typeof v.description === "string" && v.description.length > 0, `spans.${k} carries a description`);
+  }
+  for (const [k, v] of Object.entries(json.properties.new_notes.items.properties)) {
+    assert.ok(typeof v.description === "string" && v.description.length > 0, `new_notes.${k} carries a description`);
+  }
+});
+
+test("SUGGEST_SYSTEM reuses the highlighter's and the digest's own sentences", () => {
+  // llm.ts imports the backends, which reach `obsidian`, so it cannot be
+  // bundled for node the way prompt.ts and schemas.ts are; the prompt is a
+  // string literal in the source, so the source is what gets read.
+  const src = readFileSync("src/llm.ts", "utf8");
+  assert.ok(src.includes("const SUGGEST_SYSTEM"), "the prompt exists");
+  assert.ok(
+    src.includes("Return each span as a verbatim quote copied exactly from the page, character for character, including punctuation."),
+    "the highlighter's quoting paragraph is reused, with note read as page",
+  );
+  assert.ok(
+    src.includes("Each span is one to four sentences and self-contained:"),
+    "the highlighter's span-shape paragraph is reused",
+  );
+  assert.ok(
+    src.includes("The limit you are given is a ceiling, not a target."),
+    "the highlighter's ceiling paragraph is reused",
+  );
+  assert.ok(
+    src.includes("reuse the title exactly, character for character"),
+    "the digest's rule on reusing an existing title is reused",
+  );
+  assert.ok(src.includes("Nothing from outside the paper."), "the digest's summary rules are reused");
+  assert.ok(src.includes("[page N]"), "the page marker is named");
 });

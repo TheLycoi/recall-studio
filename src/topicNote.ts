@@ -360,3 +360,99 @@ export function planTopicNotes(draft: DigestDraft, manifest: Manifest, opts: Pla
 
   return { notes, unknownIds, unassignedIds, droppedNotes };
 }
+
+// ---- wiki notes
+
+/** PDF++'s own display text for a link, as pdf-plus copies it: "<basename>, p.N". */
+export function wikiDisplay(pdfBasename: string, page: number): string {
+  return `${pdfBasename}, p.${page}`;
+}
+
+export interface RenderWikiNoteArgs {
+  classCode: string;
+  pdfBasename: string;
+  summary: string;
+  highlights: ManifestHighlight[];
+}
+
+export function renderWikiNote(a: RenderWikiNoteArgs): string {
+  const { classCode, pdfBasename, summary, highlights } = a;
+  const sorted = highlights.slice().sort((x, y) => x.page - y.page);
+  const callouts = sorted.map((h) => renderCallout(pdfBasename, h.target, wikiDisplay(pdfBasename, h.page), h.text));
+
+  const lines: string[] = [];
+  lines.push("---");
+  lines.push(`class: ${classCode}`);
+  lines.push("---");
+  lines.push("");
+  if (summary.trim() !== "") {
+    lines.push("## Summary");
+    lines.push(summary);
+    lines.push("");
+  }
+  lines.push("## Highlights");
+  lines.push("");
+  if (callouts.length > 0) lines.push(callouts.join("\n\n"));
+  return lines.join("\n") + "\n";
+}
+
+/**
+ * Append highlights not already present anywhere in `existingMd` (by
+ * `highlightKey`, checked over the whole note since hand-written wiki notes
+ * carry PDF++ links inside prose and under arbitrary headings, not only under
+ * `## Highlights`) into the `## Highlights` section, in page order. When the
+ * section is missing, it is appended at EOF. Everything else is
+ * byte-identical.
+ */
+export function mergeWikiHighlights(
+  existingMd: string,
+  pdfBasename: string,
+  classCode: string,
+  highlights: ManifestHighlight[],
+): MergeResult {
+  if (existingMd.trim() === "") {
+    return { md: renderWikiNote({ classCode, pdfBasename, summary: "", highlights }), added: highlights.length, skipped: 0 };
+  }
+
+  const existingKeys = new Set(findAllPdfReferences(existingMd).map((r) => highlightKey(r.target)));
+  const toAdd = highlights
+    .filter((h) => !existingKeys.has(h.key))
+    .slice()
+    .sort((a, b) => a.page - b.page);
+  const skipped = highlights.length - toAdd.length;
+
+  const headingRe = /^##\s+Highlights\s*$/m;
+  const headingMatch = headingRe.exec(existingMd);
+
+  if (headingMatch) {
+    if (toAdd.length === 0) {
+      return { md: existingMd, added: 0, skipped };
+    }
+
+    const headingEnd = headingMatch.index + headingMatch[0].length;
+    const rest = existingMd.slice(headingEnd);
+    const nextHeadingMatch = /^##\s/m.exec(rest);
+    const sectionEnd = nextHeadingMatch ? headingEnd + nextHeadingMatch.index : existingMd.length;
+    const section = existingMd.slice(headingEnd, sectionEnd);
+
+    const trailingBlanksMatch = /\n*$/.exec(section);
+    const trailingBlanks = trailingBlanksMatch ? trailingBlanksMatch[0] : "";
+    const sectionCore = trailingBlanks ? section.slice(0, section.length - trailingBlanks.length) : section;
+
+    const newCallouts = toAdd.map((h) => renderCallout(pdfBasename, h.target, wikiDisplay(pdfBasename, h.page), h.text));
+    const appended = sectionCore.length > 0 ? `${sectionCore}\n\n${newCallouts.join("\n\n")}` : newCallouts.join("\n\n");
+
+    const newMd = existingMd.slice(0, headingEnd) + appended + trailingBlanks + existingMd.slice(sectionEnd);
+    return { md: newMd, added: toAdd.length, skipped };
+  }
+
+  if (toAdd.length === 0) {
+    return { md: existingMd, added: 0, skipped };
+  }
+
+  const newCallouts = toAdd.map((h) => renderCallout(pdfBasename, h.target, wikiDisplay(pdfBasename, h.page), h.text));
+  const beforeTrimmed = existingMd.replace(/\n*$/, "");
+  const newMd = `${beforeTrimmed}\n\n## Highlights\n\n${newCallouts.join("\n\n")}\n`;
+
+  return { md: newMd, added: toAdd.length, skipped };
+}

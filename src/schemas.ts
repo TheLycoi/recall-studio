@@ -149,3 +149,42 @@ export const QuizGradeOut = z.object({
 
 export type QuizQuestionDraft = z.infer<typeof QuizQuestionOut>;
 export type QuizGradeDraft = z.infer<typeof QuizGradeOut>;
+
+/**
+ * One "suggest" response: the spans worth highlighting in a batch of PDF
+ * pages, each assigned to the wiki note it belongs to, plus the notes that do
+ * not exist yet and have to be written before those spans can land in them.
+ *
+ * The two arrays are returned together rather than in two calls because the
+ * choice of span and the choice of note are the same judgement: a span is
+ * worth keeping when it says something a named note would hold, and a note is
+ * worth creating when spans keep arriving for it.
+ */
+export const SuggestOut = z.object({
+  spans: z.array(
+    z.object({
+      page: z.number().int().describe("The number in the [page N] marker the quote was copied from; never a page outside this batch."),
+      quote: z
+        .string()
+        .describe("The span itself, copied verbatim from that page, character for character, punctuation included; no ellipsis, no paraphrase."),
+      label: z.string().describe("At most six words naming the fact this span carries."),
+      note_title: z
+        .string()
+        .describe("The note this span belongs in: an existing title copied exactly, or the title of one of your new_notes."),
+      note_kind: z
+        .enum(["concept", "entity"])
+        .describe("concept: a mechanism, a classification, a definition and what follows from it; entity: a named person, organisation, drug, instrument, or law."),
+    }),
+  ),
+  new_notes: z.array(
+    z.object({
+      title: z.string().describe("Title of a note that does not exist yet, a short noun phrase in Title Case, unique in this response."),
+      kind: z.enum(["concept", "entity"]).describe("Same two kinds as a span's note_kind, describing the note as a whole."),
+      summary: z
+        .string()
+        .describe("Three to five sentences about this note drawn from the paper, in the reader's language; no links, ids, or page numbers."),
+    }),
+  ),
+});
+
+export type SuggestDraft = z.infer<typeof SuggestOut>;

@@ -6,13 +6,21 @@ import { ClaudeCliBackend, ClaudeCliError } from "./claudeCli";
 import { CodexBackend, CodexError } from "./codex";
 import { buildExamplesBlock } from "./examples";
 import type { BloomLevel, Card, Highlight } from "./model";
-import type { AskMessageArgs, DigestMessageArgs, QuizGradeMessageArgs, QuizQuestionMessageArgs, VerifyMessageArgs } from "./prompt";
+import type {
+  AskMessageArgs,
+  DigestMessageArgs,
+  QuizGradeMessageArgs,
+  QuizQuestionMessageArgs,
+  SuggestMessageArgs,
+  VerifyMessageArgs,
+} from "./prompt";
 import {
   buildAskMessage,
   buildDigestMessage,
   buildHighlighterMessage,
   buildQuizGradeMessage,
   buildQuizQuestionMessage,
+  buildSuggestMessage,
   buildVerifyMessage,
 } from "./prompt";
 import {
@@ -20,9 +28,10 @@ import {
   DigestOut as DigestOutSchema,
   QuizGradeOut as QuizGradeOutSchema,
   QuizQuestionOut as QuizQuestionOutSchema,
+  SuggestOut as SuggestOutSchema,
   VerifyOut as VerifyOutSchema,
 } from "./schemas";
-import type { AskDraft, DigestDraft, QuizGradeDraft, QuizQuestionDraft, VerifyDraft } from "./schemas";
+import type { AskDraft, DigestDraft, QuizGradeDraft, QuizQuestionDraft, SuggestDraft, VerifyDraft } from "./schemas";
 import type { RecallSettings } from "./settings";
 
 const CardOut = z.object({
@@ -454,6 +463,17 @@ export class LlmClient {
     });
   }
 
+  /** "suggest": a batch of pages in, highlight candidates assigned to wiki notes out. */
+  async suggest(args: SuggestMessageArgs): Promise<SuggestDraft> {
+    return this.backend().complete({
+      system: SUGGEST_SYSTEM,
+      user: buildSuggestMessage(args),
+      schema: SuggestOutSchema,
+      label: "highlight suggestions",
+      maxTokens: 16000,
+    });
+  }
+
   /**
    * "ask": one question against numbered evidence from the reader's own notes.
    * The draft is structured, not prose: the caller assembles the answer from
@@ -575,6 +595,63 @@ related lists the titles of other notes you are writing in this response, or of 
 </examples>
 
 Before returning, check your answer against the input: every id you used appears there, every id in the input appears either in exactly the notes it belongs to or in unused_ids, no note has an empty highlight_ids list, no two titles collide, every related title is one you wrote or were shown, and no summary contains a link, an id, or a fact the paper does not state.`;
+
+/**
+ * Suggest system prompt: a batch of pages from a lecture PDF in, the spans
+ * worth highlighting out, each one assigned to the wiki note it belongs to.
+ *
+ * It is the highlighter and the digest joined at the seam. The paragraphs on
+ * how a span is quoted, how long it is, what a transcript is for, and what the
+ * limit means are copied word for word from HIGHLIGHTER_SYSTEM, because the
+ * judgement is the same one and two drifting copies of a rule is worse than
+ * one repeated; the sentences on reusing an existing title and on what a
+ * summary may contain are copied the same way from DIGEST_SYSTEM. Only "note"
+ * becomes "page" where the source sentence would otherwise point at the wrong
+ * thing, since here the material being quoted is a page, not a note.
+ */
+const SUGGEST_SYSTEM = `You read the pages of a lecture PDF and choose the spans a student would highlight and later study, and you say which wiki note in their vault each span belongs to. The reader will revise from those notes for the rest of the course, so a span is worth selecting only if forgetting its content would matter, and a note is worth naming only if a reader would look it up by that name.
+
+Return each span as a verbatim quote copied exactly from the page, character for character, including punctuation. The span is located in the page by exact string match, so an ellipsis, a paraphrase, or a trimmed word makes it unusable. Start and end on sentence boundaries where possible.
+
+Each span is one to four sentences and self-contained: it carries a definition, a mechanism, a number, a name, a date, a causal claim, a distinction between similar things, or a memorable formulation, and it can be understood without the surrounding paragraph. Prefer the fundamentals a reader needs before the details, and prefer material with lasting use over trivia. Prefer fewer, denser spans over many thin ones.
+
+The pages are marked \`[page N]\` and each span reports the page it was copied from. A span never crosses a page marker: a sentence that runs over onto the next page is quoted from one side of the break or left alone, because a quote spanning two pages matches neither of them.
+
+A transcript, when one is present, is the recording of the lecture that accompanies the page. It tells you what the lecturer treated as important; it is not a source of quotes, so every span is still copied from the page itself. Prefer the passages the lecturer dwells on, repeats, calls important, or says will be tested, and pass over slide content that was skipped or read out without comment. Where the transcript and the page differ in wording, the page's wording is what gets quoted.
+
+The limit you are given is a ceiling, not a target. Over-highlighting fills the reader's inbox with cards they will delete, so returning fewer spans than the limit is the expected outcome, and returning none is right when nothing in the page is supported by the transcript.
+
+Give each span a label of at most six words that names the fact it carries.
+
+<which_note_a_span_belongs_to>
+Every span names its note. You are told which notes already exist for this class. When one of those titles is the topic a group of highlights belongs to, reuse the title exactly, character for character, because the plugin then appends those highlights to that note instead of creating a second one beside it. Reuse it only when it genuinely fits; a near-match that forces unrelated highlights together is worse than a new note.
+
+A title that is not on that list is a new note, and it appears in new_notes with its kind and a summary before any span may point at it. A note_title that is neither an existing title nor one of your new_notes points at nothing, and the spans under it are lost.
+
+A concept is something the reader would look up by name later: a mechanism, a classification, a definition together with what follows from it. An entity is a named person, organisation, drug, instrument, or law — WADA, acetaminophen, the Anti-Doping Code. Titles are short noun phrases in Title Case, the way an index entry reads, and unique within your response; two titles that differ only in case or in a plural are the same title, and one of the two notes will be lost.
+</which_note_a_span_belongs_to>
+
+<the_summary>
+Three to five sentences about this topic, drawn from the whole paper but weighted toward the spans you chose. The spans you chose tell you what the reader cares about; the rest of the paper tells you what those spans mean, and lets you write the sentence that connects two of them. Write in the reader's language, the one the paper is written in, and keep close to its wording so the summary reads as their own note rather than as a stranger's gloss.
+
+Nothing from outside the paper. If you know more about the subject than the paper says, that knowledge does not belong here: the reader will study from this note and cannot tell your additions from theirs. No citations, no links, no highlight ids, no page numbers in the prose. The spans appear underneath the summary in the finished note, so the summary does not need to quote them; it needs to say what they add up to.
+</the_summary>
+
+<what_is_already_held>
+The already-selected list is what earlier batches and the reader already hold, printed short so you can recognise it. Those passages are not picked again: offering one back gives the reader the same card twice and costs them the time to delete it. The notes those passages went to are the ones to prefer for a neighbouring span, because material from the same run of pages usually belongs in the same note, and a second note beside the first splits the topic in half.
+
+Slide titles, course logistics, figure captions, and a line the lecturer read out without comment are never spans. They carry no fact to forget, and a note that collects them is a note the reader stops opening.
+</what_is_already_held>
+
+<examples>
+<example>
+<input>[page 7] holds "Doping is defined as the occurrence of one or more of the anti-doping rule violations set out in the Code" under the slide title "Anti-Doping: Definitions", and [page 8] holds "The World Anti-Doping Agency was founded in 1999 to coordinate the fight against doping in sport across countries and sports." Existing notes: Doping (concept), Drug Testing (concept). Already selected: nothing.</input>
+<output>Two spans. The definition on page 7 goes to the existing title "Doping", copied exactly, kind concept. The sentence on page 8 goes to a new note "World Anti-Doping Agency", kind entity, listed in new_notes with a three-sentence summary of what the agency is and does as the paper describes it. The slide title "Anti-Doping: Definitions" is not a span.</output>
+<note>One existing title reused rather than a near-duplicate created, one entity proposed because a named organisation is what a reader looks up, and the slide title skipped because forgetting it costs nothing.</note>
+</example>
+</examples>
+
+Before returning, check your answer against the input: every note_title is either an existing title you were shown or a title in new_notes, every quote is copied character for character from the page it names, no span reports a page outside this batch, and no page carries more spans than the limit allows.`;
 
 /**
  * Ask system prompt: answer a question from numbered evidence taken from the
@@ -699,7 +776,7 @@ One question tests one piece of evidence. Pick the number of the piece you are t
 </the_evidence_is_the_whole_source>
 
 <the_answer_must_be_in_the_evidence>
-The expected answer must be stated in the evidence you cited, and the passage that states it goes into quote, copied character for character from that piece: the words themselves, not a paraphrase, not a tidied version, not two fragments spliced with an ellipsis. The software looks the quote up in the evidence you named, and a question whose quote is not found there is thrown away and asked again, so a quote you smoothed out is a question the reader never sees.
+The expected answer must be stated in the evidence you cited, and the passage that states it goes into quote, copied character for character from that piece: the words themselves, not a paraphrase, not a tidied version, not two fragments spliced with an ellipsis. The software looks the quote up in the evidence you named, and a question whose quote is not found there is thrown away and asked again once; if that fails too, the passage is set aside for the rest of the quiz, so a quote you smoothed out is a question the reader never sees.
 
 Finding that passage first is also how you tell whether the question is askable. If you cannot point at the words that answer it, the evidence does not answer it, and you should be asking something else about the same passage.
 </the_answer_must_be_in_the_evidence>
@@ -713,7 +790,7 @@ Consistent: ask so that the same question would draw the same answer every time,
 Tractable: ask something a reader who studied this passage would get right; obscurity is not difficulty.
 Effortful: ask something that requires retrieval rather than recognition, inference from the wording, or a guess.
 
-Never ask a yes/no question, and never one whose answer is a choice between two things you named. Half of those are right by luck, and the reader learns nothing from a coin that lands well. If the answer you are about to write is "yes" or "no", the question is wrong, not the answer.
+Never ask a yes/no question, and never one whose answer is a choice between two things you named; the software rejects a question whose wording contains its own answer, and one that asks for a list. Half of those are right by luck, and the reader learns nothing from a coin that lands well. If the answer you are about to write is "yes" or "no", the question is wrong, not the answer.
 
 Never give the answer away in the wording. A question that contains the term it is asking for, or that describes the mechanism and then asks what it is called, is answered by reading it. The reader's own vocabulary is fine and preferred; the answer itself is not.
 </what_makes_a_question_worth_asking>
@@ -742,8 +819,8 @@ The hint is one clause the reader can ask for when they are stuck. It narrows th
 <example>
 <evidence>[3] (Receptors, p.4) Receptors have 2 important properties: they bind ligands with relatively high affinity, and they transduce a signal to produce a biological effect.</evidence>
 <task>Difficulty 1: a definition, a number, a name: recall of one fact.</task>
-<output>question: "What are the two properties that define a receptor?"; answer: "Binding ligands with high affinity, and transducing a signal to produce a biological effect."; evidence_n: 3; quote: "they bind ligands with relatively high affinity, and they transduce a signal to produce a biological effect"; hint: "One is about what it attaches to, the other about what it does next."; kind: "recall".</output>
-<note>The quote is the span that carries the answer, copied whole. The question names the subject so it is answerable without the passage in view, and it does not contain either property, so reading it gives nothing away. The hint points at the shape of the answer without naming affinity or transduction.</note>
+<output>question: "With what degree of affinity do receptors bind their ligands?"; answer: "Relatively high affinity."; evidence_n: 3; quote: "they bind ligands with relatively high affinity"; hint: "It is about how tightly, not about what happens next."; kind: "recall".</output>
+<note>One fact, not a list: the passage names two properties, and a question asking for "the two properties" would be a set the reader has to recite whole, which the software rejects. The quote is the span that carries the answer, copied whole. The question names the subject so it is answerable without the passage in view and does not contain the answer, so reading it gives nothing away. The hint points at the kind of thing wanted without naming it.</note>
 </example>
 <example>
 <evidence>[5] (Receptors, p.4) Receptors bind ligands with high affinity and transduce a signal to produce a biological effect; this distinguishes receptors from inert binding sites such as albumin, which binds and carries many drugs but does not transduce a signal.</evidence>
@@ -781,7 +858,7 @@ A blank answer never reaches you, and neither does "I don't know" or any of its 
 <feedback_and_quote>
 Feedback is one or two sentences saying what the answer got right and what it missed, in the evidence's own words. Never introduce a fact the evidence does not state, however true it is and however much it would help: the reader is checking your feedback against the passage printed below it, and a sentence they cannot find there is one they cannot use.
 
-Quote the passage that settles the grade, copied character for character from the evidence, not paraphrased. It is checked against the evidence and shown only if it is found there, which is what lets the reader overrule you when they think you were wrong.
+Quote the passage that settles the grade, copied character for character from the evidence, not paraphrased. It is checked against the evidence and shown under the grade only if it is found there; a quote that is not found marks the grade as unverified, which is what lets the reader overrule you when they think you were wrong.
 </feedback_and_quote>
 
 <examples>
@@ -795,16 +872,17 @@ Quote the passage that settles the grade, copied character for character from th
 </example>
 <example>
 <evidence>[1] (Receptors, p.4) Receptors have 2 important properties: they bind ligands with relatively high affinity, and they transduce a signal to produce a biological effect.</evidence>
-<question>What are the two properties that define a receptor?</question>
-<expected_answer>Binding ligands with high affinity, and transducing a signal to produce a biological effect.</expected_answer>
-<student_answer>they bind to ligands</student_answer>
-<output>verdict: "partial"; feedback: "Binding ligands with high affinity is one of the two; the other is that they transduce a signal to produce a biological effect."; quote: "they bind ligands with relatively high affinity, and they transduce a signal to produce a biological effect".</output>
-<note>Half of what was asked for, so partial rather than incorrect. The feedback names the missing half in the evidence's words and stops there, without explaining what transduction is.</note>
+<question>What does a receptor do after it binds a ligand?</question>
+<expected_answer>It transduces a signal to produce a biological effect.</expected_answer>
+<student_answer>it binds things and then something happens</student_answer>
+<output>verdict: "partial"; feedback: "Something does happen, but the evidence names it: the receptor transduces a signal to produce a biological effect."; quote: "they transduce a signal to produce a biological effect".</output>
+<note>Right in direction, too vague to count as recall of the fact, so partial rather than incorrect. The feedback supplies the missing words from the evidence and stops there, without explaining what transduction is.</note>
 </example>
 </examples>
 
 Before you return, check that your verdict rests on what the evidence states and not on how the answer was phrased, that every fact in your feedback is in the passage, and that the words in quote appear in the evidence exactly as you copied them.`;
 
 /** The digest, Ask, verify and quiz schemas are defined in schemas.ts so tests can bundle them without obsidian; re-exported here so callers have one import. */
-export { DigestOut, AskOut, VerifyOut, QuizQuestionOut, QuizGradeOut } from "./schemas";
-export type { DigestDraft, AskDraft, VerifyDraft, QuizQuestionDraft, QuizGradeDraft } from "./schemas";
+export { DigestOut, AskOut, VerifyOut, QuizQuestionOut, QuizGradeOut, SuggestOut } from "./schemas";
+export type { DigestDraft, AskDraft, VerifyDraft, QuizQuestionDraft, QuizGradeDraft, SuggestDraft } from "./schemas";
+export type { SuggestMessageArgs } from "./prompt";
