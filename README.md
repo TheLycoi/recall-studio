@@ -318,6 +318,8 @@ The command is active on an open PDF and runs in nine steps: it reads the PDF's 
 
 **Which notes the model may reuse.** Every `.md` file under the two wiki folders whose `class` frontmatter matches the PDF's class code, or whose path already appears in the PDF's manifest as a source (which catches hand-written notes that carry no frontmatter at all), is offered to the model by title and kind (concept/entity). A span's `note_title` must be one of these or a title the model proposes in the same response's `new_notes`; anything else is treated as an orphan (below).
 
+**Orphan titles.** A `note_title` that is neither an existing note nor announced in `new_notes` is still kept: it becomes its own new note under that title, taking its kind from the span rather than from a proposal, and the title is listed in `orphanTitles` and shown in the preview as `new (concept)` or `new (entity)` like any other proposed note. The write loop refuses to create a note titled after the source PDF or living under a `sources/` folder — a source is never a note — and reports the refusal in the closing Notice, but nothing routes an orphan into a catch-all note anymore.
+
 **The batch loop and "already selected".** Long PDFs are split into page ranges (`batchPages`, `src/suggestPlan.ts`) and sent one batch at a time. Each request tells the model, cut to 80 characters, the passages the manifest already holds on those pages plus everything accepted so far in this run, so the model doesn't hand back a highlight already present and prefers the note a neighbouring passage already went to. This is the one idea borrowed from the Karpathy LLM Wiki plugin: its ingest prompt ("Analyze the following source file and output structured JSON… Extract the next batch… already extracted: …") is fixed inside the plugin's bundle and never reads a highlight at all — it converts and extracts from the whole file, with no notion of a PDF++ selection. Nothing else about that plugin's prompt, schema, or page types is reused; only the shape of "here is the next batch, and here is what you already have" carried over.
 
 **What's verified mechanically, not just asked for:**
@@ -410,7 +412,7 @@ Limitations:
 - A quote that straddles a line-end hyphen (the page holds `"pharma-\ncology"`, the model quotes `"pharmacology"`) cannot be located — de-hyphenation isn't modelled — and the span is silently dropped (`test/pageMap.test.mjs`).
 - A long deck can propose more spans than the per-PDF ceiling allows; the run stops early once the ceiling is reached rather than continuing past it.
 - A proposed title that collides case-insensitively with an existing note in the *other* folder (a concept-folder title matching an entity-folder note, or vice versa) is still treated as a match and merged into that note.
-- The three older generated PSYC360 notes use `## Related topics`; because `mergeWikiHighlights` appends `## Highlights` at the end of the file when the heading is missing, on those three notes it lands after `## Flashcard Seeds`.
+- A PDF with no text layer — a scan — can't be used: the command checks whether any page came back with text items, and stops with a Notice saying so, since OCR isn't built in.
 - No live Obsidian run and no live model call has happened yet for this command.
 
 ### Ask
