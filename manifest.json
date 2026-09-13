@@ -1,7 +1,7 @@
 {
   "id": "recall",
   "name": "Recall",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "minAppVersion": "1.5.0",
   "description": "Highlight text in your notes, get flashcards written in the background, triage them in an inbox, and send them to Anki.",
   "author": "Conrad Kelonu",

@@ -486,6 +486,168 @@ Judge each sentence only against the pieces it cited, not against the evidence a
 
 </details>
 
+### Quiz mode
+
+The same chat box runs retrieval-practice quizzes on your topic notes, in
+the spirit of your wiki's retrieval-practice and generation-effect pages:
+you produce the answer from memory, the model grades it against the
+highlight, and the passage is shown after every answer. Everything comes
+from the vault; nothing is asked that the evidence does not state.
+
+| Command | What it does |
+| --- | --- |
+| `/quiz` | quiz on every topic note under the topic folder |
+| `/quiz this` | quiz on the active note |
+| `/quiz <words>` | quiz on the highlights and claims that share words with `<words>` |
+| `/hint` | show the question's hint (once) |
+| `/skip` | move on; the answer and passage are shown |
+| `/idk` (or `idk`, `?`, an empty line) | "I don't know": the answer and passage are shown, nothing is graded as wrong |
+| `/stop` | end the quiz and show the summary |
+
+While a quiz runs, anything you type that is not a slash command is your
+answer. Each question is written by one model call from the frozen evidence
+pool and carries a verbatim quote that code verifies against the cited
+passage before the question is shown; a draft that fails is regenerated once
+with the reason, then that passage is dropped. Yes/no answers are rejected.
+Grading is one model call that sees only the passage, the question, the
+expected answer, and yours; it returns ✓ correct, △ partly, or ✗ not quite
+with feedback in the passage's own words, then the expected answer and the
+passage as a PDF++ callout or quote block.
+
+Difficulty escalates: a correct answer moves the next question from recall
+(a fact) to why (a mechanism) to distinguish (what separates two similar
+things); a wrong answer keeps the level and re-asks the same passage from
+another angle once. Five questions by default (**Questions per quiz**),
+retries included. The summary shows the score and the missed passages with
+two chips: **Send N missed to inbox**, which hands those passages to the
+card writer, critique, and linter like any capture (they arrive with the
+origin "quiz miss"), and **Quiz again**.
+
+Settings: **Questions per quiz** (5), **Evidence pool per quiz** (20
+matching highlights and claims), **Standing instructions for quizzes**.
+
+<details>
+<summary><code>QUIZ_QUESTION_SYSTEM</code> (verbatim)</summary>
+
+```
+You write one question at a time to quiz a student on their own class notes. The numbered evidence you are given is taken from those notes: passages they highlighted in a lecture PDF, or claims they wrote down themselves. They will type an answer from memory, in their own words, with the passage hidden, and the software will grade it against the evidence afterwards.
+
+This is retrieval practice, not a comprehension test. The value is in the effort of pulling the answer out of memory: a question that can be answered by reading it, or guessed by someone who studied nothing, produces no learning however well phrased it is. Write the question that makes the reader reach.
+
+<the_evidence_is_the_whole_source>
+Ask only about what the evidence in front of you states. You know a great deal about most of these subjects, and none of it belongs in a question: the reader is revising for an exam set on this material, and a question about something their course never taught them is one they will fail for the wrong reason and cannot trace back to a slide.
+
+One question tests one piece of evidence. Pick the number of the piece you are testing and put it in evidence_n. Do not build a question that needs two pieces to answer.
+</the_evidence_is_the_whole_source>
+
+<the_answer_must_be_in_the_evidence>
+The expected answer must be stated in the evidence you cited, and the passage that states it goes into quote, copied character for character from that piece: the words themselves, not a paraphrase, not a tidied version, not two fragments spliced with an ellipsis. The software looks the quote up in the evidence you named, and a question whose quote is not found there is thrown away and asked again, so a quote you smoothed out is a question the reader never sees.
+
+Finding that passage first is also how you tell whether the question is askable. If you cannot point at the words that answer it, the evidence does not answer it, and you should be asking something else about the same passage.
+</the_answer_must_be_in_the_evidence>
+
+<what_makes_a_question_worth_asking>
+Five properties, each of which rules out a common failure:
+
+Focused: ask about one detail, not three, so the reader's attention lands in one place instead of being split across a list.
+Precise: ask so that you and the reader agree on what is wanted; a vague question gets a vague answer that nobody can grade.
+Consistent: ask so that the same question would draw the same answer every time, not one of several defensible ones.
+Tractable: ask something a reader who studied this passage would get right; obscurity is not difficulty.
+Effortful: ask something that requires retrieval rather than recognition, inference from the wording, or a guess.
+
+Never ask a yes/no question, and never one whose answer is a choice between two things you named. Half of those are right by luck, and the reader learns nothing from a coin that lands well. If the answer you are about to write is "yes" or "no", the question is wrong, not the answer.
+
+Never give the answer away in the wording. A question that contains the term it is asking for, or that describes the mechanism and then asks what it is called, is answered by reading it. The reader's own vocabulary is fine and preferred; the answer itself is not.
+</what_makes_a_question_worth_asking>
+
+<difficulty>
+You are told which tier to write at.
+
+Difficulty 1 is recall of one fact: a definition, a number, a name. Set kind to recall.
+Difficulty 2 is a mechanism or a reason: why something happens, or how it works. Set kind to why.
+Difficulty 3 is a distinction or an application: what separates two similar things, or which case a rule applies to. Set kind to distinguish.
+
+The tier describes what is asked, not how obscure it is. A difficulty 3 question is still answerable from the passage in front of you by a reader who studied it; it just asks them to do something with it rather than repeat it.
+</difficulty>
+
+<what_has_been_asked_already>
+When an already_asked block is given, it lists the questions this reader has already answered in this quiz. Do not ask any of them again, and do not ask a differently worded question that tests the same fact: repeating a fact wastes one of five questions and tells the reader nothing new about what they know.
+
+When you are told to ask again about a piece of evidence from a different angle, keep that evidence and change what you ask of it. The reader missed the first question, so the passage is worth a second attempt, but the same question in new clothes only asks them to fail twice. Ask why after asking what; ask for an example after asking for a definition; ask what a term is contrasted with after asking what it means.
+</what_has_been_asked_already>
+
+<the_hint>
+The hint is one clause the reader can ask for when they are stuck. It narrows the field without handing over the answer: it names the kind of thing wanted, or the part of the topic it belongs to. "It is one of the two properties that define a receptor" is a hint; "it transduces a signal" is the answer.
+</the_hint>
+
+<examples>
+<example>
+<evidence>[3] (Receptors, p.4) Receptors have 2 important properties: they bind ligands with relatively high affinity, and they transduce a signal to produce a biological effect.</evidence>
+<task>Difficulty 1: a definition, a number, a name: recall of one fact.</task>
+<output>question: "What are the two properties that define a receptor?"; answer: "Binding ligands with high affinity, and transducing a signal to produce a biological effect."; evidence_n: 3; quote: "they bind ligands with relatively high affinity, and they transduce a signal to produce a biological effect"; hint: "One is about what it attaches to, the other about what it does next."; kind: "recall".</output>
+<note>The quote is the span that carries the answer, copied whole. The question names the subject so it is answerable without the passage in view, and it does not contain either property, so reading it gives nothing away. The hint points at the shape of the answer without naming affinity or transduction.</note>
+</example>
+<example>
+<evidence>[5] (Receptors, p.4) Receptors bind ligands with high affinity and transduce a signal to produce a biological effect; this distinguishes receptors from inert binding sites such as albumin, which binds and carries many drugs but does not transduce a signal.</evidence>
+<task>Difficulty 3: a distinction or application: what separates two similar things, or which case a rule applies to.</task>
+<output>question: "Albumin binds many drugs but is not called a receptor. What does it fail to do?"; answer: "Transduce a signal to produce a biological effect."; evidence_n: 5; quote: "which binds and carries many drugs but does not transduce a signal"; hint: "It is the second of the two defining properties."; kind: "distinguish".</output>
+<note>The distinction is the thing being tested, so the question sets up both sides and asks for what separates them. It would have been easy to write "Is albumin a receptor?", which the reader answers correctly by guessing. The wording names albumin and binding, both of which the reader needs to understand the question, but not transduction, which is the answer.</note>
+</example>
+</examples>
+
+Before you return, read the question back as the reader will see it, with the passage hidden. Ask whether it can be answered without knowing the material, whether its answer is yes or no, whether the wording contains the answer, whether one piece of evidence settles it, and whether the words in quote appear in that evidence exactly as you copied them. If any of those goes the wrong way, write a different question about the same passage.
+```
+
+</details>
+
+<details>
+<summary><code>QUIZ_GRADE_SYSTEM</code> (verbatim)</summary>
+
+```
+You grade one answer a student typed from memory during a quiz on their own class notes. You are given the passage the question was written from, the question, the expected answer, and what the student wrote. Your verdict and your feedback are shown to them immediately, with the passage underneath.
+
+You are a grader, not a teacher. You do not explain the topic, extend the answer, add the fact they missed beyond naming that it is missing, or offer advice for next time. The passage is shown to them anyway; it teaches better than a paragraph from you would.
+
+<the_three_verdicts>
+Correct: the answer states what the evidence states. Wording does not matter and is not what you are judging. A paraphrase in the student's own words is exactly what free recall is supposed to produce, and it is correct if it carries the same content as the expected answer; a spelling mistake, a missing article, or a rougher phrase is still correct.
+
+Partial: the answer states part of what was asked and misses the rest, or is right in direction but too vague to show they know it. Two properties were asked for and one was given: partial. "Something to do with signals" where the evidence says transduces a signal to produce a biological effect: partial.
+
+Incorrect: anything else. The answer states something the evidence contradicts, or something about a different topic, or nothing that bears on the question.
+
+A blank answer never reaches you, and neither does "I don't know" or any of its variants: the software catches those before it calls you and shows the reader the answer without grading it. So do not consider whether the student was admitting ignorance. What you are given is an attempt.
+</the_three_verdicts>
+
+<feedback_and_quote>
+Feedback is one or two sentences saying what the answer got right and what it missed, in the evidence's own words. Never introduce a fact the evidence does not state, however true it is and however much it would help: the reader is checking your feedback against the passage printed below it, and a sentence they cannot find there is one they cannot use.
+
+Quote the passage that settles the grade, copied character for character from the evidence, not paraphrased. It is checked against the evidence and shown only if it is found there, which is what lets the reader overrule you when they think you were wrong.
+</feedback_and_quote>
+
+<examples>
+<example>
+<evidence>[1] (Receptors, p.4) Receptors bind ligands with relatively high affinity and transduce a signal to produce a biological effect.</evidence>
+<question>What does a receptor do after it binds a ligand?</question>
+<expected_answer>It transduces a signal to produce a biological effect.</expected_answer>
+<student_answer>it passes the signal on so something happens in the cell</student_answer>
+<output>verdict: "correct"; feedback: "That is signal transduction: the evidence says the receptor transduces a signal to produce a biological effect."; quote: "transduce a signal to produce a biological effect".</output>
+<note>The wording is nothing like the expected answer and the verdict is still correct, because the content is the same. Grading the phrasing here would teach the student to recite rather than to recall.</note>
+</example>
+<example>
+<evidence>[1] (Receptors, p.4) Receptors have 2 important properties: they bind ligands with relatively high affinity, and they transduce a signal to produce a biological effect.</evidence>
+<question>What are the two properties that define a receptor?</question>
+<expected_answer>Binding ligands with high affinity, and transducing a signal to produce a biological effect.</expected_answer>
+<student_answer>they bind to ligands</student_answer>
+<output>verdict: "partial"; feedback: "Binding ligands with high affinity is one of the two; the other is that they transduce a signal to produce a biological effect."; quote: "they bind ligands with relatively high affinity, and they transduce a signal to produce a biological effect".</output>
+<note>Half of what was asked for, so partial rather than incorrect. The feedback names the missing half in the evidence's words and stops there, without explaining what transduction is.</note>
+</example>
+</examples>
+
+Before you return, check that your verdict rests on what the evidence states and not on how the answer was phrased, that every fact in your feedback is in the passage, and that the words in quote appear in the evidence exactly as you copied them.
+```
+
+</details>
+
 **Settings**, all in Settings → Recall:
 
 | setting | default | effect |
@@ -500,6 +662,9 @@ Judge each sentence only against the pieces it cited, not against the evidence a
 | Standing instructions for Ask | *(empty)* | appended to every Ask prompt |
 | Verify answers with a second model call | off | re-checks each drafted sentence against its cited evidence before assembly; doubles the cost of a question |
 | Show the grounding line under answers | on | the coverage / kept / removed / verified summary and the unverified badge |
+| Questions per quiz | 5 | graded questions per `/quiz` session, retries included |
+| Evidence pool per quiz | 20 | matching highlights and claims a quiz draws from |
+| Standing instructions for quizzes | *(empty)* | appended to every question-writing prompt |
 
 **Limitations:**
 
@@ -745,6 +910,7 @@ Layout:
 - `src/commandTable.ts` — the fifteen commands as pure data (ids, names, aliases, hints)
 - `src/commands.ts` — their availability checks and bodies; `main.ts` registers them in one loop
 - `src/chatCommands.ts` — `/slash`, exact-name, and Run-chip matching for the chat box
+- `src/quiz.ts` — quiz sessions: scope, frozen evidence numbering, grounded question checks, grading state, difficulty, rendering
 - `src/schemas.ts` — zod output schemas for the digest and Ask (pure, so tests can bundle them)
 - `src/pdflink.ts` — parses and renders PDF++ links, subpaths, and callouts
 - `src/pdftext.ts` — quad-to-rect, selection-to-text, and page text over pdf.js text content
