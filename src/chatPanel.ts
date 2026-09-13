@@ -200,7 +200,7 @@ export class ChatPanel {
     // `/skip`, `/idk` and `/stop` are chat-local and not in the registry
     // (src/quiz.ts:102-126). `parseQuizCommand` returning null is what lets a
     // mistyped `/skpi` still reach `matchCommand` and get its ordinary line.
-    const quizCommand = parseQuizCommand(q);
+    const quizCommand = parseQuizCommand(q, !!this.session);
     if (quizCommand) {
       this.draft = "";
       if (quizCommand.kind === "start") {

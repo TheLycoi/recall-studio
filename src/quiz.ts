@@ -100,29 +100,56 @@ export type QuizCommand =
   | { kind: "dontknow" };
 
 /**
- * Recognise the chat-local quiz commands. These are not registry commands
- * (src/chatCommands.ts), so the panel must try this first and fall through to
- * `matchCommand` on null — which is what makes `/skpi` still get the ordinary
- * "no command matches" line instead of being swallowed by the quiz.
+ * Recognise the chat-local quiz commands, with or without a slash. These are
+ * not registry commands (src/chatCommands.ts), so the panel must try this
+ * first and fall through to `matchCommand` on null — which is what makes
+ * `/skpi` still get the ordinary "no command matches" line instead of being
+ * swallowed by the quiz.
+ *
+ * Plain phrases: "quiz me", "quiz me on receptors", "test me on this note",
+ * "start a quiz about affinity" start a quiz whether or not one is running.
+ * Control words ("stop", "skip", "next", "hint", "give me a hint") count only
+ * while a quiz is `active`, so outside a quiz "next" stays an ordinary
+ * question for the model.
  */
-export function parseQuizCommand(text: string): QuizCommand | null {
+export function parseQuizCommand(text: string, active = false): QuizCommand | null {
   const t = text.trim();
-  if (!t.startsWith("/")) return null;
-  const m = /^\/(\S+)\s*([\s\S]*)$/.exec(t);
-  if (!m) return null;
-  const name = m[1].toLowerCase();
-  const rest = m[2].trim();
-
-  if (name === "quiz") {
-    if (!rest) return { kind: "start", scope: "all", query: "" };
-    if (rest.toLowerCase() === "this") return { kind: "start", scope: "this", query: "" };
-    return { kind: "start", scope: "query", query: rest };
+  if (t.startsWith("/")) {
+    const m = /^\/(\S+)\s*([\s\S]*)$/.exec(t);
+    if (!m) return null;
+    const name = m[1].toLowerCase();
+    const rest = m[2].trim();
+    if (name === "quiz") return startFor(rest);
+    if (name === "stop" || name === "end") return { kind: "stop" };
+    if (name === "skip" || name === "next") return { kind: "skip" };
+    if (name === "hint") return { kind: "hint" };
+    if (name === "idk") return { kind: "dontknow" };
+    return null;
   }
-  if (name === "stop" || name === "end") return { kind: "stop" };
-  if (name === "skip" || name === "next") return { kind: "skip" };
-  if (name === "hint") return { kind: "hint" };
-  if (name === "idk") return { kind: "dontknow" };
+
+  const plain = t.toLowerCase().replace(/[.!?,;:]+$/g, "").replace(/\s+/g, " ").trim();
+  if (!plain) return null;
+
+  // Starting phrases work any time.
+  const lead = /^(?:please |ok |okay |hey )?(?:(?:quiz|test|drill|question) me|(?:start|begin|run|do|give me|let'?s do|lets do) (?:a |the |another )?(?:quick |short |new )?quiz|quiz)(?: (?:on|about|from|over) (.+))?$/;
+  const m = lead.exec(plain);
+  if (m) return startFor(m[1] ?? "");
+
+  if (!active) return null;
+  if (/^(?:stop|end|quit|done|enough|i'?m done|stop (?:the )?quiz|end (?:the )?quiz|finish)$/.test(plain)) return { kind: "stop" };
+  if (/^(?:skip|next|skip (?:it|this|this one)|next question|next one|move on)$/.test(plain)) return { kind: "skip" };
+  if (/^(?:hint|a hint|give me a hint|clue|give me a clue|help me out|any hints?)$/.test(plain)) return { kind: "hint" };
   return null;
+}
+
+/** "this" / "this note" / "the active note" mean the active note; anything else is a query; nothing means everything. */
+function startFor(rest: string): QuizCommand {
+  const r = rest.trim();
+  if (!r) return { kind: "start", scope: "all", query: "" };
+  if (/^(?:this|this note|the active note|the open note|the current note|everything|all)$/i.test(r)) {
+    return /^(?:everything|all)$/i.test(r) ? { kind: "start", scope: "all", query: "" } : { kind: "start", scope: "this", query: "" };
+  }
+  return { kind: "start", scope: "query", query: r };
 }
 
 const DONT_KNOW = new Set([

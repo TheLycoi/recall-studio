@@ -575,3 +575,17 @@ test("summary lists a retried passage once", () => {
   assert.equal(misses.length, 2);
   assert.equal(new Set(misses.map((m) => m.unitId)).size, 2);
 });
+
+test("parseQuizCommand understands plain phrases", () => {
+  assert.deepEqual(q.parseQuizCommand("quiz me"), { kind: "start", scope: "all", query: "" });
+  assert.deepEqual(q.parseQuizCommand("Quiz me on receptors!"), { kind: "start", scope: "query", query: "receptors" });
+  assert.deepEqual(q.parseQuizCommand("test me on this note"), { kind: "start", scope: "this", query: "" });
+  assert.deepEqual(q.parseQuizCommand("start a quiz about drug affinity"), { kind: "start", scope: "query", query: "drug affinity" });
+  assert.deepEqual(q.parseQuizCommand("let's do a quick quiz"), { kind: "start", scope: "all", query: "" });
+  assert.equal(q.parseQuizCommand("what is a quiz?"), null);
+  assert.equal(q.parseQuizCommand("next"), null);
+  assert.deepEqual(q.parseQuizCommand("next", true), { kind: "skip" });
+  assert.deepEqual(q.parseQuizCommand("Stop.", true), { kind: "stop" });
+  assert.deepEqual(q.parseQuizCommand("give me a hint", true), { kind: "hint" });
+  assert.equal(q.parseQuizCommand("the next step is absorption", true), null);
+});

@@ -504,7 +504,12 @@ from the vault; nothing is asked that the evidence does not state.
 | `/idk` (or `idk`, `?`, an empty line) | "I don't know": the answer and passage are shown, nothing is graded as wrong |
 | `/stop` | end the quiz and show the summary |
 
-While a quiz runs, anything you type that is not a slash command is your
+Plain phrases work too: "quiz me", "quiz me on receptors", "test me on
+this note", "start a quiz about affinity"; while a quiz runs, "stop",
+"skip", "next", and "give me a hint" act as the commands, and outside a
+quiz those words are ordinary questions.
+
+While a quiz runs, anything else you type that is not a slash command is your
 answer. Each question is written by one model call from the frozen evidence
 pool and carries a verbatim quote that code verifies against the cited
 passage before the question is shown; a draft that fails is regenerated once
