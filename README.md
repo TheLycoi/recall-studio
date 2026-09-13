@@ -531,6 +531,15 @@ origin "quiz miss"), and **Quiz again**.
 Settings: **Questions per quiz** (5), **Evidence pool per quiz** (20
 matching highlights and claims), **Standing instructions for quizzes**.
 
+**What is checked before you see it (0.8.1).** The expected answer must be
+stated in the cited passage; a hint that shares no word with it is dropped; a
+question that contains its own answer or asks for a list is regenerated; the
+grader's quote is shown under the grade only when it is found in the passage,
+and a grade whose quote or feedback strays outside the passage is marked
+*unverified*; a verdict that contradicts plain word overlap (wrong although
+you wrote the expected wording, or right with no overlap and no verified
+quote) carries a note so you can overrule it.
+
 <details>
 <summary><code>QUIZ_QUESTION_SYSTEM</code> (verbatim)</summary>
 
