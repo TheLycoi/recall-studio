@@ -419,9 +419,15 @@ export function summary(session: QuizSession): { line: string; misses: AskedQues
     `${session.dontKnow} passed`,
     `${session.skipped} skipped`,
   ].join(" · ");
-  const misses = session.asked.filter(
-    (a) => a.verdict === "incorrect" || a.verdict === "partial" || a.verdict === "dontknow",
-  );
+  // One entry per passage: a retried passage was asked twice, but it is one
+  // thing to review and one thing to send to the inbox.
+  const seen = new Set<string>();
+  const misses = session.asked.filter((a) => {
+    if (!(a.verdict === "incorrect" || a.verdict === "partial" || a.verdict === "dontknow")) return false;
+    if (seen.has(a.unitId)) return false;
+    seen.add(a.unitId);
+    return true;
+  });
   return { line, misses };
 }
 

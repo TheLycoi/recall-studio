@@ -564,3 +564,14 @@ test("renderSummaryMarkdown says so when nothing was missed", () => {
   assert.match(md, /No misses\./);
   assert.equal(md.includes("**Missed:**"), false);
 });
+
+test("summary lists a retried passage once", () => {
+  let s = session(3);
+  s = ask(s, { evidence_n: 1 }, "incorrect", "wrong");
+  // the retry asks the same passage again from another angle
+  s = ask(s, { evidence_n: 1, question: "Same passage, other angle?" }, "incorrect", "wrong again");
+  s = ask(s, { evidence_n: 2, quote: "the strength with which a drug binds its receptor", answer: "the strength of binding" }, "dontknow", "");
+  const { misses } = q.summary(s);
+  assert.equal(misses.length, 2);
+  assert.equal(new Set(misses.map((m) => m.unitId)).size, 2);
+});
