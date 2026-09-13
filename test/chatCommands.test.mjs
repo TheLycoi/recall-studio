@@ -35,14 +35,15 @@ const EXPECTED = [
   ["extract-pdf-highlights", "Extract PDF highlights to manifest"],
   ["digest-pdf-highlights", "Digest PDF highlights into topic notes…"],
   ["digest-pdf-highlights-from-json", "Digest PDF highlights from pasted model output…"],
+  ["ai-highlight-pdf", "AI-highlight this PDF into the wiki…"],
   ["open-chat", "Ask the notes"],
   ["open-inbox", "Open inbox"],
   ["export-reviewed", "Export all reviewed cards to Anki"],
   ["retry-failed", "Retry failed highlights"],
 ];
 
-test("COMMAND_TABLE holds the fifteen (id, name) pairs verbatim and in order", () => {
-  assert.equal(table.COMMAND_TABLE.length, 15);
+test("COMMAND_TABLE holds the sixteen (id, name) pairs verbatim and in order", () => {
+  assert.equal(table.COMMAND_TABLE.length, 16);
   assert.deepEqual(
     table.COMMAND_TABLE.map((c) => [c.id, c.name]),
     EXPECTED,
@@ -151,7 +152,7 @@ test("renderHelp lists one line per command", () => {
   const lines = cc
     .renderHelp(table.COMMAND_TABLE.map((c) => ({ id: c.id, name: c.name, aliases: c.aliases, hint: c.hint, available: c.hint === "always" })))
     .split("\n");
-  assert.equal(lines.length, 15);
+  assert.equal(lines.length, table.COMMAND_TABLE.length);
   for (const line of lines) assert.ok(line.startsWith("- **/"), `bad help line: ${line}`);
   assert.ok(lines.some((l) => l.includes("(available)")));
   assert.ok(lines.some((l) => l.includes("(not now)")));

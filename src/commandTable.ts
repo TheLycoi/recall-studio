@@ -86,6 +86,12 @@ export const COMMAND_TABLE: CommandSpec[] = [
     hint: "needs an open PDF or manifest note",
   },
   {
+    id: "ai-highlight-pdf",
+    name: "AI-highlight this PDF into the wiki…",
+    aliases: ["suggest"],
+    hint: "needs an open PDF",
+  },
+  {
     id: "open-chat",
     name: "Ask the notes",
     aliases: ["chat", "ask"],

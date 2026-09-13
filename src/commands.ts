@@ -16,6 +16,7 @@ import { aiHighlightNote, captureMarkdownHighlights, capturePdfSelection, captur
 import { isPdfFile, readPdfSelection } from "./pdf";
 import { isManifestNote } from "./pdfHighlights";
 import { digestPdf, extractPdfHighlights } from "./digest";
+import { suggestPdfHighlights } from "./suggest";
 import { askInstruction, askTranscript } from "./modals";
 import { normalizeTranscript, truncateTranscript } from "./util";
 
@@ -173,6 +174,14 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
       const file = p.app.workspace.getActiveFile();
       if (!file || !(isPdfFile(file) || isManifestNote(p, file))) return;
       void digestPdf(p, file, "paste");
+    },
+  },
+  "ai-highlight-pdf": {
+    available: (p) => isPdfFile(p.app.workspace.getActiveFile()),
+    run: (p) => {
+      const file = p.app.workspace.getActiveFile();
+      if (!file || !isPdfFile(file)) return;
+      void suggestPdfHighlights(p, file);
     },
   },
   "open-chat": {
