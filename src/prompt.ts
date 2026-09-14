@@ -116,10 +116,10 @@ export interface AskMessageArgs {
  * just before the question, the same place the highlighter and digest messages
  * put theirs.
  *
- * The last line restates the order of work the schema expects (quotes first,
- * then one sentence at a time with its numbers). It sits after the question
- * rather than before the evidence because it is the task, and the task reads
- * last for the same reason the question does.
+ * The last line restates the order of work the schema expects: answer, then
+ * name the pieces it rests on. It sits after the question rather than before
+ * the evidence because it is the task, and the task reads last for the same
+ * reason the question does.
  */
 export function buildAskMessage(a: AskMessageArgs): string {
   const lines = askEvidenceLines(a.evidence);
@@ -130,7 +130,7 @@ export function buildAskMessage(a: AskMessageArgs): string {
     history ? `<history>\n${history}\n</history>` : "",
     standing ? `Standing instructions: ${standing}` : "",
     `Question: ${a.question.trim()}`,
-    `Extract the passages you will rely on first, then write the answer one sentence at a time, each claim with the numbers of the evidence that states it.`,
+    `Answer from the evidence above, then name in used the one or two pieces the answer rests on.`,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -141,31 +141,6 @@ function askEvidenceLines(evidence: AskEvidenceIn[]): string {
   return evidence.map((e) => `[${e.n}] (${e.noteTitle}${e.page === null ? "" : `, p.${e.page}`}) ${e.text}`).join("\n");
 }
 
-/** One drafted sentence as the verify prompt sees it: its index in the draft, its text, and the numbers it cited. */
-export interface VerifyMessageArgs {
-  evidence: AskEvidenceIn[];
-  sentences: Array<{ i: number; text: string; cited: number[] }>;
-}
-
-/**
- * Build the user message for the optional verify pass.
- *
- * Same order as the ask message: the evidence first, then the material to
- * judge, then the task. The citations are printed as `[1][3]` after each
- * sentence, the same shape the assembled answer shows the reader, so the model
- * is judging the sentence in the form it will be read in. A sentence that
- * cited nothing prints `[]`, which is visibly not a citation.
- */
-export function buildVerifyMessage(a: VerifyMessageArgs): string {
-  const draft = a.sentences
-    .map((s) => `${s.i}. ${s.text} ${s.cited.length ? s.cited.map((n) => `[${n}]`).join("") : "[]"}`)
-    .join("\n");
-  return [
-    `<evidence>\n${askEvidenceLines(a.evidence)}\n</evidence>`,
-    `<draft>\n${draft}\n</draft>`,
-    `Judge each sentence: supported only if the cited evidence states it.`,
-  ].join("\n\n");
-}
 
 /** A quiz question is written from the same numbered evidence Ask answers from, so the two share one shape. */
 export type QuizEvidenceIn = AskEvidenceIn;
@@ -311,4 +286,45 @@ export function buildSuggestMessage(a: SuggestMessageArgs): string {
 function cut(text: string, n: number): string {
   const t = text.trim();
   return t.length > n ? `${t.slice(0, n)}…` : t;
+}
+
+/** One question to turn into search terms for the reader's own notes. */
+export interface KeywordsMessageArgs {
+  question: string;
+  /** Note titles in the vault, so the terms can be aimed at what is actually there. */
+  noteTitles: string[];
+}
+
+/**
+ * The keyword call's system prompt.
+ *
+ * Language-agnostic on purpose, as upstream: the model detects the question's
+ * language and answers in it, rather than a hardcoded pair of languages that
+ * breaks for everyone else. Concept names, not question words — "what is the
+ * therapeutic index" searched for "what" and "index" finds nothing; searched
+ * for "therapeutic index", "safety margin", "LD50" it finds the passage.
+ */
+export const KEYWORDS_SYSTEM = `You turn a reader's question into search terms for their own notes.
+
+The notes are study notes: lecture highlights, definitions, and claims, written in the reader's own words. A plain keyword search over them has already failed or done badly, which is why you are being asked. Your job is to guess the words the notes themselves would use for the thing being asked about.
+
+Rules:
+- Detect the question's language and give terms in that language. Add the English equivalent as well when the concept has a standard English term, because study notes often keep the English name.
+- Concept names and noun phrases, not questions. "contrastive learning", not "what is contrastive learning".
+- Include synonyms, abbreviations and expansions: an abbreviation the question uses should appear spelled out, and a spelled-out term should appear abbreviated.
+- Include the narrower terms a note would use for the thing asked about, not just the broad topic.
+- If the question names something exactly, include that term verbatim.
+- Five to ten terms, each one to five words, most specific first.`;
+
+export function buildKeywordsMessage(a: KeywordsMessageArgs): string {
+  const titles = a.noteTitles.slice(0, 200);
+  const parts = [`<question>\n${a.question.trim()}\n</question>`];
+  if (titles.length > 0) {
+    // The titles are a hint, not a menu: a term that matches none of them is
+    // still useful, because the passages inside a note carry words its title
+    // never mentions.
+    parts.push(`<note_titles>\n${titles.join("\n")}\n</note_titles>`);
+  }
+  parts.push("Give the search terms as JSON.");
+  return parts.join("\n\n");
 }

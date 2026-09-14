@@ -1,157 +1,99 @@
 /**
- * Assembly and grounding checks for an Ask answer.
+ * Assembly for an Ask answer, and the sources shown under it.
  *
- * The model no longer writes the answer as prose with citations inside it. It
- * returns a draft — the passages it leaned on, then one sentence at a time with
- * the evidence numbers that state each one — and this file turns that draft
- * into the text the reader sees. Everything here is a rule you can check by
- * counting, in the spirit of `ungroundedClozes` in src/util.ts: a quote is kept
- * only when it is really in the evidence it claims to come from, and a claim is
- * kept only when it cites evidence that exists. Nothing trusts the prose to
- * have policed itself.
+ * The model returns prose and the evidence numbers it drew on. This file turns
+ * that into what the reader sees: the answer, then the one or two notes behind
+ * it as links they can click.
  *
- * Pure: imports `normalizePlain` and three types, so `test/askCheck.test.mjs`
- * can bundle it without an Obsidian runtime or a backend.
+ * Grounding is not done here by re-reading the model's words. It is done in
+ * the prompt — answer from the evidence given and say so when it does not
+ * cover the question — which is where the wiki upstream
+ * (gd4ai/obsidian-llm-wiki, `assembleWikiContext`) puts it too. The check that
+ * remains is the one worth keeping: a citation must point at a piece of
+ * evidence that exists, so the link under an answer always opens a real note.
+ *
+ * The verification that used to live here — every quote matched character by
+ * character against its evidence, any sentence whose quote was not found
+ * deleted — was strict enough to be its own failure mode. A faithful sentence
+ * lost because the model tidied a quote is a worse answer than the sentence,
+ * and the evidence wall it justified made the reply harder to read than the
+ * notes it came from.
+ *
+ * Pure: imports two types, so `test/askCheck.test.mjs` can bundle it without
+ * an Obsidian runtime or a backend.
  */
-import { normalizePlain } from "./util";
-import type { AskDraft, VerifyDraft } from "./schemas";
+import type { AskDraft } from "./schemas";
 import type { AskEvidenceIn } from "./prompt";
 
-/** What the checks found: what was kept, what was dropped, and whether anything had to be dropped at all. */
+/** One note behind an answer: which evidence, and what it contributed. */
+export interface AnswerSource {
+  n: number;
+  why: string;
+}
+
+/** What the answer was built from, for the line and the links under it. */
 export interface GroundingReport {
   coverage: "full" | "partial" | "none";
-  kept: number;
-  removed: number;
-  quotesVerified: Array<{ n: number; quote: string }>;
-  quotesRejected: Array<{ n: number; quote: string }>;
-  cited: number[];
-  verified: boolean;
-  /** True when the optional verify pass ran and its verdicts were applied. */
-  verifyRan: boolean;
+  /** The evidence the answer actually drew on, in the model's order, capped. */
+  sources: AnswerSource[];
+  /** Citations the model gave that pointed at no evidence. */
+  dropped: number;
+  /**
+   * The answer came from the model's general knowledge, not the notes.
+   *
+   * The reader is warned above it. Upstream does the same thing rather than
+   * refusing to answer (gd4ai/obsidian-llm-wiki, `assembleWikiContext`): a
+   * useful answer the reader knows to check beats no answer, as long as the
+   * label is impossible to miss.
+   */
+  fromGeneralKnowledge: boolean;
 }
 
-/** Shown when every sentence the model drafted was dropped. */
-const NOTHING_SUPPORTED = "Your notes don't say. None of the sentences the model drafted was supported by the evidence.";
+/** How many sources are shown under an answer. Two is enough to confirm one; more is a wall. */
+export const MAX_SOURCES = 2;
 
-/** A gap sentence says what the evidence does not cover; it must read like one. */
-const GAP_MARKERS = /\b(not|no|nothing|none|missing|absent|silent|cover|covers|covered|mention|mentions|mentioned|does not|do not|doesn't|don't|isn't|aren't|unclear|unknown)\b|n't\b/i;
-export function isGapStatement(text: string): boolean {
-  return GAP_MARKERS.test(text);
-}
+/** Shown when the model answered with nothing at all. */
+const NOTHING_SAID = "The model returned an empty answer. Ask again, or rephrase the question.";
 
 /**
- * Check a draft against its evidence and assemble the answer.
+ * Assemble the answer and the sources under it.
  *
- * Quotes are verified by normalised substring: a paraphrase is rejected even
- * when its meaning is in the evidence, which is the point — the check is on the
- * words, not on the sense. Claims that cite nothing valid are removed and
- * counted, so an answer can shrink to nothing and say so.
+ * A citation outside `1…evidence.length` is dropped and counted: the model
+ * naming evidence 9 of 6 would otherwise render a link that opens nothing.
+ * Sources are capped at `MAX_SOURCES` because the point is to confirm the
+ * answer, not to reprint the search results — the reader who wants the rest
+ * can open the note.
  */
 export function checkAnswer(draft: AskDraft, evidence: AskEvidenceIn[]): { answer: string; report: GroundingReport } {
   const max = evidence.length;
+  const answer = draft.answer.trim();
 
-  const quotesVerified: Array<{ n: number; quote: string }> = [];
-  const quotesRejected: Array<{ n: number; quote: string }> = [];
-  for (const q of draft.quotes) {
-    const needle = normalizePlain(q.quote);
-    const inRange = Number.isInteger(q.n) && q.n >= 1 && q.n <= max;
-    const ok = inRange && needle.length > 0 && normalizePlain(evidence[q.n - 1].text).includes(needle);
-    (ok ? quotesVerified : quotesRejected).push(q);
-  }
-
-  // A `none` answer may only state what the notes do not cover; any claim it
-  // carries contradicts its own coverage, so it goes.
-  const noneCoverage = draft.coverage === "none";
-  const kept: Array<{ text: string; cited: number[] }> = [];
-  let removed = 0;
-  for (const s of draft.sentences) {
-    const cited = cleanCitations(s.cited, max);
-    if (s.kind === "claim" || !isGapStatement(s.text)) {
-      // A "gap" sentence that asserts something is a claim wearing the wrong
-      // label; it needs a citation like any other claim.
-      if (noneCoverage || cited.length === 0 || s.kind !== "claim") {
-        removed++;
-        continue;
-      }
-      kept.push({ text: stripMarkers(s.text), cited });
+  const seen = new Set<number>();
+  const sources: AnswerSource[] = [];
+  let dropped = 0;
+  for (const u of draft.used) {
+    if (!Number.isInteger(u.n) || u.n < 1 || u.n > max) {
+      dropped++;
       continue;
     }
-    kept.push({ text: stripMarkers(s.text), cited: [] });
+    if (seen.has(u.n)) continue;
+    seen.add(u.n);
+    if (sources.length < MAX_SOURCES) sources.push({ n: u.n, why: u.why.trim() });
   }
 
-  const answer = renderAnswer(kept);
-  const empty = answer.length === 0;
-
-  const cited = new Set<number>();
-  if (!empty) for (const s of kept) for (const n of s.cited) cited.add(n);
+  // A general-knowledge answer names no source: it did not come from one.
+  // Trusting the flag over the citations would let a model both cite a note
+  // and disclaim it, and the reader would see a source under a warning.
+  const fromGeneralKnowledge = draft.from_general_knowledge && sources.length === 0;
 
   return {
-    answer: empty ? NOTHING_SUPPORTED : answer,
+    answer: answer.length > 0 ? answer : NOTHING_SAID,
     report: {
-      coverage: empty ? "none" : draft.coverage,
-      kept: empty ? 0 : kept.length,
-      removed,
-      quotesVerified,
-      quotesRejected,
-      cited: [...cited].sort((a, b) => a - b),
-      verified: removed === 0 && quotesRejected.length === 0,
-      verifyRan: false,
+      coverage: answer.length > 0 ? draft.coverage : "none",
+      sources,
+      dropped,
+      fromGeneralKnowledge,
     },
-  };
-}
-
-/** Citations that point at evidence that exists, each once, in order. */
-function cleanCitations(cited: number[], max: number): number[] {
-  const out = new Set<number>();
-  for (const n of cited) if (Number.isInteger(n) && n >= 1 && n <= max) out.add(n);
-  return [...out].sort((a, b) => a - b);
-}
-
-/**
- * Remove `[n]` markers the model wrote inside a sentence despite being told not
- * to, and close the gap they leave behind: the software appends the citations
- * itself, and two of them in the same sentence would be worse than none.
- */
-function stripMarkers(text: string): string {
-  return text
-    .replace(/\[\d+\]/g, "")
-    .replace(/ {2,}/g, " ")
-    .replace(/\s+([.,])/g, "$1")
-    .trim();
-}
-
-/** Kept sentences in order; list items start their own line so consecutive ones read as a list. */
-function renderAnswer(kept: Array<{ text: string; cited: number[] }>): string {
-  let out = "";
-  let prevWasItem = false;
-  for (const s of kept) {
-    if (!s.text) continue;
-    const isItem = s.text.startsWith("- ");
-    const piece = s.cited.length ? `${s.text} ${s.cited.map((n) => `[${n}]`).join("")}` : s.text;
-    if (!out) out = piece;
-    // A list item starts its own line; a plain sentence after a list starts a
-    // new paragraph, so it is not glued onto the last item.
-    else out += (isItem ? "\n" : prevWasItem ? "\n\n" : " ") + piece;
-    prevWasItem = isItem;
-  }
-  return out.trim();
-}
-
-/**
- * Fold the verify pass's verdicts into a draft.
- *
- * An unsupported claim has its citations cleared rather than being spliced out
- * here, so `checkAnswer` stays the one place that decides what a missing
- * citation means and the one place that counts it.
- */
-export function applyVerdicts(draft: AskDraft, verdicts: VerifyDraft): AskDraft {
-  const unsupported = new Set<number>();
-  for (const v of verdicts.verdicts) {
-    if (!v.supported && Number.isInteger(v.i) && v.i >= 0 && v.i < draft.sentences.length) unsupported.add(v.i);
-  }
-  return {
-    ...draft,
-    sentences: draft.sentences.map((s, i) => (s.kind === "claim" && unsupported.has(i) ? { ...s, cited: [] } : { ...s })),
   };
 }
 
@@ -162,33 +104,48 @@ export function applyVerdicts(draft: AskDraft, verdicts: VerifyDraft): AskDraft 
  */
 export function noEvidenceAnswer(question: string): { answer: string; report: GroundingReport } {
   return {
-    answer: `Your notes don't cover this: no highlight or claim under the topic notes matches “${question.trim()}”. Digest the lecture that covers it, then ask again.`,
-    report: {
-      coverage: "none",
-      kept: 1,
-      removed: 0,
-      quotesVerified: [],
-      quotesRejected: [],
-      cited: [],
-      verified: true,
-      verifyRan: false,
-    },
+    answer: `Your notes don't cover this: nothing under the topic notes matches “${question.trim()}”. Digest the lecture that covers it, then ask again.`,
+    report: { coverage: "none", sources: [], dropped: 0, fromGeneralKnowledge: false },
   };
 }
 
-/** One line under the answer saying what the checks did. Zero parts are left out, except "kept". */
-export function renderGroundingLine(r: GroundingReport): string {
-  const parts = [
-    r.coverage === "full" ? "full coverage" : r.coverage === "partial" ? "partial coverage" : "no coverage",
-    `${r.kept} ${plural(r.kept, "sentence")} kept`,
-  ];
-  if (r.removed > 0) parts.push(`${r.removed} unsupported removed`);
-  if (r.quotesVerified.length > 0) parts.push(`${r.quotesVerified.length} ${plural(r.quotesVerified.length, "quote")} verified`);
-  if (r.quotesRejected.length > 0) parts.push(`${r.quotesRejected.length} ${plural(r.quotesRejected.length, "quote")} rejected`);
-  if (r.verifyRan) parts.push("verify pass");
-  return `Grounding: ${parts.join(" · ")}`;
+/**
+ * The answer when the topic folder holds no indexable note at all.
+ *
+ * Distinct from `noEvidenceAnswer`: that one says the notes do not cover a
+ * question, which is a statement about the vault. This one says the search
+ * never read a note, which is a statement about a setting — reporting it as
+ * missing coverage sends the reader off to digest a lecture they may already
+ * have digested somewhere the search is not looking.
+ */
+export function emptyIndexAnswer(folderPrefix: string): { answer: string; report: GroundingReport } {
+  const folder = folderPrefix.replace(/\/+$/, "");
+  return {
+    answer:
+      `No notes were searched: the topic notes folder “${folder}” has no markdown notes in this vault. ` +
+      `Point “Topic notes folder” in Recall's settings at the folder your notes are in, then ask again.`,
+    report: { coverage: "none", sources: [], dropped: 0, fromGeneralKnowledge: false },
+  };
 }
 
-function plural(n: number, word: string): string {
-  return n === 1 ? word : `${word}s`;
+/** The warning shown above an answer the notes did not supply. */
+export const VERIFY_BANNER = "Not from your notes — answered from general knowledge. Verify this before relying on it.";
+
+/**
+ * The one line under an answer: how well the notes covered it.
+ *
+ * Short by design. The old line counted sentences kept, sentences removed and
+ * quotes verified — numbers that only meant anything if you knew what the
+ * checker did. Coverage is the part a reader can act on: "partial" means go
+ * and look, "none" means the notes do not have it.
+ */
+export function renderGroundingLine(r: GroundingReport): string {
+  const coverage = r.fromGeneralKnowledge
+    ? "General knowledge, not your notes"
+    : r.coverage === "full"
+      ? "Answered from your notes"
+      : r.coverage === "partial"
+        ? "Partly answered from your notes"
+        : "Not in your notes";
+  return r.dropped > 0 ? `${coverage} · ${r.dropped} bad ${r.dropped === 1 ? "citation" : "citations"} dropped` : coverage;
 }

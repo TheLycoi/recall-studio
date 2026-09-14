@@ -18,119 +18,72 @@ before(async () => {
 const EVIDENCE = [
   { n: 1, noteTitle: "Receptors", page: 3, text: "Receptors bind ligands with high affinity" },
   { n: 2, noteTitle: "Plasma Proteins", page: 4, text: "Albumin binds drugs but does not transduce a signal" },
+  { n: 3, noteTitle: "Receptors", page: 5, text: "Only a receptor transduces a signal" },
 ];
 
-const claim = (text, cited) => ({ text, kind: "claim", cited });
-const gap = (text) => ({ text, kind: "gap", cited: [] });
-const draft = (coverage, quotes, sentences) => ({ coverage, quotes, sentences });
-
-const TWO_CLAIMS = [claim("Receptors bind ligands with high affinity.", [1]), claim("Albumin does not transduce a signal.", [2])];
-const ONE_QUOTE = [{ n: 1, quote: "bind ligands with high affinity" }];
-
-test("a fully supported draft keeps both sentences and appends their citations", () => {
-  const { answer, report } = ac.checkAnswer(draft("full", ONE_QUOTE, TWO_CLAIMS), EVIDENCE);
-  assert.equal(answer, "Receptors bind ligands with high affinity. [1] Albumin does not transduce a signal. [2]");
-  assert.equal(report.kept, 2);
-  assert.equal(report.removed, 0);
-  assert.equal(report.quotesVerified.length, 1);
-  assert.equal(report.quotesRejected.length, 0);
-  assert.equal(report.verified, true);
+test("checkAnswer keeps the prose as written", () => {
+  const draft = {
+    coverage: "full", from_general_knowledge: false,
+    answer: "Both bind drugs, but only a receptor transduces a signal.",
+    used: [{ n: 1, why: "defines binding" }],
+  };
+  const { answer, report } = ac.checkAnswer(draft, EVIDENCE);
+  // No sentence splitting, no citation markers appended: what the model wrote
+  // is what the reader sees.
+  assert.equal(answer, "Both bind drugs, but only a receptor transduces a signal.");
+  assert.equal(report.coverage, "full");
+  assert.deepEqual(report.sources, [{ n: 1, why: "defines binding" }]);
 });
 
-test("cited is the union of the kept claims' citations, ascending", () => {
-  const { report } = ac.checkAnswer(draft("full", ONE_QUOTE, TWO_CLAIMS), EVIDENCE);
-  assert.deepEqual(report.cited, [1, 2]);
+test("checkAnswer caps the sources at two, best first", () => {
+  const draft = {
+    coverage: "full", from_general_knowledge: false,
+    answer: "An answer.",
+    used: [
+      { n: 3, why: "states the distinction" },
+      { n: 1, why: "defines binding" },
+      { n: 2, why: "the contrast case" },
+    ],
+  };
+  const { report } = ac.checkAnswer(draft, EVIDENCE);
+  assert.equal(report.sources.length, ac.MAX_SOURCES);
+  assert.deepEqual(report.sources.map((s) => s.n), [3, 1]);
 });
 
-test("a claim that cites nothing is removed and counted", () => {
-  const sentences = [TWO_CLAIMS[0], claim("Albumin does not transduce a signal.", [])];
-  const { answer, report } = ac.checkAnswer(draft("full", ONE_QUOTE, sentences), EVIDENCE);
-  assert.equal(answer, "Receptors bind ligands with high affinity. [1]");
-  assert.equal(report.kept, 1);
-  assert.equal(report.removed, 1);
-  assert.equal(report.verified, false);
+test("checkAnswer drops a citation pointing past the evidence and counts it", () => {
+  const draft = { coverage: "full", from_general_knowledge: false, answer: "An answer.", used: [{ n: 9, why: "invented" }, { n: 2, why: "real" }] };
+  const { report } = ac.checkAnswer(draft, EVIDENCE);
+  assert.deepEqual(report.sources, [{ n: 2, why: "real" }]);
+  assert.equal(report.dropped, 1);
 });
 
-test("a claim citing evidence that does not exist is removed", () => {
-  const sentences = [TWO_CLAIMS[0], claim("Albumin does not transduce a signal.", [9])];
-  const { answer, report } = ac.checkAnswer(draft("full", ONE_QUOTE, sentences), EVIDENCE);
-  assert.equal(answer, "Receptors bind ligands with high affinity. [1]");
-  assert.equal(report.kept, 1);
-  assert.equal(report.removed, 1);
-  assert.equal(report.verified, false);
+test("checkAnswer drops a non-integer or zero citation", () => {
+  const draft = { coverage: "full", from_general_knowledge: false, answer: "An answer.", used: [{ n: 0, why: "" }, { n: 1.5, why: "" }] };
+  const { report } = ac.checkAnswer(draft, EVIDENCE);
+  assert.deepEqual(report.sources, []);
+  assert.equal(report.dropped, 2);
 });
 
-test("a quote that is not in its evidence is rejected", () => {
-  const quotes = [{ n: 2, quote: "transduces a signal strongly" }];
-  const { report } = ac.checkAnswer(draft("full", quotes, TWO_CLAIMS), EVIDENCE);
-  assert.equal(report.quotesVerified.length, 0);
-  assert.deepEqual(report.quotesRejected, quotes);
-  assert.equal(report.verified, false);
+test("checkAnswer ignores a repeated citation without counting it as bad", () => {
+  const draft = { coverage: "full", from_general_knowledge: false, answer: "An answer.", used: [{ n: 1, why: "first" }, { n: 1, why: "again" }] };
+  const { report } = ac.checkAnswer(draft, EVIDENCE);
+  assert.deepEqual(report.sources, [{ n: 1, why: "first" }]);
+  assert.equal(report.dropped, 0);
 });
 
-test("a quote is verified through case and punctuation differences", () => {
-  const quotes = [{ n: 1, quote: "BIND LIGANDS, with high-affinity" }];
-  const { report } = ac.checkAnswer(draft("full", quotes, TWO_CLAIMS), EVIDENCE);
-  assert.deepEqual(report.quotesVerified, quotes);
-  assert.equal(report.quotesRejected.length, 0);
-  assert.equal(report.verified, true);
-});
-
-test("a none-coverage answer keeps its gap sentence and drops every claim", () => {
-  const sentences = [gap("Your notes do not mention half-life."), claim("Aspirin's half-life is 20 minutes.", [1])];
-  const { answer, report } = ac.checkAnswer(draft("none", [], sentences), EVIDENCE);
-  assert.equal(answer, "Your notes do not mention half-life.");
-  assert.equal(report.kept, 1);
-  assert.equal(report.removed, 1);
+test("checkAnswer keeps a none-coverage answer and its empty source list", () => {
+  const draft = { coverage: "none", from_general_knowledge: false, answer: "Your notes do not cover this.", used: [] };
+  const { answer, report } = ac.checkAnswer(draft, EVIDENCE);
+  assert.equal(answer, "Your notes do not cover this.");
   assert.equal(report.coverage, "none");
+  assert.deepEqual(report.sources, []);
 });
 
-test("an [n] marker written inside a sentence is stripped before the citation is appended", () => {
-  const sentences = [claim("Receptors bind ligands [1].", [1])];
-  const { answer } = ac.checkAnswer(draft("full", [], sentences), EVIDENCE);
-  assert.equal(answer, "Receptors bind ligands. [1]");
-});
-
-test("consecutive list items each start on their own line", () => {
-  const sentences = [claim("- A", [1]), claim("- B", [2])];
-  const { answer } = ac.checkAnswer(draft("full", [], sentences), EVIDENCE);
-  assert.equal(answer, "- A [1]\n- B [2]");
-});
-
-test("a draft whose every sentence is removed falls back and forces coverage none", () => {
-  const sentences = [claim("Receptors bind ligands with high affinity.", []), claim("Albumin does not transduce a signal.", [])];
-  const { answer, report } = ac.checkAnswer(draft("full", [], sentences), EVIDENCE);
-  assert.equal(answer, "Your notes don't say. None of the sentences the model drafted was supported by the evidence.");
+test("checkAnswer falls back when the model returned nothing", () => {
+  const { answer, report } = ac.checkAnswer({ coverage: "full", from_general_knowledge: false, answer: "   ", used: [{ n: 1, why: "x" }] }, EVIDENCE);
+  assert.match(answer, /empty answer/);
+  // An answer with no text cannot be "full" whatever the model claimed.
   assert.equal(report.coverage, "none");
-  assert.equal(report.removed, 2);
-  assert.equal(report.verified, false);
-});
-
-test("the fallback answer reports nothing kept", () => {
-  const sentences = [claim("Receptors bind ligands with high affinity.", [])];
-  const { report } = ac.checkAnswer(draft("full", [], sentences), EVIDENCE);
-  assert.equal(report.kept, 0);
-});
-
-test("applyVerdicts clears the citations of a sentence judged unsupported", () => {
-  const d = draft("full", ONE_QUOTE, TWO_CLAIMS);
-  const next = ac.applyVerdicts(d, { verdicts: [{ i: 1, supported: false, reason: "not stated" }] });
-  assert.deepEqual(next.sentences[1].cited, []);
-  assert.deepEqual(next.sentences[0].cited, [1]);
-  assert.deepEqual(d.sentences[1].cited, [2], "the original draft is not mutated");
-});
-
-test("applyVerdicts ignores a verdict index outside the draft", () => {
-  const d = draft("full", ONE_QUOTE, TWO_CLAIMS);
-  const next = ac.applyVerdicts(d, { verdicts: [{ i: 7, supported: false, reason: "nowhere" }] });
-  assert.deepEqual(next.sentences.map((s) => s.cited), [[1], [2]]);
-});
-
-test("applyVerdicts leaves a gap sentence alone", () => {
-  const d = draft("partial", [], [gap("Your notes do not mention half-life.")]);
-  const next = ac.applyVerdicts(d, { verdicts: [{ i: 0, supported: false, reason: "no citation" }] });
-  assert.equal(next.sentences[0].kind, "gap");
-  assert.deepEqual(next.sentences[0].cited, []);
 });
 
 test("noEvidenceAnswer names the question and the fix", () => {
@@ -138,75 +91,42 @@ test("noEvidenceAnswer names the question and the fix", () => {
   assert.match(answer, /half-life/);
   assert.match(answer, /Digest the lecture/);
   assert.equal(report.coverage, "none");
-  assert.equal(report.kept, 1);
-  assert.equal(report.removed, 0);
-  assert.deepEqual(report.cited, []);
-  assert.equal(report.quotesVerified.length, 0);
-  assert.equal(report.verified, true);
+  assert.deepEqual(report.sources, []);
 });
 
-test("renderGroundingLine omits the zero parts", () => {
-  const line = ac.renderGroundingLine({
-    coverage: "full",
-    kept: 2,
-    removed: 0,
-    quotesVerified: [{ n: 1, quote: "x" }],
-    quotesRejected: [],
-    cited: [1],
-    verified: true,
-  });
-  assert.equal(line, "Grounding: full coverage · 2 sentences kept · 1 quote verified");
+test("emptyIndexAnswer blames the setting, not the notes", () => {
+  const { answer, report } = ac.emptyIndexAnswer("classes/");
+  assert.match(answer, /No notes were searched/);
+  assert.match(answer, /classes/);
+  assert.doesNotMatch(answer, /Digest the lecture/);
+  assert.equal(report.coverage, "none");
 });
 
-test("renderGroundingLine reports removals and rejections when there are any", () => {
-  const line = ac.renderGroundingLine({
-    coverage: "partial",
-    kept: 3,
-    removed: 1,
-    quotesVerified: [{ n: 1, quote: "x" }, { n: 2, quote: "y" }],
-    quotesRejected: [{ n: 2, quote: "z" }],
-    cited: [1, 2],
-    verified: false,
-  });
-  assert.equal(line, "Grounding: partial coverage · 3 sentences kept · 1 unsupported removed · 2 quotes verified · 1 quote rejected");
+test("renderGroundingLine states coverage in words the reader can act on", () => {
+  assert.equal(ac.renderGroundingLine({ coverage: "full", sources: [], dropped: 0, fromGeneralKnowledge: false }), "Answered from your notes");
+  assert.equal(ac.renderGroundingLine({ coverage: "partial", sources: [], dropped: 0, fromGeneralKnowledge: false }), "Partly answered from your notes");
+  assert.equal(ac.renderGroundingLine({ coverage: "none", sources: [], dropped: 0, fromGeneralKnowledge: false }), "Not in your notes");
 });
 
-test("renderGroundingLine uses the singular for one sentence and says no coverage", () => {
-  const line = ac.renderGroundingLine({
-    coverage: "none",
-    kept: 1,
-    removed: 0,
-    quotesVerified: [],
-    quotesRejected: [],
-    cited: [],
-    verified: true,
-  });
-  assert.equal(line, "Grounding: no coverage · 1 sentence kept");
+test("renderGroundingLine mentions dropped citations only when there are any", () => {
+  assert.equal(ac.renderGroundingLine({ coverage: "full", sources: [], dropped: 1, fromGeneralKnowledge: false }), "Answered from your notes · 1 bad citation dropped");
+  assert.equal(ac.renderGroundingLine({ coverage: "full", sources: [], dropped: 2, fromGeneralKnowledge: false }), "Answered from your notes · 2 bad citations dropped");
 });
 
-test("a plain sentence after list items starts a new paragraph", () => {
-  const evidence = [{ n: 1, noteTitle: "T", page: 1, text: "alpha beta" }, { n: 2, noteTitle: "T", page: 1, text: "gamma delta" }];
-  const draft = { coverage: "full", quotes: [], sentences: [
-    { text: "The stages are:", kind: "claim", cited: [1] },
-    { text: "- Alpha", kind: "claim", cited: [1] },
-    { text: "- Gamma", kind: "claim", cited: [2] },
-    { text: "Alpha comes first.", kind: "claim", cited: [1] },
-  ] };
-  const { answer } = ac.checkAnswer(draft, evidence);
-  assert.equal(answer, "The stages are: [1]\n- Alpha [1]\n- Gamma [2]\n\nAlpha comes first. [1]");
+test("a general-knowledge answer is flagged and carries no source", () => {
+  const draft = { coverage: "none", from_general_knowledge: true, answer: "In general, first-pass metabolism is…", used: [] };
+  const { report } = ac.checkAnswer(draft, EVIDENCE);
+  assert.equal(report.fromGeneralKnowledge, true);
+  assert.deepEqual(report.sources, []);
+  assert.match(ac.renderGroundingLine(report), /General knowledge/);
+  assert.match(ac.VERIFY_BANNER, /Verify this/);
 });
 
-test("a gap sentence must state a gap; otherwise it is an uncited claim and removed", () => {
-  const evidence = [{ n: 1, noteTitle: "T", page: 1, text: "Pharmacokinetics is what the body does to drugs." }];
-  const draft = { coverage: "partial", quotes: [], sentences: [
-    { text: "Your notes do not mention half-life.", kind: "gap", cited: [] },
-    { text: "Aspirin's half-life is 20 minutes.", kind: "gap", cited: [] },
-    { text: "Pharmacokinetics is what the body does to drugs.", kind: "claim", cited: [1] },
-  ] };
-  const { answer, report } = ac.checkAnswer(draft, evidence);
-  assert.equal(report.kept, 2);
-  assert.equal(report.removed, 1);
-  assert.doesNotMatch(answer, /20 minutes/);
-  assert.equal(report.verifyRan, false);
-  assert.match(ac.renderGroundingLine({ ...report, verifyRan: true }), / · verify pass$/);
+test("the flag is refused when the model also named a source", () => {
+  // It cannot both come from their notes and from outside them; the citation
+  // is the harder evidence, so the disclaimer is what gives way.
+  const draft = { coverage: "full", from_general_knowledge: true, answer: "An answer.", used: [{ n: 1, why: "defines it" }] };
+  const { report } = ac.checkAnswer(draft, EVIDENCE);
+  assert.equal(report.fromGeneralKnowledge, false);
+  assert.deepEqual(report.sources, [{ n: 1, why: "defines it" }]);
 });

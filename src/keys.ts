@@ -47,6 +47,3 @@ export function resolveApiKey(settingsKey: string): { key: string; source: KeySo
   return { key: "", source: "none" };
 }
 
-export function forgetCachedKey(): void {
-  cache = null;
-}

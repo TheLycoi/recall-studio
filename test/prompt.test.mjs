@@ -241,10 +241,9 @@ test("ask puts standing instructions after the transcript blocks and before the 
   assert.ok(!blank.includes("Standing instructions:"), "blank standing instructions are omitted");
 });
 
-const ASK_INSTRUCTION =
-  "Extract the passages you will rely on first, then write the answer one sentence at a time, each claim with the numbers of the evidence that states it.";
+const ASK_INSTRUCTION = "Answer from the evidence above, then name in used the one or two pieces the answer rests on.";
 
-test("the ask message ends with the extract-then-write instruction, after the question", () => {
+test("the ask message ends with the answer-then-cite instruction, after the question", () => {
   const msg = p.buildAskMessage({ ...askBase });
   assert.ok(msg.endsWith(ASK_INSTRUCTION), "the instruction is the last thing the model reads");
   assert.ok(msg.indexOf("Question: ") < msg.indexOf(ASK_INSTRUCTION), "and it follows the question");
@@ -255,32 +254,6 @@ test("the ask message ends with the extract-then-write instruction, after the qu
     standingInstructions: "Answer in Dutch.",
   });
   assert.ok(withAll.endsWith(ASK_INSTRUCTION), "still last when every optional block is present");
-});
-
-test("the verify message puts the evidence before the draft and prints each sentence with its citations", () => {
-  const msg = p.buildVerifyMessage({
-    evidence: askBase.evidence,
-    sentences: [
-      { i: 0, text: "A", cited: [1] },
-      { i: 1, text: "B", cited: [1, 2] },
-      { i: 2, text: "C", cited: [] },
-    ],
-  });
-  const evidence = msg.indexOf("<evidence>");
-  const draft = msg.indexOf("<draft>");
-  const judge = msg.indexOf("Judge each sentence:");
-  assert.ok(evidence !== -1 && draft !== -1 && judge !== -1, "all three blocks are present");
-  assert.ok(evidence < draft, "evidence precedes the draft");
-  assert.ok(draft < judge, "the draft precedes the judging line");
-
-  assert.ok(msg.includes("0. A [1]"), "one citation prints as [1]");
-  assert.ok(msg.includes("1. B [1][2]"), "two citations print joined, without a separator");
-  assert.ok(msg.includes("2. C []"), "a sentence that cited nothing prints an empty bracket");
-  assert.ok(
-    msg.includes("[2] (Receptors, p.4) Receptors transduce a signal to produce a biological effect."),
-    "the evidence lines are the same ones buildAskMessage writes",
-  );
-  assert.ok(msg.endsWith("Judge each sentence: supported only if the cited evidence states it."), "the task reads last");
 });
 
 // --- schemas ----------------------------------------------------------------
@@ -297,44 +270,6 @@ test("DigestOut accepts a well-formed draft and rejects a note without highlight
 
   const noUnused = schemas.DigestOut.safeParse({ notes: [] });
   assert.equal(noUnused.success, false, "unused_ids is required too");
-});
-
-test("AskOut accepts a structured draft and rejects a bad coverage or a sentence without a kind", () => {
-  const draft = { coverage: "full", quotes: [{ n: 1, quote: "x" }], sentences: [{ text: "A", kind: "claim", cited: [1] }] };
-  const ok = schemas.AskOut.safeParse(draft);
-  assert.equal(ok.success, true, "a full draft parses");
-  assert.deepEqual(ok.data, draft, "and comes back unchanged");
-
-  assert.equal(
-    schemas.AskOut.safeParse({ ...draft, coverage: "maybe" }).success,
-    false,
-    "coverage is one of full, partial, none",
-  );
-  assert.equal(
-    schemas.AskOut.safeParse({ ...draft, sentences: [{ text: "A", cited: [1] }] }).success,
-    false,
-    "kind is required on every sentence, not optional",
-  );
-  assert.equal(
-    schemas.AskOut.safeParse({ coverage: "none", quotes: [], sentences: [] }).success,
-    true,
-    "a none answer with nothing in it is still well-formed",
-  );
-  assert.equal(schemas.AskOut.safeParse({ coverage: "full", quotes: [] }).success, false, "sentences is required");
-});
-
-test("VerifyOut accepts a verdict per sentence and requires all three fields", () => {
-  const ok = schemas.VerifyOut.safeParse({ verdicts: [{ i: 0, supported: true, reason: "r" }] });
-  assert.equal(ok.success, true, "one verdict parses");
-  assert.deepEqual(ok.data, { verdicts: [{ i: 0, supported: true, reason: "r" }] });
-
-  assert.equal(schemas.VerifyOut.safeParse({ verdicts: [{ i: 0, supported: true }] }).success, false, "reason is required");
-  assert.equal(
-    schemas.VerifyOut.safeParse({ verdicts: [{ i: 0, supported: "yes", reason: "r" }] }).success,
-    false,
-    "supported is a boolean, not a string",
-  );
-  assert.equal(schemas.VerifyOut.safeParse({}).success, false, "verdicts is required");
 });
 
 /**
@@ -363,20 +298,35 @@ function assertStrict(node, path, seen = new Set()) {
   }
 }
 
-test("AskOut and VerifyOut serialize strictly at every level", () => {
+test("AskOut accepts an answer with its sources and rejects a bad coverage", () => {
+  const ok = { coverage: "full", from_general_knowledge: false, answer: "Both bind drugs.", used: [{ n: 1, why: "defines binding" }] };
+  assert.equal(schemas.AskOut.safeParse(ok).success, true);
+
+  // A none answer names no source, which is the whole point of `none`.
+  assert.equal(schemas.AskOut.safeParse({ coverage: "none", from_general_knowledge: false, answer: "Not covered.", used: [] }).success, true);
+
+  assert.equal(schemas.AskOut.safeParse({ ...ok, coverage: "maybe" }).success, false);
+  assert.equal(schemas.AskOut.safeParse({ coverage: "full", from_general_knowledge: false, used: [] }).success, false, "answer is required");
+  assert.equal(
+    schemas.AskOut.safeParse({ ...ok, used: [{ n: 1 }] }).success,
+    false,
+    "a source without a why is incomplete",
+  );
+});
+
+test("AskOut serializes strictly at every level", () => {
   const ask = z.toJSONSchema(schemas.AskOut);
   assertStrict(ask, "AskOut");
   assert.deepEqual(ask.properties.coverage.enum, ["full", "partial", "none"], "z.enum serializes as a string enum");
-  assert.equal(ask.properties.sentences.items.properties.kind.type, "string", "the sentence kind enum is a string");
-  assert.deepEqual(ask.properties.sentences.items.properties.kind.enum, ["claim", "gap"]);
+  assert.equal(ask.properties.answer.type, "string");
+  assert.equal(ask.properties.used.items.properties.n.type, "number");
+  assert.equal(ask.properties.from_general_knowledge.type, "boolean", "a plain JSON Schema type, not a union");
+});
 
-  const verify = z.toJSONSchema(schemas.VerifyOut);
-  assertStrict(verify, "VerifyOut");
-  assert.equal(
-    verify.properties.verdicts.items.properties.supported.type,
-    "boolean",
-    "z.boolean is a plain JSON Schema type, not a union",
-  );
+test("KeywordsOut accepts a plain list of search terms", () => {
+  assert.equal(schemas.KeywordsOut.safeParse({ keywords: ["pharmacokinetics", "half-life"] }).success, true);
+  assert.equal(schemas.KeywordsOut.safeParse({ keywords: "pharmacokinetics" }).success, false);
+  assertStrict(z.toJSONSchema(schemas.KeywordsOut), "KeywordsOut");
 });
 
 /* ---------------------------------------------------------------- quiz mode */

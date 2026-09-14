@@ -126,6 +126,7 @@ export function matchCommand(input: string, commands: CommandLike[], fuzzy: Fuzz
  * a quiz is running, which the lines themselves say.
  */
 export const QUIZ_HELP = [
+  "- **/wiki** — check the notes: what holds no evidence, what nothing links to, what links nowhere",
   "- **/quiz** [this | words] — start a quiz on all topic notes, the active note, or matching passages",
   "- **/hint** — one clue for the current question",
   "- **/skip** — skip the current question",

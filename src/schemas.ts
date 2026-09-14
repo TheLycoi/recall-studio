@@ -39,66 +39,47 @@ export const DigestOut = z.object({
 });
 
 /**
- * One Ask response, structured so the software assembles the answer itself.
+ * One Ask response: the answer, and the notes it came from.
  *
- * The model no longer writes a paragraph with `[n]` markers inside it. It
- * reports the passages it leaned on, then the answer one sentence at a time,
- * each sentence carrying the evidence numbers that state it. That lets the
- * caller check every quote against the evidence it claims to come from, append
- * the citations, and remove a claim nobody cited, instead of trusting prose to
- * have cited itself.
+ * The model used to return the answer as a list of sentences with evidence
+ * numbers attached, so the software could verify every quote character by
+ * character and delete any sentence whose quote it could not find. That check
+ * was strict enough to be its own failure mode — a faithful sentence lost
+ * because the model tidied a quote — and it made the reply a wall of evidence
+ * rather than an answer.
+ *
+ * The grounding is now where the wiki upstream puts it: in the prompt, which
+ * tells the model to answer from the given notes and nothing else, and in the
+ * sources it names. `used` is short on purpose — the one or two notes that
+ * actually carry the answer, not everything retrieval happened to return.
  */
 export const AskOut = z.object({
   coverage: z
     .enum(["full", "partial", "none"])
-    .describe("full: the evidence answers the question; partial: it answers part; none: it does not touch the question."),
-  quotes: z
+    .describe("full: the notes answer the question; partial: they answer part of it; none: they do not."),
+  from_general_knowledge: z
+    .boolean()
+    .describe(
+      "True only when the notes did not answer the question and you answered from general knowledge instead. The reader is shown a warning to verify it.",
+    ),
+  answer: z
+    .string()
+    .describe(
+      "The answer in plain markdown, a few sentences or a short list. No citation markers, no links, no headings: the sources are listed separately.",
+    ),
+  used: z
     .array(
       z.object({
-        n: z.number().describe("Evidence number the quote is copied from."),
-        quote: z
-          .string()
-          .describe("A verbatim passage copied character for character from that evidence, the words the answer rests on."),
+        n: z.number().describe("Evidence number this answer actually drew on."),
+        why: z.string().describe("A few words on what this note contributed, e.g. 'defines the term' or 'gives the formula'."),
       }),
     )
-    .describe("The passages the answer relies on, extracted before writing. Empty when coverage is none."),
-  sentences: z
-    .array(
-      z.object({
-        text: z
-          .string()
-          .describe(
-            "One sentence of the answer, in the reader's wording, with no [n] markers, links, or ids; the software appends the citations.",
-          ),
-        kind: z
-          .enum(["claim", "gap"])
-          .describe("claim: asserts something the evidence supports; gap: says what the evidence does not cover."),
-        cited: z.array(z.number()).describe("Evidence numbers supporting this sentence. Required for a claim; empty for a gap."),
-      }),
-    )
-    .describe("The answer, one sentence per entry, in order. A list item starts with '- '."),
+    .describe("The one or two pieces of evidence the answer rests on, best first. Empty only when coverage is none."),
 });
 
-/**
- * One verdict per drafted sentence, from the optional verify pass.
- *
- * `supported` is a plain boolean, which serializes as `{"type":"boolean"}` down
- * the same strict path as everything else in this file; `test/prompt.test.mjs`
- * proves that by running `z.toJSONSchema` over both schemas.
- */
-export const VerifyOut = z.object({
-  verdicts: z.array(
-    z.object({
-      i: z.number().describe("Index of the sentence in the draft, from 0."),
-      supported: z.boolean().describe("true only when the cited evidence states what the sentence says."),
-      reason: z.string().describe("One clause: which words are or are not in the evidence."),
-    }),
-  ),
-});
 
 export type DigestDraft = z.infer<typeof DigestOut>;
 export type AskDraft = z.infer<typeof AskOut>;
-export type VerifyDraft = z.infer<typeof VerifyOut>;
 
 /**
  * One quiz question, generated from a single numbered piece of evidence.
@@ -188,3 +169,21 @@ export const SuggestOut = z.object({
 });
 
 export type SuggestDraft = z.infer<typeof SuggestOut>;
+
+/**
+ * Keywords extracted from a question, for a second look at the notes.
+ *
+ * Adapted from gd4ai/obsidian-llm-wiki's query-keywords stage. The point is
+ * not to answer anything: it is to turn "what makes someone stick with a new
+ * habit" into the terms the notes would actually have used ("self-efficacy",
+ * "maintenance", "relapse"), so a lexical search that found nothing gets a
+ * second, better set of words to search with. The scan that follows is local
+ * and costs nothing, so the one call buys a whole extra pass over the vault.
+ */
+export const KeywordsOut = z.object({
+  keywords: z
+    .array(z.string())
+    .describe(
+      "Five to ten short search terms for the reader's notes: concept names and synonyms a note would use, each one to five words, most specific first. No sentences, no question words.",
+    ),
+});

@@ -8,30 +8,31 @@ import { buildExamplesBlock } from "./examples";
 import type { BloomLevel, Card, Highlight } from "./model";
 import type {
   AskMessageArgs,
+  KeywordsMessageArgs,
   DigestMessageArgs,
   QuizGradeMessageArgs,
   QuizQuestionMessageArgs,
   SuggestMessageArgs,
-  VerifyMessageArgs,
 } from "./prompt";
 import {
   buildAskMessage,
+  buildKeywordsMessage,
+  KEYWORDS_SYSTEM,
   buildDigestMessage,
   buildHighlighterMessage,
   buildQuizGradeMessage,
   buildQuizQuestionMessage,
   buildSuggestMessage,
-  buildVerifyMessage,
 } from "./prompt";
 import {
   AskOut as AskOutSchema,
+  KeywordsOut as KeywordsOutSchema,
   DigestOut as DigestOutSchema,
   QuizGradeOut as QuizGradeOutSchema,
   QuizQuestionOut as QuizQuestionOutSchema,
   SuggestOut as SuggestOutSchema,
-  VerifyOut as VerifyOutSchema,
 } from "./schemas";
-import type { AskDraft, DigestDraft, QuizGradeDraft, QuizQuestionDraft, SuggestDraft, VerifyDraft } from "./schemas";
+import type { AskDraft, DigestDraft, QuizGradeDraft, QuizQuestionDraft, SuggestDraft } from "./schemas";
 import type { RecallSettings } from "./settings";
 
 const CardOut = z.object({
@@ -485,24 +486,27 @@ export class LlmClient {
       user: buildAskMessage(args),
       schema: AskOutSchema,
       label: "answer",
-      maxTokens: 4000,
+      maxTokens: 1500,
+      // Reading evidence and saying what it means is not work that extended
+      // thinking improves; it is work the reader waits for.
+      effort: "low",
     });
   }
 
+
   /**
-   * "verify": the optional second pass over an answer already drafted, judging
-   * each sentence against the evidence it cited. Costs a second call per
-   * question, which is why it sits behind `askVerifyPass` and is off by
-   * default. Stray indices are the caller's problem to ignore, as with
-   * `critiqueCards` above.
+   * "keywords": the terms to search the notes with when the reader's own words
+   * found nothing useful. No evidence is sent and no answer comes back — only
+   * search terms — so this stays cheap and cannot invent a claim.
    */
-  async verifyAnswer(args: VerifyMessageArgs): Promise<VerifyDraft> {
+  async keywords(args: KeywordsMessageArgs): Promise<{ keywords: string[] }> {
     return this.backend().complete({
-      system: VERIFY_SYSTEM,
-      user: buildVerifyMessage(args),
-      schema: VerifyOutSchema,
-      label: "verdicts",
-      maxTokens: 2000,
+      system: KEYWORDS_SYSTEM,
+      user: buildKeywordsMessage(args),
+      schema: KeywordsOutSchema,
+      label: "search terms",
+      maxTokens: 400,
+      effort: "low",
     });
   }
 
@@ -669,86 +673,69 @@ Before returning, check your answer against the input: every note_title is eithe
  * claim that cited nothing. The prompt says so, because a rule the model knows
  * will be checked is one it follows.
  */
-const ASK_SYSTEM = `You answer a student's question about their own class notes, using numbered evidence taken from those notes. Each piece of evidence is something they highlighted in a lecture PDF or a claim they wrote down themselves, and it carries the note it came from and the page it was highlighted on. Your answer goes into a small sidebar beside their notes, with the evidence listed underneath it, so the reader can check every sentence you write against the passage it came from.
+const ASK_SYSTEM = `You answer a student's question about their own class notes, using numbered evidence taken from those notes. Each piece of evidence is something they highlighted in a lecture PDF or a claim they wrote down themselves, and it carries the note it came from and the page it was highlighted on. Your answer goes into a small sidebar beside their notes, with a link to one or two of those notes underneath it.
 
-You do not write the finished answer. You return the passages you leaned on and then the answer one sentence at a time, each sentence saying which evidence states it, and the software assembles what the reader sees. It also checks you: a quote that is not in the evidence is dropped, and a claim that names no evidence is removed from the answer and counted. Those checks run on every answer, so treat them as the shape of the work rather than as a warning.
+Answer in prose, then name the evidence the answer rests on. The reader sees the answer first and the sources under it, so write the answer to stand on its own.
 
-<answer_only_from_the_evidence>
-The evidence is the whole of what you may assert. You know a great deal about most of these subjects, and none of it belongs here: the reader is revising for an exam set on this material, and a true sentence their course never taught them is one they cannot rely on and cannot trace back to a slide. If a fact is not in the evidence in front of you, it is not in the answer, however certain you are of it.
+<answer_from_the_evidence>
+Answer from the evidence above, not from general knowledge. You know a great deal about most of these subjects, and none of it belongs in an answer that claims to come from their notes: the reader is revising for an exam set on this material, and a true sentence their course never taught them is one they cannot rely on and cannot trace back to a slide.
+
+Do not make up anything that is not in the evidence. Nothing downstream checks your words against it any more, so an invented sentence reaches the reader looking exactly like a sourced one. Write as though they will open the note you cite and read the passage themselves, because the link under your answer is there for precisely that.
 
 The conversation so far, when there is one, is there so that a follow-up makes sense: it tells you what "it" refers to and what has already been said. It is not evidence. Nothing said in an earlier turn may be asserted in this one unless the evidence in front of you now states it.
-</answer_only_from_the_evidence>
+</answer_from_the_evidence>
 
 <when_the_notes_do_not_cover_it>
-Saying that the notes do not answer the question is a correct answer, and often the most useful one: it tells the reader their notes have a hole in them, which is exactly what they would want to know before an exam. It is never a failure to reach for.
+Saying the notes do not answer the question is a correct answer, and often the most useful one: it tells the reader their notes have a hole in them, which is exactly what they want to know before an exam. It is never a failure to reach for.
 
-Set coverage to full when the evidence answers the question, partial when it answers some of it, and none when it does not touch the question at all. A none answer is one or two gap sentences and no quotes: say what the evidence does hold and what it does not, naming what would settle the question ("nothing here gives a half-life for any drug"). Do not attach a claim to a none answer; there is nothing for it to rest on. A partial answer carries both kinds: the part the evidence settles, then a gap sentence for the part it leaves open.
+Set coverage to full when the evidence answers the question, partial when it answers some of it, none when it does not touch the question. For a partial answer, give the part the evidence settles and then say plainly what it leaves open.
+
+When coverage is none you have two honest options, and you must pick one:
+
+1. Say you do not know from their notes, and stop. Name what the evidence does hold and what it does not ("nothing here gives a half-life for any drug"). Leave used empty and from_general_knowledge false. This is the right answer whenever the question is about their course in particular — what the lecturer said, what is examinable, what a slide claimed — because general knowledge cannot answer that, and answering anyway would mislead them.
+
+2. Answer from general knowledge, and say so. Set from_general_knowledge true and leave used empty. The reader is shown a warning above the answer telling them it did not come from their notes and to verify it. Use this when the question has a real answer outside their notes that would genuinely help — a standard definition, a mechanism, background their course assumes — and say in the answer itself that their notes do not cover it.
+
+Never set from_general_knowledge true while naming sources: a sentence cannot come both from their notes and from outside them. When coverage is full or partial, from_general_knowledge is false.
 </when_the_notes_do_not_cover_it>
 
-<quotes_first>
-Before you write a sentence, copy into quotes the passages your answer will rest on: the words themselves, character for character, from the evidence they appear in, with the number of that piece. Not a paraphrase, not a tidied version, not two fragments spliced with an ellipsis. The software looks each one up in the evidence you named and shows the reader only the ones it finds, so a quote you smoothed out is a quote that disappears.
+<which_evidence_to_name>
+In used, name only the evidence the answer actually rests on — the one or two pieces that carry it, best first. Not every piece that mentions the topic, and not everything you were given: the reader gets one or two links, and a list of everything retrieval returned tells them nothing about where the answer came from. Two is the most that will be shown.
 
-Extracting them first is the point of the exercise, not bookkeeping after the fact. Finding the exact words that carry the answer is what tells you whether the answer is there at all; often the passage you were sure you remembered turns out to say something narrower, and the sentence you were about to write becomes a gap sentence instead. Keep them short, a clause or a sentence, and copy only the spans doing the work. Leave quotes empty when coverage is none.
-</quotes_first>
+For each, why is a few words on what that note contributed: "defines the term", "gives the formula", "states the exception". It is a label on a link, not a sentence.
 
-<sentences_and_their_numbers>
-Write the answer one sentence per entry, in the order the reader will read them. Do not write [1] or any other marker inside the text; the software appends the citations from the numbers you list, and a marker you typed yourself is stripped out.
-
-A claim sentence asserts something, and it lists in cited every evidence number that states it: one number, or both when the sentence rests on two pieces. A claim whose cited list is empty is removed from the answer before the reader sees it, so if you cannot name the evidence for a sentence, either find the number or rewrite the sentence as what the evidence does say. Never invent a number: if the evidence stops at [8], there is no [9], and a sentence citing one is removed.
-
-A gap sentence says what the evidence does not cover, and it cites nothing, because there is no passage to point at for an absence. That is the one kind of sentence that carries no numbers.
-
-A sentence that is a list item starts with "- " and is one entry like any other.
-</sentences_and_their_numbers>
+Never invent a number. If the evidence stops at [8] there is no [9], and a citation past the end is dropped before the reader sees it.
+</which_evidence_to_name>
 
 <how_to_write_it>
 Prefer the reader's own wording. These are their highlights, in the vocabulary their lecturer used, and an answer in that vocabulary is one they can match against the slide. Where two pieces of evidence use different words for the same thing, use the one the question used.
 
-Be short. A few sentences, or a small list when the question asks for several things. This is a sidebar, not an essay, and the evidence is right there underneath: you do not need to reproduce it, only to say what it means for the question. Plain markdown, bold and code at most, no headings, no links, no ids.
+Be short. A few sentences, or a small list when the question asks for several things. This is a sidebar, not an essay. Plain markdown, bold and code at most; no headings, no links, and no [1]-style markers in the text — the sources are listed underneath, so a marker in the prose is noise.
 </how_to_write_it>
 
 <examples>
 <example>
 <evidence>[1] (Receptors, p.4) Receptors have 2 important properties: they bind ligands with relatively high affinity, and they transduce a signal to produce a biological effect (this distinguishes receptors from inert binding sites such as albumin, which binds and carries many drugs but does not transduce a signal).</evidence>
 <question>What distinguishes a receptor from albumin?</question>
-<output>Coverage is full. One quote, from [1]: "transduce a signal to produce a biological effect (this distinguishes receptors from inert binding sites such as albumin, which binds and carries many drugs but does not transduce a signal)". Two claim sentences. The first, "Both bind drugs, but only a receptor transduces a signal to produce a biological effect.", cites [1]. The second, "Albumin binds and carries drugs without transducing anything, which is what makes it an inert binding site.", cites [1] as well.</output>
-<note>The quote is the span that actually carries the distinction, copied whole rather than trimmed to look neat. Both sentences rest on the same piece, so both name it. Nothing is added about albumin's structure or its other roles, true though that would be.</note>
+<output>Coverage full, from_general_knowledge false. The answer: "Both bind drugs, but only a receptor transduces a signal to produce a biological effect. Albumin binds and carries drugs without transducing anything, which is what makes it an inert binding site." used names [1], why "distinguishes receptors from inert binding sites".</output>
+<note>One piece carries the whole answer, so one source is named. Nothing is added about albumin's structure or its other roles, true though that would be.</note>
 </example>
 <example>
 <evidence>[1] (Pharmacology, p.2) Pharmacokinetics = what the body does to drugs. [2] (Drug Disposition, p.7) Metabolism converts drugs into more water-soluble forms for excretion.</evidence>
-<question>What is the half-life of aspirin?</question>
-<output>Coverage is none. No quotes. Two gap sentences, neither citing anything: "Your notes do not cover this." and "The evidence here defines pharmacokinetics and describes metabolism in general terms, but nothing in it gives a half-life for aspirin or for any other drug."</output>
-<note>The gap is named rather than filled. Half-life is a number worth knowing and one you could supply from memory, which is exactly why it must not appear: the reader would have no way to tell it apart from what their lecturer taught. No sentence is a claim here, so no sentence cites anything, and there is nothing to quote.</note>
+<question>What did the lecturer say the half-life of aspirin was?</question>
+<output>Coverage none, from_general_knowledge false. The answer: "Your notes do not cover this. The evidence here defines pharmacokinetics and describes metabolism in general terms, but nothing in it gives a half-life for aspirin or for any other drug." used is empty.</output>
+<note>The question asks what their lecturer said, which only their notes can answer. A half-life supplied from memory would put a number on screen their course may never have taught, and they would have no way to tell it apart from one that was.</note>
+</example>
+<example>
+<evidence>[1] (Pharmacology, p.2) Pharmacokinetics = what the body does to drugs. [2] (Drug Disposition, p.7) Metabolism converts drugs into more water-soluble forms for excretion.</evidence>
+<question>What does first-pass metabolism mean?</question>
+<output>Coverage none, from_general_knowledge true. The answer: "Your notes do not define this. In general, first-pass metabolism is the drug lost to the liver and gut wall after absorption and before it reaches the systemic circulation, which is why an oral dose is often larger than an intravenous one." used is empty.</output>
+<note>A standard definition their course assumes, rather than a claim about their course: it helps them and can be checked anywhere. The answer says up front that their notes lack it, and a warning appears above it as well.</note>
 </example>
 </examples>
 
-Before you return, read each sentence back against the evidence you cited for it. Ask of every claim whether that piece of evidence, on its own, says what the sentence says, and not merely something compatible with it; if it does not, drop the sentence or turn it into a gap sentence. Check that every quote is in the evidence you attributed it to, word for word, and that every number you used is one you were given.`;
+Before you return, read the answer back against the evidence. Ask of every sentence whether the evidence you were given says it, and not merely something compatible with it. If it does not, either cut the sentence, say instead what the evidence does say, or — if the answer is worth giving anyway — set from_general_knowledge and let the reader see the warning.`;
 
-/**
- * Verify system prompt: the optional second pass, off by default.
- *
- * Deliberately short. The first prompt is long because writing a grounded
- * answer needs the reasons; judging one needs a single distinction held
- * firmly, and every extra paragraph here is another thing for the checker to
- * weigh against the only question it should be asking.
- */
-const VERIFY_SYSTEM = `You check an answer that has already been written. You are not the writer: you do not improve sentences, fill gaps, or suggest better wording, and no sentence changes because of what you say beyond being kept or removed.
-
-You are given numbered evidence from a student's notes and the sentences drafted from it, each printed with the evidence numbers it cited. For each sentence, say whether the evidence it cited states what the sentence says.
-
-Supported means stated. Not plausible, not likely, not true as far as you know, not something the cited passage is consistent with or implies to a reader who already knows the subject. If the sentence names a number, the cited evidence carries that number; if it names a mechanism, the cited evidence describes that mechanism. Evidence that is about the right topic but does not carry the sentence's claim is not support. A sentence citing nothing, or citing a number that is not in the evidence, is unsupported.
-
-Judge each sentence only against the pieces it cited, not against the evidence as a whole: a sentence that is stated somewhere else in the list but not in what it pointed at is unsupported, because the reader will follow the citation it was given. The reason is one clause naming which words are or are not there.
-
-<example>
-<evidence>[1] (Receptors, p.4) Receptors bind ligands with relatively high affinity and transduce a signal to produce a biological effect. [2] (Drug Disposition, p.7) Metabolism converts drugs into more water-soluble forms for excretion.</evidence>
-<draft>
-0. Receptors transduce a signal to produce a biological effect. [1]
-1. Receptor binding is saturable, so the response plateaus at high doses. [1]
-</draft>
-<verdicts>0 supported: [1] states transduction of a signal to produce a biological effect in those words. 1 not supported: [1] mentions affinity and transduction but says nothing about saturation or a plateau.</verdicts>
-<note>The second sentence is true of receptors and would pass a reader who knew the subject. It is unsupported anyway, because the passage it cites does not say it.</note>
-</example>`;
 
 /**
  * Quiz question system prompt.
@@ -835,7 +822,7 @@ Before you return, read the question back as the reader will see it, with the pa
 /**
  * Quiz grade system prompt.
  *
- * Shorter than the question prompt for the reason VERIFY_SYSTEM is shorter
+ * Shorter than the question prompt for the same reason a checker is shorter
  * than ASK_SYSTEM: judging needs one distinction held firmly rather than a
  * craft explained. The three verdicts are defined against each other, and the
  * standing temptation, to teach the reader something the evidence does not
@@ -883,6 +870,6 @@ Quote the passage that settles the grade, copied character for character from th
 Before you return, check that your verdict rests on what the evidence states and not on how the answer was phrased, that every fact in your feedback is in the passage, and that the words in quote appear in the evidence exactly as you copied them.`;
 
 /** The digest, Ask, verify and quiz schemas are defined in schemas.ts so tests can bundle them without obsidian; re-exported here so callers have one import. */
-export { DigestOut, AskOut, VerifyOut, QuizQuestionOut, QuizGradeOut, SuggestOut } from "./schemas";
-export type { DigestDraft, AskDraft, VerifyDraft, QuizQuestionDraft, QuizGradeDraft, SuggestDraft } from "./schemas";
+export { DigestOut, AskOut, KeywordsOut, QuizQuestionOut, QuizGradeOut, SuggestOut } from "./schemas";
+export type { DigestDraft, AskDraft, QuizQuestionDraft, QuizGradeDraft, SuggestDraft } from "./schemas";
 export type { SuggestMessageArgs } from "./prompt";

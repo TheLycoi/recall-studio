@@ -85,7 +85,10 @@ export interface RecallSettings {
   askMaxTurns: number;
   askInstructions: string;
   /** Second model call per question that re-checks each drafted sentence against the evidence it cited. */
-  askVerifyPass: boolean;
+  /** When lexical search and the note graph leave an answer short, ask the model for better search terms. */
+  askKeywordExpansion: boolean;
+  /** When the notes do not cover a question, let the model answer from general knowledge behind a warning. */
+  askGeneralKnowledge: boolean;
   /** Show the line under an answer reporting what was kept, removed, verified, and rejected. */
   askShowGrounding: boolean;
   quizQuestions: number;
@@ -157,10 +160,11 @@ export const DEFAULT_SETTINGS: RecallSettings = {
   wikiEntitiesFolder: "wiki/entities",
   suggestInstructions: "",
 
-  askEvidenceCount: 12,
+  askEvidenceCount: 6,
   askMaxTurns: 10,
   askInstructions: "",
-  askVerifyPass: false,
+  askKeywordExpansion: true,
+  askGeneralKnowledge: false,
   askShowGrounding: true,
   quizQuestions: 5,
   quizPoolSize: 20,
@@ -692,13 +696,25 @@ export class RecallSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
-      .setName("Verify answers with a second model call")
+      .setName("Find other wording when a question comes up short")
       .setDesc(
-        "After drafting, the model re-checks each sentence against its cited evidence and unsupported ones are removed. Doubles the cost of a question.",
+        "When your words and the linked notes do not fill the evidence list, the model turns the question into the terms your notes would use and they are searched for locally. One extra call, and only on questions that were about to come up short.",
       )
       .addToggle((t) =>
-        t.setValue(s.askVerifyPass).onChange((v) => {
-          s.askVerifyPass = v;
+        t.setValue(s.askKeywordExpansion).onChange((v) => {
+          s.askKeywordExpansion = v;
+          save();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Answer from general knowledge when your notes do not")
+      .setDesc(
+        "Off, a question your notes do not cover is answered with that fact and nothing else. On, the model may answer from what it knows, with a warning above the answer saying it did not come from your notes.",
+      )
+      .addToggle((t) =>
+        t.setValue(s.askGeneralKnowledge).onChange((v) => {
+          s.askGeneralKnowledge = v;
           save();
         }),
       );

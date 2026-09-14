@@ -262,30 +262,6 @@ test("numberEvidence numbers from 1 and carries title, page, text", () => {
   assert.deepEqual(Object.keys(numbered[0]).sort(), ["n", "noteTitle", "page", "text"]);
 });
 
-test("validateCitations strips out-of-range citations and collapses the gap", () => {
-  assert.deepEqual(rt.validateCitations("A [1] B [7] C", [1, 2], 3), { answer: "A [1] B C", cited: [1, 2] });
-});
-
-test("validateCitations unions declared and written citations, and trims before punctuation", () => {
-  assert.deepEqual(rt.validateCitations("Affinity is high [2].", [], 3), {
-    answer: "Affinity is high [2].",
-    cited: [2],
-  });
-  assert.deepEqual(rt.validateCitations("Affinity is high [9].", [], 3), {
-    answer: "Affinity is high.",
-    cited: [],
-  });
-  assert.deepEqual(rt.validateCitations("A [3] B [1] C", [2], 3), { answer: "A [3] B [1] C", cited: [1, 2, 3] });
-  assert.deepEqual(rt.validateCitations("A [0] B", [0, 4, 1], 3), { answer: "A B", cited: [1] });
-});
-
-test("validateCitations with count 0 removes every citation", () => {
-  assert.deepEqual(rt.validateCitations("Nothing here [1] at all.", [1], 0), {
-    answer: "Nothing here at all.",
-    cited: [],
-  });
-});
-
 test("renderEvidenceMarkdown renders a selection highlight as a PDF++ callout", () => {
   const receptors = rt.indexNote(RECEPTORS_PATH, RECEPTORS_MD);
   const md = rt.renderEvidenceMarkdown(receptors[0], 2);
@@ -323,4 +299,165 @@ test("questionScorer counts significant shared words, ignoring stopwords and plu
   assert.equal(score("The coach listens carefully and shares benefits only with permission."), 1);
   assert.equal(score("Receptors bind ligands with high affinity."), null);
   assert.equal(rt.questionScorer("the and of")("anything"), null);
+});
+
+// A note written by hand — no `## Highlights`, no `## Key claims` — used to
+// index to nothing, so Ask answered "no coverage" for a topic the vault
+// covered. These cover the prose fallback that makes such a note answerable.
+
+test("indexNote falls back to prose when a note has neither section", () => {
+  const md = `---\nclass: HBIO408\n---\n**Definition**: A theoretical point about which an object's mass is equally distributed\n- Used to model whole body movements using classical mechanics\n`;
+  const units = rt.indexNote("wiki/concepts/TBCM.md", md);
+  assert.equal(units.length, 2);
+  assert.equal(units[0].noteTitle, "TBCM");
+  assert.equal(units[0].text, "Definition: A theoretical point about which an object's mass is equally distributed");
+  assert.equal(units[1].text, "Used to model whole body movements using classical mechanics");
+});
+
+test("indexNote leaves a structured note untouched by the fallback", () => {
+  const structured = rt.indexNote("classes/HBIO250/Receptors.md", RECEPTORS_MD);
+  assert.ok(structured.length > 0);
+  assert.ok(structured.every((u) => u.kind === "highlight" || u.kind === "claim"));
+  // Every unit still comes from the parsed sections, not from raw prose.
+  assert.ok(structured.every((u) => /#(h|c)\d+$/.test(u.id)));
+});
+
+test("prose fallback carries the callout header's page down to the quoted text", () => {
+  const md = [
+    "---", "class: HBIO250", "---",
+    "> [!PDF|yellow] [[Pharm.pdf#page=2&selection=1,0,1,5&color=yellow|Pharm, p.2]]",
+    "> > Pharmacokinetics = “What the body does to drugs”",
+  ].join("\n");
+  const units = rt.indexNote("wiki/concepts/Pharmacology.md", md);
+  assert.equal(units.length, 1);
+  assert.equal(units[0].text, "Pharmacokinetics = “What the body does to drugs”");
+  assert.equal(units[0].page, 2);
+  assert.equal(units[0].pdfBasename, "Pharm");
+});
+
+test("prose fallback skips headings, embeds, code fences and short fragments", () => {
+  const md = [
+    "---", "class: X", "---",
+    "## Dosing",
+    "![[Pharm.pdf#page=10&rect=1,2,3,4&color=yellow]]",
+    "ok",
+    "```",
+    "const skipped = true;",
+    "```",
+    "The amount of drug required to produce an effect of given intensity.",
+  ].join("\n");
+  const units = rt.indexNote("wiki/concepts/Dosing.md", md);
+  assert.equal(units.length, 1);
+  assert.equal(units[0].text, "The amount of drug required to produce an effect of given intensity.");
+});
+
+test("prose fallback reduces wikilinks to their display text", () => {
+  const md = `---\nclass: X\n---\nThe drug with the lowest [[Pharm.pdf#page=11&selection=7,25,9,1|EC50]] has the highest potency here\n`;
+  const units = rt.indexNote("wiki/concepts/Potency.md", md);
+  assert.equal(units.length, 1);
+  assert.equal(units[0].text, "The drug with the lowest EC50 has the highest potency here");
+  assert.equal(units[0].page, 11);
+});
+
+test("an empty note still indexes to nothing", () => {
+  assert.equal(rt.indexNote("wiki/entities/WADA.md", "---\nclass: HBIO250\n---\n").length, 0);
+});
+
+// Adapted from gd4ai/obsidian-llm-wiki's needle scoring, where a hit on a page
+// title outweighs a hit on an alias rather than every hit counting once.
+
+test("significantTokens drops filler verbs that used to score like real terms", () => {
+  const tokens = rt.significantTokens("how do drugs get absorbed");
+  assert.ok(!tokens.includes("get"), "filler verb 'get' must not be a search term");
+  assert.ok(tokens.includes("drug"));
+  assert.ok(tokens.includes("absorbed"));
+});
+
+test("questionScorer weights a rare word above a word every unit uses", () => {
+  const units = [
+    { id: "a#p0", notePath: "a.md", noteTitle: "A", pdfBasename: null, target: null, page: null, text: "analysis of receptor binding", kind: "claim" },
+    { id: "b#p0", notePath: "b.md", noteTitle: "B", pdfBasename: null, target: null, page: null, text: "analysis of motion capture", kind: "claim" },
+    { id: "c#p0", notePath: "c.md", noteTitle: "C", pdfBasename: null, target: null, page: null, text: "analysis of gait cycles", kind: "claim" },
+  ];
+  const score = rt.questionScorer("receptor analysis", units);
+  // "receptor" is in 1 of 3 units, "analysis" in all 3: the unit carrying the
+  // rare word must outscore one carrying only the common word.
+  assert.ok(score(units[0].text) > score(units[1].text));
+});
+
+test("questionScorer falls back to plain overlap on an empty corpus", () => {
+  const score = rt.questionScorer("receptor binding", []);
+  assert.equal(score("receptor binding affinity"), 2);
+  assert.equal(score("nothing relevant here"), null);
+});
+
+test("questionScorer returns null when no question word appears", () => {
+  const units = [
+    { id: "a#p0", notePath: "a.md", noteTitle: "A", pdfBasename: null, target: null, page: null, text: "receptor binding", kind: "claim" },
+  ];
+  assert.equal(rt.questionScorer("quantum entanglement", units)("receptor binding"), null);
+});
+
+// Graph expansion and keyword ranking: the two stages that run when the
+// reader's own words leave the evidence list short.
+
+const unit = (note, text, id) => ({
+  id: id ?? `${note}#p0`, notePath: note, noteTitle: note.replace(/\.md$/, ""),
+  pdfBasename: null, target: null, page: null, text, kind: "claim",
+});
+
+test("expandWithGraph adds a passage from a linked note when lexical came up short", () => {
+  const units = [unit("a.md", "receptor binding affinity"), unit("b.md", "second messenger cascades")];
+  // Enough edges that the graph is worth walking (isGraphUsable's gate).
+  const graph = {
+    nodes: ["a.md", "b.md", "c.md", "d.md"],
+    edges: new Map([
+      ["a.md", ["b.md", "c.md"]],
+      ["b.md", ["a.md", "c.md"]],
+      ["c.md", ["a.md", "d.md"]],
+      ["d.md", ["a.md", "b.md"]],
+    ]),
+  };
+  const lexical = [units[0]];
+  const out = rt.expandWithGraph(lexical, units, graph, 4);
+  assert.equal(out[0].id, units[0].id, "the lexical hit keeps its place");
+  assert.ok(out.length > 1, "a linked note should be reached");
+  assert.equal(out[1].notePath, "b.md");
+});
+
+test("expandWithGraph leaves a full evidence list alone", () => {
+  const units = [unit("a.md", "one"), unit("b.md", "two")];
+  const graph = { nodes: ["a.md", "b.md"], edges: new Map([["a.md", ["b.md"]], ["b.md", ["a.md"]]]) };
+  const full = [units[0], units[1]];
+  assert.deepEqual(rt.expandWithGraph(full, units, graph, 2), full);
+});
+
+test("expandWithGraph does nothing without seeds or a usable graph", () => {
+  const units = [unit("a.md", "one"), unit("b.md", "two")];
+  const graph = { nodes: ["a.md", "b.md"], edges: new Map([["a.md", ["b.md"]], ["b.md", []]]) };
+  // No lexical hits: nothing query-relevant to walk from.
+  assert.deepEqual(rt.expandWithGraph([], units, graph, 4), []);
+  // A graph with almost no edges is not worth walking.
+  const bare = { nodes: ["a.md", "b.md"], edges: new Map([["a.md", []], ["b.md", []]]) };
+  assert.deepEqual(rt.expandWithGraph([units[0]], units, bare, 4), [units[0]]);
+});
+
+test("rankByKeywords puts a title match above a body match", () => {
+  const units = [
+    unit("Other.md", "a passing mention of pharmacokinetics in another topic"),
+    unit("Pharmacokinetics.md", "what the body does to drugs"),
+  ];
+  const out = rt.rankByKeywords(units, ["pharmacokinetics"], 4);
+  assert.equal(out[0].notePath, "Pharmacokinetics.md", "the note titled for the term comes first");
+});
+
+test("rankByKeywords ignores terms too short to be a needle", () => {
+  assert.deepEqual(rt.rankByKeywords([unit("a.md", "anything at all")], ["a", ""], 4), []);
+});
+
+test("mergeEvidence appends without repeating or exceeding k", () => {
+  const a = unit("a.md", "one", "a#1");
+  const b = unit("b.md", "two", "b#1");
+  const c = unit("c.md", "three", "c#1");
+  assert.deepEqual(rt.mergeEvidence([a], [a, b, c], 2).map((u) => u.id), ["a#1", "b#1"]);
 });

@@ -1,8 +1,19 @@
 import { ItemView, MarkdownRenderer, TAbstractFile, TFile } from "obsidian";
 import type RecallPlugin from "./main";
 import { describeError } from "./llm";
-import { indexNote, numberEvidence, rankEvidence, renderEvidenceMarkdown, type EvidenceUnit, questionScorer } from "./retrieval";
-import { applyVerdicts, checkAnswer, noEvidenceAnswer, renderGroundingLine, type GroundingReport } from "./askCheck";
+import {
+  indexNote,
+  numberEvidence,
+  rankEvidence,
+  type EvidenceUnit,
+  questionScorer,
+  expandWithGraph,
+  rankByKeywords,
+  mergeEvidence,
+} from "./retrieval";
+import type { Graph } from "./graph";
+import { lintVault, renderVaultLint, type LintPage } from "./vaultLint";
+import { checkAnswer, emptyIndexAnswer, noEvidenceAnswer, renderGroundingLine, VERIFY_BANNER, type GroundingReport } from "./askCheck";
 import { matchCommand, renderHelp, tokenOverlapScorer } from "./chatCommands";
 import { RECALL_COMMANDS, type RecallCommand } from "./commands";
 import { captureEvidenceUnits } from "./capture";
@@ -29,6 +40,12 @@ import {
   disputeGrade,
 } from "./quiz";
 import type { AskHistoryTurn } from "./prompt";
+import { pdfFileName, renderPdfSubpath } from "./pdflink";
+
+/** The linktext that opens a unit's PDF at the page and selection it came from. */
+function pdfLinktext(u: EvidenceUnit): string {
+  return u.target && u.pdfBasename ? `${pdfFileName(u.pdfBasename)}#${renderPdfSubpath(u.target)}` : "";
+}
 
 /**
  * One turn in the chat log.
@@ -91,6 +108,8 @@ export class ChatPanel {
   private status = "";
   /** The topic-folder index, built on the first question and kept until the vault changes under that folder. */
   private index: EvidenceUnit[] | null = null;
+  /** The wikilink graph over the same folder, invalidated with the index. */
+  private graph: Graph | null = null;
   private eventsRegistered = false;
   /** The element the panel was last mounted into, so an answer can redraw itself. */
   private root: HTMLElement | null = null;
@@ -128,7 +147,10 @@ export class ChatPanel {
     const vault = this.plugin.app.vault;
     const touched = (path: string) => path.startsWith(this.folderPrefix());
     const invalidate = (file: TAbstractFile) => {
-      if (touched(file.path)) this.index = null;
+      if (touched(file.path)) {
+        this.index = null;
+        this.graph = null;
+      }
     };
     // obsidian.d.ts:7558 (create), :7564 (modify), :7570 (delete), :7576 (rename).
     this.view.registerEvent(vault.on("create", invalidate));
@@ -136,7 +158,10 @@ export class ChatPanel {
     this.view.registerEvent(vault.on("delete", invalidate));
     this.view.registerEvent(
       vault.on("rename", (file, oldPath) => {
-        if (touched(file.path) || touched(oldPath)) this.index = null;
+        if (touched(file.path) || touched(oldPath)) {
+          this.index = null;
+          this.graph = null;
+        }
       }),
     );
   }
@@ -156,6 +181,113 @@ export class ChatPanel {
     }
     this.index = units;
     return units;
+  }
+
+  /**
+   * `/wiki`: what is wrong with the notes, as structure rather than content.
+   *
+   * No model call — every check is counting links and indexed passages — so
+   * this is instant and safe to run whenever the chat feels wrong. It is the
+   * answer to "the chatbot can't find anything": a note with nothing quotable
+   * in it, or one the graph cannot reach, is invisible to Ask no matter how
+   * good it looks in the editor, and this says which notes those are.
+   */
+  private async runVaultLint(): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    this.status = "checking the wiki…";
+    this.rerender();
+    try {
+      const prefix = this.folderPrefix();
+      const files = this.plugin.app.vault.getMarkdownFiles().filter((f: TFile) => f.path.startsWith(prefix));
+      if (files.length === 0) {
+        this.pushSystem(`No notes under “${prefix.replace(/\/$/, "")}”. Set the topic notes folder in Recall's settings.`);
+        return;
+      }
+      const pages: LintPage[] = [];
+      for (const file of files) {
+        pages.push({ path: file.path, content: await this.plugin.app.vault.cachedRead(file) });
+      }
+      this.turns.push({ role: "assistant", text: renderVaultLint(lintVault(pages)) });
+      this.trim();
+    } catch (e) {
+      this.pushSystem(`Wiki check failed: ${describeError(e)}`);
+    } finally {
+      this.busy = false;
+      this.status = "";
+      this.rerender();
+    }
+  }
+
+  /**
+   * Widen thin evidence: graph neighbours first, then the model's own terms.
+   *
+   * A cascade rather than one search, adapted from gd4ai/obsidian-llm-wiki.
+   * Each stage only runs when the one before it left the answer short, so the
+   * common case — a question whose words are in the notes — costs exactly what
+   * it did before, and the expensive stage is paid for only when the cheap
+   * ones have visibly failed:
+   *
+   *   1. lexical (already done by the caller)
+   *   2. graph   — passages from notes the matched notes link to. Local, free.
+   *   3. keywords — one model call turning the question into the terms the
+   *      notes would use, then a local scan with them. Costs a call, so it is
+   *      last and is skipped entirely when stages 1-2 filled the slots.
+   *
+   * Every stage appends; none reorders or drops what lexical search found, so
+   * widening can only ever add evidence to an answer.
+   */
+  private async widenEvidence(q: string, units: EvidenceUnit[], lexical: EvidenceUnit[], k: number): Promise<EvidenceUnit[]> {
+    if (lexical.length >= k) return lexical;
+
+    let out = expandWithGraph(lexical, units, this.buildGraphIndex(), k);
+    if (out.length >= k || !this.plugin.settings.askKeywordExpansion) return out;
+
+    // The terms are worth asking for even when nothing matched at all: that
+    // is the case they exist for, a question phrased in words the notes never
+    // use. A failure here is not an error the reader needs to see — the
+    // answer simply stays as wide as the local stages made it.
+    try {
+      this.status = "looking for other wording…";
+      this.rerender();
+      const titles = [...new Set(units.map((u) => u.noteTitle))];
+      const { keywords } = await this.plugin.llm.keywords({ question: q, noteTitles: titles });
+      const byKeyword = rankByKeywords(units, keywords, k);
+      out = mergeEvidence(out, byKeyword, k);
+      // Neighbours of anything the new terms turned up.
+      out = expandWithGraph(out, units, this.buildGraphIndex(), k);
+    } catch (e) {
+      console.debug("[recall] keyword expansion failed:", e);
+    }
+    return out;
+  }
+
+  /**
+   * The wikilink graph over the topic folder, cached alongside the unit index.
+   *
+   * Built from `resolvedLinks` (obsidian.d.ts:4438) rather than by re-reading
+   * the notes: Obsidian has already resolved every link in the vault to a real
+   * path, which is the same work `buildGraph` would redo, and reading files
+   * here would make this async in the middle of ranking. `buildGraph` is still
+   * what the tests exercise, since it is the pure half.
+   */
+  private buildGraphIndex(): Graph {
+    if (this.graph) return this.graph;
+    const prefix = this.folderPrefix();
+    const resolved = this.plugin.app.metadataCache.resolvedLinks;
+    const nodes = this.plugin.app.vault
+      .getMarkdownFiles()
+      .filter((f: TFile) => f.path.startsWith(prefix))
+      .map((f: TFile) => f.path);
+    const known = new Set(nodes);
+
+    const edges = new Map<string, string[]>();
+    for (const path of nodes) {
+      const targets = Object.keys(resolved[path] ?? {}).filter((t) => t !== path && known.has(t));
+      edges.set(path, targets);
+    }
+    this.graph = { nodes, edges };
+    return this.graph;
   }
 
   /**
@@ -198,6 +330,15 @@ export class ChatPanel {
   async ask(text: string): Promise<void> {
     if (this.busy) return;
     const q = text.trim();
+
+    // `/wiki` is chat-local like the quiz commands below: it reports on the
+    // notes rather than doing anything to them, so it belongs in the panel
+    // that already holds the index rather than in the command registry.
+    if (/^\/wiki\b/i.test(q)) {
+      this.draft = "";
+      await this.runVaultLint();
+      return;
+    }
 
     // The quiz is tried before the command matcher, because `/quiz`, `/hint`,
     // `/skip`, `/idk` and `/stop` are chat-local and not in the registry
@@ -373,10 +514,29 @@ export class ChatPanel {
       // `prepareSimpleSearch` (obsidian.d.ts:5260) returns null for no match and
       // a `SearchResult` whose `score` (:5593) `rankEvidence` reads as
       // higher-is-better (src/retrieval.ts:128-134).
-      const scorer = questionScorer(q);
-      evidence = rankEvidence(units, q, scorer, this.plugin.settings.askEvidenceCount);
+      // Weighted by how rare each word is in this vault, so the term that
+      // names the topic outranks the one every note happens to use.
+      const scorer = questionScorer(q, units);
+      const k = this.plugin.settings.askEvidenceCount;
+      evidence = rankEvidence(units, q, scorer, k);
 
-      if (evidence.length === 0) {
+      // An empty index is a misconfigured folder, not an unanswerable
+      // question: "your notes don't cover this" would blame the notes for a
+      // setting. Name the folder that was searched so it can be corrected.
+      if (units.length === 0) {
+        const { answer, report } = emptyIndexAnswer(this.folderPrefix());
+        this.turns.push({ role: "assistant", text: answer, evidence: [], report });
+        return;
+      }
+
+      evidence = await this.widenEvidence(q, units, evidence, k);
+
+      // Retrieval found nothing. Either say so and stop, or let the model
+      // answer from what it knows behind a warning — upstream's choice
+      // (gd4ai/obsidian-llm-wiki), and the reader's to make in settings. The
+      // model is still called with an empty evidence list in that case, so the
+      // prompt's "two honest options" rule is what decides the reply, not this.
+      if (evidence.length === 0 && !this.plugin.settings.askGeneralKnowledge) {
         const { answer, report } = noEvidenceAnswer(q);
         this.turns.push({ role: "assistant", text: answer, evidence: [], report });
         return;
@@ -386,36 +546,15 @@ export class ChatPanel {
       this.rerender();
 
       const numbered = numberEvidence(evidence);
-      let draft = await this.plugin.llm.ask({
+      const draft = await this.plugin.llm.ask({
         question: q,
         evidence: numbered,
         history: this.history(),
         standingInstructions: this.plugin.settings.askInstructions,
       });
 
-      // The verify pass is a second opinion, not a gate: when it fails the
-      // draft is still the best thing we have, so the answer is rendered and
-      // the failure is stated on the turn rather than replacing it.
-      let verifyError: string | undefined;
-      let verifyRan = false;
-      if (this.plugin.settings.askVerifyPass) {
-        this.status = "verifying…";
-        this.rerender();
-        try {
-          const verdicts = await this.plugin.llm.verifyAnswer({
-            evidence: numbered,
-            sentences: draft.sentences.map((s, i) => ({ i, text: s.text, cited: s.cited })),
-          });
-          draft = applyVerdicts(draft, verdicts);
-          verifyRan = true;
-        } catch (e) {
-          verifyError = `verify pass failed: ${describeError(e)}`;
-        }
-      }
-
       const { answer, report } = checkAnswer(draft, numbered);
-      report.verifyRan = verifyRan;
-      this.turns.push({ role: "assistant", text: answer, evidence, report, error: verifyError });
+      this.turns.push({ role: "assistant", text: answer, evidence, report });
     } catch (e) {
       this.turns.push({ role: "assistant", text: "", evidence, error: describeError(e) });
     } finally {
@@ -456,7 +595,7 @@ export class ChatPanel {
         query,
         units,
         activePath,
-        questionScorer(query || ""),
+        questionScorer(query || "", units),
         this.plugin.settings.quizPoolSize,
       );
       pool = resolved.pool;
@@ -822,8 +961,14 @@ export class ChatPanel {
       return;
     }
 
+    // Above the answer, not below it: a reader who acts on the first sentence
+    // must have seen the warning before they read it.
+    if (turn.report?.fromGeneralKnowledge) {
+      el.createDiv({ cls: "recall-chat-verify-banner", text: VERIFY_BANNER });
+    }
+
     if (turn.text.trim()) {
-      // sourcePath "" — the evidence links `renderEvidenceMarkdown` writes are
+      // sourcePath "" — the evidence links the evidence rows write are
       // vault-absolute (`[[classes/HBIO250/Receptors|Receptors]]`), so there is
       // no relative link for a source path to resolve (obsidian.d.ts:4143).
       void MarkdownRenderer.render(this.plugin.app, turn.text, el.createDiv(), "", this.view);
@@ -842,33 +987,67 @@ export class ChatPanel {
     if (report && this.plugin.settings.askShowGrounding) this.renderGrounding(el, report);
 
     const evidence = turn.evidence ?? [];
-    if (evidence.length === 0) return;
-    el.createDiv({ cls: "recall-chat-evidence-head", text: "Evidence" });
-    const cited = new Set(report?.cited ?? []);
-    evidence.forEach((unit, i) => {
-      const n = i + 1;
-      const box = el.createDiv({ cls: `recall-chat-evidence${cited.has(n) ? " is-cited" : ""}` });
-      void MarkdownRenderer.render(this.plugin.app, renderEvidenceMarkdown(unit, n), box, "", this.view);
-    });
+    if (evidence.length === 0 || !report) return;
+    this.renderSources(el, evidence, report);
   }
 
   /**
-   * What the checks did, under the answer.
+   * The notes behind an answer: one or two links, not the search results.
    *
-   * The verified quotes are shown because they are the words the answer rests
-   * on: the reader can compare them against the evidence below without trusting
-   * the prose. Rejected quotes are a count on the grounding line, not a list —
-   * printing a quote the check could not find in the evidence would put an
-   * unsupported sentence back on the screen.
+   * The panel used to print every retrieved passage under every answer — seven
+   * boxes for a question the model answered from two of them — so the reader
+   * had to scan the evidence to find out which part of it mattered. The model
+   * now names the pieces it actually used, and only those are shown: the note,
+   * what it contributed, and the page, each one clickable.
+   *
+   * When the model named nothing (a `none` answer, or a reply that cited
+   * badly) the best-ranked passage is shown instead, so there is always
+   * somewhere to click through to.
+   */
+  private renderSources(el: HTMLElement, evidence: EvidenceUnit[], report: GroundingReport): void {
+    const picked = report.sources.map((s) => ({ unit: evidence[s.n - 1], why: s.why })).filter((p) => !!p.unit);
+    if (picked.length === 0 && report.coverage !== "none") picked.push({ unit: evidence[0], why: "" });
+    if (picked.length === 0) return;
+
+    el.createDiv({ cls: "recall-chat-sources-head", text: picked.length === 1 ? "Source" : "Sources" });
+    for (const { unit, why } of picked) {
+      const row = el.createDiv({ cls: "recall-chat-source" });
+
+      const link = row.createEl("a", { cls: "recall-chat-source-note", text: unit.noteTitle, href: unit.notePath });
+      link.addEventListener("click", (e) => {
+        e.preventDefault();
+        // obsidian.d.ts: openLinkText(linktext, sourcePath, newLeaf).
+        void this.plugin.app.workspace.openLinkText(unit.notePath, "", false);
+      });
+
+      if (why) row.createSpan({ cls: "recall-chat-source-why", text: why });
+
+      if (unit.target && unit.pdfBasename) {
+        const page = row.createSpan({ cls: "recall-chat-source-page", text: `p.${unit.page}` });
+        page.addEventListener("click", (e) => {
+          e.preventDefault();
+          void this.plugin.app.workspace.openLinkText(pdfLinktext(unit), "", false);
+        });
+      }
+
+      // The passage itself, quiet under the link: enough to confirm the answer
+      // at a glance without becoming the evidence board again.
+      row.createDiv({ cls: "recall-chat-source-text", text: unit.text });
+    }
+  }
+
+  /**
+   * The one line under an answer: how well the notes covered the question.
+   *
+   * It used to carry the checker's bookkeeping — sentences kept, sentences
+   * removed, quotes verified and rejected — plus the verified quotes
+   * themselves in a block quote. That was a second copy of the evidence for a
+   * reader who had not asked for the first. What is left is the part that
+   * changes what they do next: whether their notes answered the question.
    */
   private renderGrounding(el: HTMLElement, report: GroundingReport): void {
-    const line = el.createDiv({ cls: `recall-chat-grounding${report.verified ? "" : " is-unverified"}` });
+    const line = el.createDiv({ cls: `recall-chat-grounding${report.coverage === "none" ? " is-unverified" : ""}` });
     line.createSpan({ text: renderGroundingLine(report) });
-    if (!report.verified) line.createSpan({ cls: "recall-badge recall-badge-warn", text: "unverified" });
-
-    if (report.quotesVerified.length === 0) return;
-    const md = report.quotesVerified.map((q) => `> “${q.quote}” — [${q.n}]`).join("\n>\n");
-    void MarkdownRenderer.render(this.plugin.app, md, el.createDiv({ cls: "recall-chat-quotes" }), "", this.view);
   }
 
   /**
