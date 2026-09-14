@@ -35,7 +35,10 @@ export interface RecallSettings {
   notifyWhenReady: boolean;
 
   // Capture
+  /** Off by default: capture sends passages to the inbox without editing the note. */
   markMode: MarkMode;
+  /** Set once the 0.9.2 migration has forced markMode off for an install that predates it. */
+  markModeMigrated: boolean;
   openInboxOnCapture: boolean;
   /** Drag-to-capture. Off by default: with it on, every drag-selection is a capture. */
   highlighterMode: boolean;
@@ -121,7 +124,8 @@ export const DEFAULT_SETTINGS: RecallSettings = {
   concurrency: 2,
   notifyWhenReady: true,
 
-  markMode: "highlight",
+  markMode: "none",
+  markModeMigrated: true,
   openInboxOnCapture: false,
   highlighterMode: false,
   highlighterMinChars: 12,
@@ -490,7 +494,9 @@ export class RecallSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Mark captured text in the note")
-      .setDesc("'Highlight' wraps the selection in ==…==. 'Highlight + block ID' also appends a ^recall-… block ID so the inbox can link straight back to the span.")
+      .setDesc(
+        "Off by default — Recall sends passages to the inbox without editing your notes. Marking wraps the passage in ==…==, which can break headings and list formatting when a passage spans more than one line.",
+      )
       .addDropdown((d) =>
         d
           .addOptions({ none: "Do not touch the note", highlight: "Highlight (==…==)", "highlight+block": "Highlight + block ID" })

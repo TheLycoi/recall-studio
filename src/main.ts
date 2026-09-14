@@ -95,7 +95,15 @@ export default class RecallPlugin extends Plugin {
   // ---------------------------------------------------------------- helpers
 
   async loadSettings(): Promise<void> {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, (await this.loadData()) as Partial<RecallSettings>);
+    const saved = (await this.loadData()) as Partial<RecallSettings> | null;
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, saved);
+    // 0.9.2: capture no longer edits notes by default. An install that predates
+    // the change has markMode saved, so the new default alone would not reach it.
+    if (saved && !saved.markModeMigrated) {
+      this.settings.markMode = "none";
+      this.settings.markModeMigrated = true;
+      await this.saveData(this.settings);
+    }
   }
 
   async saveSettings(): Promise<void> {

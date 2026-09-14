@@ -1,9 +1,9 @@
-import { ItemView, MarkdownView, Menu, Notice, WorkspaceLeaf, setIcon } from "obsidian";
+import { ItemView, MarkdownView, Menu, Notice, TFile, WorkspaceLeaf, setIcon } from "obsidian";
 import type RecallPlugin from "./main";
 import { RECALL_ICON } from "./icon";
 import { isPdfHighlight, liveCards, makeCard, pendingCards, type Card, type Highlight } from "./model";
 import { askInstruction } from "./modals";
-import { countClozes, fmtDate } from "./util";
+import { countClozes, fmtDate, locateQuote, splitFrontmatter } from "./util";
 import { describeError } from "./llm";
 import { findCrossInterference, LINT_LABELS } from "./lint";
 import { ChatPanel } from "./chatPanel";
@@ -672,11 +672,31 @@ export class InboxView extends ItemView {
     await this.plugin.app.workspace.openLinkText(target, "", "tab");
     if (h.blockId) return;
     const view = this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
-    if (view && view.file?.path === h.sourcePath) {
-      const line = Math.min(h.line, view.editor.lineCount() - 1);
-      view.editor.setCursor({ line, ch: 0 });
-      view.editor.scrollIntoView({ from: { line, ch: 0 }, to: { line, ch: 0 } }, true);
+    if (!view || view.file?.path !== h.sourcePath) return;
+    const editor = view.editor;
+    // Nothing is written into the note any more, so the span is found by its
+    // text. `h.line` is only a fallback: it goes stale as soon as the note is
+    // edited above the highlight.
+    const file = this.plugin.app.vault.getAbstractFileByPath(h.sourcePath);
+    if (file instanceof TFile) {
+      try {
+        const raw = await this.plugin.app.vault.read(file);
+        const { body, offset } = splitFrontmatter(raw);
+        const loc = locateQuote(body, h.text);
+        if (loc) {
+          const from = editor.offsetToPos(offset + loc.start);
+          const to = editor.offsetToPos(offset + loc.end);
+          editor.setSelection(from, to);
+          editor.scrollIntoView({ from, to }, true);
+          return;
+        }
+      } catch (e) {
+        console.error("Recall: could not re-locate the highlight", e);
+      }
     }
+    const line = Math.min(h.line, editor.lineCount() - 1);
+    editor.setCursor({ line, ch: 0 });
+    editor.scrollIntoView({ from: { line, ch: 0 }, to: { line, ch: 0 } }, true);
   }
 
   // ---------------------------------------------------------------- keys

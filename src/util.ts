@@ -203,13 +203,23 @@ export function ungroundedClozes(clozeText: string, highlight: string): string[]
 
 /**
  * Whether a selection can safely be wrapped in ==…== without producing
- * nested or broken highlight markup.
+ * nested or broken highlight markup, or breaking the note's formatting.
+ *
+ * A span that crosses into a heading, list item, quote or table row cannot be
+ * wrapped: `==## Heading` stops rendering as a heading and leaks the marker
+ * into reading view. Same for a span that starts on a heading line and runs on.
  */
 export function canWrapAsHighlight(sel: string): boolean {
   if (/\n\s*\n/.test(sel)) return false;
   const t = sel.trim();
   if (/^==[\s\S]*==$/.test(t)) return false; // already wrapped
-  return !t.includes("==");
+  if (t.includes("==")) return false;
+  // A later line opens a block-level construct: heading, bullet, ordered item,
+  // blockquote/callout, or table row.
+  if (/\n[ \t]*(?:#{1,6}[ \t]|[-*+][ \t]|\d+[.)][ \t]|>|\|)/.test(t)) return false;
+  // The span starts on a heading line and does not stop at its end.
+  if (/^#{1,6}[ \t]/.test(t) && t.includes("\n")) return false;
+  return true;
 }
 
 /** Build Anki's plain-text import format (tab-separated with header directives). */

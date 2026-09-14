@@ -27,8 +27,8 @@ open inbox ──▶ scan / edit / delete ──▶ "Export" ──▶ Anki deck
 ### Capturing
 
 **Highlighter mode** is the primary path. Click the pen in the ribbon (or run
-*Toggle highlighter mode*), then drag across a passage. It is wrapped in
-`==…==` and sent to the inbox with no key pressed. This works in the editor
+*Toggle highlighter mode*), then drag across a passage. It is sent to the
+inbox with no key pressed, and your note is left untouched. This works in the editor
 (source and live preview), in reading view, and in Obsidian's PDF viewer,
 where the highlight carries its page number instead of a line. The status bar
 shows `🖊 highlighter` while the mode is on. Off by default: with it on, every
@@ -42,17 +42,26 @@ Commands, for when the mode is off:
 
 | Command | What it does |
 | --- | --- |
-| **Send selection to inbox** | Captures the selection (or the paragraph under the cursor; in reading view, the selected text), wraps it in `==…==`, and queues card writing. Also in the editor right-click menu. |
+| **Send selection to inbox** | Captures the selection (or the paragraph under the cursor; in reading view, the selected text) and queues card writing. Your note is not modified. Also in the editor right-click menu. |
 | **Send PDF selection to inbox** (also *…with instructions…*) | Captures the text selected in the PDF viewer with its page number and the page's text as context. |
 | **Send selection to inbox with instructions…** | Same, plus a one-line instruction for the writer ("one cloze on the number", "cards in Dutch"). |
 | **Send all ==highlights== in this note to inbox** | Sweeps a note you highlighted while reading and queues every span not already in the inbox. |
-| **AI-highlight this note and write cards** | The "highlight" operation: the model picks spans worth remembering, each is verified verbatim against the note, marked, and queued. Use this for dense material. |
+| **AI-highlight this note and write cards** | The "highlight" operation: the model picks spans worth remembering, each is verified verbatim against the note, then queued. Use this for dense material. Your note is not modified. |
 | **AI-highlight this note with instructions…** | Same, with guidance for the highlighter ("only definitions and numbers"). |
 | **AI-highlight this PDF into the wiki…** | On an open PDF: the model suggests spans page by page, each verified verbatim and mapped to a PDF++ selection, assigned to a same-class wiki note or a proposed new one, previewed per span, then written as callouts. |
 
+**Capture does not edit your notes.** Recall sends the passage to the inbox and
+leaves the file alone. Writing `==…==` into a note is available as an opt-in
+setting ("Mark captured text in the note"), but it is off by default: a passage
+that spans a heading or a list item cannot be wrapped in `==…==` without
+breaking the formatting, and Recall now refuses to mark those spans even when
+marking is on.
+
 Every highlight remembers its note, line, nearest heading and (optionally) a
-`^recall-…` block ID, so the inbox can jump straight back to the source. PDF
-highlights remember the page and open the PDF at that page.
+`^recall-…` block ID, so the inbox can jump straight back to the source. With
+marking off, clicking a highlight in the inbox re-locates it by its text, so the
+jump survives edits made elsewhere in the note. PDF highlights remember the page
+and open the PDF at that page.
 
 ### What the cards look like
 

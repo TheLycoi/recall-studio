@@ -101,6 +101,29 @@ test("canWrapAsHighlight refuses nested or multi-paragraph spans", () => {
   assert.equal(u.canWrapAsHighlight("two\n\nparagraphs"), false);
 });
 
+test("canWrapAsHighlight refuses spans that cross block-level markdown", () => {
+  // The reported bug: a span running from a heading into the bullet below it
+  // used to be wrapped, which killed the heading and leaked == into the note.
+  assert.equal(u.canWrapAsHighlight("## Precontemplation\n- **Traits:** Unaware of the problem."), false);
+  assert.equal(u.canWrapAsHighlight("Some lead-in text\n## A heading"), false);
+  assert.equal(u.canWrapAsHighlight("intro line\n- a bullet"), false);
+  assert.equal(u.canWrapAsHighlight("intro line\n* a bullet"), false);
+  assert.equal(u.canWrapAsHighlight("intro line\n+ a bullet"), false);
+  assert.equal(u.canWrapAsHighlight("intro line\n1. an ordered item"), false);
+  assert.equal(u.canWrapAsHighlight("intro line\n2) an ordered item"), false);
+  assert.equal(u.canWrapAsHighlight("intro line\n> a quote"), false);
+  assert.equal(u.canWrapAsHighlight("intro line\n| a | table |"), false);
+  assert.equal(u.canWrapAsHighlight("intro line\n  - an indented bullet"), false);
+});
+
+test("canWrapAsHighlight still accepts spans that only wrap lines", () => {
+  // A sentence soft-wrapped across two lines is the common case and must stay wrappable.
+  assert.equal(u.canWrapAsHighlight("a sentence that runs\nonto a second line"), true);
+  assert.equal(u.canWrapAsHighlight("## Just the heading itself"), true);
+  assert.equal(u.canWrapAsHighlight("a hyphen - mid sentence\nand more text"), true);
+  assert.equal(u.canWrapAsHighlight("5 - 3 = 2 in a line\ncontinued here"), true);
+});
+
 test("normalizeTranscript strips WebVTT scaffolding", () => {
   assert.equal(
     u.normalizeTranscript(
