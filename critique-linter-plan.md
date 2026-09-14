@@ -12,9 +12,13 @@ deterministic lint — without slowing the capture gesture Janus's design depend
 1. **Capture stays instant.** `src/capture.ts` and `src/highlighter.ts` make no
    network call and gain no new work. All new work happens inside
    `Generator.run` in `src/generator.ts`, which is already the background queue.
-2. **Everything defaults to today's behaviour.** New settings ship as
-   `critiquePass: false`, `lintMode: "badge"`, `historyExamples: false`. A user
-   who upgrades and changes nothing sees exactly 0.3.1 behaviour.
+2. **The quality chain is on by default, and never blocks a card.** As shipped
+   in 0.4.0 the settings are `critiquePass: true`, `lintMode: "badge"`,
+   `historyExamples: true` (see `DEFAULT_SETTINGS` in `src/settings.ts`). A user
+   who upgrades and changes nothing gets the critique and history examples, but
+   `lintMode: "badge"` means lint results only annotate cards — the set of cards
+   that reach Anki is unchanged from 0.3.1, and every part of the chain can be
+   switched off individually.
 3. **Nothing is silently destroyed.** The critique never deletes a card. A card
    it rejects is stored with `status: "flagged"` and a reason; the reviewer
    decides. `lintMode: "drop"` is opt-in and even then writes the card as

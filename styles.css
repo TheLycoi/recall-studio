@@ -198,6 +198,12 @@
 .recall-badge-critique {
   color: var(--color-purple);
 }
+.recall-badge-note {
+  color: var(--color-yellow);
+}
+.recall-badge-checked {
+  color: var(--color-green);
+}
 .recall-quote {
   padding: var(--size-4-3);
   border-radius: var(--radius-m);
@@ -410,10 +416,6 @@ body.recall-highlighter-active .cm-content ::selection,
 body.recall-highlighter-active .markdown-preview-view ::selection,
 body.recall-highlighter-active .textLayer ::selection {
   background: var(--text-highlight-bg);
-}
-.recall-badge-warn {
-  background: var(--background-modifier-error-hover, var(--background-modifier-error));
-  color: var(--text-normal);
 }
 .recall-badge-notice {
   color: var(--text-muted);

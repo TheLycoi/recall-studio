@@ -87,10 +87,17 @@ export function lintCard(card: Card, highlight: Highlight, siblings: Card[]): Li
     if (words(card.back).length > 12) failures.push("qa-answer-long");
     // qa-yes-no: front must not start with a yes/no auxiliary.
     if (QA_YES_NO_START.test(card.front.trim())) failures.push("qa-yes-no");
-    // answer-in-question: normalized back must not be a substring of normalized front.
-    const nFront = normalizePlain(card.front);
-    const nBack = normalizePlain(card.back);
-    if (nBack.length > 0 && nFront.includes(nBack)) failures.push("answer-in-question");
+    // answer-in-question: the normalized answer must not appear in the
+    // normalized question as a whole run of words. A raw substring test
+    // false-positives on short answers that merely spell a letter sequence
+    // inside a longer word ("on" inside "contemplation").
+    const fWords = words(normalizePlain(card.front));
+    const bWords = words(normalizePlain(card.back));
+    const contains =
+      bWords.length > 0 &&
+      bWords.length <= fWords.length &&
+      fWords.some((_, i) => bWords.every((w, k) => fWords[i + k] === w));
+    if (contains) failures.push("answer-in-question");
   }
 
   // card-long: front + back + text combined <=60 words. Cloze text is

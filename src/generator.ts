@@ -119,17 +119,22 @@ export class Generator {
 
       // lintMode applies to the final set, after any revision.
       for (const c of cards) {
-        const failures = lint.get(c)!.failures;
+        const { failures, warnings } = lint.get(c)!;
         // Stored in every mode, including "badge", so the inbox can render them.
         if (failures.length) c.lintFailures = failures;
-        if (failures.length && settings.lintMode !== "badge") c.status = "flagged";
-        const warnings = lint.get(c)!.warnings;
+        // Warnings never flag a card; they are interference notes for the reviewer.
         if (warnings.length) c.lintWarnings = warnings;
+        if (failures.length && settings.lintMode !== "badge") c.status = "flagged";
       }
 
       for (const c of cards) h.cards.push(c);
       const flagged = cards.filter((c) => c.status === "flagged").length;
-      h.status = "ready";
+      // A re-request that arrived mid-run set the status back to "queued";
+      // overwriting it here would silently drop that request, since kick()
+      // refuses to start a second run while this id is in `running`. The cast
+      // widens the type TS narrowed to "generating" at the top of run() — the
+      // await points above are exactly where enqueue() can have intervened.
+      if ((h.status as Highlight["status"]) !== "queued") h.status = "ready";
       h.generatedAt = new Date().toISOString();
       h.error = null;
       if (this.plugin.settings.notifyWhenReady) {

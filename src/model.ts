@@ -48,7 +48,7 @@ export interface Card {
   createdAt: string;
   /** Deterministic lint failures recorded when the card was generated. */
   lintFailures?: LintFailureId[];
-  /** Deterministic lint warnings recorded at generation; advisory, never change status. */
+  /** Deterministic lint warnings (including interference risks) recorded at generation; advisory, never change status. */
   lintWarnings?: LintWarningId[];
   /** One-sentence reason from the critique pass, shown to the reviewer. */
   critiqueReason?: string;

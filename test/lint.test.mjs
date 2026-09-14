@@ -251,6 +251,21 @@ test("answer-in-question: passes when the back is not contained in the front", (
   assert.ok(!r.failures.includes("answer-in-question"), "should not fail answer-in-question");
 });
 
+test("answer-in-question: a short answer inside a longer word is not a match", () => {
+  // "on" is a letter-substring of "contemplation" but not a word of the front.
+  const card = qaCard("What defines the contemplation stage?", "on");
+  const r = l.lintCard(card, highlight, []);
+  assert.ok(!r.failures.includes("answer-in-question"), "substring inside a word must not count");
+});
+
+test("answer-in-question: a multi-word answer must match as a whole run of words", () => {
+  const contiguous = qaCard("Why does the contemplation stage precede action?", "the contemplation stage");
+  assert.ok(l.lintCard(contiguous, highlight, []).failures.includes("answer-in-question"));
+
+  const scattered = qaCard("Which stage names the six month intention window?", "stage window");
+  assert.ok(!l.lintCard(scattered, highlight, []).failures.includes("answer-in-question"), "non-adjacent words must not count");
+});
+
 // ---- duplicate-card (warning)
 
 test("duplicate-card: warns when a sibling has the same normalized front", () => {
