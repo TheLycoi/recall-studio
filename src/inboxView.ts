@@ -1,6 +1,22 @@
 import { ItemView, MarkdownView, Menu, Notice, TFile, WorkspaceLeaf, setIcon } from "obsidian";
 import type RecallPlugin from "./main";
-import { RECALL_ICON } from "./icon";
+import {
+  RECALL_ADD_ICON,
+  RECALL_CHEVRON_DOWN_ICON,
+  RECALL_CHEVRON_RIGHT_ICON,
+  RECALL_CLOZE_ICON,
+  RECALL_DISCARD_ICON,
+  RECALL_EDIT_ICON,
+  RECALL_FILE_ICON,
+  RECALL_FIX_ICON,
+  RECALL_ICON,
+  RECALL_MORE_ICON,
+  RECALL_QA_ICON,
+  RECALL_RETRY_ICON,
+  RECALL_SEND_ICON,
+  RECALL_SPARK_ICON,
+  RECALL_STACK_ICON,
+} from "./icon";
 import { isPdfHighlight, liveCards, makeCard, pendingCards, type Card, type Highlight } from "./model";
 import { askInstruction } from "./modals";
 import { countClozes, fmtDate, locateQuote, splitFrontmatter } from "./util";
@@ -219,7 +235,7 @@ export class InboxView extends ItemView {
     });
 
     const deckBtn = right.createEl("button", { cls: "recall-deck-btn" });
-    setIcon(deckBtn.createSpan(), "layers");
+    setIcon(deckBtn.createSpan(), RECALL_STACK_ICON);
     deckBtn.createSpan({ text: this.plugin.settings.defaultDeck });
     deckBtn.title = "Change the target deck";
     deckBtn.addEventListener("click", async () => {
@@ -236,13 +252,13 @@ export class InboxView extends ItemView {
     exportAll.addEventListener("click", () => void this.exportHighlights(this.visibleHighlights()));
 
     const more = right.createEl("button", { cls: "clickable-icon recall-icon-btn" });
-    setIcon(more, "more-horizontal");
+    setIcon(more, RECALL_MORE_ICON);
     more.addEventListener("click", (evt) => {
       const menu = new Menu();
       menu.addItem((i) =>
         i
           .setTitle("Retry failed highlights")
-          .setIcon("refresh-cw")
+          .setIcon(RECALL_RETRY_ICON)
           .onClick(() => {
             for (const h of this.plugin.store.all()) if (h.status === "error") this.plugin.generator.enqueue(h);
           }),
@@ -250,13 +266,13 @@ export class InboxView extends ItemView {
       menu.addItem((i) =>
         i
           .setTitle("Export reviewed as Anki text file")
-          .setIcon("file-down")
+          .setIcon(RECALL_FILE_ICON)
           .onClick(() => void this.plugin.exportAsTextFile(this.visibleHighlights())),
       );
       menu.addItem((i) =>
         i
           .setTitle("Clear exported and dismissed")
-          .setIcon("trash")
+          .setIcon(RECALL_DISCARD_ICON)
           .onClick(() => {
             const n = this.plugin.store.clearExported();
             new Notice(`Recall: cleared ${n}.`);
@@ -275,7 +291,7 @@ export class InboxView extends ItemView {
     const section = root.createDiv({ cls: "recall-source" });
     const head = section.createDiv({ cls: "recall-source-head" });
     const toggle = head.createSpan({ cls: "recall-collapse" });
-    setIcon(toggle, this.collapsed.has(path) ? "chevron-right" : "chevron-down");
+    setIcon(toggle, this.collapsed.has(path) ? RECALL_CHEVRON_RIGHT_ICON : RECALL_CHEVRON_DOWN_ICON);
     toggle.addEventListener("click", () => {
       if (this.collapsed.has(path)) this.collapsed.delete(path);
       else this.collapsed.add(path);
@@ -366,18 +382,18 @@ export class InboxView extends ItemView {
       return b;
     };
     if (h.status === "ready" && pendingCards(h).length) {
-      iconBtn("send", "Export this highlight's cards to Anki (Enter)", () => void this.exportHighlights([h]));
+      iconBtn(RECALL_SEND_ICON, "Export this highlight's cards to Anki (Enter)", () => void this.exportHighlights([h]));
     }
-    if (h.status === "error") iconBtn("refresh-cw", "Retry", () => this.plugin.generator.enqueue(h));
+    if (h.status === "error") iconBtn(RECALL_RETRY_ICON, "Retry", () => this.plugin.generator.enqueue(h));
     if (h.status === "ready" || h.status === "exported") {
-      iconBtn("sparkles", "Write more cards for this highlight", async () => {
+      iconBtn(RECALL_SPARK_ICON, "Write more cards for this highlight", async () => {
         const inst = await askInstruction(this.plugin.app, "More cards", "Optional: what should the extra cards cover?");
         if (inst === null) return;
         if (inst) h.instruction = inst;
         this.plugin.generator.more(h);
       });
     }
-    iconBtn("plus", "Add a card by hand", () => {
+    iconBtn(RECALL_ADD_ICON, "Add a card by hand", () => {
       const c = makeCard(h.id, { kind: "qa", front: "", back: "" });
       h.cards.push(c);
       if (h.status === "exported") h.status = "ready";
@@ -385,12 +401,12 @@ export class InboxView extends ItemView {
       this.plugin.store.touch();
     });
     if (h.status !== "dismissed") {
-      iconBtn("x", "Dismiss highlight and its cards", () => {
+      iconBtn(RECALL_DISCARD_ICON, "Dismiss highlight and its cards", () => {
         h.status = "dismissed";
         this.plugin.store.touch();
       });
     } else {
-      iconBtn("trash-2", "Delete permanently", () => this.plugin.store.remove(h.id));
+      iconBtn(RECALL_DISCARD_ICON, "Delete permanently", () => this.plugin.store.remove(h.id));
     }
 
     // Right column: the cards.
@@ -411,7 +427,7 @@ export class InboxView extends ItemView {
       const flagged = cards.filter((c) => c.status === "flagged");
       const expanded = this.expandedFlagged.has(h.id);
       const toggle = right.createEl("button", { cls: "recall-flagged-toggle" });
-      setIcon(toggle.createSpan(), expanded ? "chevron-down" : "chevron-right");
+      setIcon(toggle.createSpan(), expanded ? RECALL_CHEVRON_DOWN_ICON : RECALL_CHEVRON_RIGHT_ICON);
       toggle.createSpan({ text: `${flagged.length} flagged` });
       toggle.title = expanded ? "Hide the flagged cards" : "Show the cards the linter or critique flagged";
       toggle.addEventListener("click", () => {
@@ -480,23 +496,23 @@ export class InboxView extends ItemView {
       });
     };
     if (this.lintNotes(c)) {
-      btn("wrench", "Fix with linter notes", () => void this.rewrite(h, c, this.lintInstruction(c)));
+      btn(RECALL_FIX_ICON, "Fix with linter notes", () => void this.rewrite(h, c, this.lintInstruction(c)));
     }
     // Flagged cards get the same actions as pending ones: the reader has to be
     // able to edit or bin a card the critique objected to, not just re-run the
     // fix. Only the export path treats flagged differently (main.ts pendingItems).
     if (c.status === "pending" || c.status === "flagged") {
-      btn("pencil", "Edit (e)", () => {
+      btn(RECALL_EDIT_ICON, "Edit (e)", () => {
         this.editing = this.editing === c.id ? null : c.id;
         this.render();
       });
-      btn("sparkles", "Rewrite with an instruction", () => void this.rewrite(h, c));
-      btn(c.kind === "qa" ? "brackets" : "help-circle", c.kind === "qa" ? "Convert to cloze" : "Convert to Q&A", () =>
+      btn(RECALL_SPARK_ICON, "Rewrite with an instruction", () => void this.rewrite(h, c));
+      btn(c.kind === "qa" ? RECALL_CLOZE_ICON : RECALL_QA_ICON, c.kind === "qa" ? "Convert to cloze" : "Convert to Q&A", () =>
         void this.rewrite(h, c, c.kind === "qa" ? "Convert this Q&A card into a cloze card." : "Convert this cloze card into a question and answer card."),
       );
-      btn("trash-2", "Delete (x)", () => this.deleteCard(h, c));
+      btn(RECALL_DISCARD_ICON, "Delete (x)", () => this.deleteCard(h, c));
     } else if (c.status === "duplicate") {
-      btn("trash-2", "Remove", () => this.deleteCard(h, c));
+      btn(RECALL_DISCARD_ICON, "Remove", () => this.deleteCard(h, c));
     }
 
     if (this.editing === c.id) {

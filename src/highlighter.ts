@@ -3,6 +3,7 @@ import type RecallPlugin from "./main";
 import { captureReadingSelection, capturePdfSelection, captureSelection } from "./capture";
 import { isPdfFile, readPdfSelection } from "./pdf";
 import { normalizeWs } from "./util";
+import { RECALL_HIGHLIGHT_ICON } from "./icon";
 
 /**
  * Highlighter mode: pick up the pen, drag across a passage, and it is
@@ -33,7 +34,7 @@ export class Highlighter {
 
   install(): void {
     const p = this.plugin;
-    this.ribbon = p.addRibbonIcon("highlighter", "Recall highlighter mode", () => void this.toggle());
+    this.ribbon = p.addRibbonIcon(RECALL_HIGHLIGHT_ICON, "Recall highlighter mode", () => void this.toggle());
     this.reflect();
     p.addCommand({ id: "toggle-highlighter", name: "Toggle highlighter mode", callback: () => void this.toggle() });
 

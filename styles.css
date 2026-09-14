@@ -1,5 +1,15 @@
 /* Recall — inbox and modals */
 
+/* Icon scale. The custom set in src/icon.ts is drawn on one grid, so the
+   rendered sizes are shared here rather than set per-button: sm for icons
+   that sit inside a text label, md for standalone clickable icons (which
+   matches Obsidian's own clickable-icon default). */
+.recall-inbox,
+.recall-statusbar {
+  --recall-icon-sm: 14px;
+  --recall-icon-md: 16px;
+}
+
 .recall-inbox {
   padding: 0 var(--size-4-4) var(--size-4-8);
   overflow-y: auto;
@@ -80,8 +90,8 @@
   gap: 6px;
 }
 .recall-deck-btn .svg-icon {
-  width: 14px;
-  height: 14px;
+  width: var(--recall-icon-sm);
+  height: var(--recall-icon-sm);
 }
 .recall-icon-btn {
   padding: 4px;
@@ -90,8 +100,8 @@
   box-shadow: none;
 }
 .recall-icon-btn .svg-icon {
-  width: 15px;
-  height: 15px;
+  width: var(--recall-icon-md);
+  height: var(--recall-icon-md);
 }
 
 /* Source group -------------------------------------------------------- */
@@ -111,8 +121,8 @@
   color: var(--text-muted);
 }
 .recall-collapse .svg-icon {
-  width: 16px;
-  height: 16px;
+  width: var(--recall-icon-md);
+  height: var(--recall-icon-md);
 }
 .recall-source-title {
   font-weight: 600;
@@ -275,6 +285,10 @@
   background: transparent;
   box-shadow: none;
   padding: var(--size-4-1) var(--size-4-2);
+}
+.recall-flagged-toggle .svg-icon {
+  width: var(--recall-icon-sm);
+  height: var(--recall-icon-sm);
 }
 .recall-flagged-toggle:hover {
   color: var(--text-normal);
@@ -508,7 +522,7 @@ body.recall-highlighter-active .textLayer ::selection {
 .recall-chat-turn.is-assistant p:first-child {
   margin-top: 0;
 }
-.recall-chat-evidence-head {
+.recall-chat-sources-head {
   margin: var(--size-4-3) 0 var(--size-4-1);
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
@@ -516,19 +530,42 @@ body.recall-highlighter-active .textLayer ::selection {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-.recall-chat-evidence {
+/* One source: the note, what it gave, the page, then the passage itself. */
+.recall-chat-source {
   margin-bottom: var(--size-4-2);
   padding: var(--size-4-2);
   border: 1px solid var(--background-modifier-border);
+  border-left: 3px solid var(--interactive-accent);
   border-radius: var(--radius-m);
   background: var(--background-secondary);
   font-size: var(--font-ui-smaller);
 }
-.recall-chat-evidence p:first-child {
-  margin-top: 0;
+.recall-chat-source-note {
+  color: var(--text-accent);
+  cursor: pointer;
+  font-weight: 600;
+  text-decoration: none;
 }
-.recall-chat-evidence p:last-child {
-  margin-bottom: 0;
+.recall-chat-source-note:hover {
+  text-decoration: underline;
+}
+.recall-chat-source-why {
+  margin-left: var(--size-4-2);
+  color: var(--text-faint);
+}
+.recall-chat-source-page {
+  margin-left: var(--size-4-2);
+  color: var(--text-accent);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.recall-chat-source-page:hover {
+  text-decoration: underline;
+}
+.recall-chat-source-text {
+  margin-top: var(--size-4-1);
+  color: var(--text-muted);
+  line-height: var(--line-height-tight);
 }
 .recall-chat-input {
   flex: 0 0 auto;
@@ -591,11 +628,6 @@ body.recall-highlighter-active .textLayer ::selection {
   align-items: center;
   gap: var(--size-4-2);
 }
-/* Evidence the answer actually cited, marked so the rest reads as context. */
-.recall-chat-evidence.is-cited {
-  border-left: 3px solid var(--interactive-accent);
-}
-
 /* Quiz mode in the chat ---------------------------------------------------- */
 /* A question: the only turn that must be read before anything is typed, so it
    sits a little apart from the grades above it. */
@@ -640,4 +672,16 @@ body.recall-highlighter-active .textLayer ::selection {
 }
 .recall-chat-turn.recall-quiz-summary .recall-chat-offer {
   margin-top: var(--size-4-2);
+}
+
+/* An answer the notes did not supply. Above the answer and hard to miss: the
+   reader has to know before they read it, not after. */
+.recall-chat-verify-banner {
+  margin-bottom: var(--size-4-2);
+  padding: var(--size-4-2) var(--size-4-3);
+  border-left: 3px solid var(--color-orange);
+  border-radius: var(--radius-s);
+  background: var(--background-modifier-error-hover);
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
 }

@@ -1,5 +1,5 @@
 import { MarkdownView, Notice, Plugin, TFile, normalizePath } from "obsidian";
-import { RECALL_ICON, registerRecallIcon } from "./icon";
+import { RECALL_ICON, RECALL_SPARK_ICON, registerRecallIcon } from "./icon";
 import { AnkiClient, exportToAnki, finalizeHighlights, buildNote } from "./anki";
 import { captureSelection } from "./capture";
 import { RECALL_COMMANDS } from "./commands";
@@ -73,7 +73,7 @@ export default class RecallPlugin extends Plugin {
         menu.addItem((item) =>
           item
             .setTitle("Recall: send with instructions…")
-            .setIcon("message-square")
+            .setIcon(RECALL_SPARK_ICON)
             .setSection("recall")
             .onClick(async () => {
               const inst = await askInstruction(this.app, "Instructions for this highlight", "e.g. one cloze on the number");
