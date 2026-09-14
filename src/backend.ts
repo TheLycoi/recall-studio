@@ -10,6 +10,15 @@ export interface CompletionRequest<T> {
   /** Plural noun for error messages ("cards", "highlights"). */
   label: string;
   maxTokens: number;
+  /**
+   * Reasoning effort for this one call, overriding the configured default.
+   *
+   * Set to "low" for work that is reading rather than reasoning. Answering
+   * from evidence already on screen does not improve with extended thinking,
+   * but it does wait for it: the same question took a noticeably long time to
+   * come back because every Ask ran at the effort a card critique needs.
+   */
+  effort?: "low" | "medium" | "high";
 }
 
 /**

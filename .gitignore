@@ -5,3 +5,6 @@ main.js
 
 # Snapshots of installed builds (contain data.json with API keys — never commit)
 installed-backups/
+
+# Local agent worktree state
+.claude/

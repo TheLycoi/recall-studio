@@ -361,7 +361,7 @@ export class ClaudeCliBackend implements LlmBackend {
     const bin = resolveClaudeBinary(s.path);
     const args = buildClaudeArgs({
       model: s.model,
-      effort: s.effort,
+      effort: req.effort ?? s.effort,
       schemaJson: JSON.stringify(toStrictSchema(req.schema)),
       system: req.system,
       maxTurns: MAX_TURNS,

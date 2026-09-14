@@ -359,7 +359,7 @@ export class CodexBackend implements LlmBackend {
   async complete<T>(req: CompletionRequest<T>): Promise<T> {
     const s = this.getSettings();
     const bin = resolveCodexBinary(s.codexPath);
-    const effort = clampEffort(s.effort, readSupportedEfforts(s.codexModel, readModelsCache()));
+    const effort = clampEffort(req.effort ?? s.effort, readSupportedEfforts(s.codexModel, readModelsCache()));
     const dir = mkdtempSync(join(tmpdir(), "recall-codex-"));
     try {
       const schemaPath = join(dir, "schema.json");
