@@ -253,8 +253,12 @@ export async function suggestPdfHighlights(plugin: RecallPlugin, pdf: TFile): Pr
     let queued = 0;
     let refused = 0;
     for (const note of final.notes) {
-      if (options.product !== "flashcards") {
-        const path = normalizePath(note.path);
+      // The topic note this note's highlights were digested into, so an
+      // exported card links to the concept and not only to the source PDF.
+      // A flashcards-only run writes no note, so there is no topic to link.
+      const topicPath = options.product === "flashcards" ? null : normalizePath(note.path);
+      if (topicPath !== null) {
+        const path = topicPath;
         // A source is never a note. The planner cannot produce either of these
         // today, but a note named after the PDF, or written into the folder the
         // PDF itself lives in, would put generated prose where the reader keeps
@@ -278,7 +282,7 @@ export async function suggestPdfHighlights(plugin: RecallPlugin, pdf: TFile): Pr
       spansWritten += note.added;
       if (!note.exists) newCount++;
       if (options.product !== "notes") {
-        queued += captureManifestHighlights(plugin, manifest, note.highlights, note.title).added;
+        queued += captureManifestHighlights(plugin, manifest, note.highlights, note.title, topicPath).added;
       }
     }
 
