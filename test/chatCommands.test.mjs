@@ -31,6 +31,7 @@ const EXPECTED = [
   ["capture-markdown-highlights", "Send all ==highlights== in this note to inbox"],
   ["ai-highlight", "AI-highlight this note and write cards"],
   ["ai-highlight-with-instruction", "AI-highlight this note with instructions…"],
+  ["ingest-source", "Read this markdown source into the wiki"],
   ["add-transcript", "Add transcript for document highlighting"],
   ["extract-pdf-highlights", "Extract PDF highlights to manifest"],
   ["digest-pdf-highlights", "Digest PDF highlights into topic notes…"],
@@ -42,8 +43,8 @@ const EXPECTED = [
   ["retry-failed", "Retry failed highlights"],
 ];
 
-test("COMMAND_TABLE holds the sixteen (id, name) pairs verbatim and in order", () => {
-  assert.equal(table.COMMAND_TABLE.length, 16);
+test("COMMAND_TABLE holds the seventeen (id, name) pairs verbatim and in order", () => {
+  assert.equal(table.COMMAND_TABLE.length, 17);
   assert.deepEqual(
     table.COMMAND_TABLE.map((c) => [c.id, c.name]),
     EXPECTED,

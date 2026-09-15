@@ -62,6 +62,12 @@ export const COMMAND_TABLE: CommandSpec[] = [
     hint: "needs an open note",
   },
   {
+    id: "ingest-source",
+    name: "Read this markdown source into the wiki",
+    aliases: ["ingest", "read-source"],
+    hint: "needs an open note",
+  },
+  {
     id: "add-transcript",
     name: "Add transcript for document highlighting",
     aliases: ["transcript"],
