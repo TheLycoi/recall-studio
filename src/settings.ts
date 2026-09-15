@@ -800,7 +800,7 @@ export class WikiLmSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Detect note types from Anki")
-      .setDesc("Looks for 'Janus - Basic (v2)' / 'Janus - Cloze (v2)' first, then falls back to Basic / Cloze, and fills in the field names below.")
+      .setDesc("Looks for Anki's stock Basic and Cloze note types, and fills in the field names below.")
       .addButton((b) =>
         b.setButtonText("Detect").onClick(async () => {
           try {

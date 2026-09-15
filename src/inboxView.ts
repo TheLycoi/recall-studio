@@ -21,7 +21,7 @@ import { isPdfHighlight, liveCards, makeCard, pendingCards, type Card, type High
 import { askInstruction } from "./modals";
 import { countClozes, fmtDate, locateQuote, splitFrontmatter } from "./util";
 import { describeError } from "./llm";
-import { findCrossInterference, LINT_LABELS } from "./lint";
+import { findCrossInterference, lintCard, LINT_LABELS } from "./lint";
 import { ChatPanel } from "./chatPanel";
 
 export const VIEW_TYPE_INBOX = "wikilm-notebook";
@@ -468,10 +468,13 @@ export class InboxView extends ItemView {
     });
 
     const top = el.createDiv({ cls: "wikilm-card-top" });
-    top.createSpan({ cls: "wikilm-kind", text: c.kind === "qa" ? "Question" : `Cloze${countClozes(c.text) > 1 ? ` ×${countClozes(c.text)}` : ""}` });
-    if (c.status === "exported") top.createSpan({ cls: "wikilm-badge wikilm-badge-exported", text: "in Anki" });
-    if (c.status === "duplicate") top.createSpan({ cls: "wikilm-badge wikilm-badge-duplicate", text: "duplicate" });
-    if (c.edited && c.status === "pending") top.createSpan({ cls: "wikilm-badge", text: "edited" });
+    // Badges live in their own wrapping child; the actions are a sibling with a
+    // reserved slot, so a long badge row can never push them out of the card.
+    const meta = top.createDiv({ cls: "wikilm-card-meta" });
+    meta.createSpan({ cls: "wikilm-kind", text: c.kind === "qa" ? "Question" : `Cloze${countClozes(c.text) > 1 ? ` ×${countClozes(c.text)}` : ""}` });
+    if (c.status === "exported") meta.createSpan({ cls: "wikilm-badge wikilm-badge-exported", text: "in Anki" });
+    if (c.status === "duplicate") meta.createSpan({ cls: "wikilm-badge wikilm-badge-duplicate", text: "duplicate" });
+    if (c.edited && c.status === "pending") meta.createSpan({ cls: "wikilm-badge", text: "edited" });
     // Render what the pipeline actually recorded rather than recomputing it:
     // the stored lintFailures are the ones lintMode acted on, so a recomputed
     // check could disagree with the status the card is sitting in. Flagged
@@ -479,11 +482,11 @@ export class InboxView extends ItemView {
     // reader needs in order to decide.
     if (c.status === "pending" || c.status === "flagged") {
       for (const id of c.lintFailures ?? []) {
-        const b = top.createSpan({ cls: "wikilm-badge wikilm-badge-warn", text: LINT_LABELS[id] });
+        const b = meta.createSpan({ cls: "wikilm-badge wikilm-badge-warn", text: LINT_LABELS[id] });
         b.title = `Lint check failed: ${id}`;
       }
       for (const id of c.lintWarnings ?? []) {
-        const b = top.createSpan({ cls: "wikilm-badge wikilm-badge-notice", text: LINT_LABELS[id] });
+        const b = meta.createSpan({ cls: "wikilm-badge wikilm-badge-notice", text: LINT_LABELS[id] });
         b.title = `Interference risk: ${id}`;
       }
       const partners = this.crossInterference.get(c.id);
@@ -492,20 +495,20 @@ export class InboxView extends ItemView {
           .map((id) => this.cardOwner.get(id))
           .filter((owner): owner is Highlight => owner !== undefined)
           .map((owner) => (owner.title ? `${owner.sourceTitle} \u2014 ${owner.title}` : owner.sourceTitle));
-        const b = top.createSpan({ cls: "wikilm-badge wikilm-badge-notice", text: LINT_LABELS["cross-interference"] });
+        const b = meta.createSpan({ cls: "wikilm-badge wikilm-badge-notice", text: LINT_LABELS["cross-interference"] });
         b.title = where.length > 0 ? `Same answer as a card in: ${where.join("; ")}` : "Same answer as a card in another highlight";
       }
       if (c.bloom) {
-        const b = top.createSpan({ cls: "wikilm-badge wikilm-badge-bloom", text: c.bloom });
+        const b = meta.createSpan({ cls: "wikilm-badge wikilm-badge-bloom", text: c.bloom });
         b.title = "Bloom level judged by the critique. 'remember' is right for a plain definition; a mechanism or reason turned into a what-is-it-called card is the case to watch for.";
       }
       if (c.critiqueReason) {
-        const b = top.createSpan({ cls: "wikilm-badge wikilm-badge-critique", text: "critique" });
+        const b = meta.createSpan({ cls: "wikilm-badge wikilm-badge-critique", text: "critique" });
         b.title = c.critiqueReason;
       } else if (c.critiqueRan) {
         // Without this the reviewer cannot tell a card the critique read and
         // kept from one it never saw (pass off, skipped as trivial, or failed).
-        const b = top.createSpan({ cls: "wikilm-badge wikilm-badge-checked", text: "checked" });
+        const b = meta.createSpan({ cls: "wikilm-badge wikilm-badge-checked", text: "checked" });
         b.title = "The critique pass reviewed this card and kept it as written.";
       }
     }
@@ -591,6 +594,19 @@ export class InboxView extends ItemView {
     const extra = form.createEl("textarea", { attr: { rows: "1", placeholder: "Extra (optional, shown on the back)" } });
     extra.value = c.extra;
 
+    // Instruction box: a rewrite request typed against the card in front of
+    // you, rather than in a modal that hides it. Empty means "just save".
+    const instruction = form.createEl("textarea", {
+      cls: "wikilm-editor-instruction",
+      attr: { rows: "1", placeholder: "Instruction for the model (optional) — e.g. shorten the answer, ask about the date" },
+    });
+
+    // Where "Check" writes its verdict. Kept out of the card's own lint fields
+    // so a check on an unsaved draft never overwrites what the pipeline
+    // recorded about the card as it currently stands on disk.
+    const report = form.createDiv({ cls: "wikilm-editor-report" });
+    report.hide();
+
     const sync = () => {
       const isQa = kindSel.value === "qa";
       front.toggle(isQa);
@@ -600,7 +616,79 @@ export class InboxView extends ItemView {
     kindSel.addEventListener("change", sync);
     sync();
 
-    const save = () => {
+    /** The card as currently typed, without touching the stored one. */
+    const draft = (): Card => ({
+      ...c,
+      kind: kindSel.value as Card["kind"],
+      front: kindSel.value === "qa" ? front.value.trim() : "",
+      back: kindSel.value === "qa" ? back.value.trim() : "",
+      text: kindSel.value === "qa" ? "" : text.value.trim(),
+      extra: extra.value.trim(),
+    });
+
+    /**
+     * Run the card rules against the draft: the mechanical linter first, then
+     * the model critique. The linter is free and synchronous, so its verdict
+     * is on screen before the model call starts.
+     */
+    const check = async (btn: HTMLButtonElement) => {
+      const d = draft();
+      if (d.kind === "qa" ? !d.front || !d.back : !d.text) {
+        new Notice("WikiLM: nothing to check yet.");
+        return;
+      }
+      const siblings = h.cards.filter((x) => x.id !== c.id && x.status !== "deleted");
+      const { failures, warnings } = lintCard(d, h, siblings);
+
+      report.empty();
+      report.show();
+      const list = report.createDiv({ cls: "wikilm-editor-report-list" });
+      for (const id of failures) list.createDiv({ cls: "wikilm-report-line wikilm-report-fail", text: `✗ ${LINT_LABELS[id]}` });
+      for (const id of warnings) list.createDiv({ cls: "wikilm-report-line wikilm-report-warn", text: `! ${LINT_LABELS[id]}` });
+      if (!failures.length && !warnings.length) list.createDiv({ cls: "wikilm-report-line wikilm-report-ok", text: "✓ passes every mechanical rule" });
+
+      const pending = report.createDiv({ cls: "wikilm-report-line wikilm-muted", text: "asking the critique…" });
+      btn.disabled = true;
+      try {
+        const [verdict] = await this.plugin.llm.critiqueCards(h, [d], siblings);
+        pending.remove();
+        if (!verdict) {
+          report.createDiv({ cls: "wikilm-report-line wikilm-muted", text: "the critique returned nothing for this card." });
+          return;
+        }
+        const line = report.createDiv({ cls: "wikilm-report-line" });
+        line.createSpan({ cls: `wikilm-badge wikilm-badge-bloom`, text: verdict.bloom });
+        const label = verdict.verdict === "keep" ? "keep" : verdict.verdict === "revise" ? "suggests a revision" : "would drop this";
+        line.createSpan({ text: ` ${label}` });
+        if (verdict.verdict !== "keep" && verdict.reason) {
+          report.createDiv({ cls: "wikilm-report-line wikilm-report-reason", text: verdict.reason });
+        }
+        // A suggested revision is offered, never applied behind your back:
+        // the reviewer decides (the same invariant the generator follows).
+        if (verdict.verdict === "revise") {
+          const apply = report.createEl("button", { text: "Use the revision" });
+          apply.addEventListener("click", () => {
+            kindSel.value = verdict.kind;
+            if (verdict.kind === "qa") {
+              front.value = verdict.front.trim();
+              back.value = verdict.back.trim();
+            } else {
+              text.value = verdict.text.trim();
+            }
+            sync();
+            apply.disabled = true;
+          });
+        }
+      } catch (e) {
+        pending.remove();
+        report.createDiv({ cls: "wikilm-report-line wikilm-report-fail", text: describeError(e) });
+      } finally {
+        btn.disabled = false;
+      }
+    };
+
+    const save = async () => {
+      const ask = instruction.value.trim();
       const before = JSON.stringify([c.kind, c.front, c.back, c.text, c.extra]);
       c.kind = kindSel.value as Card["kind"];
       c.front = front.value.trim();
@@ -623,6 +711,9 @@ export class InboxView extends ItemView {
       }
       this.editing = null;
       this.plugin.store.touch();
+      // The instruction runs against the just-saved text, so a hand edit and a
+      // "now shorten it" land in one pass rather than fighting each other.
+      if (ask && c.status !== "deleted") await this.rewrite(h, c, ask);
     };
     const cancel = () => {
       const empty = c.kind === "qa" ? !c.front || !c.back : !c.text;
@@ -630,12 +721,12 @@ export class InboxView extends ItemView {
       this.editing = null;
       this.plugin.store.touch();
     };
-    for (const ta of [front, back, text, extra]) {
+    for (const ta of [front, back, text, extra, instruction]) {
       ta.addEventListener("keydown", (e) => {
         e.stopPropagation();
         if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
           e.preventDefault();
-          save();
+          void save();
         } else if (e.key === "Escape") {
           e.preventDefault();
           cancel();
@@ -644,7 +735,10 @@ export class InboxView extends ItemView {
     }
     const btns = form.createDiv({ cls: "wikilm-editor-btns" });
     btns.createEl("button", { text: "Cancel" }).addEventListener("click", cancel);
-    btns.createEl("button", { text: "Save", cls: "mod-cta" }).addEventListener("click", save);
+    const checkBtn = btns.createEl("button", { text: "Check" });
+    checkBtn.title = "Run the card rules and the critique against what you have typed, without saving.";
+    checkBtn.addEventListener("click", () => void check(checkBtn));
+    btns.createEl("button", { text: "Save", cls: "mod-cta" }).addEventListener("click", () => void save());
     btns.createSpan({ cls: "wikilm-muted", text: "⌘⏎ save · esc cancel" });
     window.setTimeout(() => (c.kind === "qa" ? front : text).focus(), 10);
   }

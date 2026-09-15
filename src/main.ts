@@ -155,8 +155,12 @@ export default class WikiLmPlugin extends Plugin {
   async detectNoteTypes(): Promise<void> {
     const models = await this.anki.modelNames();
     const pick = (cands: string[]) => cands.find((c) => models.includes(c));
-    const basic = pick(["Janus - Basic (v2)", "Basic+", "Basic"]) ?? models.find((m) => /basic/i.test(m));
-    const cloze = pick(["Janus - Cloze (v2)", "Cloze+", "Cloze"]) ?? models.find((m) => /cloze/i.test(m));
+    // Stock Anki note types, in preference order. Third-party types are not
+    // preferred: they are not present on a fresh install, and picking one the
+    // reader happens to have installed silently changes where a card's fields
+    // land. The regex fallbacks still find a renamed or localised type.
+    const basic = pick(["Basic", "Basic+"]) ?? models.find((m) => /basic/i.test(m));
+    const cloze = pick(["Cloze", "Cloze+"]) ?? models.find((m) => /cloze/i.test(m));
     if (basic) {
       const f = await this.anki.modelFieldNames(basic);
       this.settings.basicModel = basic;

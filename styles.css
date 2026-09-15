@@ -253,6 +253,11 @@
   background: var(--background-secondary);
   font-size: var(--font-ui-small);
   cursor: default;
+  /* The grid track is minmax(240px, 1fr); without this a long badge row or an
+     unbroken cloze string widens the card past its track and the action
+     buttons end up clipped outside the border. */
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .wikilm-card.is-focused {
   border-color: var(--interactive-accent);
@@ -309,11 +314,23 @@
 .wikilm-flagged-box.is-collapsed {
   display: none;
 }
+/* Badges wrap onto their own lines; the actions keep a reserved slot on the
+   first line so they can never be pushed out of the card. The badges live in
+   their own flex child rather than as direct children of the row, because a
+   wrapping row would otherwise carry the actions down with them. */
 .wikilm-card-top {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--size-4-2);
   margin-bottom: var(--size-4-1);
+}
+.wikilm-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--size-4-1);
+  min-width: 0;
+  flex: 1 1 auto;
 }
 .wikilm-kind {
   font-size: var(--font-ui-smaller);
@@ -324,13 +341,26 @@
 .wikilm-card-actions {
   margin-left: auto;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 0;
+  /* Never shrink below the buttons' own size, and never get pushed off the
+     right edge by a long badge row. */
+  flex: 0 0 auto;
   opacity: 0;
   transition: opacity 120ms;
 }
 .wikilm-card:hover .wikilm-card-actions,
-.wikilm-card.is-focused .wikilm-card-actions {
+.wikilm-card.is-focused .wikilm-card-actions,
+.wikilm-card:focus-within .wikilm-card-actions {
   opacity: 1;
+}
+/* Keyboard and touch have no hover: without this the actions are unreachable
+   for anyone not using a mouse. */
+@media (hover: none) {
+  .wikilm-card-actions {
+    opacity: 1;
+  }
 }
 .wikilm-field-label {
   font-size: var(--font-ui-smaller);
@@ -378,6 +408,43 @@
 }
 .wikilm-editor-btns .wikilm-muted {
   margin-left: auto;
+}
+.wikilm-editor-instruction {
+  border-top: 1px dashed var(--background-modifier-border);
+  padding-top: var(--size-4-1);
+}
+/* Verdict from the editor's Check button. Kept visually distinct from the
+   badge row so it reads as "about the draft", not "about the saved card". */
+.wikilm-editor-report {
+  border-left: 2px solid var(--background-modifier-border);
+  padding-left: var(--size-4-2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--font-ui-smaller);
+}
+.wikilm-editor-report-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.wikilm-report-line {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-1);
+}
+.wikilm-report-fail {
+  color: var(--text-error);
+}
+.wikilm-report-warn {
+  color: var(--text-warning);
+}
+.wikilm-report-ok {
+  color: var(--text-success);
+}
+.wikilm-report-reason {
+  color: var(--text-muted);
+  font-style: italic;
 }
 
 /* Empty state ----------------------------------------------------------- */

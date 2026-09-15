@@ -85,6 +85,9 @@ export class DeckSuggestModal extends SuggestModal<string> {
   onChooseSuggestion(item: string): void {
     this.resolved = true;
     this.resolve(item);
+    // SuggestModal does not close itself on a choice; without this the deck is
+    // picked but the modal stays on screen, which reads as "nothing happened".
+    this.close();
   }
 
   onClose(): void {
@@ -128,6 +131,7 @@ class TranscriptFileSuggestModal extends FuzzySuggestModal<TFile> {
   onChooseItem(item: TFile): void {
     this.resolved = true;
     this.resolve(item);
+    this.close();
   }
 
   onClose(): void {
