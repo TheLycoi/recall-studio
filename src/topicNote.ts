@@ -368,6 +368,28 @@ export function wikiDisplay(pdfBasename: string, page: number): string {
   return `${pdfBasename}, p.${page}`;
 }
 
+/** A wiki page is a concept or a named thing; the two render differently. */
+export type WikiKind = "concept" | "entity";
+
+/**
+ * The closed tag vocabularies, as the 100 existing pages actually use them.
+ * Exactly one tag per page. `other` is the escape hatch, not a default.
+ */
+export const CONCEPT_TAGS = ["method", "theory", "term", "phenomenon", "standard", "field", "other"] as const;
+export const ENTITY_TAGS = ["product", "person", "organization", "project", "event", "place", "other"] as const;
+export type ConceptTag = (typeof CONCEPT_TAGS)[number];
+export type EntityTag = (typeof ENTITY_TAGS)[number];
+
+/** A link the planner resolved, rendered by code and never by the model. */
+export interface RelatedLink {
+  /** Full-path target, e.g. "concepts/chunking". */
+  path: string;
+  /** Display text, e.g. "Chunking". */
+  display: string;
+  /** Optional gloss after an em dash, as the entity pages use. */
+  note?: string;
+}
+
 export interface RenderWikiNoteArgs {
   classCode: string;
   pdfBasename: string;
@@ -375,6 +397,137 @@ export interface RenderWikiNoteArgs {
   highlights: ManifestHighlight[];
 }
 
+/**
+ * Everything a karpathy-schema page needs. `title` is the H1 and `tag` is the
+ * single frontmatter tag; `created` is preserved across a merge while
+ * `updated` is always refreshed.
+ */
+export interface RenderKarpathyNoteArgs {
+  title: string;
+  kind: WikiKind;
+  tag: string;
+  /** Source pages this was digested from, as vault paths under `sources/`. */
+  sources: string[];
+  aliases: string[];
+  created: string;
+  updated: string;
+  /** `## Definition` for a concept, `## Description` for an entity. */
+  definition: string;
+  /** Concept-only; each bullet must trace to a highlight. */
+  keyCharacteristics: string[];
+  /** Concept-only. */
+  applications: string[];
+  relatedConcepts: RelatedLink[];
+  relatedEntities: RelatedLink[];
+  /** Verified highlights only — the evidence the prose rests on. */
+  highlights: ManifestHighlight[];
+  pdfBasename: string;
+  /** True when `reviewed: true`, which makes a merge append-only. */
+  reviewed?: boolean;
+  generationComplete?: boolean;
+}
+
+/**
+ * A double-quoted YAML scalar. Always quoted, never bare: the existing pages
+ * quote 262 of their 266 aliases, so emitting a bare scalar where one is
+ * allowed would rewrite that line on every page a merge touches.
+ */
+function yamlStr(s: string): string {
+  return JSON.stringify(s);
+}
+
+/** `- [[path|Display]]`, with an em-dash gloss when the planner supplied one. */
+function relatedLine(l: RelatedLink): string {
+  const link = `[[${l.path}|${l.display}]]`;
+  return l.note && l.note.trim() !== "" ? `- ${link} \u2014 ${l.note.trim()}` : `- ${link}`;
+}
+
+/**
+ * A wiki page in karpathywiki's schema, so the 106 pages already in the vault
+ * and every page written from here share one format.
+ *
+ * Frontmatter key order is fixed — `type`, `created`, `updated`, `sources`,
+ * `tags`, `aliases`, `generation_complete` — because it is identical in all
+ * 100 existing concept and entity pages, and a reordering would show up as a
+ * diff on every page the merge touches.
+ *
+ * Section order differs by kind, also matching what the pages do: a concept
+ * runs Definition → Key Characteristics → Applications → Related Concepts →
+ * Related Entities, an entity runs Description → Related Entities → Related
+ * Concepts. Both end at `## Mentions in Source`.
+ *
+ * The one deliberate departure: `## Mentions in Source` renders PDF++ callouts
+ * rather than the bare quotes karpathywiki emitted. A bare quote cannot be
+ * checked against anything, which is what its own lint counts as its 187
+ * ungrounded quotes; a callout carries the page and selection it came from.
+ */
+export function renderKarpathyNote(a: RenderKarpathyNoteArgs): string {
+  const isConcept = a.kind === "concept";
+  const sorted = a.highlights.slice().sort((x, y) => x.page - y.page);
+
+  const lines: string[] = [];
+  lines.push("---");
+  lines.push(`type: ${a.kind}`);
+  lines.push(`created: ${a.created}`);
+  lines.push(`updated: ${a.updated}`);
+  lines.push("sources:");
+  for (const src of a.sources) lines.push(`  - "[[${src}]]"`);
+  lines.push(`tags: [${a.tag}]`);
+  lines.push("aliases:");
+  for (const al of a.aliases) lines.push(`  - ${yamlStr(al)}`);
+  if (a.reviewed) lines.push("reviewed: true");
+  lines.push(`generation_complete: ${a.generationComplete ?? true}`);
+  lines.push("---");
+  lines.push("");
+  lines.push("");
+  lines.push(`# ${a.title}`);
+  lines.push("");
+
+  lines.push(isConcept ? "## Definition" : "## Description");
+  lines.push(a.definition.trim());
+  lines.push("");
+
+  if (isConcept) {
+    lines.push("## Key Characteristics");
+    for (const b of a.keyCharacteristics) lines.push(`- ${b}`);
+    lines.push("");
+    lines.push("## Applications");
+    for (const b of a.applications) lines.push(`- ${b}`);
+    lines.push("");
+  }
+
+  // Concepts lead with concepts, entities lead with entities — each page's
+  // nearest neighbours first, which is the order the existing pages use.
+  const first = isConcept
+    ? (["## Related Concepts", a.relatedConcepts] as const)
+    : (["## Related Entities", a.relatedEntities] as const);
+  const second = isConcept
+    ? (["## Related Entities", a.relatedEntities] as const)
+    : (["## Related Concepts", a.relatedConcepts] as const);
+  for (const [heading, links] of [first, second]) {
+    lines.push(heading);
+    for (const l of links) lines.push(relatedLine(l));
+    lines.push("");
+  }
+
+  lines.push("## Mentions in Source");
+  lines.push("");
+  if (sorted.length > 0) {
+    lines.push(
+      sorted.map((h) => renderCallout(a.pdfBasename, h.target, wikiDisplay(a.pdfBasename, h.page), h.text)).join("\n\n"),
+    );
+  }
+  return lines.join("\n").replace(/\n{3,}$/, "\n") + "\n";
+}
+
+/**
+ * Render a wiki page in the vault's schema.
+ *
+ * A thin dispatcher on purpose: Stage 2 adds `renderClassNote` for the
+ * `secondbrain` vault's `class:` + `## Summary` / `## Highlights` form, chosen
+ * per vault. Keeping the seam here means that arrives as a second branch
+ * rather than a rewrite of every caller.
+ */
 export function renderWikiNote(a: RenderWikiNoteArgs): string {
   const { classCode, pdfBasename, summary, highlights } = a;
   const sorted = highlights.slice().sort((x, y) => x.page - y.page);
