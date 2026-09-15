@@ -10,9 +10,15 @@
   --wikilm-icon-md: 16px;
 }
 
+/* min-width:0 is load-bearing. As a flex child of Obsidian's pane this element's
+   automatic minimum size is its content width, so without it a long deck name or
+   an unbroken line widens the view past the pane and the whole sidebar scrolls
+   sideways — controls at the right edge end up clipped rather than wrapped. */
 .wikilm-notebook {
   padding: 0 var(--size-4-4) var(--size-4-8);
+  overflow-x: hidden;
   overflow-y: auto;
+  min-width: 0;
   outline: none;
   container-type: inline-size;
 }
@@ -29,6 +35,31 @@
     flex-wrap: wrap;
   }
   .wikilm-header-right {
+    flex-wrap: wrap;
+  }
+}
+
+/* A docked sidebar is nearer 300px than 600px, and the header's four controls
+   need ~600px on one line. Below this the title takes its own row so the
+   controls get the full width, and the export button drops its label to an
+   icon-width minimum rather than pushing the overflow menu out of reach. */
+@container (max-width: 400px) {
+  .wikilm-header-left {
+    flex-basis: 100%;
+  }
+  .wikilm-header-right {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .wikilm-header-right .mod-cta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* The chat's own controls wrap for the same reason the header's do: in a
+     docked sidebar Send, Clear and the model picker do not fit on one line,
+     and without this the last of them is clipped by the pane edge. */
+  .wikilm-chat-buttons {
     flex-wrap: wrap;
   }
 }
@@ -59,11 +90,13 @@
   display: flex;
   align-items: baseline;
   gap: var(--size-4-3);
+  min-width: 0;
 }
 .wikilm-header-right {
   display: flex;
   align-items: center;
   gap: var(--size-4-2);
+  min-width: 0;
 }
 .wikilm-stats {
   display: flex;
@@ -84,14 +117,23 @@
 .wikilm-stat.is-flagged .wikilm-stat-n {
   color: var(--color-yellow);
 }
+/* A deck name is arbitrary user text, so it truncates rather than setting the
+   header's width. The icon keeps its size; only the label gives way. */
 .wikilm-deck-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+}
+.wikilm-deck-btn span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .wikilm-deck-btn .svg-icon {
   width: var(--wikilm-icon-sm);
   height: var(--wikilm-icon-sm);
+  flex-shrink: 0;
 }
 .wikilm-icon-btn {
   padding: 4px;
@@ -555,9 +597,14 @@ body.wikilm-highlighter-active .textLayer ::selection {
 }
 
 /* Ask panel -------------------------------------------------------------- */
-/* Chat fills the leaf: the log scrolls, the input stays at the bottom. */
+/* Chat fills the leaf: the log scrolls, the input stays at the bottom.
+   The height is what makes that true. Without it the flex column has no bound
+   to divide, so `flex: 1` on the log resolves to the log's own content height
+   and the input below it is pushed past the bottom edge — visible only once
+   the pane is wide enough to make the log short. */
 .wikilm-notebook.is-chat {
   display: flex;
+  height: 100%;
   flex-direction: column;
   padding-bottom: 0;
   overflow: hidden;
@@ -641,7 +688,9 @@ body.wikilm-highlighter-active .textLayer ::selection {
 }
 .wikilm-chat-input {
   flex: 0 0 auto;
-  padding: var(--size-4-2) 0 var(--size-4-3);
+  /* The bottom padding is restored here because `.is-chat` zeroes the
+     notebook's own: without it the Send row sits flush on the pane edge. */
+  padding: var(--size-4-2) 0 var(--size-4-4);
   border-top: 1px solid var(--background-modifier-border);
   background: var(--background-primary);
 }

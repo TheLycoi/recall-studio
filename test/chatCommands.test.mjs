@@ -31,14 +31,14 @@ const EXPECTED = [
   ["capture-markdown-highlights", "Send all ==highlights== in this note to inbox"],
   ["ai-highlight", "AI-highlight this note and write cards"],
   ["ai-highlight-with-instruction", "AI-highlight this note with instructions…"],
-  ["ingest-source", "Read this markdown source into the wiki"],
+  ["ingest-source", "Ingest source: read this markdown into the wiki"],
   ["add-transcript", "Add transcript for document highlighting"],
   ["extract-pdf-highlights", "Extract PDF highlights to manifest"],
   ["digest-pdf-highlights", "Digest PDF highlights into topic notes…"],
   ["digest-pdf-highlights-from-json", "Digest PDF highlights from pasted model output…"],
   ["ai-highlight-pdf", "AI-highlight this PDF into the wiki…"],
-  ["open-chat", "Ask the notes"],
-  ["lint-wiki", "Check the wiki for gaps and dead links"],
+  ["open-chat", "Open chat: ask the notes"],
+  ["lint-wiki", "Lint wiki: find gaps, dead links and ungrounded quotes"],
   ["open-inbox", "Open inbox"],
   ["export-reviewed", "Export all reviewed cards to Anki"],
   ["retry-failed", "Retry failed highlights"],
@@ -72,22 +72,10 @@ test("aliases are unique across the table and never collide with another id", ()
   }
 });
 
-// The injected scorer from the plan: how many of the query's tokens appear as
-// tokens of the target, or null when none do. Deliberately not Obsidian's
-// scorer — OFFER_THRESHOLD is only ever compared against the injected one.
-const tokens = (s) =>
-  s
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean);
-const fuzzy = (q) => {
-  const qt = tokens(q);
-  return (t) => {
-    const tt = new Set(tokens(t));
-    const n = qt.filter((w) => tt.has(w)).length;
-    return n || null;
-  };
-};
+// The scorer the panel actually injects (src/chatPanel.ts:411), not a copy of
+// it: a local reimplementation drifted from the shipped one, so the suite
+// passed while the app scored differently. Bound after the bundle loads.
+const fuzzy = (q) => cc.tokenOverlapScorer(q);
 
 const COMMANDS = () => table.COMMAND_TABLE.map((c) => ({ id: c.id, name: c.name, aliases: c.aliases }));
 
@@ -114,7 +102,7 @@ test("matchCommand: a short command-like sentence is offered, not run", () => {
   const cmds = COMMANDS();
   // "extract pdf highlights" is neither a name nor an alias. Against the name
   // "Extract PDF highlights to manifest" all three query tokens are present,
-  // so the injected scorer computes 3 — at or above OFFER_THRESHOLD (2), an offer.
+  // so the injected scorer computes 3 — at or above OFFER_THRESHOLD, an offer.
   const scored = fuzzy("extract pdf highlights")("Extract PDF highlights to manifest");
   assert.equal(scored, 3);
   assert.equal(cc.OFFER_THRESHOLD, 2);
@@ -148,6 +136,43 @@ test("matchCommand: ordinary short questions stay questions", () => {
   const cmds = COMMANDS();
   assert.deepEqual(cc.matchCommand("what is a receptor", cmds, fuzzy), { kind: "question" });
   assert.deepEqual(cc.matchCommand("", cmds, fuzzy), { kind: "question" });
+});
+
+test("a run-together command word still names its command", () => {
+  // "wikilint" is "wiki" and "lint" typed without the space. Splitting on
+  // non-alphanumerics alone scored it zero against every command, so the Run
+  // chip could never appear for it.
+  assert.equal(fuzzy("wikilint")("wiki"), 1);
+  assert.equal(fuzzy("wiki lint")("lint"), 1);
+  // Not any substring: a command word under three characters cannot match
+  // inside an unrelated query word.
+  assert.equal(fuzzy("something")("me"), null);
+});
+
+test("a mistyped slash command is offered, not dead-ended", () => {
+  const cmds = COMMANDS();
+  // The reported case: "/wikilint" answered "No command matches" with the
+  // command one word away.
+  assert.deepEqual(cc.matchCommand("/wikilint", cmds, fuzzy), { kind: "offer", id: "lint-wiki", score: 1 });
+  // A slash line that plainly names its command still runs without asking.
+  assert.deepEqual(cc.matchCommand("/wiki", cmds, fuzzy), { kind: "run", id: "lint-wiki" });
+  // Nothing recognisable is still unknown.
+  assert.deepEqual(cc.matchCommand("/nope", cmds, fuzzy), { kind: "unknown", query: "nope" });
+});
+
+test("filler words alone never offer a command", () => {
+  // Filler is what let ordinary questions reach the offer threshold: this
+  // query shares "the", "for" and "and" with the lint command's name and must
+  // score nothing at all.
+  assert.equal(fuzzy("what does the for and")("Check the wiki for gaps and dead links"), null);
+});
+
+test("a prose question that mentions a command word is still answered", () => {
+  const cmds = COMMANDS();
+  // An offer replaces the answer (src/chatPanel.ts:427-443), so a question
+  // that merely says "wiki" must not be turned into a chip. This is why the
+  // prose threshold stays at two while a slash line offers at one.
+  assert.deepEqual(cc.matchCommand("what does the wiki say", cmds, fuzzy), { kind: "question" });
 });
 
 test("renderHelp lists one line per command", () => {

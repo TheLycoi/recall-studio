@@ -63,7 +63,7 @@ export const COMMAND_TABLE: CommandSpec[] = [
   },
   {
     id: "ingest-source",
-    name: "Read this markdown source into the wiki",
+    name: "Ingest source: read this markdown into the wiki",
     aliases: ["ingest", "read-source"],
     hint: "needs an open note",
   },
@@ -99,13 +99,17 @@ export const COMMAND_TABLE: CommandSpec[] = [
   },
   {
     id: "open-chat",
-    name: "Ask the notes",
+    name: "Open chat: ask the notes",
     aliases: ["chat", "ask"],
     hint: "always",
   },
   {
     id: "lint-wiki",
-    name: "Check the wiki for gaps and dead links",
+    // The name has to carry the word a reader searches for. "Check the wiki
+    // for gaps and dead links" described it well and was unfindable: the
+    // palette matches on the name only, so typing "lint" returned nothing.
+    // Aliases are a chat affordance and never reach the palette.
+    name: "Lint wiki: find gaps, dead links and ungrounded quotes",
     aliases: ["wiki", "lint"],
     hint: "always available",
   },

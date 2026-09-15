@@ -23,21 +23,43 @@ export type CommandMatch =
 export type FuzzyScorer = (query: string) => (text: string) => number | null;
 
 // How good a plain sentence's resemblance to a command must be before the chat
-// offers a Run chip. obsidian.d.ts:5244-5252 documents `prepareFuzzySearch`
-// only as "construct a fuzzy search callback that runs on a target string"
-// returning `SearchResult | null`; `SearchResult.score` (:5593) carries no
-// documented scale, sign, or range at all, so no threshold can be derived from
-// the typings. The scorer is therefore injected: this constant is only ever
-// compared against whatever scorer the caller supplies, and the tests pin it
-// against a token-overlap scorer (one point per query token present).
+// offers a Run chip, counted in shared content words: the panel injects
+// `tokenOverlapScorer` (src/chatPanel.ts:411), the same scorer the tests use,
+// so this constant means the same thing in both.
 //
-// The live wrapper T4 installs is
-//   (q) => { const f = prepareFuzzySearch(q); return (t) => f(t)?.score ?? null; }
-// whose scores are on Obsidian's undocumented scale, not the token counts the
-// tests use. Expect to retune this constant against the real scorer once the
-// chip has been seen in the app; too low offers chips for ordinary questions,
-// too high never offers one.
+// Two, and it stays two, because an offer *replaces* the answer rather than
+// sitting beside it (src/chatPanel.ts:427-443). At one, "what does the wiki
+// say about hallucination" shares the word "wiki" with a command and would get
+// a chip instead of an answer — swallowing a real question, which is worse
+// than missing a chip. Filler no longer counts toward it (COMMAND_STOPWORDS),
+// so the two words that reach this bar are two words that mean something.
 export const OFFER_THRESHOLD = 2;
+
+/**
+ * Shared content words before a slash line runs its best match outright.
+ *
+ * Running the wrong command unasked is worse than one extra click, and at one
+ * shared word "/wikilint" and "/wiki notes about lint" are indistinguishable.
+ */
+const SLASH_RUN_SCORE = 2;
+
+/**
+ * Shared content words before a slash line offers its best match.
+ *
+ * Lower than `OFFER_THRESHOLD` because a slash cannot swallow a question: the
+ * reader has already said they want to run something, so the only choice is
+ * which command — or the dead end this replaced.
+ */
+const SLASH_OFFER_SCORE = 1;
+
+/**
+ * Tie-break weight for an alias hit over a name hit of the same size.
+ *
+ * A fraction rather than a whole point: it settles which command a score of 1
+ * belongs to without ever pushing that score up to `SLASH_RUN_SCORE`, so
+ * breaking a tie can never turn an offer into something that runs unasked.
+ */
+const ALIAS_BONUS = 0.5;
 
 /** Only short lines are considered command-like; longer ones read as prose. */
 const MAX_OFFER_WORDS = 8;
@@ -87,9 +109,34 @@ export function matchCommand(input: string, commands: CommandLike[], fuzzy: Fuzz
     for (const c of commands) {
       if (key === normName(c.name)) return { kind: "run", id: c.id };
     }
+    // Aliases count here as well as names: "/wikilint" resembles the alias
+    // "wiki" and nothing in any palette name, and scoring names alone sent it
+    // to the dead end below with the command one step away.
+    // An alias hit outweighs a name hit of the same size: an alias is the
+    // command's short name, while a palette name is a sentence that can share
+    // a word by coincidence. Without this "/wikilint" matched "Read this
+    // markdown source into the wiki" as readily as the alias "wiki".
     const score = fuzzy(rest);
-    const hit = best(commands, (c) => score(c.name));
-    if (hit) return { kind: "run", id: hit.item.id };
+    const hit = best(commands, (c) => {
+      let top = score(c.name);
+      for (const a of c.aliases) {
+        const s = score(a);
+        if (s === null) continue;
+        const weighted = s + ALIAS_BONUS;
+        if (top === null || weighted > top) top = weighted;
+      }
+      return top;
+    });
+    // A slash line that clearly names its command still runs at once, which is
+    // the policy this file opened with: two or more shared content words is a
+    // name being typed, not a guess. A single shared word is the new case —
+    // "/wikilint" used to dead-end at "No command matches" with the command one
+    // step away — and is offered rather than run, so a typo that lands on the
+    // wrong command can be declined instead of firing.
+    if (hit && hit.score >= SLASH_RUN_SCORE) return { kind: "run", id: hit.item.id };
+    // The alias tie-break is an ordering device, not a count; the score that
+    // leaves here is the shared-word count it came from.
+    if (hit && hit.score >= SLASH_OFFER_SCORE) return { kind: "offer", id: hit.item.id, score: Math.floor(hit.score) };
     return { kind: "unknown", query: rest };
   }
 
@@ -155,18 +202,48 @@ export function renderHelp(
 /**
  * Deterministic scorer for the offer decision: how many distinct words of the
  * query appear in the text (lowercased, split on non-alphanumerics; hyphenated
- * names such as "AI-highlight" split into their parts). Null when none do. The
+ * names such as "AI-highlight" split into their parts), counting a query word
+ * that contains a command word as a hit. Null when none do. The
  * chat panel injects this rather than Obsidian's `prepareFuzzySearch`, whose
  * score scale is undocumented (obsidian.d.ts:5244-5252), so `OFFER_THRESHOLD`
  * means "at least this many shared words" in tests and in the app alike.
  */
+/**
+ * Words that carry no signal about which command was meant.
+ *
+ * Every palette name is an English phrase, so a question that shares only
+ * "the" and "for" with one was scoring as high as a query that actually named
+ * it: "what does the wiki say about hallucination" reached the offer threshold
+ * against "Check the wiki for gaps and dead links" on its filler alone.
+ */
+const COMMAND_STOPWORDS = new Set(
+  "a an and are as at be by do does for from how in into is it its of on or that the this to what when where which who why with your".split(" "),
+);
+
 export function tokenOverlapScorer(query: string): (text: string) => number | null {
-  const tokens = (v: string) => new Set(v.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 0));
+  const tokens = (v: string) =>
+    new Set(v.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 0 && !COMMAND_STOPWORDS.has(w)));
   const q = tokens(query);
   return (text) => {
     const t = tokens(text);
     let n = 0;
-    for (const w of q) if (t.has(w)) n++;
+    for (const w of q) {
+      if (t.has(w)) {
+        n++;
+        continue;
+      }
+      // A run-together word still names the command: "wikilint" is "wiki" and
+      // "lint" typed without the space, and scoring that zero is what made the
+      // Run chip unreachable for the phrasing readers actually use. Only
+      // command words of three characters or more count, so a short one cannot
+      // match inside an unrelated query word.
+      for (const word of t) {
+        if (word.length >= 3 && w.includes(word)) {
+          n++;
+          break;
+        }
+      }
+    }
     return n > 0 ? n : null;
   };
 }
