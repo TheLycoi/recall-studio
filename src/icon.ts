@@ -18,7 +18,7 @@ import { addIcon } from "obsidian";
 
 const ICON_PREFIX = "wikilm";
 
-/** The inbox: a mailbox. The plugin's ribbon, view tab and menu entry. */
+/** An open book — the wiki. The plugin's ribbon, view tab and menu entry. */
 export const WIKILM_ICON = `${ICON_PREFIX}`;
 /** A stack of cards — decks, and the inbox's deck picker. */
 export const WIKILM_STACK_ICON = `${ICON_PREFIX}-stack`;
@@ -66,16 +66,18 @@ const card = (x: number, y: number, w: number, h: number, rx = 9): string =>
   `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${rx}"/>`;
 
 const ICONS: Record<string, string> = {
-  // A mailbox: domed body on a post, flag raised on the right. The flag is what
-  // makes it a mailbox rather than a tunnel at 16px, so it stays even though it
-  // carries no state — the inbox's own count badge says what is waiting. It
-  // joins the body wall directly; drawn detached it read as a stray tick.
+  // An open book: two pages meeting at a spine. The plugin is a wiki first, so
+  // its identity icon is the wiki, not the inbox behind it.
+  //
+  // The outer edges curve while the spine stays straight, which is what says
+  // "open book" rather than "folder" — a symmetric outline read as either. One
+  // text line per page is enough at 16px; two crowded into a grey block.
   [WIKILM_ICON]: stroke(`
-    <path d="M10 64V48a18 18 0 0 1 18-18h24a18 18 0 0 1 18 18v16z"/>
-    <path d="M28 64V36"/>
-    <path d="M38 88V64"/>
-    <path d="M82 64V26"/>
-    <path d="M82 28h10v9H82"/>`),
+    <path d="M50 32v52"/>
+    <path d="M50 32C42 24 30 20 14 20v50c16 0 28 4 36 12"/>
+    <path d="M50 32c8-8 20-12 36-12v50c-16 0-28 4-36 12"/>
+    <path d="M24 42h16"/>
+    <path d="M60 42h16"/>`),
 
   // Two offset cards. The back card is clipped to a corner rather than drawn
   // whole, which keeps the stack legible when it is 14px wide.
