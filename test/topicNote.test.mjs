@@ -590,6 +590,26 @@ test("an entity dispatches to the entity shape", () => {
   assert.ok(!md.includes("## Key Characteristics"));
 });
 
+const KARPATHY_PAGE_NO_SOURCES = `---
+type: concept
+created: 2026-09-01
+updated: 2026-09-01
+tags: [theory]
+aliases:
+  - "Kept Alias"
+generation_complete: true
+---
+
+
+# Chunking
+
+## Definition
+Text.
+
+## Mentions in Source
+
+`;
+
 const KARPATHY_PAGE = `---
 type: concept
 created: 2026-09-01
@@ -626,14 +646,37 @@ test("a merge keeps created and moves updated", () => {
   assert.ok(r.md.includes("updated: 2026-09-15"), "updated always moves");
 });
 
-test("a merge appends to sources and never replaces them", () => {
-  const r = tn.mergeWikiHighlights(KARPATHY_PAGE, "Paper", "", [HL(2, "a")], {
+test("a page's sources are its callouts, not a frontmatter key", () => {
+  // A callout links the PDF at the exact span it came from, so it can be
+  // clicked and checked. A frontmatter wikilink is a second, weaker copy of
+  // the same claim and is the copy that rots.
+  const md = tn.renderWikiNote({
+    classCode: "",
+    pdfBasename: "Paper",
+    summary: "Text.",
+    highlights: [HL(2, 1)],
     schema: "karpathy",
-    sources: ["sources/second"],
+    title: "Chunking",
+    kind: "concept",
     today: "2026-09-15",
   });
-  assert.ok(r.md.includes("[[sources/first]]"), "the source it already had survives");
-  assert.ok(r.md.includes("[[sources/second]]"));
+  assert.ok(!md.includes("sources:"), "no sources key is written");
+  assert.ok(md.includes("[[Paper.pdf#page=2"), "the callout carries the link back to the PDF");
+});
+
+test("a merge does not add a sources key to a page that has none", () => {
+  const r = tn.mergeWikiHighlights(KARPATHY_PAGE_NO_SOURCES, "Paper", "", [HL(2, 1)], {
+    schema: "karpathy",
+    today: "2026-09-15",
+  });
+  assert.equal(r.added, 1);
+  assert.ok(!r.md.includes("sources:"));
+});
+
+test("a sources key a reader wrote by hand is left alone", () => {
+  // Nothing emits one now, but a page that already has one is theirs.
+  const r = tn.mergeWikiHighlights(KARPATHY_PAGE, "Paper", "", [HL(2, 1)], { schema: "karpathy", today: "2026-09-15" });
+  assert.ok(r.md.includes("[[sources/first]]"), "an existing key survives untouched");
 });
 
 test("a source already listed is not added twice", () => {

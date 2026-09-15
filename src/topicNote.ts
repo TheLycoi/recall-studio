@@ -413,8 +413,6 @@ export interface RenderWikiNoteArgs {
   /** Needed by the karpathy schema, which puts the page's own name in an H1. */
   title?: string;
   kind?: WikiKind;
-  /** Source pages this was digested from, as vault paths under `sources/`. */
-  sources?: string[];
   /** Today, so a caller can render a fixed date in a test. */
   today?: string;
 }
@@ -428,8 +426,6 @@ export interface RenderKarpathyNoteArgs {
   title: string;
   kind: WikiKind;
   tag: string;
-  /** Source pages this was digested from, as vault paths under `sources/`. */
-  sources: string[];
   aliases: string[];
   created: string;
   updated: string;
@@ -468,10 +464,16 @@ function relatedLine(l: RelatedLink): string {
  * A wiki page in karpathywiki's schema, so the 106 pages already in the vault
  * and every page written from here share one format.
  *
- * Frontmatter key order is fixed — `type`, `created`, `updated`, `sources`,
- * `tags`, `aliases`, `generation_complete` — because it is identical in all
- * 100 existing concept and entity pages, and a reordering would show up as a
+ * Frontmatter key order is fixed — `type`, `created`, `updated`, `tags`,
+ * `aliases`, `generation_complete` — so a reordering does not show up as a
  * diff on every page the merge touches.
+ *
+ * There is deliberately no `sources:` key. A page's sources are the PDF++
+ * callouts under `## Mentions in Source`: each one links to the PDF at the
+ * exact span it came from, so it can be clicked and checked. A frontmatter
+ * wikilink naming a source note is a second, weaker copy of the same claim,
+ * and it is the copy that rots — it survives the note being renamed, moved or
+ * never written, which is how the old generator accumulated dead links.
  *
  * Section order differs by kind, also matching what the pages do: a concept
  * runs Definition → Key Characteristics → Applications → Related Concepts →
@@ -492,8 +494,6 @@ export function renderKarpathyNote(a: RenderKarpathyNoteArgs): string {
   lines.push(`type: ${a.kind}`);
   lines.push(`created: ${a.created}`);
   lines.push(`updated: ${a.updated}`);
-  lines.push("sources:");
-  for (const src of a.sources) lines.push(`  - "[[${src}]]"`);
   lines.push(`tags: [${a.tag}]`);
   lines.push("aliases:");
   for (const al of a.aliases) lines.push(`  - ${yamlStr(al)}`);
@@ -561,7 +561,6 @@ export function renderWikiNote(a: RenderWikiNoteArgs): string {
       // vocabulary's own escape hatch is the honest default. The lint reports
       // it as off-schema, which is the reader's cue to set it.
       tag: "other",
-      sources: a.sources ?? [],
       aliases: [],
       created: day,
       updated: day,
@@ -598,10 +597,9 @@ export function renderWikiNote(a: RenderWikiNoteArgs): string {
 /**
  * Refresh the frontmatter a merge is allowed to touch.
  *
- * `updated` always moves, `created` never does, and `sources` and `aliases`
- * are appended to rather than replaced — a page merged into twice keeps both
- * sources, and an alias the reader added by hand survives the next digest.
- * Anything else in the frontmatter is returned byte-identical.
+ * `updated` always moves and `created` never does. Everything else in the
+ * frontmatter, including any `aliases` the reader added by hand, is returned
+ * byte-identical.
  */
 function touchFrontmatter(md: string, options: MergeWikiOptions): string {
   const m = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(md);
@@ -610,12 +608,6 @@ function touchFrontmatter(md: string, options: MergeWikiOptions): string {
   let fm = m[2];
 
   fm = /^updated:/m.test(fm) ? fm.replace(/^updated:.*$/m, `updated: ${day}`) : `${fm}\nupdated: ${day}`;
-
-  for (const src of options.sources ?? []) {
-    const line = `  - "[[${src}]]"`;
-    if (fm.includes(`[[${src}]]`)) continue;
-    fm = /^sources:/m.test(fm) ? fm.replace(/^sources:.*$/m, (hit) => `${hit}\n${line}`) : `${fm}\nsources:\n${line}`;
-  }
 
   return md.slice(0, m.index) + m[1] + fm + m[3] + md.slice(m.index + m[0].length);
 }
@@ -630,8 +622,6 @@ function touchFrontmatter(md: string, options: MergeWikiOptions): string {
  */
 export interface MergeWikiOptions {
   schema?: WikiSchema;
-  /** Source pages to add to `sources:`, for the karpathy schema. */
-  sources?: string[];
   /** Today, so a caller can pin the date in a test. */
   today?: string;
 }
@@ -646,7 +636,7 @@ export function mergeWikiHighlights(
   const schema = options.schema ?? "class";
   if (existingMd.trim() === "") {
     return {
-      md: renderWikiNote({ classCode, pdfBasename, summary: "", highlights, schema, sources: options.sources }),
+      md: renderWikiNote({ classCode, pdfBasename, summary: "", highlights, schema }),
       added: highlights.length,
       skipped: 0,
     };

@@ -178,8 +178,6 @@ export interface PlanWikiOptions {
   entitiesFolder: string;
   /** Page format this vault uses. Defaults to `class`, which is what it was. */
   schema?: WikiSchema;
-  /** Source pages the digest came from, recorded in a karpathy page's `sources:`. */
-  sources?: string[];
 }
 
 export interface PlanWikiResult {
@@ -256,10 +254,7 @@ export function planWikiNotes(
 
     const existing = wikiByTitle.get(key);
     if (existing) {
-      const merged = mergeWikiHighlights(existing.md, opts.pdfBasename, opts.classCode, rows, {
-        schema: opts.schema,
-        sources: opts.sources,
-      });
+      const merged = mergeWikiHighlights(existing.md, opts.pdfBasename, opts.classCode, rows, { schema: opts.schema });
       // Nothing new to write: the note already holds every one of these
       // callouts, so offering it to the user would be a no-op diff.
       if (merged.added === 0) continue;
@@ -289,7 +284,6 @@ export function planWikiNotes(
       schema: opts.schema,
       title: group.title,
       kind,
-      sources: opts.sources,
     });
     notes.push({
       title: group.title,
