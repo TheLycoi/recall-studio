@@ -200,6 +200,7 @@ export async function suggestPdfHighlights(plugin: WikiLmPlugin, pdf: TFile): Pr
       pdfBasename: manifest.pdfBasename,
       conceptsFolder: s.wikiConceptsFolder,
       entitiesFolder: s.wikiEntitiesFolder,
+      schema: s.wikiSchema,
     };
     const plan = planWikiNotes(accepted, highlights, newNotes, wiki, planOpts);
     const alreadyPresent = plan.notes.reduce((n, x) => n + x.skipped, 0);

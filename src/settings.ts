@@ -78,6 +78,8 @@ export interface WikiLmSettings {
   wikiConceptsFolder: string;
   /** Folder for new entity notes created from suggested highlights. */
   wikiEntitiesFolder: string;
+  /** Page format this vault's wiki uses: karpathy `type:` pages, or `class:` pages. */
+  wikiSchema: "karpathy" | "class";
   suggestInstructions: string;
 
   // Ask
@@ -158,6 +160,7 @@ export const DEFAULT_SETTINGS: WikiLmSettings = {
   suggestPagesPerBatch: 8,
   wikiConceptsFolder: "wiki/concepts",
   wikiEntitiesFolder: "wiki/entities",
+  wikiSchema: "class",
   suggestInstructions: "",
 
   askEvidenceCount: 6,

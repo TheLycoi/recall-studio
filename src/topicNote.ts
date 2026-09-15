@@ -390,11 +390,33 @@ export interface RelatedLink {
   note?: string;
 }
 
+/**
+ * Which page format a vault uses.
+ *
+ * `karpathy`: `type: concept|entity` with Definition / Key Characteristics /
+ * Applications and the two Related sections. `class`: `class: <CODE>` with
+ * `## Summary` and `## Highlights`.
+ *
+ * Both are live in different vaults on purpose, and neither is migrated to the
+ * other — a page written in the wrong one is what the older generator's linter
+ * treated as malformed and "repaired".
+ */
+export type WikiSchema = "karpathy" | "class";
+
 export interface RenderWikiNoteArgs {
   classCode: string;
   pdfBasename: string;
   summary: string;
   highlights: ManifestHighlight[];
+  /** Defaults to `class`, the format this renderer has always emitted. */
+  schema?: WikiSchema;
+  /** Needed by the karpathy schema, which puts the page's own name in an H1. */
+  title?: string;
+  kind?: WikiKind;
+  /** Source pages this was digested from, as vault paths under `sources/`. */
+  sources?: string[];
+  /** Today, so a caller can render a fixed date in a test. */
+  today?: string;
 }
 
 /**
@@ -529,6 +551,29 @@ export function renderKarpathyNote(a: RenderKarpathyNoteArgs): string {
  * rather than a rewrite of every caller.
  */
 export function renderWikiNote(a: RenderWikiNoteArgs): string {
+  if (a.schema === "karpathy") {
+    const day = a.today ?? new Date().toISOString().slice(0, 10);
+    const kind = a.kind ?? "concept";
+    return renderKarpathyNote({
+      title: a.title ?? "Untitled",
+      kind,
+      // A tag is the model's to choose, and nothing has asked it yet, so the
+      // vocabulary's own escape hatch is the honest default. The lint reports
+      // it as off-schema, which is the reader's cue to set it.
+      tag: "other",
+      sources: a.sources ?? [],
+      aliases: [],
+      created: day,
+      updated: day,
+      definition: a.summary,
+      keyCharacteristics: [],
+      applications: [],
+      relatedConcepts: [],
+      relatedEntities: [],
+      highlights: a.highlights,
+      pdfBasename: a.pdfBasename,
+    });
+  }
   const { classCode, pdfBasename, summary, highlights } = a;
   const sorted = highlights.slice().sort((x, y) => x.page - y.page);
   const callouts = sorted.map((h) => renderCallout(pdfBasename, h.target, wikiDisplay(pdfBasename, h.page), h.text));
@@ -549,6 +594,32 @@ export function renderWikiNote(a: RenderWikiNoteArgs): string {
   return lines.join("\n") + "\n";
 }
 
+
+/**
+ * Refresh the frontmatter a merge is allowed to touch.
+ *
+ * `updated` always moves, `created` never does, and `sources` and `aliases`
+ * are appended to rather than replaced — a page merged into twice keeps both
+ * sources, and an alias the reader added by hand survives the next digest.
+ * Anything else in the frontmatter is returned byte-identical.
+ */
+function touchFrontmatter(md: string, options: MergeWikiOptions): string {
+  const m = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(md);
+  if (!m) return md;
+  const day = options.today ?? new Date().toISOString().slice(0, 10);
+  let fm = m[2];
+
+  fm = /^updated:/m.test(fm) ? fm.replace(/^updated:.*$/m, `updated: ${day}`) : `${fm}\nupdated: ${day}`;
+
+  for (const src of options.sources ?? []) {
+    const line = `  - "[[${src}]]"`;
+    if (fm.includes(`[[${src}]]`)) continue;
+    fm = /^sources:/m.test(fm) ? fm.replace(/^sources:.*$/m, (hit) => `${hit}\n${line}`) : `${fm}\nsources:\n${line}`;
+  }
+
+  return md.slice(0, m.index) + m[1] + fm + m[3] + md.slice(m.index + m[0].length);
+}
+
 /**
  * Append highlights not already present anywhere in `existingMd` (by
  * `highlightKey`, checked over the whole note since hand-written wiki notes
@@ -557,14 +628,28 @@ export function renderWikiNote(a: RenderWikiNoteArgs): string {
  * section is missing, it is appended at EOF. Everything else is
  * byte-identical.
  */
+export interface MergeWikiOptions {
+  schema?: WikiSchema;
+  /** Source pages to add to `sources:`, for the karpathy schema. */
+  sources?: string[];
+  /** Today, so a caller can pin the date in a test. */
+  today?: string;
+}
+
 export function mergeWikiHighlights(
   existingMd: string,
   pdfBasename: string,
   classCode: string,
   highlights: ManifestHighlight[],
+  options: MergeWikiOptions = {},
 ): MergeResult {
+  const schema = options.schema ?? "class";
   if (existingMd.trim() === "") {
-    return { md: renderWikiNote({ classCode, pdfBasename, summary: "", highlights }), added: highlights.length, skipped: 0 };
+    return {
+      md: renderWikiNote({ classCode, pdfBasename, summary: "", highlights, schema, sources: options.sources }),
+      added: highlights.length,
+      skipped: 0,
+    };
   }
 
   const existingKeys = new Set(findAllPdfReferences(existingMd).map((r) => highlightKey(r.target)));
@@ -574,19 +659,28 @@ export function mergeWikiHighlights(
     .sort((a, b) => a.page - b.page);
   const skipped = highlights.length - toAdd.length;
 
-  const headingRe = /^##\s+Highlights\s*$/m;
-  const headingMatch = headingRe.exec(existingMd);
+  // A page the reader has marked `reviewed: true` is theirs. Highlights may
+  // still be appended — that is additive and is the whole point of a merge —
+  // but no frontmatter of theirs is rewritten, not even `updated`.
+  const reviewed = /^reviewed:\s*true\s*$/m.test(existingMd);
+  const body = schema === "karpathy" && !reviewed ? touchFrontmatter(existingMd, options) : existingMd;
+
+  // Karpathy pages keep their quotes under `## Mentions in Source`; the class
+  // schema uses `## Highlights`. Merging into the wrong one would append a
+  // second section the page's own schema does not have.
+  const headingRe = schema === "karpathy" ? /^##\s+Mentions in Source\s*$/m : /^##\s+Highlights\s*$/m;
+  const headingMatch = headingRe.exec(body);
 
   if (headingMatch) {
     if (toAdd.length === 0) {
-      return { md: existingMd, added: 0, skipped };
+      return { md: body, added: 0, skipped };
     }
 
     const headingEnd = headingMatch.index + headingMatch[0].length;
-    const rest = existingMd.slice(headingEnd);
+    const rest = body.slice(headingEnd);
     const nextHeadingMatch = /^##\s/m.exec(rest);
-    const sectionEnd = nextHeadingMatch ? headingEnd + nextHeadingMatch.index : existingMd.length;
-    const section = existingMd.slice(headingEnd, sectionEnd);
+    const sectionEnd = nextHeadingMatch ? headingEnd + nextHeadingMatch.index : body.length;
+    const section = body.slice(headingEnd, sectionEnd);
 
     const trailingBlanksMatch = /\n*$/.exec(section);
     const trailingBlanks = trailingBlanksMatch ? trailingBlanksMatch[0] : "";
@@ -595,21 +689,21 @@ export function mergeWikiHighlights(
     const newCallouts = toAdd.map((h) => renderCallout(pdfBasename, h.target, wikiDisplay(pdfBasename, h.page), h.text));
     const appended = sectionCore.length > 0 ? `${sectionCore}\n\n${newCallouts.join("\n\n")}` : newCallouts.join("\n\n");
 
-    const newMd = existingMd.slice(0, headingEnd) + appended + trailingBlanks + existingMd.slice(sectionEnd);
+    const newMd = body.slice(0, headingEnd) + appended + trailingBlanks + body.slice(sectionEnd);
     return { md: newMd, added: toAdd.length, skipped };
   }
 
   if (toAdd.length === 0) {
-    return { md: existingMd, added: 0, skipped };
+    return { md: body, added: 0, skipped };
   }
 
   const newCallouts = toAdd.map((h) => renderCallout(pdfBasename, h.target, wikiDisplay(pdfBasename, h.page), h.text));
-  const sectionText = `## Highlights\n\n${newCallouts.join("\n\n")}`;
+  const sectionText = `## ${schema === "karpathy" ? "Mentions in Source" : "Highlights"}\n\n${newCallouts.join("\n\n")}`;
 
   // Insert before the first of `## Related topics` or `## Flashcard Seeds`
   // (WikiLM's own digest skeleton), whichever appears first; else append at EOF.
-  const relatedMatch = /^##\s+Related topics\s*$/m.exec(existingMd);
-  const seedsMatch = /^##\s+Flashcard Seeds\s*$/m.exec(existingMd);
+  const relatedMatch = /^##\s+Related topics\s*$/m.exec(body);
+  const seedsMatch = /^##\s+Flashcard Seeds\s*$/m.exec(body);
   let anchorMatch: RegExpExecArray | null = null;
   if (relatedMatch && seedsMatch) {
     anchorMatch = relatedMatch.index <= seedsMatch.index ? relatedMatch : seedsMatch;
@@ -619,12 +713,12 @@ export function mergeWikiHighlights(
 
   let newMd: string;
   if (anchorMatch) {
-    const before = existingMd.slice(0, anchorMatch.index);
-    const after = existingMd.slice(anchorMatch.index);
+    const before = body.slice(0, anchorMatch.index);
+    const after = body.slice(anchorMatch.index);
     const beforeTrimmed = before.replace(/\n*$/, "");
     newMd = `${beforeTrimmed}\n\n${sectionText}\n\n${after}`;
   } else {
-    const beforeTrimmed = existingMd.replace(/\n*$/, "");
+    const beforeTrimmed = body.replace(/\n*$/, "");
     newMd = `${beforeTrimmed}\n\n${sectionText}\n`;
   }
 

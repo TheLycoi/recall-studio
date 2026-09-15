@@ -532,3 +532,149 @@ S.
   assert.ok(highlightsIdx < relatedIdx);
   assert.ok(result.md.slice(relatedIdx).startsWith(existing.slice(existing.indexOf("## Related topics"))));
 });
+
+// ---- the dispatcher, and the karpathy merge rules
+//
+// The renderer existed before these tests and had no callers, so the suite was
+// green while the format collision it exists to end was still live. These
+// exercise the path a digest actually takes.
+
+// `key` must be the real `highlightKey(target)` — the merge re-derives it from
+// the callouts already on the page, so a made-up key would never match and the
+// duplicate check would look broken when it is not.
+const HL = (page, n) => ({
+  page,
+  text: `span ${n}`,
+  key: `page=${page}&selection=0,0,0,4`,
+  target: { page, selection: { beginIndex: 0, beginOffset: 0, endIndex: 0, endOffset: 4 }, color: "yellow" },
+});
+
+test("renderWikiNote defaults to the class schema", () => {
+  const md = tn.renderWikiNote({ classCode: "HBIO408", pdfBasename: "P", summary: "s", highlights: [] });
+  assert.ok(md.includes("class: HBIO408"));
+  assert.ok(md.includes("## Highlights"));
+  assert.ok(!md.includes("type: concept"));
+});
+
+test("renderWikiNote dispatches to the karpathy schema when asked", () => {
+  const md = tn.renderWikiNote({
+    classCode: "HBIO408",
+    pdfBasename: "P",
+    summary: "What it means.",
+    highlights: [],
+    schema: "karpathy",
+    title: "Angular Kinematics",
+    kind: "concept",
+    today: "2026-09-15",
+  });
+  assert.ok(md.includes("type: concept"), "the karpathy renderer ran");
+  assert.ok(md.includes("# Angular Kinematics"));
+  assert.ok(md.includes("## Definition"));
+  assert.ok(md.includes("What it means."));
+  assert.ok(!md.includes("class:"), "the two schemas never mix in one page");
+});
+
+test("an entity dispatches to the entity shape", () => {
+  const md = tn.renderWikiNote({
+    classCode: "",
+    pdfBasename: "P",
+    summary: "Who they are.",
+    highlights: [],
+    schema: "karpathy",
+    title: "Piotr Wozniak",
+    kind: "entity",
+    today: "2026-09-15",
+  });
+  assert.ok(md.includes("type: entity"));
+  assert.ok(md.includes("## Description"));
+  assert.ok(!md.includes("## Key Characteristics"));
+});
+
+const KARPATHY_PAGE = `---
+type: concept
+created: 2026-09-01
+updated: 2026-09-01
+sources:
+  - "[[sources/first]]"
+tags: [theory]
+aliases:
+  - "Kept Alias"
+generation_complete: true
+---
+
+
+# Chunking
+
+## Definition
+Text.
+
+## Mentions in Source
+
+`;
+
+test("a karpathy merge appends under Mentions in Source, not Highlights", () => {
+  const r = tn.mergeWikiHighlights(KARPATHY_PAGE, "Paper", "", [HL(2, "a")], { schema: "karpathy", today: "2026-09-15" });
+  assert.equal(r.added, 1);
+  assert.ok(r.md.includes("## Mentions in Source"));
+  assert.ok(!r.md.includes("## Highlights"), "a second section would not match the page's own schema");
+  assert.ok(r.md.includes("[!PDF"));
+});
+
+test("a merge keeps created and moves updated", () => {
+  const r = tn.mergeWikiHighlights(KARPATHY_PAGE, "Paper", "", [HL(2, "a")], { schema: "karpathy", today: "2026-09-15" });
+  assert.ok(r.md.includes("created: 2026-09-01"), "created is never rewritten");
+  assert.ok(r.md.includes("updated: 2026-09-15"), "updated always moves");
+});
+
+test("a merge appends to sources and never replaces them", () => {
+  const r = tn.mergeWikiHighlights(KARPATHY_PAGE, "Paper", "", [HL(2, "a")], {
+    schema: "karpathy",
+    sources: ["sources/second"],
+    today: "2026-09-15",
+  });
+  assert.ok(r.md.includes("[[sources/first]]"), "the source it already had survives");
+  assert.ok(r.md.includes("[[sources/second]]"));
+});
+
+test("a source already listed is not added twice", () => {
+  const r = tn.mergeWikiHighlights(KARPATHY_PAGE, "Paper", "", [HL(2, "a")], {
+    schema: "karpathy",
+    sources: ["sources/first"],
+    today: "2026-09-15",
+  });
+  assert.equal(r.md.match(/sources\/first/g).length, 1);
+});
+
+test("an alias the reader added by hand survives a merge", () => {
+  const r = tn.mergeWikiHighlights(KARPATHY_PAGE, "Paper", "", [HL(2, "a")], { schema: "karpathy", today: "2026-09-15" });
+  assert.ok(r.md.includes('- "Kept Alias"'));
+});
+
+test("reviewed: true leaves every frontmatter line alone", () => {
+  const reviewed = KARPATHY_PAGE.replace("generation_complete: true", "reviewed: true\ngeneration_complete: true");
+  const r = tn.mergeWikiHighlights(reviewed, "Paper", "", [HL(2, "a")], {
+    schema: "karpathy",
+    sources: ["sources/second"],
+    today: "2026-09-15",
+  });
+  // Highlights are still appended — that is additive, and the point of a merge.
+  assert.equal(r.added, 1);
+  assert.ok(r.md.includes("updated: 2026-09-01"), "updated does not move on a reviewed page");
+  assert.ok(!r.md.includes("sources/second"), "no source is added to a reviewed page");
+});
+
+test("a highlight already on the page is skipped, not duplicated", () => {
+  const once = tn.mergeWikiHighlights(KARPATHY_PAGE, "Paper", "", [HL(2, "a")], { schema: "karpathy", today: "2026-09-15" });
+  const twice = tn.mergeWikiHighlights(once.md, "Paper", "", [HL(2, "a")], { schema: "karpathy", today: "2026-09-15" });
+  assert.equal(twice.added, 0);
+  assert.equal(twice.skipped, 1);
+});
+
+test("the class schema still merges under Highlights", () => {
+  const page = "---\nclass: HBIO408\n---\n\n## Highlights\n\n";
+  const r = tn.mergeWikiHighlights(page, "Paper", "HBIO408", [HL(1, "a")]);
+  assert.equal(r.added, 1);
+  assert.ok(r.md.includes("## Highlights"));
+  assert.ok(!r.md.includes("## Mentions in Source"));
+  assert.ok(!r.md.includes("updated:"), "the class schema has no dated frontmatter to touch");
+});
