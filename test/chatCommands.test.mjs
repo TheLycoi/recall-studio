@@ -38,13 +38,14 @@ const EXPECTED = [
   ["digest-pdf-highlights-from-json", "Digest PDF highlights from pasted model output…"],
   ["ai-highlight-pdf", "AI-highlight this PDF into the wiki…"],
   ["open-chat", "Ask the notes"],
+  ["lint-wiki", "Check the wiki for gaps and dead links"],
   ["open-inbox", "Open inbox"],
   ["export-reviewed", "Export all reviewed cards to Anki"],
   ["retry-failed", "Retry failed highlights"],
 ];
 
-test("COMMAND_TABLE holds the seventeen (id, name) pairs verbatim and in order", () => {
-  assert.equal(table.COMMAND_TABLE.length, 17);
+test("COMMAND_TABLE holds the eighteen (id, name) pairs verbatim and in order", () => {
+  assert.equal(table.COMMAND_TABLE.length, 18);
   assert.deepEqual(
     table.COMMAND_TABLE.map((c) => [c.id, c.name]),
     EXPECTED,

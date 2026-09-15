@@ -437,3 +437,53 @@ test("findCrossInterference: two h1 cards sharing a back with h2 only cross-list
   assert.deepEqual(map.get("c1"), ["c2"]);
   assert.deepEqual(map.get("c3"), ["c2"]);
 });
+
+// --- Density: the writer now prefers multi-deletion cloze cards (src/llm.ts
+// "Density"), so the linter has to accept a dense card that is still
+// recoverable while holding the three-deletion ceiling it always enforced.
+
+test("a two-deletion card over one sentence passes", () => {
+  const card = clozeCard("Contemplation: the client intends to change within the next {{c1::six months}} and weighs {{c2::pros and cons}}.");
+  const { failures } = l.lintCard(card, highlight, []);
+  assert.deepEqual(failures, []);
+});
+
+test("three deletions are the ceiling, not a failure", () => {
+  const card = clozeCard("{{c1::Contemplation}}: the client intends to change within the next {{c2::six months}} and weighs {{c3::pros and cons}}.");
+  const { failures } = l.lintCard(card, highlight, []);
+  assert.deepEqual(failures, []);
+});
+
+test("a fourth deletion still fails cloze-count", () => {
+  const card = clozeCard(
+    "{{c1::Contemplation}}: the {{c2::client}} intends to change within the next {{c3::six months}} and weighs {{c4::pros and cons}}.",
+  );
+  const { failures } = l.lintCard(card, highlight, []);
+  assert.ok(failures.includes("cloze-count"));
+});
+
+test("density does not excuse an ungrounded deletion", () => {
+  const card = clozeCard("Contemplation: the client intends to change within the next {{c1::six months}} and weighs {{c2::costs and benefits}}.");
+  const { failures } = l.lintCard(card, highlight, []);
+  assert.ok(failures.includes("cloze-not-grounded"));
+});
+
+// --- LINT_FIX_INSTRUCTIONS backs the inbox's one-click fix (src/inboxView.ts
+// lintInstruction). A missing entry would put "undefined" into the prompt, so
+// the map has to stay in step with LINT_LABELS.
+
+test("every lint id has a fix instruction", () => {
+  for (const id of Object.keys(l.LINT_LABELS)) {
+    const fix = l.LINT_FIX_INSTRUCTIONS[id];
+    assert.equal(typeof fix, "string", `${id} has no fix instruction`);
+    assert.ok(fix.length > 20, `${id}'s fix instruction is too terse to aim a rewrite: ${fix}`);
+  }
+});
+
+test("fix instructions say what to do, not just what is wrong", () => {
+  // The old behaviour passed LINT_LABELS straight through, so these read as
+  // bare noun phrases ("not grounded"). Each one should now be a directive.
+  for (const [id, fix] of Object.entries(l.LINT_FIX_INSTRUCTIONS)) {
+    assert.notEqual(fix, l.LINT_LABELS[id], `${id} still uses the badge label as its instruction`);
+  }
+});

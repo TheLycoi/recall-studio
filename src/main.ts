@@ -141,6 +141,24 @@ export default class WikiLmPlugin extends Plugin {
     }
   }
 
+  /**
+   * Open the chat and check the wiki there.
+   *
+   * The lint lives in the chat panel because its report is a turn in the log —
+   * something to read, scroll back to and act on — rather than a Notice that
+   * disappears. Routing the command through the panel keeps one implementation
+   * instead of a second copy that drifts.
+   */
+  async lintWiki(): Promise<void> {
+    await this.openChat();
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_INBOX)) {
+      if (leaf.view instanceof InboxView) {
+        await leaf.view.chatPanel().runVaultLint();
+        return;
+      }
+    }
+  }
+
   async chooseDeck(): Promise<string | null> {
     let decks: string[] = [];
     try {

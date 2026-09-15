@@ -104,6 +104,12 @@ export const COMMAND_TABLE: CommandSpec[] = [
     hint: "always",
   },
   {
+    id: "lint-wiki",
+    name: "Check the wiki for gaps and dead links",
+    aliases: ["wiki", "lint"],
+    hint: "always available",
+  },
+  {
     id: "open-inbox",
     name: "Open inbox",
     aliases: ["inbox"],

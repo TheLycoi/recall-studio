@@ -192,7 +192,7 @@ export class ChatPanel {
    * in it, or one the graph cannot reach, is invisible to Ask no matter how
    * good it looks in the editor, and this says which notes those are.
    */
-  private async runVaultLint(): Promise<void> {
+  async runVaultLint(): Promise<void> {
     if (this.busy) return;
     this.busy = true;
     this.status = "checking the wiki…";
@@ -331,10 +331,11 @@ export class ChatPanel {
     if (this.busy) return;
     const q = text.trim();
 
-    // `/wiki` is chat-local like the quiz commands below: it reports on the
-    // notes rather than doing anything to them, so it belongs in the panel
-    // that already holds the index rather than in the command registry.
-    if (/^\/wiki\b/i.test(q)) {
+    // `/wiki` is intercepted here as well as being registered as `lint-wiki`,
+    // so the report lands in this log rather than opening a second chat. The
+    // registry entry is what puts it in the palette and in `/help`; both reach
+    // the same `runVaultLint`.
+    if (/^\/wiki\b|^\/lint\b|^\/lint-wiki\b/i.test(q)) {
       this.draft = "";
       await this.runVaultLint();
       return;

@@ -85,14 +85,22 @@ export class DeckSuggestModal extends SuggestModal<string> {
   onChooseSuggestion(item: string): void {
     this.resolved = true;
     this.resolve(item);
-    // SuggestModal does not close itself on a choice; without this the deck is
-    // picked but the modal stays on screen, which reads as "nothing happened".
-    this.close();
   }
 
+  /**
+   * Obsidian's `selectSuggestion` closes the modal *before* it calls
+   * `onChooseSuggestion`, so at this point a real pick still looks like a
+   * dismissal: `resolved` is false and resolving null here would settle the
+   * promise first, making the later `resolve(item)` a no-op and handing the
+   * caller null for a deck the reader did choose. Deferring one microtask
+   * lets onChooseSuggestion set `resolved` before the cancel path reads it;
+   * a genuine dismissal has no such callback and still resolves null.
+   */
   onClose(): void {
     super.onClose();
-    if (!this.resolved) this.resolve(null);
+    queueMicrotask(() => {
+      if (!this.resolved) this.resolve(null);
+    });
   }
 }
 
@@ -131,12 +139,14 @@ class TranscriptFileSuggestModal extends FuzzySuggestModal<TFile> {
   onChooseItem(item: TFile): void {
     this.resolved = true;
     this.resolve(item);
-    this.close();
   }
 
+  /** Same close-before-choose ordering as DeckSuggestModal.onClose above. */
   onClose(): void {
     super.onClose();
-    if (!this.resolved) this.resolve(null);
+    queueMicrotask(() => {
+      if (!this.resolved) this.resolve(null);
+    });
   }
 }
 

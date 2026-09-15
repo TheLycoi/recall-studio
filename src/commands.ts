@@ -200,6 +200,10 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
     available: () => true,
     run: (p) => void p.openChat(),
   },
+  "lint-wiki": {
+    available: () => true,
+    run: (p) => void p.lintWiki(),
+  },
   "open-inbox": {
     available: () => true,
     run: (p) => void p.openInbox(),

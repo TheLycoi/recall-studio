@@ -8,7 +8,6 @@ import {
   WIKILM_DISCARD_ICON,
   WIKILM_EDIT_ICON,
   WIKILM_FILE_ICON,
-  WIKILM_FIX_ICON,
   WIKILM_ICON,
   WIKILM_MORE_ICON,
   WIKILM_QA_ICON,
@@ -21,7 +20,8 @@ import { isPdfHighlight, liveCards, makeCard, pendingCards, type Card, type High
 import { askInstruction } from "./modals";
 import { countClozes, fmtDate, locateQuote, splitFrontmatter } from "./util";
 import { describeError } from "./llm";
-import { findCrossInterference, lintCard, LINT_LABELS } from "./lint";
+import { findCrossInterference, lintCard, LINT_FIX_INSTRUCTIONS, LINT_LABELS } from "./lint";
+import { DEFAULT_SETTINGS } from "./settings";
 import { ChatPanel } from "./chatPanel";
 
 export const VIEW_TYPE_INBOX = "wikilm-notebook";
@@ -86,6 +86,11 @@ export class InboxView extends ItemView {
   }
 
   /** Switch halves, remember the choice, redraw. Called by `openChat()` in main.ts. */
+  /** The chat panel, so a command can run a chat-local action in it. */
+  chatPanel(): ChatPanel {
+    return this.chat;
+  }
+
   async setMode(mode: "inbox" | "chat"): Promise<void> {
     if (this.mode !== mode) {
       this.mode = mode;
@@ -251,8 +256,14 @@ export class InboxView extends ItemView {
 
     const deckBtn = right.createEl("button", { cls: "wikilm-deck-btn" });
     setIcon(deckBtn.createSpan(), WIKILM_STACK_ICON);
-    deckBtn.createSpan({ text: this.plugin.settings.defaultDeck });
-    deckBtn.title = "Change the target deck";
+    // "Default" is the settings fallback, not a deck the reader picked, so it
+    // reads as though a choice has been made when none has. Naming the action
+    // instead makes the button say what it does until there is a real deck to
+    // report — after that the deck name is the more useful label.
+    const deck = this.plugin.settings.defaultDeck;
+    const chosen = deck && deck !== DEFAULT_SETTINGS.defaultDeck;
+    deckBtn.createSpan({ text: chosen ? deck : "Choose deck" });
+    deckBtn.title = chosen ? `Cards export to “${deck}”. Click to change the target deck.` : "Choose the Anki deck these cards export to";
     deckBtn.addEventListener("click", async () => {
       const d = await this.plugin.chooseDeck();
       if (d) {
@@ -526,14 +537,23 @@ export class InboxView extends ItemView {
     // able to edit or bin a card the critique objected to, not just re-run the
     // fix. Only the export path treats flagged differently (main.ts pendingItems).
     if (c.status === "pending" || c.status === "flagged") {
-      if (this.lintNotes(c)) {
-        btn(WIKILM_FIX_ICON, "Fix with linter notes", () => void this.rewrite(h, c, this.lintInstruction(c)));
-      }
       btn(WIKILM_EDIT_ICON, "Edit (e)", () => {
         this.editing = this.editing === c.id ? null : c.id;
         this.render();
       });
-      btn(WIKILM_SPARK_ICON, "Rewrite with an instruction", () => void this.rewrite(h, c));
+      // The star is the button a reader reaches for to improve a card, so when
+      // the pipeline already recorded what is wrong it fixes the card on one
+      // click instead of asking for an instruction that only restates the
+      // critique. Typing your own instruction is still available on a card
+      // with notes, one icon along, and is the star's only job without them.
+      if (this.lintNotes(c)) {
+        btn(WIKILM_SPARK_ICON, this.fixTooltip(c), () => void this.rewrite(h, c, this.lintInstruction(c)));
+        // Retry, not the check: the check reads as "accept", which is the one
+        // thing this button does not do.
+        btn(WIKILM_RETRY_ICON, "Rewrite with your own instruction", () => void this.rewrite(h, c));
+      } else {
+        btn(WIKILM_SPARK_ICON, "Rewrite with an instruction", () => void this.rewrite(h, c));
+      }
       btn(c.kind === "qa" ? WIKILM_CLOZE_ICON : WIKILM_QA_ICON, c.kind === "qa" ? "Convert to cloze" : "Convert to Q&A", () =>
         void this.rewrite(h, c, c.kind === "qa" ? "Convert this Q&A card into a cloze card." : "Convert this cloze card into a question and answer card."),
       );
@@ -663,21 +683,22 @@ export class InboxView extends ItemView {
         if (verdict.verdict !== "keep" && verdict.reason) {
           report.createDiv({ cls: "wikilm-report-line wikilm-report-reason", text: verdict.reason });
         }
-        // A suggested revision is offered, never applied behind your back:
-        // the reviewer decides (the same invariant the generator follows).
+        // Check is the reader asking "is this OK?" mid-edit, not a background
+        // pass they might not be watching (unlike the generator's own critique,
+        // which only flags — invariant 3). Clicking Check already is the
+        // decision to hear the verdict out, so a revision drops straight into
+        // the fields: nothing reaches the card until Save is pressed, and the
+        // fields stay editable in case the revision needs a tweak first.
         if (verdict.verdict === "revise") {
-          const apply = report.createEl("button", { text: "Use the revision" });
-          apply.addEventListener("click", () => {
-            kindSel.value = verdict.kind;
-            if (verdict.kind === "qa") {
-              front.value = verdict.front.trim();
-              back.value = verdict.back.trim();
-            } else {
-              text.value = verdict.text.trim();
-            }
-            sync();
-            apply.disabled = true;
-          });
+          kindSel.value = verdict.kind;
+          if (verdict.kind === "qa") {
+            front.value = verdict.front.trim();
+            back.value = verdict.back.trim();
+          } else {
+            text.value = verdict.text.trim();
+          }
+          sync();
+          report.createDiv({ cls: "wikilm-report-line wikilm-report-ok", text: "✓ revision applied below — Save to keep it" });
         }
       } catch (e) {
         pending.remove();
@@ -757,16 +778,31 @@ export class InboxView extends ItemView {
   }
 
   /**
-   * The instruction handed to the rewrite path, e.g.
-   * `Fix these problems: answer is longer than 12 words; the answer restates a
-   * word in the question.` Failure labels come from LINT_LABELS so a renamed
-   * id changes the wording here too, and the critique reason is appended last
-   * because it is a full sentence while the labels are fragments.
+   * What the one-click fix button says it will do. The instruction itself is
+   * a paragraph now, which is right for the model and far too long for a
+   * tooltip, so this names the defects with the badge labels the reader is
+   * already looking at and lets the critique's own sentence speak for itself.
+   */
+  private fixTooltip(c: Card): string {
+    const labels = (c.lintFailures ?? []).map((id) => LINT_LABELS[id]);
+    const what = labels.length ? labels.join(", ") : "the critique's note";
+    return c.critiqueReason ? `Fix in one click — ${what}. ${c.critiqueReason.trim()}` : `Fix in one click — ${what}.`;
+  }
+
+  /**
+   * The instruction handed to the rewrite path. Each failure contributes the
+   * sentence from LINT_FIX_INSTRUCTIONS saying what would count as fixed —
+   * the badge labels in LINT_LABELS are fragments written for a glance, and
+   * as an instruction they left the model guessing. The critique reason is
+   * appended last because it is already a full sentence about this card.
    */
   private lintInstruction(c: Card): string {
-    const parts = (c.lintFailures ?? []).map((id) => LINT_LABELS[id]);
+    const parts = (c.lintFailures ?? []).map((id) => LINT_FIX_INSTRUCTIONS[id]);
     if (c.critiqueReason) parts.push(c.critiqueReason.trim().replace(/\.$/, ""));
-    return `Fix these problems: ${parts.join("; ")}.`;
+    // "Keep what is right" matters because the failures name only the defect:
+    // told just to fix the grounding, a rewrite will happily also re-open a
+    // question the reader already narrowed, or switch a card back to qa.
+    return `Fix these problems, changing nothing else that already works: ${parts.join("; ")}.`;
   }
 
   private async rewrite(h: Highlight, c: Card, preset?: string): Promise<void> {

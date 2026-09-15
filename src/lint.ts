@@ -184,3 +184,27 @@ export const LINT_LABELS: Record<LintFailureId | LintWarningId, string> = {
   "shared-answer": "shared answer",
   "cross-interference": "answer used elsewhere",
 };
+
+/**
+ * What the model has to actually do about each failure, for the one-click fix.
+ *
+ * LINT_LABELS is written for a badge the reader glances at, so its wording is
+ * a fragment: "not grounded", "cloze framing". Handed to a rewrite as an
+ * instruction those say almost nothing — the model has to guess both what is
+ * wrong and what would count as fixed. These say it outright, in the terms the
+ * writer prompt already uses, so the rewrite is aimed rather than exploratory.
+ */
+export const LINT_FIX_INSTRUCTIONS: Record<LintFailureId | LintWarningId, string> = {
+  "cloze-not-grounded": "a deletion hides text that is not in the highlight; re-word the sentence so every deletion is a span the highlight states verbatim",
+  "cloze-count": "the card has no deletions or more than three; keep one to three, splitting the rest onto their own card",
+  "cloze-numbering": "the deletion numbers skip or repeat out of order; number them c1, c2, c3 with no gaps",
+  "cloze-framing": "a deletion hides framing words or runs too long; each deletion should hide one short span, a term, number, or name",
+  "qa-empty": "the card is missing its question, its answer, or its cloze text; write the missing side from the highlight",
+  "qa-answer-long": "the answer runs past a short phrase; narrow the question so the answer is a term, number, name, or short phrase",
+  "qa-yes-no": "the question can be answered yes or no, which is guessable; ask what, which, how, why, when, or how many instead",
+  "card-long": "the card is too long to read at a glance; cut it to the words that carry the retrieval",
+  "answer-in-question": "the question already contains its own answer, so nothing is retrieved; withhold the word the answer turns on",
+  "duplicate-card": "another card on this highlight tests the same fact; either test a genuinely different fact or a different direction",
+  "shared-answer": "another card on this highlight has the same answer; add the cue that tells the two apart, or test a different fact",
+  "cross-interference": "a card on another highlight has this answer; add a cue naming this subject so the two cannot be confused",
+};
