@@ -1,21 +1,21 @@
 import { ItemView, MarkdownView, Menu, Notice, TFile, WorkspaceLeaf, setIcon } from "obsidian";
-import type RecallPlugin from "./main";
+import type WikiLmPlugin from "./main";
 import {
-  RECALL_ADD_ICON,
-  RECALL_CHEVRON_DOWN_ICON,
-  RECALL_CHEVRON_RIGHT_ICON,
-  RECALL_CLOZE_ICON,
-  RECALL_DISCARD_ICON,
-  RECALL_EDIT_ICON,
-  RECALL_FILE_ICON,
-  RECALL_FIX_ICON,
-  RECALL_ICON,
-  RECALL_MORE_ICON,
-  RECALL_QA_ICON,
-  RECALL_RETRY_ICON,
-  RECALL_SEND_ICON,
-  RECALL_SPARK_ICON,
-  RECALL_STACK_ICON,
+  WIKILM_ADD_ICON,
+  WIKILM_CHEVRON_DOWN_ICON,
+  WIKILM_CHEVRON_RIGHT_ICON,
+  WIKILM_CLOZE_ICON,
+  WIKILM_DISCARD_ICON,
+  WIKILM_EDIT_ICON,
+  WIKILM_FILE_ICON,
+  WIKILM_FIX_ICON,
+  WIKILM_ICON,
+  WIKILM_MORE_ICON,
+  WIKILM_QA_ICON,
+  WIKILM_RETRY_ICON,
+  WIKILM_SEND_ICON,
+  WIKILM_SPARK_ICON,
+  WIKILM_STACK_ICON,
 } from "./icon";
 import { isPdfHighlight, liveCards, makeCard, pendingCards, type Card, type Highlight } from "./model";
 import { askInstruction } from "./modals";
@@ -24,7 +24,7 @@ import { describeError } from "./llm";
 import { findCrossInterference, LINT_LABELS } from "./lint";
 import { ChatPanel } from "./chatPanel";
 
-export const VIEW_TYPE_INBOX = "recall-inbox";
+export const VIEW_TYPE_INBOX = "wikilm-notebook";
 
 type Filter = "review" | "all" | "exported";
 
@@ -55,7 +55,7 @@ export class InboxView extends ItemView {
 
   constructor(
     leaf: WorkspaceLeaf,
-    private plugin: RecallPlugin,
+    private plugin: WikiLmPlugin,
   ) {
     super(leaf);
   }
@@ -64,14 +64,14 @@ export class InboxView extends ItemView {
     return VIEW_TYPE_INBOX;
   }
   getDisplayText(): string {
-    return "Recall inbox";
+    return "WikiLM inbox";
   }
   getIcon(): string {
-    return RECALL_ICON;
+    return WIKILM_ICON;
   }
 
   async onOpen(): Promise<void> {
-    this.contentEl.addClass("recall-inbox");
+    this.contentEl.addClass("wikilm-notebook");
     this.contentEl.tabIndex = 0;
     this.mode = this.plugin.settings.sidebarMode;
     this.chat = new ChatPanel(this.plugin, this);
@@ -146,11 +146,11 @@ export class InboxView extends ItemView {
 
     const hs = this.visibleHighlights();
     if (hs.length === 0) {
-      const empty = root.createDiv({ cls: "recall-empty" });
+      const empty = root.createDiv({ cls: "wikilm-empty" });
       empty.createEl("p", { text: this.filter === "review" ? "Nothing to review." : "Nothing here." });
       empty.createEl("p", {
-                cls: "recall-muted",
-        text: "Turn on highlighter mode (ribbon pen) and drag across a passage in a note or PDF, or select text and run “Recall: Send selection to inbox”. Cards are written in the background and show up here.",
+                cls: "wikilm-muted",
+        text: "Turn on highlighter mode (ribbon pen) and drag across a passage in a note or PDF, or select text and run “WikiLM: Send selection to inbox”. Cards are written in the background and show up here.",
       });
       return;
     }
@@ -184,14 +184,14 @@ export class InboxView extends ItemView {
 
   /** The Inbox | Chat switch, in its own row above the header so it sits in the same place in both modes. */
   private renderTabs(root: HTMLElement): void {
-    const row = root.createDiv({ cls: "recall-tabs-row" });
-    const tabs = row.createDiv({ cls: "recall-tabs" });
+    const row = root.createDiv({ cls: "wikilm-tabs-row" });
+    const tabs = row.createDiv({ cls: "wikilm-tabs" });
     for (const [m, label] of [
       ["inbox", "Inbox"],
       ["chat", "Chat"],
     ] as const) {
       const active = this.mode === m;
-      const tab = tabs.createEl("button", { cls: `recall-tab${active ? " is-active" : ""}`, text: label });
+      const tab = tabs.createEl("button", { cls: `wikilm-tab${active ? " is-active" : ""}`, text: label });
       tab.setAttribute("aria-pressed", String(active));
       tab.addEventListener("click", () => void this.setMode(m));
     }
@@ -200,13 +200,13 @@ export class InboxView extends ItemView {
   private renderHeader(root: HTMLElement): void {
     const counts = this.plugin.store.counts();
     const chat = this.mode === "chat";
-    const header = root.createDiv({ cls: "recall-header" });
-    const left = header.createDiv({ cls: "recall-header-left" });
+    const header = root.createDiv({ cls: "wikilm-header" });
+    const left = header.createDiv({ cls: "wikilm-header-left" });
     left.createEl("h2", { text: chat ? "Ask" : "Inbox" });
-    const stats = left.createDiv({ cls: "recall-stats" });
+    const stats = left.createDiv({ cls: "wikilm-stats" });
     const stat = (label: string, n: number, cls = "") => {
-      const s = stats.createSpan({ cls: `recall-stat ${cls}` });
-      s.createSpan({ cls: "recall-stat-n", text: String(n) });
+      const s = stats.createSpan({ cls: `wikilm-stat ${cls}` });
+      s.createSpan({ cls: "wikilm-stat-n", text: String(n) });
       s.createSpan({ text: ` ${label}` });
       return s;
     };
@@ -231,11 +231,11 @@ export class InboxView extends ItemView {
       if (counts.errors) stat("failed", counts.errors, "is-error");
     }
 
-    const right = header.createDiv({ cls: "recall-header-right" });
+    const right = header.createDiv({ cls: "wikilm-header-right" });
 
     if (chat) return;
 
-    const filter = right.createEl("select", { cls: "dropdown recall-filter" });
+    const filter = right.createEl("select", { cls: "dropdown wikilm-filter" });
     for (const [v, label] of [
       ["review", "To review"],
       ["exported", "Exported"],
@@ -249,8 +249,8 @@ export class InboxView extends ItemView {
       this.render();
     });
 
-    const deckBtn = right.createEl("button", { cls: "recall-deck-btn" });
-    setIcon(deckBtn.createSpan(), RECALL_STACK_ICON);
+    const deckBtn = right.createEl("button", { cls: "wikilm-deck-btn" });
+    setIcon(deckBtn.createSpan(), WIKILM_STACK_ICON);
     deckBtn.createSpan({ text: this.plugin.settings.defaultDeck });
     deckBtn.title = "Change the target deck";
     deckBtn.addEventListener("click", async () => {
@@ -266,14 +266,14 @@ export class InboxView extends ItemView {
     exportAll.title = "Send every pending card in the inbox to Anki (⌘⏎)";
     exportAll.addEventListener("click", () => void this.exportHighlights(this.visibleHighlights()));
 
-    const more = right.createEl("button", { cls: "clickable-icon recall-icon-btn" });
-    setIcon(more, RECALL_MORE_ICON);
+    const more = right.createEl("button", { cls: "clickable-icon wikilm-icon-btn" });
+    setIcon(more, WIKILM_MORE_ICON);
     more.addEventListener("click", (evt) => {
       const menu = new Menu();
       menu.addItem((i) =>
         i
           .setTitle("Retry failed highlights")
-          .setIcon(RECALL_RETRY_ICON)
+          .setIcon(WIKILM_RETRY_ICON)
           .onClick(() => {
             for (const h of this.plugin.store.all()) if (h.status === "error") this.plugin.generator.enqueue(h);
           }),
@@ -281,16 +281,16 @@ export class InboxView extends ItemView {
       menu.addItem((i) =>
         i
           .setTitle("Export reviewed as Anki text file")
-          .setIcon(RECALL_FILE_ICON)
+          .setIcon(WIKILM_FILE_ICON)
           .onClick(() => void this.plugin.exportAsTextFile(this.visibleHighlights())),
       );
       menu.addItem((i) =>
         i
           .setTitle("Clear exported and dismissed")
-          .setIcon(RECALL_DISCARD_ICON)
+          .setIcon(WIKILM_DISCARD_ICON)
           .onClick(() => {
             const n = this.plugin.store.clearExported();
-            new Notice(`Recall: cleared ${n}.`);
+            new Notice(`WikiLM: cleared ${n}.`);
           }),
       );
       menu.addItem((i) =>
@@ -303,23 +303,23 @@ export class InboxView extends ItemView {
   }
 
   private renderSource(root: HTMLElement, path: string, list: Highlight[]): void {
-    const section = root.createDiv({ cls: "recall-source" });
-    const head = section.createDiv({ cls: "recall-source-head" });
-    const toggle = head.createSpan({ cls: "recall-collapse" });
-    setIcon(toggle, this.collapsed.has(path) ? RECALL_CHEVRON_RIGHT_ICON : RECALL_CHEVRON_DOWN_ICON);
+    const section = root.createDiv({ cls: "wikilm-source" });
+    const head = section.createDiv({ cls: "wikilm-source-head" });
+    const toggle = head.createSpan({ cls: "wikilm-collapse" });
+    setIcon(toggle, this.collapsed.has(path) ? WIKILM_CHEVRON_RIGHT_ICON : WIKILM_CHEVRON_DOWN_ICON);
     toggle.addEventListener("click", () => {
       if (this.collapsed.has(path)) this.collapsed.delete(path);
       else this.collapsed.add(path);
       this.render();
     });
-    const title = head.createEl("a", { cls: "recall-source-title", text: list[0].sourceTitle });
+    const title = head.createEl("a", { cls: "wikilm-source-title", text: list[0].sourceTitle });
     title.addEventListener("click", () => void this.plugin.app.workspace.openLinkText(path, "", "tab"));
     const pending = list.reduce((n, h) => n + pendingCards(h).length, 0);
     head.createSpan({
-      cls: "recall-muted",
+      cls: "wikilm-muted",
       text: `${list.length} highlight${list.length === 1 ? "" : "s"} · ${pending} card${pending === 1 ? "" : "s"} to review`,
     });
-    const actions = head.createDiv({ cls: "recall-source-actions" });
+    const actions = head.createDiv({ cls: "wikilm-source-actions" });
     if (pending) {
       const b = actions.createEl("button", { text: "Export note" });
       b.title = "Send all reviewed cards from this note to Anki";
@@ -331,17 +331,17 @@ export class InboxView extends ItemView {
   }
 
   private renderHighlight(section: HTMLElement, h: Highlight): void {
-    const row = section.createDiv({ cls: `recall-hl recall-hl-${h.status}` });
+    const row = section.createDiv({ cls: `wikilm-hl wikilm-hl-${h.status}` });
     row.dataset.id = h.id;
 
     // Left column: the highlight itself.
-    const left = row.createDiv({ cls: "recall-hl-left" });
-    const meta = left.createDiv({ cls: "recall-hl-meta" });
-    const titleEl = meta.createSpan({ cls: "recall-hl-title", text: h.title || h.heading || "Highlight" });
+    const left = row.createDiv({ cls: "wikilm-hl-left" });
+    const meta = left.createDiv({ cls: "wikilm-hl-meta" });
+    const titleEl = meta.createSpan({ cls: "wikilm-hl-title", text: h.title || h.heading || "Highlight" });
     titleEl.title = "Click to rename";
     titleEl.addEventListener("click", () => {
       const input = createEl("input", { type: "text", value: h.title });
-      input.addClass("recall-inline-input");
+      input.addClass("wikilm-inline-input");
       titleEl.replaceWith(input);
       input.focus();
       const commit = () => {
@@ -354,7 +354,7 @@ export class InboxView extends ItemView {
         if (e.key === "Escape") this.render();
       });
     });
-    const badge = meta.createSpan({ cls: `recall-badge recall-badge-${h.status}` });
+    const badge = meta.createSpan({ cls: `wikilm-badge wikilm-badge-${h.status}` });
     badge.setText(
       h.status === "queued"
         ? "queued"
@@ -369,12 +369,12 @@ export class InboxView extends ItemView {
                 : `${pendingCards(h).length} to review`,
     );
 
-    const quote = left.createDiv({ cls: "recall-quote" });
+    const quote = left.createDiv({ cls: "wikilm-quote" });
     quote.setText(h.text);
     quote.title = "Open in the note";
     quote.addEventListener("click", () => void this.openSource(h));
 
-    const where = left.createDiv({ cls: "recall-hl-where recall-muted" });
+    const where = left.createDiv({ cls: "wikilm-hl-where wikilm-muted" });
     where.setText(
       [
         isPdfHighlight(h) ? "PDF" : h.heading ? `§ ${h.heading}` : null,
@@ -385,30 +385,30 @@ export class InboxView extends ItemView {
         .filter(Boolean)
         .join(" · "),
     );
-    if (h.instruction) left.createDiv({ cls: "recall-hl-instruction", text: `“${h.instruction}”` });
-    if (h.status === "error" && h.error) left.createDiv({ cls: "recall-error", text: h.error });
+    if (h.instruction) left.createDiv({ cls: "wikilm-hl-instruction", text: `“${h.instruction}”` });
+    if (h.status === "error" && h.error) left.createDiv({ cls: "wikilm-error", text: h.error });
 
-    const hlActions = left.createDiv({ cls: "recall-hl-actions" });
+    const hlActions = left.createDiv({ cls: "wikilm-hl-actions" });
     const iconBtn = (icon: string, tip: string, fn: () => void) => {
-      const b = hlActions.createEl("button", { cls: "clickable-icon recall-icon-btn" });
+      const b = hlActions.createEl("button", { cls: "clickable-icon wikilm-icon-btn" });
       setIcon(b, icon);
       b.title = tip;
       b.addEventListener("click", fn);
       return b;
     };
     if (h.status === "ready" && pendingCards(h).length) {
-      iconBtn(RECALL_SEND_ICON, "Export this highlight's cards to Anki (Enter)", () => void this.exportHighlights([h]));
+      iconBtn(WIKILM_SEND_ICON, "Export this highlight's cards to Anki (Enter)", () => void this.exportHighlights([h]));
     }
-    if (h.status === "error") iconBtn(RECALL_RETRY_ICON, "Retry", () => this.plugin.generator.enqueue(h));
+    if (h.status === "error") iconBtn(WIKILM_RETRY_ICON, "Retry", () => this.plugin.generator.enqueue(h));
     if (h.status === "ready" || h.status === "exported") {
-      iconBtn(RECALL_SPARK_ICON, "Write more cards for this highlight", async () => {
+      iconBtn(WIKILM_SPARK_ICON, "Write more cards for this highlight", async () => {
         const inst = await askInstruction(this.plugin.app, "More cards", "Optional: what should the extra cards cover?");
         if (inst === null) return;
         if (inst) h.instruction = inst;
         this.plugin.generator.more(h);
       });
     }
-    iconBtn(RECALL_ADD_ICON, "Add a card by hand", () => {
+    iconBtn(WIKILM_ADD_ICON, "Add a card by hand", () => {
       const c = makeCard(h.id, { kind: "qa", front: "", back: "" });
       h.cards.push(c);
       if (h.status === "exported") h.status = "ready";
@@ -416,21 +416,21 @@ export class InboxView extends ItemView {
       this.plugin.store.touch();
     });
     if (h.status !== "dismissed") {
-      iconBtn(RECALL_DISCARD_ICON, "Dismiss highlight and its cards", () => {
+      iconBtn(WIKILM_DISCARD_ICON, "Dismiss highlight and its cards", () => {
         h.status = "dismissed";
         this.plugin.store.touch();
       });
     } else {
-      iconBtn(RECALL_DISCARD_ICON, "Delete permanently", () => this.plugin.store.remove(h.id));
+      iconBtn(WIKILM_DISCARD_ICON, "Delete permanently", () => this.plugin.store.remove(h.id));
     }
 
     // Right column: the cards.
-    const right = row.createDiv({ cls: "recall-cards" });
+    const right = row.createDiv({ cls: "wikilm-cards" });
     const cards = liveCards(h);
     if (h.status === "queued" || h.status === "generating") {
-      right.createDiv({ cls: "recall-muted recall-cards-empty", text: "Cards are being written in the background…" });
+      right.createDiv({ cls: "wikilm-muted wikilm-cards-empty", text: "Cards are being written in the background…" });
     } else if (cards.length === 0) {
-      right.createDiv({ cls: "recall-muted recall-cards-empty", text: "No cards." });
+      right.createDiv({ cls: "wikilm-muted wikilm-cards-empty", text: "No cards." });
     }
     // lintMode "hide" collapses flagged cards behind a toggle rather than
     // dropping them: they are still created in the DOM (invariant 3, nothing
@@ -441,8 +441,8 @@ export class InboxView extends ItemView {
       for (const c of cards) if (c.status !== "flagged") this.renderCard(right, h, c);
       const flagged = cards.filter((c) => c.status === "flagged");
       const expanded = this.expandedFlagged.has(h.id);
-      const toggle = right.createEl("button", { cls: "recall-flagged-toggle" });
-      setIcon(toggle.createSpan(), expanded ? RECALL_CHEVRON_DOWN_ICON : RECALL_CHEVRON_RIGHT_ICON);
+      const toggle = right.createEl("button", { cls: "wikilm-flagged-toggle" });
+      setIcon(toggle.createSpan(), expanded ? WIKILM_CHEVRON_DOWN_ICON : WIKILM_CHEVRON_RIGHT_ICON);
       toggle.createSpan({ text: `${flagged.length} flagged` });
       toggle.title = expanded ? "Hide the flagged cards" : "Show the cards the linter or critique flagged";
       toggle.addEventListener("click", () => {
@@ -450,7 +450,7 @@ export class InboxView extends ItemView {
         else this.expandedFlagged.add(h.id);
         this.render();
       });
-      const box = right.createDiv({ cls: `recall-flagged-box${expanded ? "" : " is-collapsed"}` });
+      const box = right.createDiv({ cls: `wikilm-flagged-box${expanded ? "" : " is-collapsed"}` });
       for (const c of flagged) this.renderCard(box, h, c);
       return;
     }
@@ -458,20 +458,20 @@ export class InboxView extends ItemView {
   }
 
   private renderCard(parent: HTMLElement, h: Highlight, c: Card): void {
-    const el = parent.createDiv({ cls: `recall-card recall-card-${c.kind} recall-card-${c.status}` });
+    const el = parent.createDiv({ cls: `wikilm-card wikilm-card-${c.kind} wikilm-card-${c.status}` });
     el.dataset.id = c.id;
     if (this.focusedCard === c.id) el.addClass("is-focused");
     el.addEventListener("click", () => {
       this.focusedCard = c.id;
-      this.contentEl.querySelectorAll(".recall-card.is-focused").forEach((x) => x.removeClass("is-focused"));
+      this.contentEl.querySelectorAll(".wikilm-card.is-focused").forEach((x) => x.removeClass("is-focused"));
       el.addClass("is-focused");
     });
 
-    const top = el.createDiv({ cls: "recall-card-top" });
-    top.createSpan({ cls: "recall-kind", text: c.kind === "qa" ? "Question" : `Cloze${countClozes(c.text) > 1 ? ` ×${countClozes(c.text)}` : ""}` });
-    if (c.status === "exported") top.createSpan({ cls: "recall-badge recall-badge-exported", text: "in Anki" });
-    if (c.status === "duplicate") top.createSpan({ cls: "recall-badge recall-badge-duplicate", text: "duplicate" });
-    if (c.edited && c.status === "pending") top.createSpan({ cls: "recall-badge", text: "edited" });
+    const top = el.createDiv({ cls: "wikilm-card-top" });
+    top.createSpan({ cls: "wikilm-kind", text: c.kind === "qa" ? "Question" : `Cloze${countClozes(c.text) > 1 ? ` ×${countClozes(c.text)}` : ""}` });
+    if (c.status === "exported") top.createSpan({ cls: "wikilm-badge wikilm-badge-exported", text: "in Anki" });
+    if (c.status === "duplicate") top.createSpan({ cls: "wikilm-badge wikilm-badge-duplicate", text: "duplicate" });
+    if (c.edited && c.status === "pending") top.createSpan({ cls: "wikilm-badge", text: "edited" });
     // Render what the pipeline actually recorded rather than recomputing it:
     // the stored lintFailures are the ones lintMode acted on, so a recomputed
     // check could disagree with the status the card is sitting in. Flagged
@@ -479,11 +479,11 @@ export class InboxView extends ItemView {
     // reader needs in order to decide.
     if (c.status === "pending" || c.status === "flagged") {
       for (const id of c.lintFailures ?? []) {
-        const b = top.createSpan({ cls: "recall-badge recall-badge-warn", text: LINT_LABELS[id] });
+        const b = top.createSpan({ cls: "wikilm-badge wikilm-badge-warn", text: LINT_LABELS[id] });
         b.title = `Lint check failed: ${id}`;
       }
       for (const id of c.lintWarnings ?? []) {
-        const b = top.createSpan({ cls: "recall-badge recall-badge-notice", text: LINT_LABELS[id] });
+        const b = top.createSpan({ cls: "wikilm-badge wikilm-badge-notice", text: LINT_LABELS[id] });
         b.title = `Interference risk: ${id}`;
       }
       const partners = this.crossInterference.get(c.id);
@@ -492,26 +492,26 @@ export class InboxView extends ItemView {
           .map((id) => this.cardOwner.get(id))
           .filter((owner): owner is Highlight => owner !== undefined)
           .map((owner) => (owner.title ? `${owner.sourceTitle} \u2014 ${owner.title}` : owner.sourceTitle));
-        const b = top.createSpan({ cls: "recall-badge recall-badge-notice", text: LINT_LABELS["cross-interference"] });
+        const b = top.createSpan({ cls: "wikilm-badge wikilm-badge-notice", text: LINT_LABELS["cross-interference"] });
         b.title = where.length > 0 ? `Same answer as a card in: ${where.join("; ")}` : "Same answer as a card in another highlight";
       }
       if (c.bloom) {
-        const b = top.createSpan({ cls: "recall-badge recall-badge-bloom", text: c.bloom });
+        const b = top.createSpan({ cls: "wikilm-badge wikilm-badge-bloom", text: c.bloom });
         b.title = "Bloom level judged by the critique. 'remember' is right for a plain definition; a mechanism or reason turned into a what-is-it-called card is the case to watch for.";
       }
       if (c.critiqueReason) {
-        const b = top.createSpan({ cls: "recall-badge recall-badge-critique", text: "critique" });
+        const b = top.createSpan({ cls: "wikilm-badge wikilm-badge-critique", text: "critique" });
         b.title = c.critiqueReason;
       } else if (c.critiqueRan) {
         // Without this the reviewer cannot tell a card the critique read and
         // kept from one it never saw (pass off, skipped as trivial, or failed).
-        const b = top.createSpan({ cls: "recall-badge recall-badge-checked", text: "checked" });
+        const b = top.createSpan({ cls: "wikilm-badge wikilm-badge-checked", text: "checked" });
         b.title = "The critique pass reviewed this card and kept it as written.";
       }
     }
-    const actions = top.createDiv({ cls: "recall-card-actions" });
+    const actions = top.createDiv({ cls: "wikilm-card-actions" });
     const btn = (icon: string, tip: string, fn: () => void) => {
-      const b = actions.createEl("button", { cls: "clickable-icon recall-icon-btn" });
+      const b = actions.createEl("button", { cls: "clickable-icon wikilm-icon-btn" });
       setIcon(b, icon);
       b.title = tip;
       b.addEventListener("click", (e) => {
@@ -524,19 +524,19 @@ export class InboxView extends ItemView {
     // fix. Only the export path treats flagged differently (main.ts pendingItems).
     if (c.status === "pending" || c.status === "flagged") {
       if (this.lintNotes(c)) {
-        btn(RECALL_FIX_ICON, "Fix with linter notes", () => void this.rewrite(h, c, this.lintInstruction(c)));
+        btn(WIKILM_FIX_ICON, "Fix with linter notes", () => void this.rewrite(h, c, this.lintInstruction(c)));
       }
-      btn(RECALL_EDIT_ICON, "Edit (e)", () => {
+      btn(WIKILM_EDIT_ICON, "Edit (e)", () => {
         this.editing = this.editing === c.id ? null : c.id;
         this.render();
       });
-      btn(RECALL_SPARK_ICON, "Rewrite with an instruction", () => void this.rewrite(h, c));
-      btn(c.kind === "qa" ? RECALL_CLOZE_ICON : RECALL_QA_ICON, c.kind === "qa" ? "Convert to cloze" : "Convert to Q&A", () =>
+      btn(WIKILM_SPARK_ICON, "Rewrite with an instruction", () => void this.rewrite(h, c));
+      btn(c.kind === "qa" ? WIKILM_CLOZE_ICON : WIKILM_QA_ICON, c.kind === "qa" ? "Convert to cloze" : "Convert to Q&A", () =>
         void this.rewrite(h, c, c.kind === "qa" ? "Convert this Q&A card into a cloze card." : "Convert this cloze card into a question and answer card."),
       );
-      btn(RECALL_DISCARD_ICON, "Delete (x)", () => this.deleteCard(h, c));
+      btn(WIKILM_DISCARD_ICON, "Delete (x)", () => this.deleteCard(h, c));
     } else if (c.status === "duplicate") {
-      btn(RECALL_DISCARD_ICON, "Remove", () => this.deleteCard(h, c));
+      btn(WIKILM_DISCARD_ICON, "Remove", () => this.deleteCard(h, c));
     }
 
     if (this.editing === c.id) {
@@ -545,17 +545,17 @@ export class InboxView extends ItemView {
     }
 
     if (c.critiqueReason && (c.status === "pending" || c.status === "flagged")) {
-      el.createDiv({ cls: "recall-card-reason", text: c.critiqueReason });
+      el.createDiv({ cls: "wikilm-card-reason", text: c.critiqueReason });
     }
 
-    const body = el.createDiv({ cls: "recall-card-body" });
+    const body = el.createDiv({ cls: "wikilm-card-body" });
     if (c.kind === "qa") {
-      body.createDiv({ cls: "recall-field-label", text: "Question" });
-      body.createDiv({ cls: "recall-field", text: c.front });
-      body.createDiv({ cls: "recall-field-label", text: "Answer" });
-      body.createDiv({ cls: "recall-field", text: c.back });
+      body.createDiv({ cls: "wikilm-field-label", text: "Question" });
+      body.createDiv({ cls: "wikilm-field", text: c.front });
+      body.createDiv({ cls: "wikilm-field-label", text: "Answer" });
+      body.createDiv({ cls: "wikilm-field", text: c.back });
     } else {
-      const f = body.createDiv({ cls: "recall-field recall-cloze" });
+      const f = body.createDiv({ cls: "wikilm-field wikilm-cloze" });
       this.renderClozeText(f, c.text);
     }
   }
@@ -566,8 +566,8 @@ export class InboxView extends ItemView {
     let m: RegExpExecArray | null;
     while ((m = re.exec(text))) {
       if (m.index > last) el.appendText(text.slice(last, m.index));
-      const chip = el.createSpan({ cls: "recall-cloze-chip" });
-      chip.createSpan({ cls: "recall-cloze-n", text: m[1].slice(1) });
+      const chip = el.createSpan({ cls: "wikilm-cloze-chip" });
+      chip.createSpan({ cls: "wikilm-cloze-n", text: m[1].slice(1) });
       chip.appendText(m[2]);
       chip.title = m[3] ? `hint: ${m[3]}` : m[1];
       last = m.index + m[0].length;
@@ -576,7 +576,7 @@ export class InboxView extends ItemView {
   }
 
   private renderEditor(el: HTMLElement, h: Highlight, c: Card): void {
-    const form = el.createDiv({ cls: "recall-editor" });
+    const form = el.createDiv({ cls: "wikilm-editor" });
     const kindSel = form.createEl("select", { cls: "dropdown" });
     kindSel.createEl("option", { value: "qa", text: "Question / answer" });
     kindSel.createEl("option", { value: "cloze", text: "Cloze" });
@@ -609,7 +609,7 @@ export class InboxView extends ItemView {
       c.extra = extra.value.trim();
       const empty = c.kind === "qa" ? !c.front || !c.back : !c.text;
       if (empty) {
-        new Notice("Recall: empty card discarded.");
+        new Notice("WikiLM: empty card discarded.");
         c.status = "deleted";
       } else if (JSON.stringify([c.kind, c.front, c.back, c.text, c.extra]) !== before) {
         c.edited = true;
@@ -642,10 +642,10 @@ export class InboxView extends ItemView {
         }
       });
     }
-    const btns = form.createDiv({ cls: "recall-editor-btns" });
+    const btns = form.createDiv({ cls: "wikilm-editor-btns" });
     btns.createEl("button", { text: "Cancel" }).addEventListener("click", cancel);
     btns.createEl("button", { text: "Save", cls: "mod-cta" }).addEventListener("click", save);
-    btns.createSpan({ cls: "recall-muted", text: "⌘⏎ save · esc cancel" });
+    btns.createSpan({ cls: "wikilm-muted", text: "⌘⏎ save · esc cancel" });
     window.setTimeout(() => (c.kind === "qa" ? front : text).focus(), 10);
   }
 
@@ -678,7 +678,7 @@ export class InboxView extends ItemView {
   private async rewrite(h: Highlight, c: Card, preset?: string): Promise<void> {
     const instruction = preset ?? (await askInstruction(this.plugin.app, "Rewrite card", "e.g. make the answer shorter, ask about the date instead"));
     if (!instruction) return;
-    const notice = new Notice("Recall: rewriting…", 0);
+    const notice = new Notice("WikiLM: rewriting…", 0);
     try {
       const d = await this.plugin.llm.rewriteCard(h, c, instruction);
       c.kind = d.kind;
@@ -696,7 +696,7 @@ export class InboxView extends ItemView {
       delete c.critiqueReason;
       this.plugin.store.touch();
     } catch (e) {
-      new Notice(`Recall: ${describeError(e)}`);
+      new Notice(`WikiLM: ${describeError(e)}`);
     } finally {
       notice.hide();
     }
@@ -738,7 +738,7 @@ export class InboxView extends ItemView {
           return;
         }
       } catch (e) {
-        console.error("Recall: could not re-locate the highlight", e);
+        console.error("WikiLM: could not re-locate the highlight", e);
       }
     }
     const line = Math.min(h.line, editor.lineCount() - 1);
@@ -753,8 +753,8 @@ export class InboxView extends ItemView {
     // would otherwise take j/k focus while invisible. Skipping them here
     // keeps the cursor on what the reader can actually see; expanding the
     // group brings them straight back into the sequence.
-    return Array.from(this.contentEl.querySelectorAll<HTMLElement>(".recall-card"))
-      .filter((e) => !e.closest(".recall-flagged-box.is-collapsed"))
+    return Array.from(this.contentEl.querySelectorAll<HTMLElement>(".wikilm-card"))
+      .filter((e) => !e.closest(".wikilm-flagged-box.is-collapsed"))
       .map((e) => e.dataset.id!)
       .filter(Boolean);
   }
@@ -768,9 +768,9 @@ export class InboxView extends ItemView {
 
   private focusCard(id: string | null): void {
     this.focusedCard = id;
-    this.contentEl.querySelectorAll(".recall-card.is-focused").forEach((x) => x.removeClass("is-focused"));
+    this.contentEl.querySelectorAll(".wikilm-card.is-focused").forEach((x) => x.removeClass("is-focused"));
     if (!id) return;
-    const el = this.contentEl.querySelector<HTMLElement>(`.recall-card[data-id="${id}"]`);
+    const el = this.contentEl.querySelector<HTMLElement>(`.wikilm-card[data-id="${id}"]`);
     if (el) {
       el.addClass("is-focused");
       el.scrollIntoView({ block: "nearest" });

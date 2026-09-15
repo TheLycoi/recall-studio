@@ -3,7 +3,7 @@
 // so the chat matcher and its tests can read the table without a plugin.
 //
 // The ids and names here are the ones Obsidian registers (src/main.ts loops
-// over RECALL_COMMANDS in src/commands.ts). Changing an id orphans a user's
+// over WIKILM_COMMANDS in src/commands.ts). Changing an id orphans a user's
 // hotkey; changing a name changes what the palette shows. Both are verbatim
 // from the 0.5.0 addCommand blocks.
 

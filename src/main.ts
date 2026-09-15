@@ -1,20 +1,20 @@
 import { MarkdownView, Notice, Plugin, TFile, normalizePath } from "obsidian";
-import { RECALL_ICON, RECALL_SPARK_ICON, registerRecallIcon } from "./icon";
+import { WIKILM_ICON, WIKILM_SPARK_ICON, registerWikiLmIcon } from "./icon";
 import { AnkiClient, exportToAnki, finalizeHighlights, buildNote } from "./anki";
 import { captureSelection } from "./capture";
-import { RECALL_COMMANDS } from "./commands";
+import { WIKILM_COMMANDS } from "./commands";
 import { Generator } from "./generator";
 import { Highlighter } from "./highlighter";
 import { InboxView, VIEW_TYPE_INBOX } from "./inboxView";
 import { LlmClient } from "./llm";
 import { askInstruction, pickDeck } from "./modals";
 import type { Card, Highlight } from "./model";
-import { DEFAULT_SETTINGS, RecallSettingTab, type RecallSettings } from "./settings";
+import { DEFAULT_SETTINGS, WikiLmSettingTab, type WikiLmSettings } from "./settings";
 import { InboxStore } from "./store";
 import { buildAnkiTextImport } from "./util";
 
-export default class RecallPlugin extends Plugin {
-  settings: RecallSettings = { ...DEFAULT_SETTINGS };
+export default class WikiLmPlugin extends Plugin {
+  settings: WikiLmSettings = { ...DEFAULT_SETTINGS };
   store!: InboxStore;
   generator!: Generator;
   llm!: LlmClient;
@@ -24,8 +24,8 @@ export default class RecallPlugin extends Plugin {
 
   async onload(): Promise<void> {
     await this.loadSettings();
-    registerRecallIcon();
-    this.store = new InboxStore(this.app, this.manifest.dir ?? `${this.app.vault.configDir}/plugins/recall`);
+    registerWikiLmIcon();
+    this.store = new InboxStore(this.app, this.manifest.dir ?? `${this.app.vault.configDir}/plugins/wikipedia-lm`);
     await this.store.load();
     this.llm = new LlmClient(
       () => this.settings,
@@ -35,11 +35,11 @@ export default class RecallPlugin extends Plugin {
     this.generator = new Generator(this);
 
     this.registerView(VIEW_TYPE_INBOX, (leaf) => new InboxView(leaf, this));
-    this.addSettingTab(new RecallSettingTab(this.app, this));
+    this.addSettingTab(new WikiLmSettingTab(this.app, this));
 
-    this.addRibbonIcon(RECALL_ICON, "Recall inbox", () => void this.openInbox());
+    this.addRibbonIcon(WIKILM_ICON, "WikiLM inbox", () => void this.openInbox());
     this.statusBar = this.addStatusBarItem();
-    this.statusBar.addClass("recall-statusbar");
+    this.statusBar.addClass("wikilm-statusbar");
     this.statusBar.addEventListener("click", () => void this.openInbox());
     this.store.onChange(() => this.refreshStatusBar());
     this.highlighter = new Highlighter(this);
@@ -47,7 +47,7 @@ export default class RecallPlugin extends Plugin {
     this.refreshStatusBar();
 
     // ---- commands -------------------------------------------------------
-    for (const c of RECALL_COMMANDS)
+    for (const c of WIKILM_COMMANDS)
       this.addCommand({
         id: c.id,
         name: c.name,
@@ -65,16 +65,16 @@ export default class RecallPlugin extends Plugin {
         if (!file) return;
         menu.addItem((item) =>
           item
-            .setTitle(editor.getSelection().trim() ? "Recall: send selection to inbox" : "Recall: send paragraph to inbox")
-            .setIcon(RECALL_ICON)
-            .setSection("recall")
+            .setTitle(editor.getSelection().trim() ? "WikiLM: send selection to inbox" : "WikiLM: send paragraph to inbox")
+            .setIcon(WIKILM_ICON)
+            .setSection("wikilm")
             .onClick(() => void captureSelection(this, editor, file)),
         );
         menu.addItem((item) =>
           item
-            .setTitle("Recall: send with instructions…")
-            .setIcon(RECALL_SPARK_ICON)
-            .setSection("recall")
+            .setTitle("WikiLM: send with instructions…")
+            .setIcon(WIKILM_SPARK_ICON)
+            .setSection("wikilm")
             .onClick(async () => {
               const inst = await askInstruction(this.app, "Instructions for this highlight", "e.g. one cloze on the number");
               if (inst !== null) await captureSelection(this, editor, file, inst);
@@ -95,7 +95,7 @@ export default class RecallPlugin extends Plugin {
   // ---------------------------------------------------------------- helpers
 
   async loadSettings(): Promise<void> {
-    const saved = (await this.loadData()) as Partial<RecallSettings> | null;
+    const saved = (await this.loadData()) as Partial<WikiLmSettings> | null;
     this.settings = Object.assign({}, DEFAULT_SETTINGS, saved);
     // 0.9.2: capture no longer edits notes by default. An install that predates
     // the change has markMode saved, so the new default alone would not reach it.
@@ -120,9 +120,9 @@ export default class RecallPlugin extends Plugin {
     if (c.toReview) parts.push(`⧉ ${c.toReview}`);
     if (c.flagged) parts.push(`⚑ ${c.flagged}`);
     if (c.errors) parts.push(`⚠ ${c.errors}`);
-    this.statusBar.setText(parts.length ? `Recall ${parts.join(" · ")}` : "Recall");
-    this.statusBar.toggleClass("recall-statusbar-highlighter", !!this.highlighter?.enabled);
-    this.statusBar.title = `Recall: ${this.highlighter?.enabled ? "highlighter mode on, " : ""}${c.queued + c.generating} writing, ${c.toReview} cards to review${c.flagged ? `, ${c.flagged} flagged` : ""}${c.errors ? `, ${c.errors} failed` : ""}. Click to open the inbox.`;
+    this.statusBar.setText(parts.length ? `WikiLM ${parts.join(" · ")}` : "WikiLM");
+    this.statusBar.toggleClass("wikilm-statusbar-highlighter", !!this.highlighter?.enabled);
+    this.statusBar.title = `WikiLM: ${this.highlighter?.enabled ? "highlighter mode on, " : ""}${c.queued + c.generating} writing, ${c.toReview} cards to review${c.flagged ? `, ${c.flagged} flagged` : ""}${c.errors ? `, ${c.errors} failed` : ""}. Click to open the inbox.`;
   }
 
   async openInbox(): Promise<void> {
@@ -146,7 +146,7 @@ export default class RecallPlugin extends Plugin {
     try {
       decks = await this.anki.deckNames();
     } catch {
-      new Notice("Recall: Anki not reachable; type a deck name.");
+      new Notice("WikiLM: Anki not reachable; type a deck name.");
     }
     return pickDeck(this.app, decks);
   }
@@ -190,10 +190,10 @@ export default class RecallPlugin extends Plugin {
   async exportHighlights(list: Highlight[]): Promise<void> {
     const items = this.pendingItems(list);
     if (items.length === 0) {
-      new Notice("Recall: nothing to export.");
+      new Notice("WikiLM: nothing to export.");
       return;
     }
-    const notice = new Notice(`Recall: exporting ${items.length} card${items.length === 1 ? "" : "s"} to “${this.settings.defaultDeck}”…`, 0);
+    const notice = new Notice(`WikiLM: exporting ${items.length} card${items.length === 1 ? "" : "s"} to “${this.settings.defaultDeck}”…`, 0);
     try {
       const res = await exportToAnki(this.anki, items, {
         settings: this.settings,
@@ -204,12 +204,12 @@ export default class RecallPlugin extends Plugin {
       const bits = [`${res.added} added`];
       if (res.duplicates) bits.push(`${res.duplicates} already in Anki`);
       if (res.failed.length) bits.push(`${res.failed.length} failed`);
-      new Notice(`Recall: ${bits.join(", ")}.`, res.failed.length ? 8000 : 4000);
-      for (const f of res.failed) console.warn("Recall: export failed", f.error, f.card);
-      if (res.failed.length) new Notice(`Recall: ${res.failed[0].error}`, 8000);
+      new Notice(`WikiLM: ${bits.join(", ")}.`, res.failed.length ? 8000 : 4000);
+      for (const f of res.failed) console.warn("WikiLM: export failed", f.error, f.card);
+      if (res.failed.length) new Notice(`WikiLM: ${res.failed[0].error}`, 8000);
     } catch (e) {
       const msg = (e as Error).message;
-      new Notice(`Recall: export failed. ${msg}\nUse “Export reviewed as Anki text file” from the inbox menu if Anki is closed.`, 10000);
+      new Notice(`WikiLM: export failed. ${msg}\nUse “Export reviewed as Anki text file” from the inbox menu if Anki is closed.`, 10000);
       this.store.touch();
     } finally {
       notice.hide();
@@ -220,7 +220,7 @@ export default class RecallPlugin extends Plugin {
   async exportAsTextFile(list: Highlight[]): Promise<void> {
     const items = this.pendingItems(list);
     if (items.length === 0) {
-      new Notice("Recall: nothing to export.");
+      new Notice("WikiLM: nothing to export.");
       return;
     }
     const ctx = { settings: this.settings, vaultName: this.app.vault.getName(), deck: this.settings.defaultDeck };
@@ -235,7 +235,7 @@ export default class RecallPlugin extends Plugin {
     const folder = normalizePath(this.settings.exportFolder);
     if (!(await this.app.vault.adapter.exists(folder))) await this.app.vault.createFolder(folder);
     const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 16);
-    const path = normalizePath(`${folder}/recall-${stamp}.txt`);
+    const path = normalizePath(`${folder}/wikilm-${stamp}.txt`);
     const qa = rows.filter((r) => r.fields.length !== 2 || r.notetype !== this.settings.clozeModel);
     const cloze = rows.filter((r) => !qa.includes(r));
     // Anki's importer needs a consistent column count per file, so split by note type when the field counts differ.
@@ -247,7 +247,7 @@ export default class RecallPlugin extends Plugin {
     for (const { card } of items) card.status = "exported";
     finalizeHighlights(items.map((i) => i.highlight));
     this.store.touch();
-    new Notice(`Recall: wrote ${files.map(([p]) => p).join(" and ")}. In Anki: File → Import.`, 8000);
+    new Notice(`WikiLM: wrote ${files.map(([p]) => p).join(" and ")}. In Anki: File → Import.`, 8000);
   }
 
   /** Used by the settings tab and tests; resolves a TFile from a path. */

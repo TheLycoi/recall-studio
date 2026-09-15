@@ -1,5 +1,5 @@
 import { ItemView, MarkdownRenderer, TAbstractFile, TFile } from "obsidian";
-import type RecallPlugin from "./main";
+import type WikiLmPlugin from "./main";
 import { describeError } from "./llm";
 import {
   indexNote,
@@ -15,7 +15,7 @@ import type { Graph } from "./graph";
 import { lintVault, renderVaultLint, type LintPage } from "./vaultLint";
 import { checkAnswer, emptyIndexAnswer, noEvidenceAnswer, renderGroundingLine, VERIFY_BANNER, type GroundingReport } from "./askCheck";
 import { matchCommand, renderHelp, tokenOverlapScorer } from "./chatCommands";
-import { RECALL_COMMANDS, type RecallCommand } from "./commands";
+import { WIKILM_COMMANDS, type WikiLmCommand } from "./commands";
 import { captureEvidenceUnits } from "./capture";
 import {
   acceptQuestion,
@@ -83,7 +83,7 @@ interface ChatTurn {
 }
 
 /**
- * The Ask panel: the chat half of the Recall sidebar, owned by `InboxView`.
+ * The Ask panel: the chat half of the WikiLM sidebar, owned by `InboxView`.
  *
  * It never imports `./inboxView` — the view hands itself in as an `ItemView`,
  * which is all this needs (a `Component` for `MarkdownRenderer.render`'s
@@ -125,7 +125,7 @@ export class ChatPanel {
   private restartArmed = false;
 
   constructor(
-    private plugin: RecallPlugin,
+    private plugin: WikiLmPlugin,
     private view: ItemView,
   ) {}
 
@@ -201,7 +201,7 @@ export class ChatPanel {
       const prefix = this.folderPrefix();
       const files = this.plugin.app.vault.getMarkdownFiles().filter((f: TFile) => f.path.startsWith(prefix));
       if (files.length === 0) {
-        this.pushSystem(`No notes under “${prefix.replace(/\/$/, "")}”. Set the topic notes folder in Recall's settings.`);
+        this.pushSystem(`No notes under “${prefix.replace(/\/$/, "")}”. Set the topic notes folder in WikiLM's settings.`);
         return;
       }
       const pages: LintPage[] = [];
@@ -257,7 +257,7 @@ export class ChatPanel {
       // Neighbours of anything the new terms turned up.
       out = expandWithGraph(out, units, this.buildGraphIndex(), k);
     } catch (e) {
-      console.debug("[recall] keyword expansion failed:", e);
+      console.debug("[wikilm] keyword expansion failed:", e);
     }
     return out;
   }
@@ -396,7 +396,7 @@ export class ChatPanel {
 
     if (!q) return;
 
-    const match = matchCommand(q, RECALL_COMMANDS, tokenOverlapScorer);
+    const match = matchCommand(q, WIKILM_COMMANDS, tokenOverlapScorer);
 
     switch (match.kind) {
       case "help":
@@ -413,7 +413,7 @@ export class ChatPanel {
         this.pushSystem(`No command matches /${match.query}. Type /help.`);
         return;
       case "offer": {
-        const command = RECALL_COMMANDS.find((c) => c.id === match.id);
+        const command = WIKILM_COMMANDS.find((c) => c.id === match.id);
         if (!command) {
           await this.askQuestion(q);
           return;
@@ -437,7 +437,7 @@ export class ChatPanel {
   /** `/help`: every command, its first alias, its hint, and whether it can run right now. */
   private helpText(): string {
     return renderHelp(
-      RECALL_COMMANDS.map((c) => ({ ...c, available: c.available(this.plugin) })),
+      WIKILM_COMMANDS.map((c) => ({ ...c, available: c.available(this.plugin) })),
       true,
     );
   }
@@ -459,7 +459,7 @@ export class ChatPanel {
    * not fill the log with pairs.
    */
   private async runCommand(id: string): Promise<void> {
-    const command: RecallCommand | undefined = RECALL_COMMANDS.find((c) => c.id === id);
+    const command: WikiLmCommand | undefined = WIKILM_COMMANDS.find((c) => c.id === id);
     if (!command) {
       this.pushSystem(`No command matches /${id}. Type /help.`);
       return;
@@ -907,16 +907,16 @@ export class ChatPanel {
 
   render(root: HTMLElement): void {
     this.root = root;
-    root.querySelector(".recall-chat")?.remove();
-    const wrap = root.createDiv({ cls: "recall-chat" });
+    root.querySelector(".wikilm-chat")?.remove();
+    const wrap = root.createDiv({ cls: "wikilm-chat" });
 
-    const log = wrap.createDiv({ cls: "recall-chat-log" });
+    const log = wrap.createDiv({ cls: "wikilm-chat-log" });
 
     const prefix = this.folderPrefix();
     if (this.turns.length === 0) {
       const hasNotes = this.plugin.app.vault.getMarkdownFiles().some((f: TFile) => f.path.startsWith(prefix));
       log.createDiv({
-        cls: "recall-muted",
+        cls: "wikilm-muted",
         text: hasNotes
           ? "Ask a question about your topic notes. Answers cite the highlights they came from. Type /help for commands."
           : `No topic notes under ${prefix} yet. Digest a PDF first, or type /help for commands.`,
@@ -937,12 +937,12 @@ export class ChatPanel {
     const quizCls =
       turn.quiz && turn.role === "assistant"
         ? turn.quiz.kind === "question"
-          ? " recall-quiz-question"
+          ? " wikilm-quiz-question"
           : turn.quiz.kind === "grade"
-            ? ` recall-quiz-grade is-${turn.quiz.verdict ?? "skipped"}${turn.quiz.unverified ? " is-unverified" : ""}`
-            : " recall-quiz-summary"
+            ? ` wikilm-quiz-grade is-${turn.quiz.verdict ?? "skipped"}${turn.quiz.unverified ? " is-unverified" : ""}`
+            : " wikilm-quiz-summary"
         : "";
-    const el = log.createDiv({ cls: `recall-chat-turn ${cls}${quizCls}` });
+    const el = log.createDiv({ cls: `wikilm-chat-turn ${cls}${quizCls}` });
     if (turn.role === "user") {
       el.setText(turn.text);
       return;
@@ -964,7 +964,7 @@ export class ChatPanel {
     // Above the answer, not below it: a reader who acts on the first sentence
     // must have seen the warning before they read it.
     if (turn.report?.fromGeneralKnowledge) {
-      el.createDiv({ cls: "recall-chat-verify-banner", text: VERIFY_BANNER });
+      el.createDiv({ cls: "wikilm-chat-verify-banner", text: VERIFY_BANNER });
     }
 
     if (turn.text.trim()) {
@@ -974,9 +974,9 @@ export class ChatPanel {
       void MarkdownRenderer.render(this.plugin.app, turn.text, el.createDiv(), "", this.view);
     }
     if (turn.quiz?.kind === "grade" && turn.quiz.unverified) {
-      el.createDiv({ cls: "recall-chat-grounding is-unverified" }).createSpan({ cls: "recall-badge recall-badge-warn", text: "unverified" });
+      el.createDiv({ cls: "wikilm-chat-grounding is-unverified" }).createSpan({ cls: "wikilm-badge wikilm-badge-warn", text: "unverified" });
     }
-    if (turn.error) el.createDiv({ cls: "recall-error", text: turn.error });
+    if (turn.error) el.createDiv({ cls: "wikilm-error", text: turn.error });
 
     if (turn.quiz?.kind === "summary") {
       this.renderSummaryChips(el, turn.quiz.misses ?? []);
@@ -1009,21 +1009,21 @@ export class ChatPanel {
     if (picked.length === 0 && report.coverage !== "none") picked.push({ unit: evidence[0], why: "" });
     if (picked.length === 0) return;
 
-    el.createDiv({ cls: "recall-chat-sources-head", text: picked.length === 1 ? "Source" : "Sources" });
+    el.createDiv({ cls: "wikilm-chat-sources-head", text: picked.length === 1 ? "Source" : "Sources" });
     for (const { unit, why } of picked) {
-      const row = el.createDiv({ cls: "recall-chat-source" });
+      const row = el.createDiv({ cls: "wikilm-chat-source" });
 
-      const link = row.createEl("a", { cls: "recall-chat-source-note", text: unit.noteTitle, href: unit.notePath });
+      const link = row.createEl("a", { cls: "wikilm-chat-source-note", text: unit.noteTitle, href: unit.notePath });
       link.addEventListener("click", (e) => {
         e.preventDefault();
         // obsidian.d.ts: openLinkText(linktext, sourcePath, newLeaf).
         void this.plugin.app.workspace.openLinkText(unit.notePath, "", false);
       });
 
-      if (why) row.createSpan({ cls: "recall-chat-source-why", text: why });
+      if (why) row.createSpan({ cls: "wikilm-chat-source-why", text: why });
 
       if (unit.target && unit.pdfBasename) {
-        const page = row.createSpan({ cls: "recall-chat-source-page", text: `p.${unit.page}` });
+        const page = row.createSpan({ cls: "wikilm-chat-source-page", text: `p.${unit.page}` });
         page.addEventListener("click", (e) => {
           e.preventDefault();
           void this.plugin.app.workspace.openLinkText(pdfLinktext(unit), "", false);
@@ -1032,7 +1032,7 @@ export class ChatPanel {
 
       // The passage itself, quiet under the link: enough to confirm the answer
       // at a glance without becoming the evidence board again.
-      row.createDiv({ cls: "recall-chat-source-text", text: unit.text });
+      row.createDiv({ cls: "wikilm-chat-source-text", text: unit.text });
     }
   }
 
@@ -1046,7 +1046,7 @@ export class ChatPanel {
    * changes what they do next: whether their notes answered the question.
    */
   private renderGrounding(el: HTMLElement, report: GroundingReport): void {
-    const line = el.createDiv({ cls: `recall-chat-grounding${report.coverage === "none" ? " is-unverified" : ""}` });
+    const line = el.createDiv({ cls: `wikilm-chat-grounding${report.coverage === "none" ? " is-unverified" : ""}` });
     line.createSpan({ text: renderGroundingLine(report) });
   }
 
@@ -1061,8 +1061,8 @@ export class ChatPanel {
   private renderOffer(el: HTMLElement, turn: ChatTurn): void {
     const offer = turn.offer;
     if (!offer) return;
-    const row = el.createDiv({ cls: "recall-chat-offer" });
-    row.createSpan({ cls: "recall-muted", text: "Did you mean to run a command?" });
+    const row = el.createDiv({ cls: "wikilm-chat-offer" });
+    row.createSpan({ cls: "wikilm-muted", text: "Did you mean to run a command?" });
 
     const run = row.createEl("button", { cls: "mod-cta", text: `Run “${offer.name}”` });
     run.disabled = this.busy;
@@ -1089,7 +1089,7 @@ export class ChatPanel {
    * than writing an empty batch to the inbox.
    */
   private renderSummaryChips(el: HTMLElement, misses: EvidenceUnit[]): void {
-    const row = el.createDiv({ cls: "recall-chat-offer" });
+    const row = el.createDiv({ cls: "wikilm-chat-offer" });
     const send = row.createEl("button", {
       cls: "mod-cta",
       text: `Send ${misses.length} missed to inbox`,
@@ -1109,8 +1109,8 @@ export class ChatPanel {
   }
 
   private renderInput(wrap: HTMLElement): void {
-    const box = wrap.createDiv({ cls: "recall-chat-input" });
-    const ta = box.createEl("textarea", { cls: "recall-chat-textarea" });
+    const box = wrap.createDiv({ cls: "wikilm-chat-input" });
+    const ta = box.createEl("textarea", { cls: "wikilm-chat-textarea" });
     ta.rows = 3;
     ta.placeholder = "Ask your notes, or type /help…";
     ta.value = this.draft;
@@ -1131,7 +1131,7 @@ export class ChatPanel {
       void this.ask(ta.value);
     });
 
-    const row = box.createDiv({ cls: "recall-chat-buttons" });
+    const row = box.createDiv({ cls: "wikilm-chat-buttons" });
     const send = row.createEl("button", { cls: "mod-cta", text: "Send" });
     send.disabled = this.busy;
     send.addEventListener("click", () => {
@@ -1141,7 +1141,7 @@ export class ChatPanel {
     const clear = row.createEl("button", { text: "Clear" });
     clear.addEventListener("click", () => this.clear());
 
-    row.createSpan({ cls: "recall-muted", text: this.status });
+    row.createSpan({ cls: "wikilm-muted", text: this.status });
 
     if (!this.busy) window.setTimeout(() => ta.focus(), 0);
   }

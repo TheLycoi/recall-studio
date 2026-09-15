@@ -11,7 +11,7 @@ import { execFileSync } from "child_process";
  *
  * A key value is never logged or included in an error message.
  */
-export const KEYCHAIN_SERVICES = ["Recall Anthropic API key", "ANTHROPIC_API_KEY"];
+export const KEYCHAIN_SERVICES = ["WikiLM Anthropic API key", "ANTHROPIC_API_KEY"];
 
 let cache: { value: string; at: number } | null = null;
 const CACHE_MS = 5 * 60 * 1000;

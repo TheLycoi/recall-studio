@@ -1,5 +1,5 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
-import type RecallPlugin from "./main";
+import type WikiLmPlugin from "./main";
 
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 export type Provider = "anthropic" | "codex" | "claudecli";
@@ -8,7 +8,7 @@ export type LintMode = "badge" | "hide" | "drop";
 export type SuggestGranularity = "minimal" | "standard" | "detailed";
 export const SUGGEST_PER_PAGE: Record<SuggestGranularity, number> = { minimal: 1, standard: 2, detailed: 4 };
 
-export interface RecallSettings {
+export interface WikiLmSettings {
   // LLM
   /** "anthropic": Messages API with an API key. "codex": OpenAI's Codex CLI signed in with a ChatGPT subscription. */
   provider: Provider;
@@ -108,7 +108,7 @@ export interface RecallSettings {
   historyExamples: boolean;
 }
 
-export const DEFAULT_SETTINGS: RecallSettings = {
+export const DEFAULT_SETTINGS: WikiLmSettings = {
   provider: "anthropic",
   apiKey: "",
   model: "claude-opus-5",
@@ -142,12 +142,12 @@ export const DEFAULT_SETTINGS: RecallSettings = {
   clozeModel: "Cloze",
   clozeTextField: "Text",
   clozeExtraField: "Back Extra",
-  extraTags: "recall",
+  extraTags: "wikilm",
   includeSourceTag: true,
   includeExtra: true,
-  exportFolder: "recall-exports",
+  exportFolder: "wikilm-exports",
 
-  manifestFolder: "recall-manifests",
+  manifestFolder: "wikilm-manifests",
   topicFolder: "classes",
   digestMaxNotes: 6,
   digestInstructions: "",
@@ -177,10 +177,10 @@ export const DEFAULT_SETTINGS: RecallSettings = {
   historyExamples: true,
 };
 
-export class RecallSettingTab extends PluginSettingTab {
+export class WikiLmSettingTab extends PluginSettingTab {
   constructor(
     app: App,
-    private plugin: RecallPlugin,
+    private plugin: WikiLmPlugin,
   ) {
     super(app, plugin);
   }
@@ -213,9 +213,9 @@ export class RecallSettingTab extends PluginSettingTab {
           b.setDisabled(true);
           try {
             const r = await this.plugin.llm.probe();
-            new Notice(`Recall: ${r.model} answered (${r.via}).`, 6000);
+            new Notice(`WikiLM: ${r.model} answered (${r.via}).`, 6000);
           } catch (e) {
-            new Notice(`Recall: ${(e as Error).message}`, 8000);
+            new Notice(`WikiLM: ${(e as Error).message}`, 8000);
           } finally {
             b.setDisabled(false);
           }
@@ -272,7 +272,7 @@ export class RecallSettingTab extends PluginSettingTab {
       new Setting(containerEl)
         .setName("Anthropic API key")
         .setDesc(
-          "Leave empty to read ANTHROPIC_API_KEY from the environment or the macOS keychain (service “ANTHROPIC_API_KEY” or “Recall Anthropic API key”). A key typed here is stored in data.json, which this vault syncs through iCloud in plaintext.",
+          "Leave empty to read ANTHROPIC_API_KEY from the environment or the macOS keychain (service “ANTHROPIC_API_KEY” or “WikiLM Anthropic API key”). A key typed here is stored in data.json, which this vault syncs through iCloud in plaintext.",
         )
         .addText((t) => {
           t.inputEl.type = "password";
@@ -499,7 +499,7 @@ export class RecallSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Mark captured text in the note")
       .setDesc(
-        "Off by default — Recall sends passages to the inbox without editing your notes. Marking wraps the passage in ==…==, which can break headings and list formatting when a passage spans more than one line.",
+        "Off by default — WikiLM sends passages to the inbox without editing your notes. Marking wraps the passage in ==…==, which can break headings and list formatting when a passage spans more than one line.",
       )
       .addDropdown((d) =>
         d
@@ -806,14 +806,14 @@ export class RecallSettingTab extends PluginSettingTab {
           try {
             await this.plugin.detectNoteTypes();
             this.display();
-            new Notice("Recall: note types detected.");
+            new Notice("WikiLM: note types detected.");
           } catch (e) {
-            new Notice(`Recall: ${(e as Error).message}`);
+            new Notice(`WikiLM: ${(e as Error).message}`);
           }
         }),
       );
 
-    const field = (name: string, key: keyof RecallSettings, desc = "") =>
+    const field = (name: string, key: keyof WikiLmSettings, desc = "") =>
       new Setting(containerEl)
         .setName(name)
         .setDesc(desc)

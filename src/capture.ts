@@ -1,5 +1,5 @@
 import { Editor, MarkdownView, Notice, TFile } from "obsidian";
-import type RecallPlugin from "./main";
+import type WikiLmPlugin from "./main";
 import { makeHighlight, type Highlight } from "./model";
 import type { PdfSelection } from "./pdf";
 import {
@@ -42,17 +42,17 @@ function paragraphAt(editor: Editor): { from: { line: number; ch: number }; to: 
   return { from: { line: a, ch: 0 }, to: { line: b, ch: editor.getLine(b).length } };
 }
 
-function announce(plugin: RecallPlugin, h: Highlight, opts: CaptureOptions): void {
+function announce(plugin: WikiLmPlugin, h: Highlight, opts: CaptureOptions): void {
   plugin.store.add(h);
   plugin.generator.enqueue(h);
   const what = opts.gesture ? "highlighted and sent to inbox" : "sent to inbox";
-  new Notice(`Recall: ${what}${opts.instruction ? " with instructions" : ""}.`);
+  new Notice(`WikiLM: ${what}${opts.instruction ? " with instructions" : ""}.`);
   if (plugin.settings.openInboxOnCapture) void plugin.openInbox();
 }
 
 /** Capture the editor selection (or, outside highlighter mode, the current paragraph) into the inbox. */
 export async function captureSelection(
-  plugin: RecallPlugin,
+  plugin: WikiLmPlugin,
   editor: Editor,
   file: TFile,
   instructionOrOpts: string | CaptureOptions = "",
@@ -66,7 +66,7 @@ export async function captureSelection(
     if (opts.gesture) return null;
     const p = paragraphAt(editor);
     if (!p) {
-      new Notice("Recall: select some text first.");
+      new Notice("WikiLM: select some text first.");
       return null;
     }
     from = p.from;
@@ -75,11 +75,11 @@ export async function captureSelection(
   }
   const text = stripMarks(sel).trim();
   if (text.length < 3) {
-    if (!opts.gesture) new Notice("Recall: selection is too short.");
+    if (!opts.gesture) new Notice("WikiLM: selection is too short.");
     return null;
   }
   if (plugin.store.hasDuplicate(file.path, normalizeWs(text))) {
-    if (!opts.gesture) new Notice("Recall: that highlight is already in the inbox.");
+    if (!opts.gesture) new Notice("WikiLM: that highlight is already in the inbox.");
     return null;
   }
 
@@ -109,7 +109,7 @@ export async function captureSelection(
       const lastLine = editor.getLine(to.line);
       const hasBlockId = /\^[A-Za-z0-9-]+\s*$/.test(lastLine);
       if (!hasBlockId) {
-        h.blockId = `recall-${newId()}`;
+        h.blockId = `wikilm-${newId()}`;
         const tail = lastLine.slice(to.ch);
         replacement = replacement + tail + ` ^${h.blockId}`;
         to = { line: to.line, ch: lastLine.length };
@@ -131,7 +131,7 @@ export async function captureSelection(
 }
 
 /** Sweep a note for ==highlights== and queue every new one. */
-export async function captureMarkdownHighlights(plugin: RecallPlugin, file: TFile, instruction = ""): Promise<number> {
+export async function captureMarkdownHighlights(plugin: WikiLmPlugin, file: TFile, instruction = ""): Promise<number> {
   const raw = await plugin.app.vault.read(file);
   const { body, offset } = splitFrontmatter(raw);
   const spans = findMarkdownHighlights(body);
@@ -157,8 +157,8 @@ export async function captureMarkdownHighlights(plugin: RecallPlugin, file: TFil
   }
   new Notice(
     spans.length === 0
-      ? "Recall: no ==highlights== found in this note."
-      : `Recall: queued ${added} highlight${added === 1 ? "" : "s"}${spans.length - added ? ` (${spans.length - added} already in inbox)` : ""}.`,
+      ? "WikiLM: no ==highlights== found in this note."
+      : `WikiLM: queued ${added} highlight${added === 1 ? "" : "s"}${spans.length - added ? ` (${spans.length - added} already in inbox)` : ""}.`,
   );
   return added;
 }
@@ -175,7 +175,7 @@ interface LocatedSpan {
  * and queue card writing. Shared by AI highlighting and reading-view capture.
  */
 async function captureSpans(
-  plugin: RecallPlugin,
+  plugin: WikiLmPlugin,
   file: TFile,
   raw: string,
   spans: LocatedSpan[],
@@ -224,7 +224,7 @@ async function captureSpans(
         const eol = lineEnd === -1 ? body.length : lineEnd;
         const tail = body.slice(l.end, eol);
         if (!/\^[A-Za-z0-9-]+\s*$/.test(tail)) {
-          h.blockId = `recall-${newId()}`;
+          h.blockId = `wikilm-${newId()}`;
           rep = rep + tail + ` ^${h.blockId}`;
           end = eol;
         }
@@ -246,7 +246,7 @@ async function captureSpans(
  * not in an editor, so the text is located in the note body and marked there.
  */
 export async function captureReadingSelection(
-  plugin: RecallPlugin,
+  plugin: WikiLmPlugin,
   view: MarkdownView,
   win: Window,
   opts: CaptureOptions = {},
@@ -260,24 +260,24 @@ export async function captureReadingSelection(
   const { body } = splitFrontmatter(raw);
   const loc = locateQuote(body, text);
   if (!loc) {
-    new Notice("Recall: could not find that selection in the note's markdown.");
+    new Notice("WikiLM: could not find that selection in the note's markdown.");
     return null;
   }
   if (plugin.store.hasDuplicate(file.path, normalizeWs(stripMarks(body.slice(loc.start, loc.end))))) {
-    if (!opts.gesture) new Notice("Recall: that highlight is already in the inbox.");
+    if (!opts.gesture) new Notice("WikiLM: that highlight is already in the inbox.");
     return null;
   }
   const { created } = await captureSpans(plugin, file, raw, [loc], opts.gesture ? "highlighter" : "selection", opts.instruction ?? "");
   sel?.removeAllRanges();
   if (!created.length) return null;
-  new Notice(`Recall: ${opts.gesture ? "highlighted and " : ""}sent to inbox.`);
+  new Notice(`WikiLM: ${opts.gesture ? "highlighted and " : ""}sent to inbox.`);
   if (plugin.settings.openInboxOnCapture) void plugin.openInbox();
   return created[0];
 }
 
 /** A selection in Obsidian's PDF viewer becomes a highlight with a page number. */
 export function capturePdfSelection(
-  plugin: RecallPlugin,
+  plugin: WikiLmPlugin,
   file: TFile,
   sel: PdfSelection,
   opts: CaptureOptions = {},
@@ -285,7 +285,7 @@ export function capturePdfSelection(
   const text = sel.text.trim();
   if (text.length < 3) return null;
   if (plugin.store.hasDuplicate(file.path, normalizeWs(text))) {
-    if (!opts.gesture) new Notice("Recall: that highlight is already in the inbox.");
+    if (!opts.gesture) new Notice("WikiLM: that highlight is already in the inbox.");
     return null;
   }
   let before = "";
@@ -318,15 +318,15 @@ export function capturePdfSelection(
  * "highlight" operation: let the model choose spans, verify each one is really
  * in the note, mark it, and queue card writing. Fire-and-forget.
  */
-export function aiHighlightNote(plugin: RecallPlugin, file: TFile, instruction = ""): void {
+export function aiHighlightNote(plugin: WikiLmPlugin, file: TFile, instruction = ""): void {
   const transcript = plugin.store.getTranscript(file.path)?.text ?? null;
-  new Notice(transcript !== null ? "Recall: choosing highlights from the transcript in the background…" : "Recall: choosing highlights in the background…");
+  new Notice(transcript !== null ? "WikiLM: choosing highlights from the transcript in the background…" : "WikiLM: choosing highlights in the background…");
   void (async () => {
     try {
       const raw = await plugin.app.vault.read(file);
       const { body } = splitFrontmatter(raw);
       if (body.trim().length < 40) {
-        new Notice("Recall: note is too short to highlight.");
+        new Notice("WikiLM: note is too short to highlight.");
         return;
       }
       const picks = await plugin.llm.highlight(basenameNoExt(file.path), body, instruction, transcript);
@@ -345,10 +345,10 @@ export function aiHighlightNote(plugin: RecallPlugin, file: TFile, instruction =
       const bits = [`${created.length} highlight${created.length === 1 ? "" : "s"} queued`];
       if (skipped) bits.push(`${skipped} already in inbox`);
       if (missed) bits.push(`${missed} could not be located`);
-      new Notice(`Recall: ${bits.join(", ")}.`);
+      new Notice(`WikiLM: ${bits.join(", ")}.`);
     } catch (e) {
-      console.error("Recall: AI highlight failed", e);
-      new Notice(`Recall: highlighting failed. ${describeError(e)}`);
+      console.error("WikiLM: AI highlight failed", e);
+      new Notice(`WikiLM: highlighting failed. ${describeError(e)}`);
     }
   })();
 }
@@ -362,7 +362,7 @@ export function aiHighlightNote(plugin: RecallPlugin, file: TFile, instruction =
  * (`src/inboxView.ts` `openSource`).
  */
 export function captureManifestHighlights(
-  plugin: RecallPlugin,
+  plugin: WikiLmPlugin,
   manifest: Manifest,
   items: ManifestHighlight[],
   noteTitle: string,
@@ -398,7 +398,7 @@ export function captureManifestHighlights(
     plugin.generator.enqueue(h);
     added++;
   }
-  new Notice(`Recall: ${added} highlight${added === 1 ? "" : "s"} queued as flashcards${skipped ? `, ${skipped} skipped` : ""}.`);
+  new Notice(`WikiLM: ${added} highlight${added === 1 ? "" : "s"} queued as flashcards${skipped ? `, ${skipped} skipped` : ""}.`);
   return { added, skipped };
 }
 
@@ -410,7 +410,7 @@ export function captureManifestHighlights(
  * note itself is the source.
  */
 export function captureEvidenceUnits(
-  plugin: RecallPlugin,
+  plugin: WikiLmPlugin,
   units: EvidenceUnit[],
   title: string,
 ): { added: number; skipped: number } {
@@ -466,8 +466,8 @@ export function captureEvidenceUnits(
   }
   new Notice(
     added === 0 && skipped === 0
-      ? "Recall: nothing to send."
-      : `Recall: ${added} passage${added === 1 ? "" : "s"} sent to the inbox from the quiz (${skipped} already there).`,
+      ? "WikiLM: nothing to send."
+      : `WikiLM: ${added} passage${added === 1 ? "" : "s"} sent to the inbox from the quiz (${skipped} already there).`,
   );
   return { added, skipped };
 }

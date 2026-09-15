@@ -1,4 +1,4 @@
-// Pure manifest model: render/parse the recall-manifest note format, and the
+// Pure manifest model: render/parse the wikilm-manifest note format, and the
 // merge/sort helpers that build it. No `obsidian` import (see src/lint.ts:1-6);
 // bundled standalone and exercised with node --test (test/manifest.test.mjs).
 import { splitFrontmatter, normalizeWs } from "./util";
@@ -138,7 +138,7 @@ function renderFrontmatter(m: Manifest): string {
   const sourcesJson = `[${m.sources.map((s) => `"${s}"`).join(", ")}]`;
   const lines = [
     "---",
-    "type: recall-manifest",
+    "type: wikilm-manifest",
     `pdf: "${m.pdfPath}"`,
     `pdf_link: "[[${m.pdfBasename}.pdf]]"`,
     `class: ${m.classCode}`,

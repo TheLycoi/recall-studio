@@ -123,7 +123,7 @@ export function emptyIndexAnswer(folderPrefix: string): { answer: string; report
   return {
     answer:
       `No notes were searched: the topic notes folder “${folder}” has no markdown notes in this vault. ` +
-      `Point “Topic notes folder” in Recall's settings at the folder your notes are in, then ask again.`,
+      `Point “Topic notes folder” in WikiLM's settings at the folder your notes are in, then ask again.`,
     report: { coverage: "none", sources: [], dropped: 0, fromGeneralKnowledge: false },
   };
 }

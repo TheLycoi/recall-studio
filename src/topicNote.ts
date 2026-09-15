@@ -607,7 +607,7 @@ export function mergeWikiHighlights(
   const sectionText = `## Highlights\n\n${newCallouts.join("\n\n")}`;
 
   // Insert before the first of `## Related topics` or `## Flashcard Seeds`
-  // (Recall's own digest skeleton), whichever appears first; else append at EOF.
+  // (WikiLM's own digest skeleton), whichever appears first; else append at EOF.
   const relatedMatch = /^##\s+Related topics\s*$/m.exec(existingMd);
   const seedsMatch = /^##\s+Flashcard Seeds\s*$/m.exec(existingMd);
   let anchorMatch: RegExpExecArray | null = null;

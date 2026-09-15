@@ -10,7 +10,7 @@
  * and what to write, and it writes nothing until the preview is accepted.
  */
 import { Notice, TFile, normalizePath } from "obsidian";
-import type RecallPlugin from "./main";
+import type WikiLmPlugin from "./main";
 import { captureManifestHighlights } from "./capture";
 import { describeError } from "./llm";
 import { askDigestOptions, askInstruction, previewSuggestions } from "./modals";
@@ -28,7 +28,7 @@ const ALREADY_SELECTED_CHARS = 80;
  * The `class` frontmatter of a note, when it has one. Copied from
  * src/pdfHighlights.ts:339-345, which keeps it module-private.
  */
-function frontmatterClass(plugin: RecallPlugin, path: string): string {
+function frontmatterClass(plugin: WikiLmPlugin, path: string): string {
   const file = plugin.app.vault.getAbstractFileByPath(path); // obsidian.d.ts:7369
   if (!(file instanceof TFile)) return "";
   const fm = plugin.app.metadataCache.getFileCache(file)?.frontmatter; // obsidian.d.ts:4417, :1446
@@ -43,7 +43,7 @@ function frontmatterClass(plugin: RecallPlugin, path: string): string {
  * test catches the hand-written notes that have no frontmatter at all, which
  * secondbrain has plenty of.
  */
-async function wikiNotes(plugin: RecallPlugin, classCode: string, sources: string[]): Promise<WikiNoteIn[]> {
+async function wikiNotes(plugin: WikiLmPlugin, classCode: string, sources: string[]): Promise<WikiNoteIn[]> {
   const s = plugin.settings;
   const folders: Array<{ folder: string; kind: "concept" | "entity" }> = [
     { folder: s.wikiConceptsFolder, kind: "concept" },
@@ -94,19 +94,19 @@ function existingNotesFor(
  * verbatim against the page it claims to come from before it is ever offered,
  * and a batch that throws aborts the whole run with nothing written.
  */
-export async function suggestPdfHighlights(plugin: RecallPlugin, pdf: TFile): Promise<void> {
+export async function suggestPdfHighlights(plugin: WikiLmPlugin, pdf: TFile): Promise<void> {
   try {
     const s = plugin.settings;
 
     // (1) The text layer and the highlights that are already there.
     const { manifest, pages, warnings } = await collectPdfHighlights(plugin, pdf, { paperText: false, pages: true });
     await writeManifest(plugin, manifest);
-    if (warnings.length) new Notice(`Recall: ${warnings.join("; ")}`, 8000); // obsidian.d.ts:4613
+    if (warnings.length) new Notice(`WikiLM: ${warnings.join("; ")}`, 8000); // obsidian.d.ts:4613
     // A scanned deck parses fine but every page comes back with no text items,
     // so checking the page count alone would let the run reach the model with
     // empty pages. Say what is actually wrong instead.
     if (pages.length === 0 || pages.every((p) => p.items.length === 0)) {
-      new Notice("Recall: this PDF has no text layer — it looks like a scan, and needs OCR before highlights can be suggested.", 8000);
+      new Notice("WikiLM: this PDF has no text layer — it looks like a scan, and needs OCR before highlights can be suggested.", 8000);
       return;
     }
     const maps = new Map<number, PageMap>(pages.map((p, i) => [i + 1, buildPageMap(p.items)]));
@@ -118,7 +118,7 @@ export async function suggestPdfHighlights(plugin: RecallPlugin, pdf: TFile): Pr
       if (asked === null) return;
       classCode = asked.trim();
       if (!classCode) {
-        new Notice("Recall: a class code is needed to find this PDF's wiki notes.");
+        new Notice("WikiLM: a class code is needed to find this PDF's wiki notes.");
         return;
       }
       manifest.classCode = classCode;
@@ -150,7 +150,7 @@ export async function suggestPdfHighlights(plugin: RecallPlugin, pdf: TFile): Pr
       const remaining = cap - accepted.length;
       if (remaining <= 0) break;
 
-      new Notice(`Recall: suggesting highlights, pages ${batch.from}–${batch.to} of ${pages.length}…`);
+      new Notice(`WikiLM: suggesting highlights, pages ${batch.from}–${batch.to} of ${pages.length}…`);
 
       const range: number[] = [];
       for (let n = batch.from; n <= batch.to; n++) range.push(n);
@@ -189,7 +189,7 @@ export async function suggestPdfHighlights(plugin: RecallPlugin, pdf: TFile): Pr
     }
 
     if (accepted.length === 0) {
-      new Notice("Recall: no highlights suggested.");
+      new Notice("WikiLM: no highlights suggested.");
       return;
     }
 
@@ -241,7 +241,7 @@ export async function suggestPdfHighlights(plugin: RecallPlugin, pdf: TFile): Pr
     }
 
     if (keptSpans.length === 0) {
-      new Notice("Recall: nothing selected; nothing written.");
+      new Notice("WikiLM: nothing selected; nothing written.");
       return;
     }
 
@@ -287,18 +287,18 @@ export async function suggestPdfHighlights(plugin: RecallPlugin, pdf: TFile): Pr
     }
 
     if (options.product === "flashcards") {
-      new Notice(`Recall: ${queued} highlight${queued === 1 ? "" : "s"} queued as flashcards.`, 8000);
+      new Notice(`WikiLM: ${queued} highlight${queued === 1 ? "" : "s"} queued as flashcards.`, 8000);
       return;
     }
     const written = final.notes.length - refused;
     const tail = queued > 0 ? `, ${queued} queued as flashcards` : "";
     const refusedTail = refused > 0 ? `, ${refused} refused (a source is never a note)` : "";
     new Notice(
-      `Recall: wrote ${spansWritten} span${spansWritten === 1 ? "" : "s"} into ${written} note${written === 1 ? "" : "s"} (${newCount} new)${tail}${refusedTail}.`,
+      `WikiLM: wrote ${spansWritten} span${spansWritten === 1 ? "" : "s"} into ${written} note${written === 1 ? "" : "s"} (${newCount} new)${tail}${refusedTail}.`,
       8000,
     );
   } catch (e) {
-    console.error("Recall: suggesting highlights failed", e);
-    new Notice(`Recall: suggesting highlights failed. ${describeError(e)}`, 8000);
+    console.error("WikiLM: suggesting highlights failed", e);
+    new Notice(`WikiLM: suggesting highlights failed. ${describeError(e)}`, 8000);
   }
 }

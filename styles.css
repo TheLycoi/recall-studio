@@ -1,16 +1,16 @@
-/* Recall — inbox and modals */
+/* WikiLM — inbox and modals */
 
 /* Icon scale. The custom set in src/icon.ts is drawn on one grid, so the
    rendered sizes are shared here rather than set per-button: sm for icons
    that sit inside a text label, md for standalone clickable icons (which
    matches Obsidian's own clickable-icon default). */
-.recall-inbox,
-.recall-statusbar {
-  --recall-icon-sm: 14px;
-  --recall-icon-md: 16px;
+.wikilm-notebook,
+.wikilm-statusbar {
+  --wikilm-icon-sm: 14px;
+  --wikilm-icon-md: 16px;
 }
 
-.recall-inbox {
+.wikilm-notebook {
   padding: 0 var(--size-4-4) var(--size-4-8);
   overflow-y: auto;
   outline: none;
@@ -19,27 +19,27 @@
 
 /* Narrow pane (right sidebar): stack the highlight above its cards. */
 @container (max-width: 620px) {
-  .recall-hl {
+  .wikilm-hl {
     grid-template-columns: 1fr;
   }
-  .recall-cards {
+  .wikilm-cards {
     grid-template-columns: 1fr;
   }
-  .recall-header {
+  .wikilm-header {
     flex-wrap: wrap;
   }
-  .recall-header-right {
+  .wikilm-header-right {
     flex-wrap: wrap;
   }
 }
 
-.recall-muted {
+.wikilm-muted {
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
 }
 
 /* Header ------------------------------------------------------------- */
-.recall-header {
+.wikilm-header {
   position: sticky;
   top: 0;
   z-index: 2;
@@ -51,122 +51,122 @@
   background: var(--background-primary);
   border-bottom: 1px solid var(--background-modifier-border);
 }
-.recall-header h2 {
+.wikilm-header h2 {
   margin: 0;
   font-size: var(--font-ui-large);
 }
-.recall-header-left {
+.wikilm-header-left {
   display: flex;
   align-items: baseline;
   gap: var(--size-4-3);
 }
-.recall-header-right {
+.wikilm-header-right {
   display: flex;
   align-items: center;
   gap: var(--size-4-2);
 }
-.recall-stats {
+.wikilm-stats {
   display: flex;
   gap: var(--size-4-3);
   color: var(--text-muted);
   font-size: var(--font-ui-small);
 }
-.recall-stat-n {
+.wikilm-stat-n {
   font-weight: 600;
   color: var(--text-normal);
 }
-.recall-stat.is-busy .recall-stat-n {
+.wikilm-stat.is-busy .wikilm-stat-n {
   color: var(--color-orange);
 }
-.recall-stat.is-error .recall-stat-n {
+.wikilm-stat.is-error .wikilm-stat-n {
   color: var(--color-red);
 }
-.recall-stat.is-flagged .recall-stat-n {
+.wikilm-stat.is-flagged .wikilm-stat-n {
   color: var(--color-yellow);
 }
-.recall-deck-btn {
+.wikilm-deck-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
-.recall-deck-btn .svg-icon {
-  width: var(--recall-icon-sm);
-  height: var(--recall-icon-sm);
+.wikilm-deck-btn .svg-icon {
+  width: var(--wikilm-icon-sm);
+  height: var(--wikilm-icon-sm);
 }
-.recall-icon-btn {
+.wikilm-icon-btn {
   padding: 4px;
   border-radius: var(--radius-s);
   background: none;
   box-shadow: none;
 }
-.recall-icon-btn .svg-icon {
-  width: var(--recall-icon-md);
-  height: var(--recall-icon-md);
+.wikilm-icon-btn .svg-icon {
+  width: var(--wikilm-icon-md);
+  height: var(--wikilm-icon-md);
 }
 
 /* Source group -------------------------------------------------------- */
-.recall-source {
+.wikilm-source {
   margin-top: var(--size-4-5);
 }
-.recall-source-head {
+.wikilm-source-head {
   display: flex;
   align-items: center;
   gap: var(--size-4-2);
   padding-bottom: var(--size-4-2);
   border-bottom: 1px solid var(--background-modifier-border);
 }
-.recall-collapse {
+.wikilm-collapse {
   display: inline-flex;
   cursor: pointer;
   color: var(--text-muted);
 }
-.recall-collapse .svg-icon {
-  width: var(--recall-icon-md);
-  height: var(--recall-icon-md);
+.wikilm-collapse .svg-icon {
+  width: var(--wikilm-icon-md);
+  height: var(--wikilm-icon-md);
 }
-.recall-source-title {
+.wikilm-source-title {
   font-weight: 600;
   font-size: var(--font-ui-medium);
   cursor: pointer;
   color: var(--text-normal);
   text-decoration: none;
 }
-.recall-source-title:hover {
+.wikilm-source-title:hover {
   color: var(--text-accent);
 }
-.recall-source-actions {
+.wikilm-source-actions {
   margin-left: auto;
 }
 
 /* Highlight row ------------------------------------------------------- */
-.recall-hl {
+.wikilm-hl {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) minmax(0, 2fr);
   gap: var(--size-4-4);
   padding: var(--size-4-4) 0;
   border-bottom: 1px dashed var(--background-modifier-border);
 }
-.recall-hl-dismissed {
+.wikilm-hl-dismissed {
   opacity: 0.5;
 }
-.recall-hl-left {
+.wikilm-hl-left {
   min-width: 0;
 }
-.recall-hl-meta {
+.wikilm-hl-meta {
   display: flex;
   align-items: center;
   gap: var(--size-4-2);
   margin-bottom: var(--size-4-2);
 }
-.recall-hl-title {
+.wikilm-hl-title {
   font-weight: 600;
   cursor: text;
 }
-.recall-inline-input {
+.wikilm-inline-input {
   font-weight: 600;
   width: 100%;
 }
-.recall-badge {
+.wikilm-badge {
   font-size: var(--font-ui-smaller);
   padding: 1px 7px;
   border-radius: 999px;
@@ -174,37 +174,37 @@
   color: var(--text-muted);
   white-space: nowrap;
 }
-.recall-badge-ready {
+.wikilm-badge-ready {
   background: var(--background-modifier-success);
   color: var(--text-normal);
 }
-.recall-badge-generating,
-.recall-badge-queued {
+.wikilm-badge-generating,
+.wikilm-badge-queued {
   color: var(--color-orange);
 }
-.recall-badge-error {
+.wikilm-badge-error {
   background: var(--background-modifier-error);
   color: var(--text-on-accent);
 }
-.recall-badge-exported {
+.wikilm-badge-exported {
   color: var(--color-green);
 }
-.recall-badge-duplicate {
+.wikilm-badge-duplicate {
   color: var(--color-yellow);
 }
-.recall-badge-warn {
+.wikilm-badge-warn {
   color: var(--color-orange);
 }
-.recall-badge-critique {
+.wikilm-badge-critique {
   color: var(--color-purple);
 }
-.recall-badge-note {
+.wikilm-badge-note {
   color: var(--color-yellow);
 }
-.recall-badge-checked {
+.wikilm-badge-checked {
   color: var(--color-green);
 }
-.recall-quote {
+.wikilm-quote {
   padding: var(--size-4-3);
   border-radius: var(--radius-m);
   background: color-mix(in srgb, var(--text-highlight-bg) 55%, transparent);
@@ -213,40 +213,40 @@
   white-space: pre-wrap;
   cursor: pointer;
 }
-.recall-quote:hover {
+.wikilm-quote:hover {
   background: var(--text-highlight-bg);
 }
-.recall-hl-where {
+.wikilm-hl-where {
   margin-top: var(--size-4-1);
 }
-.recall-hl-instruction {
+.wikilm-hl-instruction {
   margin-top: var(--size-4-1);
   font-size: var(--font-ui-smaller);
   color: var(--text-accent);
 }
-.recall-error {
+.wikilm-error {
   margin-top: var(--size-4-2);
   font-size: var(--font-ui-smaller);
   color: var(--color-red);
 }
-.recall-hl-actions {
+.wikilm-hl-actions {
   display: flex;
   gap: 2px;
   margin-top: var(--size-4-2);
 }
 
 /* Cards --------------------------------------------------------------- */
-.recall-cards {
+.wikilm-cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: var(--size-4-2);
   align-content: start;
 }
-.recall-cards-empty {
+.wikilm-cards-empty {
   grid-column: 1 / -1;
   padding: var(--size-4-3);
 }
-.recall-card {
+.wikilm-card {
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-m);
   padding: var(--size-4-2) var(--size-4-3);
@@ -254,24 +254,24 @@
   font-size: var(--font-ui-small);
   cursor: default;
 }
-.recall-card.is-focused {
+.wikilm-card.is-focused {
   border-color: var(--interactive-accent);
   box-shadow: 0 0 0 1px var(--interactive-accent);
 }
-.recall-card-exported,
-.recall-card-duplicate {
+.wikilm-card-exported,
+.wikilm-card-duplicate {
   opacity: 0.55;
 }
-.recall-card-flagged {
+.wikilm-card-flagged {
   opacity: 0.7;
   border-color: var(--color-yellow);
   background: var(--background-primary);
 }
-.recall-card-flagged:hover,
-.recall-card-flagged.is-focused {
+.wikilm-card-flagged:hover,
+.wikilm-card-flagged.is-focused {
   opacity: 1;
 }
-.recall-card-reason {
+.wikilm-card-reason {
   font-size: var(--font-ui-smaller);
   color: var(--text-muted);
   font-style: italic;
@@ -280,7 +280,7 @@
 
 /* Flagged group under lintMode "hide". The cards stay in the DOM; only this
    container's visibility changes, so nothing is silently removed. */
-.recall-flagged-toggle {
+.wikilm-flagged-toggle {
   grid-column: 1 / -1;
   display: flex;
   align-items: center;
@@ -292,68 +292,68 @@
   box-shadow: none;
   padding: var(--size-4-1) var(--size-4-2);
 }
-.recall-flagged-toggle .svg-icon {
-  width: var(--recall-icon-sm);
-  height: var(--recall-icon-sm);
+.wikilm-flagged-toggle .svg-icon {
+  width: var(--wikilm-icon-sm);
+  height: var(--wikilm-icon-sm);
 }
-.recall-flagged-toggle:hover {
+.wikilm-flagged-toggle:hover {
   color: var(--text-normal);
 }
-.recall-flagged-box {
+.wikilm-flagged-box {
   grid-column: 1 / -1;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: var(--size-4-2);
   align-content: start;
 }
-.recall-flagged-box.is-collapsed {
+.wikilm-flagged-box.is-collapsed {
   display: none;
 }
-.recall-card-top {
+.wikilm-card-top {
   display: flex;
   align-items: center;
   gap: var(--size-4-2);
   margin-bottom: var(--size-4-1);
 }
-.recall-kind {
+.wikilm-kind {
   font-size: var(--font-ui-smaller);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-muted);
 }
-.recall-card-actions {
+.wikilm-card-actions {
   margin-left: auto;
   display: flex;
   gap: 0;
   opacity: 0;
   transition: opacity 120ms;
 }
-.recall-card:hover .recall-card-actions,
-.recall-card.is-focused .recall-card-actions {
+.wikilm-card:hover .wikilm-card-actions,
+.wikilm-card.is-focused .wikilm-card-actions {
   opacity: 1;
 }
-.recall-field-label {
+.wikilm-field-label {
   font-size: var(--font-ui-smaller);
   color: var(--text-faint);
   margin-top: var(--size-4-1);
 }
-.recall-field {
+.wikilm-field {
   line-height: 1.45;
   white-space: pre-wrap;
 }
-.recall-field + .recall-field-label {
+.wikilm-field + .wikilm-field-label {
   border-top: 1px dashed var(--background-modifier-border);
   padding-top: var(--size-4-1);
   margin-top: var(--size-4-2);
 }
-.recall-cloze-chip {
+.wikilm-cloze-chip {
   display: inline;
   padding: 0 4px;
   border-radius: 3px;
   background: var(--text-normal);
   color: var(--background-primary);
 }
-.recall-cloze-n {
+.wikilm-cloze-n {
   font-size: 0.7em;
   vertical-align: super;
   margin-right: 2px;
@@ -361,94 +361,94 @@
 }
 
 /* Editor -------------------------------------------------------------- */
-.recall-editor {
+.wikilm-editor {
   display: flex;
   flex-direction: column;
   gap: var(--size-4-1);
 }
-.recall-editor textarea {
+.wikilm-editor textarea {
   width: 100%;
   font-size: var(--font-ui-small);
   resize: vertical;
 }
-.recall-editor-btns {
+.wikilm-editor-btns {
   display: flex;
   align-items: center;
   gap: var(--size-4-2);
 }
-.recall-editor-btns .recall-muted {
+.wikilm-editor-btns .wikilm-muted {
   margin-left: auto;
 }
 
 /* Empty state ----------------------------------------------------------- */
-.recall-empty {
+.wikilm-empty {
   padding: var(--size-4-8) 0;
   text-align: center;
 }
 
 /* Modal ---------------------------------------------------------------- */
-.recall-modal-textarea {
+.wikilm-modal-textarea {
   width: 100%;
   margin-bottom: var(--size-4-2);
 }
 
 /* Status bar ----------------------------------------------------------- */
-.recall-statusbar {
+.wikilm-statusbar {
   cursor: pointer;
 }
 
 /* Highlighter mode ------------------------------------------------------ */
-.side-dock-ribbon-action.recall-highlighter-on,
-.side-dock-ribbon-action.recall-highlighter-on:hover {
+.side-dock-ribbon-action.wikilm-highlighter-on,
+.side-dock-ribbon-action.wikilm-highlighter-on:hover {
   color: var(--interactive-accent);
   background: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
   border-radius: var(--radius-s);
 }
-.recall-statusbar-highlighter {
+.wikilm-statusbar-highlighter {
   color: var(--interactive-accent);
 }
-body.recall-highlighter-active .markdown-source-view .cm-content,
-body.recall-highlighter-active .markdown-preview-view,
-body.recall-highlighter-active .pdf-viewer .textLayer {
+body.wikilm-highlighter-active .markdown-source-view .cm-content,
+body.wikilm-highlighter-active .markdown-preview-view,
+body.wikilm-highlighter-active .pdf-viewer .textLayer {
   cursor: text;
 }
-body.recall-highlighter-active .cm-content ::selection,
-body.recall-highlighter-active .markdown-preview-view ::selection,
-body.recall-highlighter-active .textLayer ::selection {
+body.wikilm-highlighter-active .cm-content ::selection,
+body.wikilm-highlighter-active .markdown-preview-view ::selection,
+body.wikilm-highlighter-active .textLayer ::selection {
   background: var(--text-highlight-bg);
 }
-.recall-badge-notice {
+.wikilm-badge-notice {
   color: var(--text-muted);
   background: var(--background-modifier-hover);
 }
-.recall-badge-bloom {
+.wikilm-badge-bloom {
   color: var(--color-cyan);
 }
 
 /* Digest preview modal --------------------------------------------------- */
-.recall-preview-counts {
+.wikilm-preview-counts {
   margin: 0 0 var(--size-4-3);
 }
-.recall-preview-note {
+.wikilm-preview-note {
   padding: var(--size-4-3);
   margin-bottom: var(--size-4-2);
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-m);
   background: var(--background-secondary);
 }
-.recall-preview-head {
+.wikilm-preview-head {
   display: flex;
   align-items: center;
   gap: var(--size-4-2);
   margin-bottom: var(--size-4-1);
 }
-.recall-preview-title {
+.wikilm-preview-title {
   flex: 1;
 }
-.recall-preview-badge {
+.wikilm-preview-badge {
   white-space: nowrap;
 }
-.recall-preview-highlights {
+.wikilm-preview-highlights {
   margin: var(--size-4-1) 0;
   padding-left: var(--size-4-4);
   font-size: var(--font-ui-small);
@@ -456,19 +456,19 @@ body.recall-highlighter-active .textLayer ::selection {
 }
 
 /* Sidebar tabs ----------------------------------------------------------- */
-.recall-tabs-row {
+.wikilm-tabs-row {
   display: flex;
   justify-content: flex-start;
   margin-bottom: var(--size-4-2);
 }
-.recall-tabs {
+.wikilm-tabs {
   display: inline-flex;
   padding: 2px;
   gap: 2px;
   border-radius: var(--radius-m);
   background: var(--background-modifier-hover);
 }
-.recall-tab {
+.wikilm-tab {
   padding: 2px var(--size-4-2);
   border: none;
   border-radius: var(--radius-s);
@@ -478,10 +478,10 @@ body.recall-highlighter-active .textLayer ::selection {
   font-size: var(--font-ui-small);
   cursor: pointer;
 }
-.recall-tab:hover {
+.wikilm-tab:hover {
   color: var(--text-normal);
 }
-.recall-tab.is-active {
+.wikilm-tab.is-active {
   background: var(--background-primary);
   color: var(--text-normal);
   font-weight: 600;
@@ -489,29 +489,29 @@ body.recall-highlighter-active .textLayer ::selection {
 
 /* Ask panel -------------------------------------------------------------- */
 /* Chat fills the leaf: the log scrolls, the input stays at the bottom. */
-.recall-inbox.is-chat {
+.wikilm-notebook.is-chat {
   display: flex;
   flex-direction: column;
   padding-bottom: 0;
   overflow: hidden;
 }
-.recall-chat {
+.wikilm-chat {
   display: flex;
   flex: 1;
   flex-direction: column;
   min-height: 0;
 }
-.recall-chat-log {
+.wikilm-chat-log {
   flex: 1;
   min-height: 0;
   padding: var(--size-4-2) 0;
   overflow-y: auto;
 }
-.recall-chat-turn {
+.wikilm-chat-turn {
   margin-bottom: var(--size-4-3);
   font-size: var(--font-ui-small);
 }
-.recall-chat-turn.is-user {
+.wikilm-chat-turn.is-user {
   width: fit-content;
   max-width: 85%;
   margin-left: auto;
@@ -521,13 +521,13 @@ body.recall-highlighter-active .textLayer ::selection {
   color: var(--text-muted);
   white-space: pre-wrap;
 }
-.recall-chat-turn.is-assistant {
+.wikilm-chat-turn.is-assistant {
   width: 100%;
 }
-.recall-chat-turn.is-assistant p:first-child {
+.wikilm-chat-turn.is-assistant p:first-child {
   margin-top: 0;
 }
-.recall-chat-sources-head {
+.wikilm-chat-sources-head {
   margin: var(--size-4-3) 0 var(--size-4-1);
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
@@ -536,7 +536,7 @@ body.recall-highlighter-active .textLayer ::selection {
   letter-spacing: 0.04em;
 }
 /* One source: the note, what it gave, the page, then the passage itself. */
-.recall-chat-source {
+.wikilm-chat-source {
   margin-bottom: var(--size-4-2);
   padding: var(--size-4-2);
   border: 1px solid var(--background-modifier-border);
@@ -545,45 +545,45 @@ body.recall-highlighter-active .textLayer ::selection {
   background: var(--background-secondary);
   font-size: var(--font-ui-smaller);
 }
-.recall-chat-source-note {
+.wikilm-chat-source-note {
   color: var(--text-accent);
   cursor: pointer;
   font-weight: 600;
   text-decoration: none;
 }
-.recall-chat-source-note:hover {
+.wikilm-chat-source-note:hover {
   text-decoration: underline;
 }
-.recall-chat-source-why {
+.wikilm-chat-source-why {
   margin-left: var(--size-4-2);
   color: var(--text-faint);
 }
-.recall-chat-source-page {
+.wikilm-chat-source-page {
   margin-left: var(--size-4-2);
   color: var(--text-accent);
   cursor: pointer;
   white-space: nowrap;
 }
-.recall-chat-source-page:hover {
+.wikilm-chat-source-page:hover {
   text-decoration: underline;
 }
-.recall-chat-source-text {
+.wikilm-chat-source-text {
   margin-top: var(--size-4-1);
   color: var(--text-muted);
   line-height: var(--line-height-tight);
 }
-.recall-chat-input {
+.wikilm-chat-input {
   flex: 0 0 auto;
   padding: var(--size-4-2) 0 var(--size-4-3);
   border-top: 1px solid var(--background-modifier-border);
   background: var(--background-primary);
 }
-.recall-chat-textarea {
+.wikilm-chat-textarea {
   width: 100%;
   resize: vertical;
   font-size: var(--font-ui-small);
 }
-.recall-chat-buttons {
+.wikilm-chat-buttons {
   display: flex;
   align-items: center;
   gap: var(--size-4-2);
@@ -592,21 +592,21 @@ body.recall-highlighter-active .textLayer ::selection {
 
 /* Commands and grounding in the chat ------------------------------------- */
 /* The panel's own voice: a command running, a hint, /help. Never the model. */
-.recall-chat-turn.is-system {
+.wikilm-chat-turn.is-system {
   padding-left: var(--size-4-2);
   border-left: 2px solid var(--background-modifier-border);
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
   white-space: pre-wrap;
 }
-.recall-chat-turn.is-system p:first-child {
+.wikilm-chat-turn.is-system p:first-child {
   margin-top: 0;
 }
-.recall-chat-turn.is-system p:last-child {
+.wikilm-chat-turn.is-system p:last-child {
   margin-bottom: 0;
 }
 /* What the checks did to the answer, under the answer. */
-.recall-chat-grounding {
+.wikilm-chat-grounding {
   display: flex;
   align-items: center;
   gap: var(--size-4-2);
@@ -614,20 +614,20 @@ body.recall-highlighter-active .textLayer ::selection {
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
 }
-.recall-chat-grounding.is-unverified {
+.wikilm-chat-grounding.is-unverified {
   color: var(--color-orange);
 }
 /* The verified quotes: the words the answer rests on, checked against the evidence. */
-.recall-chat-quotes {
+.wikilm-chat-quotes {
   margin-top: var(--size-4-1);
   font-size: var(--font-ui-smaller);
 }
-.recall-chat-quotes blockquote {
+.wikilm-chat-quotes blockquote {
   margin: 0;
   color: var(--text-muted);
 }
 /* The chip row for a line that resembles a command without being one. */
-.recall-chat-offer {
+.wikilm-chat-offer {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -636,52 +636,52 @@ body.recall-highlighter-active .textLayer ::selection {
 /* Quiz mode in the chat ---------------------------------------------------- */
 /* A question: the only turn that must be read before anything is typed, so it
    sits a little apart from the grades above it. */
-.recall-chat-turn.recall-quiz-question {
+.wikilm-chat-turn.wikilm-quiz-question {
   margin-top: var(--size-4-3);
   font-size: var(--font-ui-small);
 }
-.recall-chat-turn.recall-quiz-question p:first-child {
+.wikilm-chat-turn.wikilm-quiz-question p:first-child {
   margin-top: 0;
 }
 /* A grade: the verdict is the border colour, so a scrolled-back log reads as a
    column of ✓/△/✗ without reading a word. */
-.recall-chat-turn.recall-quiz-grade {
+.wikilm-chat-turn.wikilm-quiz-grade {
   padding-left: var(--size-4-2);
   border-left: 3px solid var(--text-muted);
 }
-.recall-chat-turn.recall-quiz-grade.is-correct {
+.wikilm-chat-turn.wikilm-quiz-grade.is-correct {
   border-left-color: var(--color-green);
 }
-.recall-chat-turn.recall-quiz-grade.is-partial {
+.wikilm-chat-turn.wikilm-quiz-grade.is-partial {
   border-left-color: var(--color-yellow);
 }
-.recall-chat-turn.recall-quiz-grade.is-incorrect {
+.wikilm-chat-turn.wikilm-quiz-grade.is-incorrect {
   border-left-color: var(--color-red);
 }
-.recall-chat-turn.recall-quiz-grade.is-dontknow,
-.recall-chat-turn.recall-quiz-grade.is-skipped {
+.wikilm-chat-turn.wikilm-quiz-grade.is-dontknow,
+.wikilm-chat-turn.wikilm-quiz-grade.is-skipped {
   border-left-color: var(--text-muted);
 }
-.recall-chat-turn.recall-quiz-grade p:first-child {
+.wikilm-chat-turn.wikilm-quiz-grade p:first-child {
   margin-top: 0;
 }
 /* The closing summary and its two chips. */
-.recall-chat-turn.recall-quiz-summary {
+.wikilm-chat-turn.wikilm-quiz-summary {
   padding: var(--size-4-2);
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-m);
   background: var(--background-secondary);
 }
-.recall-chat-turn.recall-quiz-summary p:first-child {
+.wikilm-chat-turn.wikilm-quiz-summary p:first-child {
   margin-top: 0;
 }
-.recall-chat-turn.recall-quiz-summary .recall-chat-offer {
+.wikilm-chat-turn.wikilm-quiz-summary .wikilm-chat-offer {
   margin-top: var(--size-4-2);
 }
 
 /* An answer the notes did not supply. Above the answer and hard to miss: the
    reader has to know before they read it, not after. */
-.recall-chat-verify-banner {
+.wikilm-chat-verify-banner {
   margin-bottom: var(--size-4-2);
   padding: var(--size-4-2) var(--size-4-3);
   border-left: 3px solid var(--color-orange);

@@ -8,7 +8,7 @@
  * read, what to ask, and what to write.
  */
 import { Notice, TFile, normalizePath } from "obsidian";
-import type RecallPlugin from "./main";
+import type WikiLmPlugin from "./main";
 import { captureManifestHighlights } from "./capture";
 import { describeError } from "./llm";
 import type { Manifest } from "./manifest";
@@ -33,21 +33,21 @@ function today(): string {
 const PASTE_HELP =
   "Paste the JSON object the model returned — " +
   '{"notes":[{"title":"…","summary":"…","highlight_ids":["H01"],"related":["…"]}],"unused_ids":["…"]} — ' +
-  "referring to highlights by the `id::` in each manifest callout; Recall renders every link and callout itself.";
+  "referring to highlights by the `id::` in each manifest callout; WikiLM renders every link and callout itself.";
 
 /**
  * "Extract PDF highlights to manifest": collect the PDF's highlights (no paper
  * text — the plain extract command does not need it), write the manifest and
  * open it.
  */
-export async function extractPdfHighlights(plugin: RecallPlugin, pdf: TFile): Promise<TFile | null> {
+export async function extractPdfHighlights(plugin: WikiLmPlugin, pdf: TFile): Promise<TFile | null> {
   try {
     const { manifest, warnings } = await collectPdfHighlights(plugin, pdf, { paperText: false });
     const file = await writeManifest(plugin, manifest);
 
     const n = manifest.highlights.length;
     const s = manifest.sources.length;
-    const bits = `Recall: ${n} highlight${n === 1 ? "" : "s"} from ${s} source note${s === 1 ? "" : "s"}.`;
+    const bits = `WikiLM: ${n} highlight${n === 1 ? "" : "s"} from ${s} source note${s === 1 ? "" : "s"}.`;
     if (warnings.length) new Notice(`${bits} ${warnings.join("; ")}`, 8000); // obsidian.d.ts:4613
     else new Notice(bits);
 
@@ -55,8 +55,8 @@ export async function extractPdfHighlights(plugin: RecallPlugin, pdf: TFile): Pr
     await plugin.app.workspace.getLeaf("tab").openFile(file);
     return file;
   } catch (e) {
-    console.error("Recall: extracting PDF highlights failed", e);
-    new Notice(`Recall: extracting highlights failed. ${describeError(e)}`);
+    console.error("WikiLM: extracting PDF highlights failed", e);
+    new Notice(`WikiLM: extracting highlights failed. ${describeError(e)}`);
     return null;
   }
 }
@@ -74,7 +74,7 @@ interface Resolved {
  * there. A missing PDF is not fatal: the highlights carry the material, the
  * paper text only widens the summary.
  */
-async function resolveSource(plugin: RecallPlugin, source: TFile): Promise<Resolved | null> {
+async function resolveSource(plugin: WikiLmPlugin, source: TFile): Promise<Resolved | null> {
   if (isPdfFile(source)) {
     const { manifest, paperText } = await collectPdfHighlights(plugin, source, { paperText: true });
     await writeManifest(plugin, manifest);
@@ -83,7 +83,7 @@ async function resolveSource(plugin: RecallPlugin, source: TFile): Promise<Resol
 
   const manifest = await readManifestNote(plugin, source);
   if (!manifest) {
-    new Notice("Recall: this note is not a Recall manifest. Run “Extract PDF highlights to manifest” on a PDF first.");
+    new Notice("WikiLM: this note is not a WikiLM manifest. Run “Extract PDF highlights to manifest” on a PDF first.");
     return null;
   }
 
@@ -93,12 +93,12 @@ async function resolveSource(plugin: RecallPlugin, source: TFile): Promise<Resol
     const { paperText } = await collectPdfHighlights(plugin, pdf, { paperText: true });
     return { manifest, paperText };
   }
-  new Notice(`Recall: ${manifest.pdfPath} is no longer in the vault; summarising from the highlights alone.`, 8000);
+  new Notice(`WikiLM: ${manifest.pdfPath} is no longer in the vault; summarising from the highlights alone.`, 8000);
   return { manifest, paperText: "" };
 }
 
 /** Titles of the notes already in `<topicFolder>/<classCode>`, minus the class hub note. */
-function existingTitles(plugin: RecallPlugin, topicFolder: string, classCode: string): string[] {
+function existingTitles(plugin: WikiLmPlugin, topicFolder: string, classCode: string): string[] {
   const prefix = `${normalizePath(`${topicFolder}/${classCode}`)}/`;
   const titles: string[] = [];
   for (const file of plugin.app.vault.getMarkdownFiles()) {
@@ -111,7 +111,7 @@ function existingTitles(plugin: RecallPlugin, topicFolder: string, classCode: st
 }
 
 /** Read every planned path that already exists, for the planner's merge branch. */
-async function readExisting(plugin: RecallPlugin, paths: string[]): Promise<Record<string, string>> {
+async function readExisting(plugin: WikiLmPlugin, paths: string[]): Promise<Record<string, string>> {
   const existing: Record<string, string> = {};
   for (const path of paths) {
     const file = plugin.app.vault.getAbstractFileByPath(normalizePath(path));
@@ -127,7 +127,7 @@ function pathFor(topicFolder: string, classCode: string, title: string): string 
 
 /** Ask the model for a draft; null when the call failed (the Notice is raised here). */
 async function draftFromModel(
-  plugin: RecallPlugin,
+  plugin: WikiLmPlugin,
   manifest: Manifest,
   classCode: string,
   paperText: string,
@@ -146,9 +146,9 @@ async function draftFromModel(
       instruction,
     });
   } catch (e) {
-    console.error("Recall: digest failed", e);
+    console.error("WikiLM: digest failed", e);
     new Notice(
-      `Recall: digest failed. ${describeError(e)} Run “Extract PDF highlights to manifest” and digest by hand, or paste a model's JSON.`,
+      `WikiLM: digest failed. ${describeError(e)} Run “Extract PDF highlights to manifest” and digest by hand, or paste a model's JSON.`,
       10000,
     );
     return null;
@@ -156,7 +156,7 @@ async function draftFromModel(
 }
 
 /** Ask for the model's JSON and validate it; null when cancelled or unusable. */
-async function draftFromPaste(plugin: RecallPlugin): Promise<DigestDraft | null> {
+async function draftFromPaste(plugin: WikiLmPlugin): Promise<DigestDraft | null> {
   const raw = await askPastedJson(plugin.app, "Paste the model's JSON", PASTE_HELP);
   if (raw === null) return null;
 
@@ -164,14 +164,14 @@ async function draftFromPaste(plugin: RecallPlugin): Promise<DigestDraft | null>
   try {
     parsed = JSON.parse(raw);
   } catch (e) {
-    new Notice(`Recall: that is not valid JSON. ${(e as Error).message}`, 8000);
+    new Notice(`WikiLM: that is not valid JSON. ${(e as Error).message}`, 8000);
     return null;
   }
   const checked = DigestOut.safeParse(parsed);
   if (!checked.success) {
     const first = checked.error.issues[0];
     new Notice(
-      `Recall: the JSON does not match the digest shape${first ? ` (${first.path.join(".")}: ${first.message})` : ""}.`,
+      `WikiLM: the JSON does not match the digest shape${first ? ` (${first.path.join(".")}: ${first.message})` : ""}.`,
       10000,
     );
     return null;
@@ -184,7 +184,7 @@ async function draftFromPaste(plugin: RecallPlugin): Promise<DigestDraft | null>
  * `mode` chooses where the draft comes from — the provider, or a JSON blob
  * pasted from a chat session (the interim path while no provider works).
  */
-export async function digestPdf(plugin: RecallPlugin, source: TFile, mode: "model" | "paste"): Promise<void> {
+export async function digestPdf(plugin: WikiLmPlugin, source: TFile, mode: "model" | "paste"): Promise<void> {
   try {
     const resolved = await resolveSource(plugin, source);
     if (!resolved) return;
@@ -230,7 +230,7 @@ export async function digestPdf(plugin: RecallPlugin, source: TFile, mode: "mode
 
     const planned = await plan(draft);
     if (planned.notes.length === 0) {
-      new Notice("Recall: the draft named no highlight that exists in this manifest; nothing to write.", 8000);
+      new Notice("WikiLM: the draft named no highlight that exists in this manifest; nothing to write.", 8000);
       return;
     }
 
@@ -300,9 +300,9 @@ export async function digestPdf(plugin: RecallPlugin, source: TFile, mode: "mode
       `${alreadyPresent} skipped as present`,
     ];
     if (queued > 0) bits.push(`${queued} flashcard${queued === 1 ? "" : "s"} queued`);
-    new Notice(`Recall: ${bits.join(", ")}.`, 8000);
+    new Notice(`WikiLM: ${bits.join(", ")}.`, 8000);
   } catch (e) {
-    console.error("Recall: digest failed", e);
-    new Notice(`Recall: digest failed. ${describeError(e)}`, 8000);
+    console.error("WikiLM: digest failed", e);
+    new Notice(`WikiLM: digest failed. ${describeError(e)}`, 8000);
   }
 }

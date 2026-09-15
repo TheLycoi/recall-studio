@@ -3,7 +3,7 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { requestUrl } from "obsidian";
 import type { CompletionRequest, LlmBackend } from "./backend";
 import { resolveApiKey, type KeySource } from "./keys";
-import type { RecallSettings } from "./settings";
+import type { WikiLmSettings } from "./settings";
 
 /**
  * Obsidian runs plugins inside an Electron renderer where plain fetch() is
@@ -35,7 +35,7 @@ function obsidianFetch(): typeof fetch {
 export class AnthropicBackend implements LlmBackend {
   readonly name = "anthropic" as const;
 
-  constructor(private getSettings: () => RecallSettings) {}
+  constructor(private getSettings: () => WikiLmSettings) {}
 
   private client(): Anthropic {
     return this.clientWithSource().client;
@@ -46,7 +46,7 @@ export class AnthropicBackend implements LlmBackend {
     const { key, source } = resolveApiKey(s.apiKey);
     if (!key) {
       throw new Error(
-        "No Anthropic API key. Set one in Recall settings, export ANTHROPIC_API_KEY, add a keychain item named ANTHROPIC_API_KEY, or switch the provider to Codex.",
+        "No Anthropic API key. Set one in WikiLM settings, export ANTHROPIC_API_KEY, add a keychain item named ANTHROPIC_API_KEY, or switch the provider to Codex.",
       );
     }
     const client = new Anthropic({

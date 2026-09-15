@@ -19,10 +19,10 @@ export class InstructionModal extends Modal {
 
   onOpen(): void {
     const { contentEl } = this;
-    contentEl.addClass("recall-modal");
+    contentEl.addClass("wikilm-modal");
     contentEl.createEl("h3", { text: this.title });
     const ta = contentEl.createEl("textarea", { attr: { rows: "4", placeholder: this.placeholder } });
-    ta.addClass("recall-modal-textarea");
+    ta.addClass("wikilm-modal-textarea");
     ta.addEventListener("input", () => (this.value = ta.value));
     ta.addEventListener("keydown", (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -79,7 +79,7 @@ export class DeckSuggestModal extends SuggestModal<string> {
 
   renderSuggestion(value: string, el: HTMLElement): void {
     el.setText(value);
-    if (!this.decks.includes(value)) el.createSpan({ text: "  (new deck)", cls: "recall-muted" });
+    if (!this.decks.includes(value)) el.createSpan({ text: "  (new deck)", cls: "wikilm-muted" });
   }
 
   onChooseSuggestion(item: string): void {
@@ -157,7 +157,7 @@ export class TranscriptModal extends Modal {
 
   onOpen(): void {
     const { contentEl } = this;
-    contentEl.addClass("recall-modal");
+    contentEl.addClass("wikilm-modal");
     contentEl.createEl("h3", { text: "Transcript for document highlighting" });
 
     if (this.current) {
@@ -166,19 +166,19 @@ export class TranscriptModal extends Modal {
       const cut = c.truncated ? ", cut to the size limit" : "";
       contentEl.createEl("p", {
         text: `Current: ${from}, ${c.text.length.toLocaleString()} characters, added ${c.addedAt}${cut}`,
-        cls: "recall-muted",
+        cls: "wikilm-muted",
       });
     } else {
       contentEl.createEl("p", {
         text: "No transcript attached. Paste one below or choose a file.",
-        cls: "recall-muted",
+        cls: "wikilm-muted",
       });
     }
 
     const ta = contentEl.createEl("textarea", {
       attr: { rows: "10", placeholder: "Paste the lecture transcript here…" },
     });
-    ta.addClass("recall-modal-textarea");
+    ta.addClass("wikilm-modal-textarea");
     ta.value = this.value;
     this.ta = ta;
     ta.addEventListener("input", () => {
@@ -229,7 +229,7 @@ export class TranscriptModal extends Modal {
   private submit() {
     const text = this.value.trim();
     if (!text) {
-      new Notice("Recall: paste a transcript or choose a file first.");
+      new Notice("WikiLM: paste a transcript or choose a file first.");
       return;
     }
     this.resolved = true;
@@ -275,7 +275,7 @@ export class DigestOptionsModal extends Modal {
 
   onOpen(): void {
     const { contentEl } = this;
-    contentEl.addClass("recall-modal");
+    contentEl.addClass("wikilm-modal");
     contentEl.createEl("h3", { text: this.title });
 
     new Setting(contentEl).setName("Produce").addDropdown((d) => {
@@ -289,7 +289,7 @@ export class DigestOptionsModal extends Modal {
     const ta = contentEl.createEl("textarea", {
       attr: { rows: "3", placeholder: "e.g. split receptors and enzymes into separate notes" },
     });
-    ta.addClass("recall-modal-textarea");
+    ta.addClass("wikilm-modal-textarea");
     ta.value = this.instruction;
     ta.addEventListener("input", () => (this.instruction = ta.value));
     ta.addEventListener("keydown", (e) => {
@@ -347,12 +347,12 @@ export class PasteJsonModal extends Modal {
 
   onOpen(): void {
     const { contentEl } = this;
-    contentEl.addClass("recall-modal");
+    contentEl.addClass("wikilm-modal");
     contentEl.createEl("h3", { text: this.title });
-    contentEl.createEl("p", { text: this.help, cls: "recall-muted" });
+    contentEl.createEl("p", { text: this.help, cls: "wikilm-muted" });
 
     const ta = contentEl.createEl("textarea", { attr: { rows: "14", placeholder: "Paste the model's JSON here…" } });
-    ta.addClass("recall-modal-textarea");
+    ta.addClass("wikilm-modal-textarea");
 
     let useBtn!: ButtonComponent;
     new Setting(contentEl)
@@ -418,8 +418,8 @@ export class DigestPreviewModal extends Modal {
 
   onOpen(): void {
     const { contentEl } = this;
-    contentEl.addClass("recall-modal");
-    contentEl.addClass("recall-preview");
+    contentEl.addClass("wikilm-modal");
+    contentEl.addClass("wikilm-preview");
     contentEl.createEl("h3", { text: `Proposed topic notes for ${this.pdfBasename}` });
 
     const totalHighlights = this.notes.reduce((sum, n) => sum + n.highlights.length, 0);
@@ -428,12 +428,12 @@ export class DigestPreviewModal extends Modal {
       `${this.notes.length} notes · ${totalHighlights} highlights · ${alreadyPresent} already present · ` +
       `${this.extras.unknownIds.length} unknown ids dropped · ${this.extras.unassignedIds.length} unassigned`;
     if (this.extras.flashcards > 0) countsText += ` · ${this.extras.flashcards} flashcards will be queued`;
-    contentEl.createEl("p", { text: countsText, cls: "recall-muted recall-preview-counts" });
+    contentEl.createEl("p", { text: countsText, cls: "wikilm-muted wikilm-preview-counts" });
 
     const list = contentEl.createDiv();
     this.notes.forEach((note, i) => {
-      const card = list.createDiv({ cls: "recall-preview-note" });
-      const head = card.createDiv({ cls: "recall-preview-head" });
+      const card = list.createDiv({ cls: "wikilm-preview-note" });
+      const head = card.createDiv({ cls: "wikilm-preview-head" });
 
       const checkbox = head.createEl("input", { attr: { type: "checkbox" } }) as HTMLInputElement;
       checkbox.checked = this.checked[i];
@@ -443,20 +443,20 @@ export class DigestPreviewModal extends Modal {
       });
 
       const titleInput = head.createEl("input", { attr: { type: "text" } }) as HTMLInputElement;
-      titleInput.addClass("recall-inline-input");
-      titleInput.addClass("recall-preview-title");
+      titleInput.addClass("wikilm-inline-input");
+      titleInput.addClass("wikilm-preview-title");
       titleInput.value = note.title;
       titleInput.addEventListener("input", () => {
         this.titles[i] = titleInput.value;
       });
 
       const badgeText = note.exists ? `exists: +${note.added}, ${note.skipped} skipped` : "new";
-      head.createSpan({ text: badgeText, cls: "recall-badge recall-preview-badge" });
+      head.createSpan({ text: badgeText, cls: "wikilm-badge wikilm-preview-badge" });
 
-      card.createEl("div", { text: note.path, cls: "recall-muted" });
+      card.createEl("div", { text: note.path, cls: "wikilm-muted" });
       card.createEl("p", { text: note.summary });
 
-      const hlList = card.createEl("ul", { cls: "recall-preview-highlights" });
+      const hlList = card.createEl("ul", { cls: "wikilm-preview-highlights" });
       note.highlights.forEach((h) => {
         const li = hlList.createEl("li");
         li.createEl("strong", { text: `p.${h.page} ` });
@@ -465,7 +465,7 @@ export class DigestPreviewModal extends Modal {
       });
 
       if (note.related.length > 0) {
-        card.createEl("div", { text: `Related: ${note.related.join(", ")}`, cls: "recall-muted" });
+        card.createEl("div", { text: `Related: ${note.related.join(", ")}`, cls: "wikilm-muted" });
       }
     });
 
@@ -550,8 +550,8 @@ export class SuggestPreviewModal extends Modal {
 
   onOpen(): void {
     const { contentEl } = this;
-    contentEl.addClass("recall-modal");
-    contentEl.addClass("recall-preview");
+    contentEl.addClass("wikilm-modal");
+    contentEl.addClass("wikilm-preview");
     contentEl.createEl("h3", { text: `Suggested highlights for ${this.pdfBasename}` });
 
     const totalSpans = this.notes.reduce((sum, n) => sum + n.highlights.length, 0);
@@ -562,16 +562,16 @@ export class SuggestPreviewModal extends Modal {
       countsText += ` · unmatched titles: ${this.extras.orphanTitles.join(", ")}`;
     }
     if (this.extras.flashcards > 0) countsText += ` · ${this.extras.flashcards} flashcards will be queued`;
-    contentEl.createEl("p", { text: countsText, cls: "recall-muted recall-preview-counts" });
+    contentEl.createEl("p", { text: countsText, cls: "wikilm-muted wikilm-preview-counts" });
 
     const list = contentEl.createDiv();
     this.notes.forEach((note, i) => {
-      const card = list.createDiv({ cls: "recall-preview-note" });
-      const head = card.createDiv({ cls: "recall-preview-head" });
+      const card = list.createDiv({ cls: "wikilm-preview-note" });
+      const head = card.createDiv({ cls: "wikilm-preview-head" });
 
       const titleInput = head.createEl("input", { attr: { type: "text" } }) as HTMLInputElement;
-      titleInput.addClass("recall-inline-input");
-      titleInput.addClass("recall-preview-title");
+      titleInput.addClass("wikilm-inline-input");
+      titleInput.addClass("wikilm-preview-title");
       titleInput.value = note.title;
       titleInput.addEventListener("input", () => {
         this.titles[i] = titleInput.value;
@@ -585,12 +585,12 @@ export class SuggestPreviewModal extends Modal {
       } else {
         badgeText = `exists: +${note.added}, ${note.skipped} skipped`;
       }
-      head.createSpan({ text: badgeText, cls: "recall-badge recall-preview-badge" });
+      head.createSpan({ text: badgeText, cls: "wikilm-badge wikilm-preview-badge" });
 
-      card.createEl("div", { text: note.path, cls: "recall-muted" });
+      card.createEl("div", { text: note.path, cls: "wikilm-muted" });
       if (note.summary) card.createEl("p", { text: note.summary });
 
-      const hlList = card.createEl("ul", { cls: "recall-preview-highlights" });
+      const hlList = card.createEl("ul", { cls: "wikilm-preview-highlights" });
       note.highlights.forEach((h, j) => {
         const li = hlList.createEl("li");
         const checkbox = li.createEl("input", { attr: { type: "checkbox" } }) as HTMLInputElement;

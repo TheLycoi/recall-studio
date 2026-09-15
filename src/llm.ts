@@ -33,7 +33,7 @@ import {
   SuggestOut as SuggestOutSchema,
 } from "./schemas";
 import type { AskDraft, DigestDraft, QuizGradeDraft, QuizQuestionDraft, SuggestDraft } from "./schemas";
-import type { RecallSettings } from "./settings";
+import type { WikiLmSettings } from "./settings";
 
 const CardOut = z.object({
   kind: z.enum(["qa", "cloze"]).describe("qa for a question with a short answer; cloze for one sentence with hidden spans"),
@@ -195,7 +195,7 @@ Before returning, check each card against the highlight: the answer is stated th
  * all of them in a single call so sibling interference is visible.
  *
  * Adapted from obsidian-loopback's prompts/critique-v1.md, which is cloze-only
- * and assumes a Back Extra field Recall does not have. Carried over from it:
+ * and assumes a Back Extra field WikiLM does not have. Carried over from it:
  * the rule that a revision may only use facts the passage states, and the
  * preference for dropping over a fix that stretches past the text. New here:
  * Bloom fit, sibling interference, and near-tautology.
@@ -316,7 +316,7 @@ export class LlmClient {
    * one-argument construction, and the tests, keep working.
    */
   constructor(
-    private getSettings: () => RecallSettings,
+    private getSettings: () => WikiLmSettings,
     private getHighlights: () => Highlight[] = () => [],
   ) {
     this.anthropic = new AnthropicBackend(getSettings);

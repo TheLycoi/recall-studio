@@ -6,7 +6,7 @@ import type { App, TFile } from "obsidian";
  * every page as div.page[data-page-number] with a .textLayer of spans, so a
  * DOM selection inside it already carries the text, the page, and the whole
  * page's text for context. No PDF parsing library is needed, which is why
- * Recall can read PDFs without the load-time hazards Loopback had to dodge.
+ * WikiLM can read PDFs without the load-time hazards Loopback had to dodge.
  */
 export interface PdfSelection {
   text: string;

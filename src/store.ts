@@ -29,7 +29,7 @@ export class InboxStore {
         if (parsed && Array.isArray(parsed.highlights)) this.data = parsed;
       }
     } catch (e) {
-      console.error("Recall: failed to read inbox.json", e);
+      console.error("WikiLM: failed to read inbox.json", e);
     }
     // Anything interrupted mid-generation goes back to the queue.
     for (const h of this.data.highlights) if (h.status === "generating") h.status = "queued";
@@ -48,7 +48,7 @@ export class InboxStore {
     try {
       await this.app.vault.adapter.write(this.path, JSON.stringify(this.data, null, 2));
     } catch (e) {
-      console.error("Recall: failed to write inbox.json", e);
+      console.error("WikiLM: failed to write inbox.json", e);
     }
   }
 

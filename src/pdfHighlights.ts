@@ -15,7 +15,7 @@
  * typed, pdf.js-free functions in src/pdftext.ts.
  */
 import { TFile, normalizePath } from "obsidian";
-import type RecallPlugin from "./main";
+import type WikiLmPlugin from "./main";
 import { loadPdfDocument } from "./pdf";
 import { findPdfReferences, highlightKey, splitLinktext, type PdfReference, type PdfTarget } from "./pdflink";
 import {
@@ -120,7 +120,7 @@ interface NoteRefs {
  * inside the manifest folder are skipped: a manifest links every highlight of
  * the PDF back at it, and re-reading it would double every entry.
  */
-async function backlinkingNotes(plugin: RecallPlugin, pdf: TFile): Promise<NoteRefs[]> {
+async function backlinkingNotes(plugin: WikiLmPlugin, pdf: TFile): Promise<NoteRefs[]> {
   const manifestPrefix = `${normalizePath(plugin.settings.manifestFolder)}/`;
   const resolved = plugin.app.metadataCache.resolvedLinks;
   const sourcePaths = Object.keys(resolved)
@@ -204,7 +204,7 @@ export interface CollectResult {
  * the plain extract command does not.
  */
 export async function collectPdfHighlights(
-  plugin: RecallPlugin,
+  plugin: WikiLmPlugin,
   pdf: TFile,
   opts: { paperText: boolean; pages?: boolean },
 ): Promise<CollectResult> {
@@ -243,7 +243,7 @@ export async function collectPdfHighlights(
       warnings.push(
         "pdf.js text content has no per-character geometry; embedded annotations and rect embeds carry no text",
       );
-      console.debug("Recall: pdf.js textContent sample", firstWithItems.items[0], firstWithItems.annots[0]);
+      console.debug("WikiLM: pdf.js textContent sample", firstWithItems.items[0], firstWithItems.annots[0]);
     }
 
     // (3a) References from notes.
@@ -336,7 +336,7 @@ export async function collectPdfHighlights(
 }
 
 /** The `class` frontmatter of a note, when it has one. */
-function frontmatterClass(plugin: RecallPlugin, path: string): string {
+function frontmatterClass(plugin: WikiLmPlugin, path: string): string {
   const file = plugin.app.vault.getAbstractFileByPath(path);
   if (!(file instanceof TFile)) return "";
   const fm = plugin.app.metadataCache.getFileCache(file)?.frontmatter; // obsidian.d.ts:4417, :1446
@@ -350,7 +350,7 @@ function frontmatterClass(plugin: RecallPlugin, path: string): string {
  * meant to be repeatable; hand edits inside the callouts survive only until
  * the next run, as the format note says).
  */
-export async function writeManifest(plugin: RecallPlugin, manifest: Manifest): Promise<TFile> {
+export async function writeManifest(plugin: WikiLmPlugin, manifest: Manifest): Promise<TFile> {
   const folder = normalizePath(plugin.settings.manifestFolder);
   // Same pattern as the Anki export in src/main.ts:343-344.
   if (!(await plugin.app.vault.adapter.exists(folder))) {
@@ -366,13 +366,13 @@ export async function writeManifest(plugin: RecallPlugin, manifest: Manifest): P
   return await plugin.app.vault.create(path, md); // obsidian.d.ts:7386
 }
 
-/** Whether this note is a manifest, by its `type: recall-manifest` frontmatter. */
-export function isManifestNote(plugin: RecallPlugin, file: TFile): boolean {
-  return plugin.app.metadataCache.getFileCache(file)?.frontmatter?.type === "recall-manifest";
+/** Whether this note is a manifest, by its `type: wikilm-manifest` frontmatter. */
+export function isManifestNote(plugin: WikiLmPlugin, file: TFile): boolean {
+  return plugin.app.metadataCache.getFileCache(file)?.frontmatter?.type === "wikilm-manifest";
 }
 
 /** Parse a manifest note back into a Manifest; null when it is not one. */
-export async function readManifestNote(plugin: RecallPlugin, file: TFile): Promise<Manifest | null> {
+export async function readManifestNote(plugin: WikiLmPlugin, file: TFile): Promise<Manifest | null> {
   if (!isManifestNote(plugin, file)) return null;
   return parseManifest(await plugin.app.vault.cachedRead(file));
 }

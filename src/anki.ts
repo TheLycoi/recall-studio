@@ -1,6 +1,6 @@
 import { requestUrl } from "obsidian";
 import type { Card, Highlight } from "./model";
-import type { RecallSettings } from "./settings";
+import type { WikiLmSettings } from "./settings";
 import { ankiTag, basenameNoExt, escapeHtml, inlineMarkdownToHtml, slugify } from "./util";
 
 export interface AnkiNote {
@@ -61,7 +61,7 @@ export class AnkiClient {
 }
 
 export interface ExportContext {
-  settings: RecallSettings;
+  settings: WikiLmSettings;
   vaultName: string;
   deck: string;
 }
@@ -78,11 +78,11 @@ export function buildExtra(h: Highlight, ctx: ExportContext): string {
   if (h.topicPath) {
     const topicNoExt = h.topicPath.replace(/\.md$/i, "");
     const topicUri = `obsidian://open?vault=${encodeURIComponent(ctx.vaultName)}&file=${encodeURIComponent(topicNoExt)}`;
-    topic = `<div class="recall-topic">Topic: <a href="${topicUri}">${escapeHtml(basenameNoExt(h.topicPath))}</a></div>`;
+    topic = `<div class="wikilm-topic">Topic: <a href="${topicUri}">${escapeHtml(basenameNoExt(h.topicPath))}</a></div>`;
   }
   return (
-    `<blockquote class="recall-highlight">${escapeHtml(h.text).replace(/\n/g, "<br>")}</blockquote>` +
-    `<div class="recall-source">Source: <a href="${uri}">${escapeHtml(h.sourceTitle)}</a>${where}</div>` +
+    `<blockquote class="wikilm-highlight">${escapeHtml(h.text).replace(/\n/g, "<br>")}</blockquote>` +
+    `<div class="wikilm-source">Source: <a href="${uri}">${escapeHtml(h.sourceTitle)}</a>${where}</div>` +
     topic
   );
 }

@@ -5,7 +5,7 @@ import { delimiter, join } from "path";
 import { z } from "zod";
 import type { CompletionRequest, LlmBackend } from "./backend";
 import { extractJson, toStrictSchema } from "./codex";
-import type { RecallSettings } from "./settings";
+import type { WikiLmSettings } from "./settings";
 
 /**
  * Claude Code backend: shells out to Anthropic's `claude` CLI in print mode
@@ -168,12 +168,12 @@ export interface ClassifyInput {
 
 export function classifyClaude(input: ClassifyInput): ClaudeCliError {
   const { spawnError = null, timedOut = false, aborted = false, code = null, stderr = "", parsed = null } = input;
-  if (aborted) return new ClaudeCliError("aborted", "Cancelled because Recall was unloaded.");
+  if (aborted) return new ClaudeCliError("aborted", "Cancelled because WikiLM was unloaded.");
   if (spawnError?.code === "ENOENT") {
     binaryCache = null;
     return new ClaudeCliError(
       "not-found",
-      `Claude Code CLI could not be started (${spawnError.path ?? "unknown path"}). Check “Claude Code CLI path” in Recall settings.`,
+      `Claude Code CLI could not be started (${spawnError.path ?? "unknown path"}). Check “Claude Code CLI path” in WikiLM settings.`,
     );
   }
   if (spawnError) return new ClaudeCliError("failed", `Could not start Claude Code: ${spawnError.message}`);
@@ -221,7 +221,7 @@ export function resolveClaudeBinary(configured: string): string {
   const hint = configured.trim() ? `Nothing runnable at "${configured.trim()}".` : "Not on Obsidian's PATH, in ~/.local/bin, or in the usual bin directories.";
   throw new ClaudeCliError(
     "not-found",
-    `Claude Code CLI not found. ${hint} Set “Claude Code CLI path” in Recall settings to the output of \`which claude\`, or install the CLI and run \`claude\` once to sign in.`,
+    `Claude Code CLI not found. ${hint} Set “Claude Code CLI path” in WikiLM settings to the output of \`which claude\`, or install the CLI and run \`claude\` once to sign in.`,
   );
 }
 
@@ -316,7 +316,7 @@ function runQuick(bin: string, args: string[]): Promise<{ stdout: string; stderr
 export class ClaudeCliBackend implements LlmBackend {
   readonly name = "claudecli" as const;
 
-  constructor(private getSettings: () => RecallSettings) {}
+  constructor(private getSettings: () => WikiLmSettings) {}
 
   private settings(): { path: string; model: string; effort: string } {
     const s = this.getSettings();

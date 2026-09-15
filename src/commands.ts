@@ -2,7 +2,7 @@
 // `available` predicate and a `run` action here; `src/main.ts` registers the
 // merged list with a single `addCommand` loop, and the chat panel runs the same
 // objects directly. There is no `app.commands` in the public Obsidian typings,
-// so Recall owning the registry is the only way the chat can run a command.
+// so WikiLM owning the registry is the only way the chat can run a command.
 //
 // The bodies below are moved verbatim from the fifteen addCommand blocks that
 // lived at src/main.ts:52-215 in 0.5.0: `available` is the checkCallback's
@@ -10,7 +10,7 @@
 // `!checking` branch, and the four `callback` commands are `available: () => true`.
 
 import { Notice } from "obsidian";
-import type RecallPlugin from "./main";
+import type WikiLmPlugin from "./main";
 import { COMMAND_TABLE, type CommandSpec } from "./commandTable";
 import { aiHighlightNote, captureMarkdownHighlights, capturePdfSelection, captureReadingSelection, captureSelection } from "./capture";
 import { isPdfFile, readPdfSelection } from "./pdf";
@@ -20,14 +20,14 @@ import { suggestPdfHighlights } from "./suggest";
 import { askInstruction, askTranscript } from "./modals";
 import { normalizeTranscript, truncateTranscript } from "./util";
 
-export interface RecallCommand extends CommandSpec {
+export interface WikiLmCommand extends CommandSpec {
   /** True when the command can run right now; the palette hides it otherwise. */
-  available(plugin: RecallPlugin): boolean;
+  available(plugin: WikiLmPlugin): boolean;
   /** Performs the command. Callers use `void` or `await`; errors surface as Notices. */
-  run(plugin: RecallPlugin): Promise<void> | void;
+  run(plugin: WikiLmPlugin): Promise<void> | void;
 }
 
-type Implementation = Pick<RecallCommand, "available" | "run">;
+type Implementation = Pick<WikiLmCommand, "available" | "run">;
 
 const IMPLEMENTATIONS: Record<string, Implementation> = {
   "capture-selection": {
@@ -45,7 +45,7 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
       const file = p.app.workspace.getActiveFile();
       if (!isPdfFile(file)) return;
       const sel = readPdfSelection(activeWindow);
-      if (!sel) new Notice("Recall: select text inside a PDF page first.");
+      if (!sel) new Notice("WikiLM: select text inside a PDF page first.");
       else capturePdfSelection(p, file, sel);
     },
   },
@@ -56,7 +56,7 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
       if (!isPdfFile(file)) return;
       const sel = readPdfSelection(activeWindow);
       if (!sel) {
-        new Notice("Recall: select text inside a PDF page first.");
+        new Notice("WikiLM: select text inside a PDF page first.");
         return;
       }
       void askInstruction(p.app, "Instructions for this highlight", "e.g. one cloze on the number").then((inst) => {
@@ -130,7 +130,7 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
         if (choice === null) return;
         if (choice.action === "clear") {
           p.store.clearTranscript(file.path);
-          new Notice("Recall: transcript removed.");
+          new Notice("WikiLM: transcript removed.");
           return;
         }
         const cleaned = normalizeTranscript(choice.text);
@@ -142,7 +142,7 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
           addedAt: new Date().toISOString(),
           truncated,
         });
-        new Notice(`Recall: transcript saved (${kept.length.toLocaleString()} characters)${truncated ? ", cut to the size limit" : ""}.`);
+        new Notice(`WikiLM: transcript saved (${kept.length.toLocaleString()} characters)${truncated ? ", cut to the size limit" : ""}.`);
       });
     },
   },
@@ -201,7 +201,7 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
     run: (p) => {
       let n = 0;
       for (const h of p.store.all()) if (h.status === "error") (p.generator.enqueue(h), n++);
-      new Notice(`Recall: retrying ${n}.`);
+      new Notice(`WikiLM: retrying ${n}.`);
     },
   },
 };
@@ -210,10 +210,10 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
 // command that throws when run; an implementation with no spec would never be
 // registered at all. Both are programming errors, so fail loudly at import.
 for (const spec of COMMAND_TABLE) {
-  if (!IMPLEMENTATIONS[spec.id]) throw new Error(`Recall: command "${spec.id}" has no implementation.`);
+  if (!IMPLEMENTATIONS[spec.id]) throw new Error(`WikiLM: command "${spec.id}" has no implementation.`);
 }
 for (const id of Object.keys(IMPLEMENTATIONS)) {
-  if (!COMMAND_TABLE.some((spec) => spec.id === id)) throw new Error(`Recall: implementation "${id}" has no command spec.`);
+  if (!COMMAND_TABLE.some((spec) => spec.id === id)) throw new Error(`WikiLM: implementation "${id}" has no command spec.`);
 }
 
-export const RECALL_COMMANDS: RecallCommand[] = COMMAND_TABLE.map((spec) => ({ ...spec, ...IMPLEMENTATIONS[spec.id] }));
+export const WIKILM_COMMANDS: WikiLmCommand[] = COMMAND_TABLE.map((spec) => ({ ...spec, ...IMPLEMENTATIONS[spec.id] }));
