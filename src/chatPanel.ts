@@ -12,7 +12,7 @@ import {
   mergeEvidence,
 } from "./retrieval";
 import type { Graph } from "./graph";
-import { lintVault, renderVaultLint, type LintPage } from "./vaultLint";
+import { lintVault, renderVaultLint, WIKI_SCHEMA, type LintPage } from "./vaultLint";
 import { checkAnswer, emptyIndexAnswer, noEvidenceAnswer, renderGroundingLine, VERIFY_BANNER, type GroundingReport } from "./askCheck";
 import { matchCommand, renderHelp, tokenOverlapScorer } from "./chatCommands";
 import { WIKILM_COMMANDS, type WikiLmCommand } from "./commands";
@@ -208,7 +208,18 @@ export class ChatPanel {
       for (const file of files) {
         pages.push({ path: file.path, content: await this.plugin.app.vault.cachedRead(file) });
       }
-      this.turns.push({ role: "assistant", text: renderVaultLint(lintVault(pages)) });
+
+      // Everything a quote could have come from: the wiki's own source pages,
+      // and every note outside the wiki folder, since a clipping usually lives
+      // in the vault rather than under `wiki/`. Read once and shared across
+      // pages — the cost is one cachedRead per note, not per quote.
+      const sources = new Map<string, string>();
+      for (const file of this.plugin.app.vault.getMarkdownFiles()) {
+        if (file.path.startsWith(prefix) && !file.path.startsWith(`${prefix}sources/`)) continue;
+        sources.set(file.path, await this.plugin.app.vault.cachedRead(file));
+      }
+
+      this.turns.push({ role: "assistant", text: renderVaultLint(lintVault(pages, { schema: WIKI_SCHEMA, sources })) });
       this.trim();
     } catch (e) {
       this.pushSystem(`Wiki check failed: ${describeError(e)}`);

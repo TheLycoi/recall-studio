@@ -80,3 +80,137 @@ test("renderVaultLint groups issues and names the notes", () => {
   assert.match(md, /\[\[a\]\]/);
   assert.match(md, /`Missing`/);
 });
+
+// ---- schema, aliases and quote grounding
+//
+// These checks are opt-in: a vault that configures no schema and supplies no
+// source text gets exactly the structural report it got before. That is what
+// lets one plugin serve two vaults with different conventions.
+
+const SCHEMA = {
+  kindKey: "type",
+  tagsByKind: {
+    concept: ["method", "theory", "term"],
+    entity: ["person", "product"],
+  },
+  aliasKinds: ["concept", "entity"],
+};
+
+const page = (path, front, body) => ({ path, content: `---\n${front}\n---\n\n${body}\n` });
+
+test("a tag outside the vocabulary is a schema violation", () => {
+  const r = vl.lintVault([page("wiki/a.md", 'type: concept\ntags: [vibes]\naliases:\n  - "A"', "Text with a claim in it.")], { schema: SCHEMA });
+  const found = r.issues.filter((i) => i.id === "schema-violation");
+  assert.equal(found.length, 1);
+  assert.match(found[0].detail, /vibes/);
+});
+
+test("a tag inside the vocabulary passes", () => {
+  const r = vl.lintVault([page("wiki/a.md", 'type: concept\ntags: [method]\naliases:\n  - "A"', "Text with a claim in it.")], { schema: SCHEMA });
+  assert.deepEqual(r.issues.filter((i) => i.id === "schema-violation"), []);
+});
+
+test("an unknown kind is reported once, not once per tag", () => {
+  const r = vl.lintVault([page("wiki/a.md", "type: pamphlet\ntags: [method, theory]", "Text with a claim in it.")], { schema: SCHEMA });
+  const found = r.issues.filter((i) => i.id === "schema-violation");
+  assert.equal(found.length, 1);
+  assert.match(found[0].detail, /pamphlet/);
+});
+
+test("an empty alias list counts as no aliases", () => {
+  // The bug worth not repeating: testing for the key alone treats a page whose
+  // aliases were all deleted as configured.
+  for (const front of ["type: concept\ntags: [method]\naliases: []", 'type: concept\ntags: [method]\naliases:\n  - ""']) {
+    const r = vl.lintVault([page("wiki/a.md", front, "Text with a claim in it.")], { schema: SCHEMA });
+    assert.equal(r.issues.filter((i) => i.id === "no-aliases").length, 1, front);
+  }
+});
+
+test("a real alias satisfies the check, inline or block", () => {
+  for (const front of ['type: concept\ntags: [method]\naliases: ["Other name"]', 'type: concept\ntags: [method]\naliases:\n  - "Other name"']) {
+    const r = vl.lintVault([page("wiki/a.md", front, "Text with a claim in it.")], { schema: SCHEMA });
+    assert.deepEqual(r.issues.filter((i) => i.id === "no-aliases"), [], front);
+  }
+});
+
+test("no schema configured means no schema findings", () => {
+  const r = vl.lintVault([page("wiki/a.md", "class: HBIO408", "Text with a claim in it.")]);
+  assert.deepEqual(r.issues.filter((i) => i.id === "schema-violation" || i.id === "no-aliases"), []);
+});
+
+const QUOTED = (quote, cite) =>
+  page(
+    "wiki/a.md",
+    'type: concept\ntags: [method]\naliases:\n  - "A"',
+    `Some prose about it.\n\n## Mentions in Source\n\n- "${quote}"${cite ? ` — [[${cite}]]` : ""}`,
+  );
+
+const SOURCES = new Map([["sources/paper.md", "The study found that spacing improves retention over massing."]]);
+
+test("a quote that is in its cited source is clean", () => {
+  const r = vl.lintVault([QUOTED("spacing improves retention", "sources/paper")], { sources: SOURCES });
+  assert.deepEqual(r.issues.filter((i) => i.id.endsWith("-quote")), []);
+});
+
+test("a quote that is not in its cited source is ungrounded", () => {
+  const r = vl.lintVault([QUOTED("spacing has no effect on retention", "sources/paper")], { sources: SOURCES });
+  const found = r.issues.filter((i) => i.id === "ungrounded-quote");
+  assert.equal(found.length, 1);
+  assert.equal(found[0].target, "sources/paper");
+  assert.match(found[0].detail, /no effect/);
+});
+
+test("a quote citing a source the vault does not hold is unverifiable, not ungrounded", () => {
+  // The distinction matters: one says the page is wrong, the other says we
+  // cannot tell. Reporting them together would overstate what is known.
+  const r = vl.lintVault([QUOTED("spacing improves retention", "sources/missing")], { sources: SOURCES });
+  assert.equal(r.issues.filter((i) => i.id === "unverifiable-quote").length, 1);
+  assert.deepEqual(r.issues.filter((i) => i.id === "ungrounded-quote"), []);
+});
+
+test("an uncited quote is checked against every source", () => {
+  const ok = vl.lintVault([QUOTED("spacing improves retention", null)], { sources: SOURCES });
+  assert.deepEqual(ok.issues.filter((i) => i.id.endsWith("-quote")), []);
+  const bad = vl.lintVault([QUOTED("spacing is a myth", null)], { sources: SOURCES });
+  assert.equal(bad.issues.filter((i) => i.id === "ungrounded-quote").length, 1);
+});
+
+test("quote matching survives reflowing and smart quotes", () => {
+  const sources = new Map([["sources/paper.md", "the spacing\neffect is “real” and well documented"]]);
+  const r = vl.lintVault([QUOTED("the spacing effect is “real”", "sources/paper")], { sources });
+  assert.deepEqual(r.issues.filter((i) => i.id.endsWith("-quote")), []);
+});
+
+test("a PDF++ callout is not string-checked: it carries its own anchor", () => {
+  const p = page(
+    "wiki/a.md",
+    'type: concept\ntags: [method]\naliases:\n  - "A"',
+    '## Mentions in Source\n\n> [!PDF|yellow] [[Paper.pdf#page=2|Paper, p.2]]\n> > a span that appears in no source note',
+  );
+  const r = vl.lintVault([p], { sources: SOURCES });
+  assert.deepEqual(r.issues.filter((i) => i.id.endsWith("-quote")), []);
+});
+
+test("no sources supplied means no quote findings", () => {
+  const r = vl.lintVault([QUOTED("anything at all", "sources/paper")]);
+  assert.deepEqual(r.issues.filter((i) => i.id.endsWith("-quote")), []);
+});
+
+test("the report is byte-identical across runs on an unchanged vault", () => {
+  const pages = [
+    QUOTED("spacing is a myth", "sources/paper"),
+    page("wiki/b.md", "type: concept\ntags: [vibes]", "Another note with prose."),
+  ];
+  const a = vl.renderVaultLint(vl.lintVault(pages, { schema: SCHEMA, sources: SOURCES }));
+  const b = vl.renderVaultLint(vl.lintVault(pages, { schema: SCHEMA, sources: SOURCES }));
+  assert.equal(a, b);
+});
+
+test("the ungrounded quote leads the report", () => {
+  const pages = [QUOTED("spacing is a myth", "sources/paper"), page("wiki/b.md", "type: concept", "")];
+  const out = vl.renderVaultLint(vl.lintVault(pages, { schema: SCHEMA, sources: SOURCES }));
+  const quoteAt = out.indexOf("Quote not in its source");
+  const emptyAt = out.indexOf("Empty:");
+  assert.ok(quoteAt > -1 && emptyAt > -1);
+  assert.ok(quoteAt < emptyAt, "a wrong answer outranks a missing one");
+});
