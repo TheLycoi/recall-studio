@@ -197,3 +197,132 @@ test("renderBatch marks each segment and writes the trail once per change", () =
   // "Chunking" heads two segments but is written once.
   assert.equal(out.split("## Chunking\n").length - 1, 1);
 });
+
+// ---- span verification
+//
+// The markdown half of the "model output is never trusted for anchoring"
+// invariant. These mirror test/suggestPlan.test.mjs's verifySpans cases.
+
+const span = (segment, quote, extra = {}) => ({
+  segment,
+  quote,
+  label: "a label",
+  note_title: "Chunking",
+  note_kind: "concept",
+  ...extra,
+});
+
+const OPTS = (over = {}) => ({
+  perSegment: 3,
+  remaining: 10,
+  existingKeys: new Set(),
+  batch: [1, 2, 3, 4],
+  ...over,
+});
+
+test("verifyMarkdownSpans keeps a span whose quote is really in the note", () => {
+  const map = sm.buildSourceMap(NOTE);
+  const r = sm.verifyMarkdownSpans([span(3, "Overlapping windows keep a sentence whole.")], map, "wiki/retrieval.md", OPTS());
+  assert.equal(r.spans.length, 1);
+  assert.equal(r.spans[0].quote, "Overlapping windows keep a sentence whole.");
+  assert.deepEqual(r.spans[0].anchor.trail, ["Chunking", "Overlap"]);
+  assert.equal(r.dropped.unlocated, 0);
+});
+
+test("verifyMarkdownSpans drops a quote the model invented", () => {
+  const map = sm.buildSourceMap(NOTE);
+  const r = sm.verifyMarkdownSpans([span(1, "Chunking was invented in 1997 by Dr. Fake.")], map, "n.md", OPTS());
+  assert.deepEqual(r.spans, []);
+  assert.equal(r.dropped.unlocated, 1);
+});
+
+test("verifyMarkdownSpans refuses a segment outside the batch", () => {
+  const map = sm.buildSourceMap(NOTE);
+  const r = sm.verifyMarkdownSpans(
+    [span(99, "Overlapping windows keep a sentence whole.")],
+    map,
+    "n.md",
+    OPTS({ batch: [1, 2] }),
+  );
+  assert.deepEqual(r.spans, []);
+  assert.equal(r.dropped.outOfBatch, 1);
+});
+
+test("verifyMarkdownSpans accepts the `page` field the shared schema uses", () => {
+  const map = sm.buildSourceMap(NOTE);
+  const r = sm.verifyMarkdownSpans(
+    [{ page: 3, quote: "Overlapping windows keep a sentence whole.", label: "l", note_title: "T", note_kind: "concept" }],
+    map,
+    "n.md",
+    OPTS(),
+  );
+  assert.equal(r.spans.length, 1, "one schema has to serve both the PDF and markdown paths");
+});
+
+test("verifyMarkdownSpans drops a duplicate of a key already held", () => {
+  const map = sm.buildSourceMap(NOTE);
+  const first = sm.verifyMarkdownSpans([span(3, "Overlapping windows keep a sentence whole.")], map, "n.md", OPTS());
+  const again = sm.verifyMarkdownSpans(
+    [span(3, "Overlapping windows keep a sentence whole.")],
+    map,
+    "n.md",
+    OPTS({ existingKeys: new Set([first.spans[0].key]) }),
+  );
+  assert.deepEqual(again.spans, []);
+  assert.equal(again.dropped.duplicate, 1);
+});
+
+test("verifyMarkdownSpans lets the earlier span win an overlap", () => {
+  const map = sm.buildSourceMap(NOTE);
+  const r = sm.verifyMarkdownSpans(
+    [
+      span(2, "Splitting a document into pieces is the first step."),
+      span(2, "a document into pieces"),
+    ],
+    map,
+    "n.md",
+    OPTS(),
+  );
+  assert.equal(r.spans.length, 1);
+  assert.ok(r.spans[0].quote.startsWith("Splitting"), "response order decides the tie");
+  assert.equal(r.dropped.duplicate, 1);
+});
+
+test("verifyMarkdownSpans honours the per-segment and overall caps", () => {
+  const map = sm.buildSourceMap(NOTE);
+  const capped = sm.verifyMarkdownSpans(
+    [
+      span(2, "Splitting a document into pieces is the first step."),
+      span(3, "Overlapping windows keep a sentence whole."),
+    ],
+    map,
+    "n.md",
+    OPTS({ remaining: 1 }),
+  );
+  assert.equal(capped.spans.length, 1);
+  assert.equal(capped.dropped.overCap, 1);
+});
+
+test("a span key identifies the note and the offsets, so two notes never collide", () => {
+  const map = sm.buildSourceMap(NOTE);
+  const a = sm.verifyMarkdownSpans([span(3, "Overlapping windows keep a sentence whole.")], map, "a.md", OPTS());
+  const b = sm.verifyMarkdownSpans([span(3, "Overlapping windows keep a sentence whole.")], map, "b.md", OPTS());
+  assert.notEqual(a.spans[0].key, b.spans[0].key);
+  assert.ok(a.spans[0].key.startsWith("a.md#"));
+});
+
+test("renderMarkdownMention cites the note and heading, never an offset", () => {
+  const map = sm.buildSourceMap(NOTE);
+  const r = sm.verifyMarkdownSpans([span(3, "Overlapping windows keep a sentence whole.")], map, "sources/retrieval.md", OPTS());
+  const line = sm.renderMarkdownMention(r.spans[0], "sources/retrieval", "Retrieval");
+  assert.ok(line.startsWith('- "Overlapping windows keep a sentence whole."'));
+  assert.ok(line.includes("[[sources/retrieval#Overlap|Retrieval › Chunking › Overlap]]"));
+  assert.ok(!/\d+-\d+/.test(line), "a character offset would not survive an edit");
+});
+
+test("renderMarkdownMention falls back to the note when there is no heading", () => {
+  const map = sm.buildSourceMap(NOTE);
+  const r = sm.verifyMarkdownSpans([span(1, "Intro paragraph before any heading.")], map, "n.md", OPTS());
+  const line = sm.renderMarkdownMention(r.spans[0], "sources/n", "Note");
+  assert.ok(line.includes("[[sources/n|Note]]"));
+});

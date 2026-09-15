@@ -339,3 +339,139 @@ export function renderBatch(segments: Segment[], indexOf: (s: Segment) => number
   }
   return parts.join("\n\n").trim();
 }
+
+/**
+ * A span the model proposed and this module verified against the real note.
+ *
+ * The markdown counterpart of `VerifiedSpan` (src/suggestPlan.ts:28). It
+ * carries an anchor rather than a `PdfTarget`: there is no selection to
+ * reproduce, so what it records is where the quote sits and enough
+ * surrounding text to find it again after an edit.
+ */
+export interface VerifiedMarkdownSpan {
+  /** 1-based index of the segment the model cited, as the `[s N]` marker. */
+  segment: number;
+  quote: string;
+  label: string;
+  noteTitle: string;
+  noteKind: "concept" | "entity";
+  anchor: SourceAnchor;
+  /** Stable identity: the note path plus the quote's offsets. */
+  key: string;
+}
+
+export interface VerifyMarkdownOptions {
+  /** Most spans to accept from any one segment. */
+  perSegment: number;
+  /** Cap across the whole run, counted down by the caller. */
+  remaining: number;
+  /** Keys already held, so a re-run does not duplicate what it wrote before. */
+  existingKeys: Set<string>;
+  /** The batch's segment indices, so a span citing outside it is refused. */
+  batch: number[];
+}
+
+export interface VerifyMarkdownResult {
+  spans: VerifiedMarkdownSpan[];
+  dropped: { outOfBatch: number; unlocated: number; duplicate: number; overCap: number };
+}
+
+/** A span's identity: which note, and exactly where in it. */
+export function markdownSpanKey(notePath: string, start: number, end: number): string {
+  return `${notePath}#${start}-${end}`;
+}
+
+/** Do two spans cover any of the same characters? */
+function overlapsSpan(a: SourceAnchor, b: SourceAnchor): boolean {
+  return a.start < b.end && b.start < a.end;
+}
+
+/**
+ * Keep only the spans that survive every check, in the order the model gave
+ * them: inside the batch, verbatim-locatable in the note, not a quote already
+ * held, not overlapping one already accepted, and within both caps.
+ *
+ * This is markdown's `verifySpans` (src/suggestPlan.ts:72) and enforces the
+ * same invariant for the same reason: the model's output is never trusted for
+ * anchoring. A quote it invented, or subtly reworded, fails `anchorQuote` and
+ * is dropped rather than written to a note with a citation that would not
+ * survive being clicked.
+ *
+ * Order matters — an earlier span wins the note against a later one that
+ * overlaps it, so the model's own ranking decides ties.
+ */
+export function verifyMarkdownSpans(
+  spans: Array<{ page?: number; segment?: number; quote?: string; label?: string; note_title?: string; note_kind?: "concept" | "entity" }>,
+  map: SourceMap,
+  notePath: string,
+  opts: VerifyMarkdownOptions,
+): VerifyMarkdownResult {
+  const out: VerifiedMarkdownSpan[] = [];
+  const dropped = { outOfBatch: 0, unlocated: 0, duplicate: 0, overCap: 0 };
+  const acceptedKeys = new Set<string>();
+  const bySegment = new Map<number, VerifiedMarkdownSpan[]>();
+  const inBatch = new Set(opts.batch);
+
+  for (const s of spans ?? []) {
+    // The model is prompted with `[s N]` markers, but the shared span schema
+    // names the field `page`; accept either so one schema serves both paths.
+    const seg = s.segment ?? s.page;
+    if (!Number.isInteger(seg) || !inBatch.has(seg as number)) {
+      dropped.outOfBatch++;
+      continue;
+    }
+
+    const anchor = anchorQuote(map, s.quote ?? "");
+    if (!anchor) {
+      dropped.unlocated++;
+      continue;
+    }
+
+    const key = markdownSpanKey(notePath, anchor.start, anchor.end);
+    if (opts.existingKeys.has(key) || acceptedKeys.has(key)) {
+      dropped.duplicate++;
+      continue;
+    }
+
+    const onSeg = bySegment.get(seg as number) ?? [];
+    if (onSeg.some((prev) => overlapsSpan(prev.anchor, anchor))) {
+      dropped.duplicate++;
+      continue;
+    }
+
+    if (onSeg.length >= opts.perSegment || out.length >= opts.remaining) {
+      dropped.overCap++;
+      continue;
+    }
+
+    const span: VerifiedMarkdownSpan = {
+      segment: seg as number,
+      quote: anchor.quote,
+      label: s.label ?? "",
+      noteTitle: s.note_title ?? "",
+      noteKind: s.note_kind ?? "concept",
+      anchor,
+      key,
+    };
+    out.push(span);
+    acceptedKeys.add(key);
+    onSeg.push(span);
+    bySegment.set(seg as number, onSeg);
+  }
+
+  return { spans: out, dropped };
+}
+
+/**
+ * How a verified markdown span is cited in a wiki page.
+ *
+ * `- "quote" — [[note#heading|Note › Heading]]`, or `[[note|Note]]` when the
+ * quote sits above any heading. A heading is the finest address markdown can
+ * honour: Obsidian resolves `#heading` on open, whereas a character offset
+ * would silently point at the wrong text the first time the note is edited.
+ */
+export function renderMarkdownMention(span: VerifiedMarkdownSpan, notePath: string, noteTitle: string): string {
+  const heading = span.anchor.trail.filter((t) => t.length > 0).join(" › ");
+  const link = heading ? `[[${notePath}#${span.anchor.trail[span.anchor.trail.length - 1]}|${noteTitle} › ${heading}]]` : `[[${notePath}|${noteTitle}]]`;
+  return `- "${span.quote.replace(/\s+/g, " ").trim()}" — ${link}`;
+}
