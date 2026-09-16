@@ -1037,7 +1037,7 @@ source link; cards captured any other way are unchanged
 
    Effort defaults to `high` (highlights are small, so this is cheap). Click
    **Test** to confirm the provider answers.
-2. Open Anki, then Settings → Wikipedia LM → **Detect** note types. It uses
+2. Open Anki, then Settings → WikiLM → **Detect** note types. It uses
    Anki's stock `Basic` and `Cloze` types and maps the front/back/extra
    fields. Stock `Basic` has no extra field, so a card's source link needs a
    note type that has one.

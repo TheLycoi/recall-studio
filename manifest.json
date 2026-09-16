@@ -1,6 +1,6 @@
 {
-  "id": "wikipedia-lm",
-  "name": "Wikipedia LM",
+  "id": "wikilm",
+  "name": "WikiLM",
   "version": "0.10.0",
   "minAppVersion": "1.5.0",
   "description": "Turn your sources into a wiki you can question: highlight-grounded concept and entity pages, a chat that answers only from them, and flashcards pushed to Anki for long-term retention.",

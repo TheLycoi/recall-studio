@@ -25,7 +25,7 @@ export default class WikiLmPlugin extends Plugin {
   async onload(): Promise<void> {
     await this.loadSettings();
     registerWikiLmIcon();
-    this.store = new InboxStore(this.app, this.manifest.dir ?? `${this.app.vault.configDir}/plugins/wikipedia-lm`);
+    this.store = new InboxStore(this.app, this.manifest.dir ?? `${this.app.vault.configDir}/plugins/wikilm`);
     await this.store.load();
     this.llm = new LlmClient(
       () => this.settings,
