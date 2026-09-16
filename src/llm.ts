@@ -698,6 +698,14 @@ A title that is not on that list is a new note, and it appears in new_notes with
 A concept is something the reader would look up by name later: a mechanism, a classification, a definition together with what follows from it. An entity is a named person, organisation, drug, instrument, or law — WADA, acetaminophen, the Anti-Doping Code. Titles are short noun phrases in Title Case, the way an index entry reads, and unique within your response; two titles that differ only in case or in a plural are the same title, and one of the two notes will be lost.
 </which_note_a_span_belongs_to>
 
+<where_in_a_note_a_span_goes>
+Each existing note is listed with the section headings it already has, indented under its title. Those headings are the reader's own subtopics, and a span that belongs to one of them names it in note_section, copied exactly as shown, so the plugin appends the highlight under that heading rather than at the bottom of the page.
+
+A subtopic of an existing note belongs inside that note, not beside it. When a span is about a subtopic the note has no section for yet, still name the note and give note_section a short new heading in Title Case; the plugin creates the section inside that note. "COX inhibitors" is a section of a pharmacology note, not a second note: a reader who wants it opens the pharmacology note and looks for the heading. Reserve new_notes for a subject the reader would look up under its own name — one they would expect to find as its own page, not as a heading in a page they already have.
+
+Leave note_section empty when the span is about the note as a whole and no heading fits, and always for a note in new_notes, which has no sections yet.
+</where_in_a_note_a_span_goes>
+
 <the_summary>
 Three to five sentences about this topic, drawn from the whole paper but weighted toward the spans you chose. The spans you chose tell you what the reader cares about; the rest of the paper tells you what those spans mean, and lets you write the sentence that connects two of them. Write in the reader's language, the one the paper is written in, and keep close to its wording so the summary reads as their own note rather than as a stranger's gloss.
 
@@ -716,9 +724,14 @@ Slide titles, course logistics, figure captions, and a line the lecturer read ou
 <output>Two spans. The definition on page 7 goes to the existing title "Doping", copied exactly, kind concept. The sentence on page 8 goes to a new note "World Anti-Doping Agency", kind entity, listed in new_notes with a three-sentence summary of what the agency is and does as the paper describes it. The slide title "Anti-Doping: Definitions" is not a span.</output>
 <note>One existing title reused rather than a near-duplicate created, one entity proposed because a named organisation is what a reader looks up, and the slide title skipped because forgetting it costs nothing.</note>
 </example>
+<example>
+<input>[page 17] holds "Drugs often work on more than one receptor, and as a result produce more than one kind of biological response." and [page 19] holds "Non-selective NSAIDs such as aspirin and ibuprofen inhibit both COX-1 and COX-2." Existing notes: Pharmacology (concept) with the sections Dosing, Drug Safety & The Therapeutic Index, Receptors; Pharmacodynamics (concept) with no sections. Already selected: nothing.</input>
+<output>Two spans, both to the existing title "Pharmacology". The page 17 span carries note_section "Receptors", copied exactly, because receptor subtypes are what that section is about. The page 19 span carries note_section "COX Inhibitors and NSAIDs", a heading the note does not have yet, because NSAIDs are a subtopic of pharmacology the reader would look for inside that note. new_notes is empty.</output>
+<note>Neither span became a new note. The first landed under a heading the reader had already written; the second created a heading inside the note it belongs to, which is where the reader will look for it.</note>
+</example>
 </examples>
 
-Before returning, check your answer against the input: every note_title is either an existing title you were shown or a title in new_notes, every quote is copied character for character from the page it names, no span reports a page outside this batch, and no page carries more spans than the limit allows.`;
+Before returning, check your answer against the input: every note_title is either an existing title you were shown or a title in new_notes, every note_section is a heading you were shown for that note, a short new heading, or empty, every quote is copied character for character from the page it names, no span reports a page outside this batch, and no page carries more spans than the limit allows.`;
 
 /**
  * Ask system prompt: answer a question from numbered evidence taken from the

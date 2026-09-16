@@ -48,7 +48,7 @@ Commands, for when the mode is off:
 | **Send all ==highlights== in this note to inbox** | Sweeps a note you highlighted while reading and queues every span not already in the inbox. |
 | **AI-highlight this note and write cards** | The "highlight" operation: the model picks spans worth remembering, each is verified verbatim against the note, then queued. Use this for dense material. Your note is not modified. |
 | **AI-highlight this note with instructions…** | Same, with guidance for the highlighter ("only definitions and numbers"). |
-| **AI-highlight this PDF into the wiki…** | On an open PDF: the model suggests spans page by page, each verified verbatim and mapped to a PDF++ selection, assigned to a same-class wiki note or a proposed new one, previewed per span, then written as callouts. |
+| **AI-highlight this PDF into the wiki…** | On an open PDF: the model suggests spans page by page, each verified verbatim and mapped to a PDF++ selection, assigned to a same-class wiki note — under one of its own `##` headings when the span is a subtopic of it — or a proposed new one, previewed per span, then written as callouts. |
 
 **Capture does not edit your notes.** Recall sends the passage to the inbox and
 leaves the file alone. Writing `==…==` into a note is available as an opt-in
@@ -323,7 +323,7 @@ Before returning, check your answer against the input: every id you used appears
 
 ### Suggesting highlights in a PDF
 
-Digesting (above) starts from highlights you already made by hand. **AI-highlight this PDF into the wiki…** goes the other way: it reads a lecture PDF's own text layer and proposes the highlights, each one verified against the page before it's ever offered, assigned to an existing wiki note or a new one, and written straight into secondbrain-style notes — not a manifest, not a topic-note folder, but `wiki/concepts` and `wiki/entities`, the same notes you write and link by hand.
+Digesting (above) starts from highlights you already made by hand. **AI-highlight this PDF into the wiki…** goes the other way: it reads a lecture PDF's own text layer and proposes the highlights, each one verified against the page before it's ever offered, assigned to an existing wiki note (and, when it belongs to one of that note's own subtopics, to that `##` heading) or a new one, and written straight into secondbrain-style notes — not a manifest, not a topic-note folder, but `wiki/concepts` and `wiki/entities`, the same notes you write and link by hand.
 
 The command is active on an open PDF and runs in nine steps: it reads the PDF's text page by page and any existing highlights already in a manifest for it; asks for (or reuses) the class code; picks up the transcript attached to the PDF's own path, if any; asks Notes / Flashcards / Both, as the digest does; collects the wiki notes this PDF may write into; sends the pages to the model in batches, each batch told what earlier batches and the manifest already hold; verifies every returned span and turns the survivors into manifest-shaped highlight rows; groups those rows into notes and shows a per-span preview; and, once you confirm (and possibly rename a note or uncheck a span), writes the callouts and queues flashcards if asked.
 
@@ -338,7 +338,7 @@ The command is active on an open PDF and runs in nine steps: it reads the PDF's 
 | Wiki entities folder | `wiki/entities` | Same, for entity notes. |
 | Standing instructions for PDF suggestions | *(empty)* | Free text appended to every request, same idiom as the highlighter's and digest's standing instructions. |
 
-**Which notes the model may reuse.** Every `.md` file under the two wiki folders whose `class` frontmatter matches the PDF's class code, or whose path already appears in the PDF's manifest as a source (which catches hand-written notes that carry no frontmatter at all), is offered to the model by title and kind (concept/entity). A span's `note_title` must be one of these or a title the model proposes in the same response's `new_notes`; anything else is treated as an orphan (below).
+**Which notes the model may reuse.** Every `.md` file under the two wiki folders whose `class` frontmatter matches the PDF's class code, or whose path already appears in the PDF's manifest as a source (which catches hand-written notes that carry no frontmatter at all), is offered to the model by title and kind (concept/entity), and — for a note that exists — by its `##` headings, indented under the title (`noteSections`, `src/topicNote.ts`; the first twenty). A span's `note_title` must be one of these or a title the model proposes in the same response's `new_notes`; anything else is treated as an orphan (below). A span may also carry a `note_section`: one of that note's headings copied exactly, or a short new heading when the span is a subtopic the note has no section for yet. The prompt's rule is that a subtopic of an existing note belongs inside it, not beside it — shown titles alone, the model used to found "Receptor Subtypes and Off-Target Effects" as a new page next to a pharmacology note that already had a `## Receptors` section.
 
 **Orphan titles.** A `note_title` that is neither an existing note nor announced in `new_notes` is still kept: it becomes its own new note under that title, taking its kind from the span rather than from a proposal, and the title is listed in `orphanTitles` and shown in the preview as `new (concept)` or `new (entity)` like any other proposed note. The write loop refuses to create a note titled after the source PDF or living under a `sources/` folder — a source is never a note — and reports the refusal in the closing Notice, but nothing routes an orphan into a catch-all note anymore.
 
@@ -373,7 +373,7 @@ S.
 
 The display text on every callout is always the full PDF basename plus the page (`<PDF name>, p.N`), the same string PDF++ itself writes — never a bare `p.N`.
 
-**Append-only into existing notes.** Writing into a note that already exists (`mergeWikiHighlights`, `src/topicNote.ts`) only ever adds callouts, checked by `highlightKey` over the *whole* note (hand-written wiki notes carry PDF++ links inside prose and under arbitrary headings, not only under `## Highlights`), so a highlight already present anywhere is skipped rather than duplicated. New callouts land under an existing `## Highlights` heading, or the heading is appended at the end of the file when there isn't one. Nothing else in the note — frontmatter, prose, other headings — is touched. A 0-byte stub (secondbrain has some, e.g. `Pharmacodynamics.md`) becomes a full note in the shape above the first time a span is assigned to it.
+**Append-only into existing notes.** Writing into a note that already exists (`mergeWikiHighlights`, `src/topicNote.ts`) only ever adds callouts, checked by `highlightKey` over the *whole* note (hand-written wiki notes carry PDF++ links inside prose and under arbitrary headings, not only under `## Highlights`), so a highlight already present anywhere is skipped rather than duplicated. Without a section, new callouts land under an existing `## Highlights` heading, or the heading is appended at the end of the file when there isn't one. With a `note_section`, they go at the end of that `##` section instead — the heading is matched the way a reader reads it, so case, a trailing space, and `==`/`**`/wikilink markup around it don't matter — and a heading the note doesn't have yet is created for it, placed ahead of the first of the page's closing sections (`## Highlights`, `## Mentions in Source`, `## Related Concepts`/`Entities`/`topics`, `## Flashcard Seeds`, `## Key claims`) or at the end when it has none. Each such span shows `→ <heading>` in the preview, with `(new section)` when the merge will create it. A section named on a note that doesn't exist yet is set aside: a fresh note takes its sections from the schema. Nothing else in the note — frontmatter, prose, other headings — is touched. A 0-byte stub (secondbrain has some, e.g. `Pharmacodynamics.md`) becomes a full note in the shape above the first time a span is assigned to it.
 
 **Notes, Flashcards, or Both**, same chooser as the digest: Notes writes only the wiki notes; Flashcards skips writing notes and queues every verified span into the inbox instead; Both does both.
 
@@ -403,6 +403,14 @@ A title that is not on that list is a new note, and it appears in new_notes with
 A concept is something the reader would look up by name later: a mechanism, a classification, a definition together with what follows from it. An entity is a named person, organisation, drug, instrument, or law — WADA, acetaminophen, the Anti-Doping Code. Titles are short noun phrases in Title Case, the way an index entry reads, and unique within your response; two titles that differ only in case or in a plural are the same title, and one of the two notes will be lost.
 </which_note_a_span_belongs_to>
 
+<where_in_a_note_a_span_goes>
+Each existing note is listed with the section headings it already has, indented under its title. Those headings are the reader's own subtopics, and a span that belongs to one of them names it in note_section, copied exactly as shown, so the plugin appends the highlight under that heading rather than at the bottom of the page.
+
+A subtopic of an existing note belongs inside that note, not beside it. When a span is about a subtopic the note has no section for yet, still name the note and give note_section a short new heading in Title Case; the plugin creates the section inside that note. "COX inhibitors" is a section of a pharmacology note, not a second note: a reader who wants it opens the pharmacology note and looks for the heading. Reserve new_notes for a subject the reader would look up under its own name — one they would expect to find as its own page, not as a heading in a page they already have.
+
+Leave note_section empty when the span is about the note as a whole and no heading fits, and always for a note in new_notes, which has no sections yet.
+</where_in_a_note_a_span_goes>
+
 <the_summary>
 Three to five sentences about this topic, drawn from the whole paper but weighted toward the spans you chose. The spans you chose tell you what the reader cares about; the rest of the paper tells you what those spans mean, and lets you write the sentence that connects two of them. Write in the reader's language, the one the paper is written in, and keep close to its wording so the summary reads as their own note rather than as a stranger's gloss.
 
@@ -421,9 +429,14 @@ Slide titles, course logistics, figure captions, and a line the lecturer read ou
 <output>Two spans. The definition on page 7 goes to the existing title "Doping", copied exactly, kind concept. The sentence on page 8 goes to a new note "World Anti-Doping Agency", kind entity, listed in new_notes with a three-sentence summary of what the agency is and does as the paper describes it. The slide title "Anti-Doping: Definitions" is not a span.</output>
 <note>One existing title reused rather than a near-duplicate created, one entity proposed because a named organisation is what a reader looks up, and the slide title skipped because forgetting it costs nothing.</note>
 </example>
+<example>
+<input>[page 17] holds "Drugs often work on more than one receptor, and as a result produce more than one kind of biological response." and [page 19] holds "Non-selective NSAIDs such as aspirin and ibuprofen inhibit both COX-1 and COX-2." Existing notes: Pharmacology (concept) with the sections Dosing, Drug Safety & The Therapeutic Index, Receptors; Pharmacodynamics (concept) with no sections. Already selected: nothing.</input>
+<output>Two spans, both to the existing title "Pharmacology". The page 17 span carries note_section "Receptors", copied exactly, because receptor subtypes are what that section is about. The page 19 span carries note_section "COX Inhibitors and NSAIDs", a heading the note does not have yet, because NSAIDs are a subtopic of pharmacology the reader would look for inside that note. new_notes is empty.</output>
+<note>Neither span became a new note. The first landed under a heading the reader had already written; the second created a heading inside the note it belongs to, which is where the reader will look for it.</note>
+</example>
 </examples>
 
-Before returning, check your answer against the input: every note_title is either an existing title you were shown or a title in new_notes, every quote is copied character for character from the page it names, no span reports a page outside this batch, and no page carries more spans than the limit allows.
+Before returning, check your answer against the input: every note_title is either an existing title you were shown or a title in new_notes, every note_section is a heading you were shown for that note, a short new heading, or empty, every quote is copied character for character from the page it names, no span reports a page outside this batch, and no page carries more spans than the limit allows.
 ```
 
 </details>

@@ -140,6 +140,11 @@ export type QuizGradeDraft = z.infer<typeof QuizGradeOut>;
  * choice of span and the choice of note are the same judgement: a span is
  * worth keeping when it says something a named note would hold, and a note is
  * worth creating when spans keep arriving for it.
+ *
+ * A span may also name the section of an existing note it belongs under. The
+ * model is shown each note's headings, and a subtopic of a note is filed
+ * inside it — under a heading the note has, or one the plugin creates — rather
+ * than founded as a second note beside it.
  */
 export const SuggestOut = z.object({
   spans: z.array(
@@ -155,6 +160,11 @@ export const SuggestOut = z.object({
       note_kind: z
         .enum(["concept", "entity"])
         .describe("concept: a mechanism, a classification, a definition and what follows from it; entity: a named person, organisation, drug, instrument, or law."),
+      note_section: z
+        .string()
+        .describe(
+          "The section of that note this span belongs under: one of the note's listed headings copied exactly, or a short new heading in Title Case when the span is a subtopic none of them covers. Empty when the span is about the note as a whole, and always empty for a note in new_notes.",
+        ),
     }),
   ),
   new_notes: z.array(

@@ -616,6 +616,13 @@ export class SuggestPreviewModal extends Modal {
         li.createEl("strong", { text: `p.${h.page} ` });
         const cut = h.text.length > 120 ? `${h.text.slice(0, 120)}…` : h.text;
         li.createSpan({ text: cut });
+        // Where in the note this one lands, when it is going under a heading
+        // rather than into the highlights: the reader is choosing per span,
+        // and a span filed under the wrong subtopic is worth unticking.
+        const section = note.sections?.find((s) => s.keys.includes(h.key));
+        if (section) {
+          li.createSpan({ cls: "wikilm-muted", text: ` → ${section.heading}${section.created ? " (new section)" : ""}` });
+        }
       });
     });
 

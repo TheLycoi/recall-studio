@@ -347,3 +347,80 @@ test("planWikiNotes omits a group whose rows are all already present", () => {
   assert.deepEqual(out.notes, []);
   assert.deepEqual(out.orphanTitles, []);
 });
+
+// ---- sections: a span filed under a note's own subtopic ------------------
+
+const planOpts = {
+  classCode: CLASS_CODE,
+  pdfBasename: PDF_BASENAME,
+  conceptsFolder: "wiki/concepts",
+  entitiesFolder: "wiki/entities",
+};
+
+test("verifySpans carries the section a span names, trimmed of its marker", () => {
+  const m = maps();
+  const res = sp.verifySpans(
+    draftOf([
+      { ...span(1, "Albumin is an inert binding protein."), note_section: "## Receptors " },
+      span(1, "Affinity rises with structural fit."),
+    ]),
+    m,
+    opts(),
+  );
+  assert.equal(res.spans[0].noteSection, "Receptors");
+  assert.equal(res.spans[1].noteSection, "", "a span without a section is about the note as a whole");
+});
+
+test("planWikiNotes files each span under the section it names and reports the sections", () => {
+  const m = maps();
+  const md = `---\nclass: ${CLASS_CODE}\n---\n\n## Receptors\n\nA receptor binds and transduces.\n\n## Highlights\n\n`;
+  const res = sp.verifySpans(
+    draftOf([
+      { ...span(1, "Albumin is an inert binding protein."), note_section: "Receptors" },
+      { ...span(1, "Affinity rises with structural fit."), note_section: "Affinity" },
+      span(2, "Pharmacokinetics is what the body does to the drug."),
+    ]),
+    m,
+    opts(),
+  );
+  const rows = sp.toManifestHighlights(res.spans, m);
+  const out = sp.planWikiNotes(res.spans, rows, [], [{ title: "Pharmacology", kind: "concept", path: "wiki/concepts/Pharmacology.md", md }], planOpts);
+
+  assert.equal(out.notes.length, 1, "one file, however many sections");
+  const note = out.notes[0];
+  assert.equal(note.exists, true);
+  assert.equal(note.added, 3);
+
+  const receptors = note.content.indexOf("## Receptors");
+  const affinity = note.content.indexOf("## Affinity");
+  const highlights = note.content.indexOf("## Highlights");
+  const albumin = note.content.indexOf("Albumin is an inert binding protein.");
+  const fit = note.content.indexOf("Affinity rises with structural fit.");
+  const pk = note.content.indexOf("Pharmacokinetics is what the body does to the drug.");
+  assert.ok(receptors < albumin && albumin < affinity, "the receptor span sits under Receptors");
+  assert.ok(affinity < fit && fit < highlights, "the affinity span sits under its new section, ahead of the highlights");
+  assert.ok(highlights < pk, "the sectionless span goes under Highlights");
+  assert.deepEqual(
+    note.sections.map((s) => [s.heading, s.created, s.keys.length]),
+    [
+      ["Receptors", false, 1],
+      ["Affinity", true, 1],
+    ],
+  );
+});
+
+test("planWikiNotes sets a section aside on a note that does not exist yet", () => {
+  const m = maps();
+  const proposed = [{ title: "Binding Proteins", kind: "concept", summary: "S." }];
+  const res = sp.verifySpans(
+    draftOf([{ ...span(1, "Albumin is an inert binding protein.", "Binding Proteins"), note_section: "Albumin" }], proposed),
+    m,
+    opts(),
+  );
+  const rows = sp.toManifestHighlights(res.spans, m);
+  const out = sp.planWikiNotes(res.spans, rows, proposed, [], planOpts);
+  assert.equal(out.notes.length, 1);
+  assert.equal(out.notes[0].exists, false);
+  assert.ok(!out.notes[0].content.includes("## Albumin"), "a fresh note takes its sections from the schema");
+  assert.equal(out.notes[0].sections, undefined);
+});

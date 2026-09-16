@@ -13,6 +13,90 @@ export function safeTitle(title: string): string {
   return collapsed || "Untitled";
 }
 
+/**
+ * A heading as a reader reads it: the markup a hand-written heading carries
+ * (`==mark==`, `**bold**`, a wikilink's brackets and alias) is not part of
+ * its name, and neither is the trailing space or colon that so often follows
+ * one. `## Receptors ` and `**Receptors**:` both read "Receptors".
+ */
+function headingDisplay(raw: string): string {
+  return raw
+    .replace(/==|\*\*|__|`/g, "")
+    .replace(/!?\[\[([^\]]+)\]\]/g, (_m, inner: string) => {
+      const s = String(inner);
+      const pipe = s.lastIndexOf("|");
+      return pipe >= 0 ? s.slice(pipe + 1) : s.replace(/#.*$/, "");
+    })
+    .replace(/\s+/g, " ")
+    .replace(/[\s:]+$/, "")
+    .trim();
+}
+
+/**
+ * A section heading the model named, as it will be matched or written.
+ *
+ * The model is asked to copy a heading exactly and sometimes copies the `## `
+ * with it; a heading is also the one place a stray newline would split a
+ * page, so both go. Capped because a heading is a label, not a sentence.
+ */
+export function safeHeading(heading: string): string {
+  const oneLine = heading.replace(/[\r\n]+/g, " ").replace(/^\s*#+\s*/, "");
+  return headingDisplay(oneLine).slice(0, 80).trim();
+}
+
+/** The form two headings are compared in: display form, case folded. */
+export function headingKey(heading: string): string {
+  return headingDisplay(heading.replace(/^\s*#+\s*/, "")).toLowerCase();
+}
+
+interface HeadingLine {
+  heading: string;
+  key: string;
+  /** Offset just past the heading's text, before its line break. */
+  end: number;
+}
+
+/** Every `##` heading in a body with its offset, skipping fenced code, where a `## ` is text. */
+function scanHeadings(body: string): HeadingLine[] {
+  const out: HeadingLine[] = [];
+  let fenced = false;
+  let offset = 0;
+  for (const line of body.split("\n")) {
+    if (/^\s*(```|~~~)/.test(line)) {
+      fenced = !fenced;
+    } else if (!fenced) {
+      const m = /^ {0,3}##\s+(.+?)\s*$/.exec(line);
+      if (m) {
+        const heading = headingDisplay(m[1]);
+        if (heading) out.push({ heading, key: heading.toLowerCase(), end: offset + line.length });
+      }
+    }
+    offset += line.length + 1;
+  }
+  return out;
+}
+
+/**
+ * The `##` headings of a note, in order, as the reader wrote them.
+ *
+ * These are the note's subtopics, and they are what the suggester shows the
+ * model so a span can be filed under one instead of founding a new note
+ * beside it. Only `##`: that is the level every page in both vaults uses for
+ * its subtopics, and a deeper heading is a division of one of these rather
+ * than a place of its own.
+ */
+export function noteSections(md: string): string[] {
+  const body = md.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const h of scanHeadings(body)) {
+    if (seen.has(h.key)) continue;
+    seen.add(h.key);
+    out.push(h.heading);
+  }
+  return out;
+}
+
 export interface RenderTopicNoteArgs {
   title: string;
   classCode: string;
@@ -147,6 +231,8 @@ export interface MergeResult {
   md: string;
   added: number;
   skipped: number;
+  /** The section the highlights went under, when the merge was aimed at one and added something. */
+  section?: { heading: string; created: boolean };
 }
 
 /**
@@ -228,6 +314,12 @@ export interface PreparedNote {
   content: string;
   added: number;
   skipped: number;
+  /**
+   * For an existing note, the sections its highlights were filed under and
+   * which of them the merge created, keyed back to the highlights by `key` so
+   * the preview can label each one. Absent for a note written fresh.
+   */
+  sections?: Array<{ heading: string; keys: string[]; created: boolean }>;
 }
 
 export interface PlanTopicNotesResult {
@@ -613,17 +705,73 @@ function touchFrontmatter(md: string, options: MergeWikiOptions): string {
 }
 
 /**
+ * Append `text` at the end of the section whose heading ends at `headingEnd`,
+ * keeping whatever blank lines separated that section from the next heading
+ * so the page's own spacing survives the edit.
+ */
+function spliceIntoSection(body: string, headingEnd: number, text: string): string {
+  const rest = body.slice(headingEnd);
+  const nextHeadingMatch = /^##\s/m.exec(rest);
+  const sectionEnd = nextHeadingMatch ? headingEnd + nextHeadingMatch.index : body.length;
+  const section = body.slice(headingEnd, sectionEnd);
+
+  const trailingBlanksMatch = /\n*$/.exec(section);
+  const trailingBlanks = trailingBlanksMatch ? trailingBlanksMatch[0] : "";
+  const sectionCore = trailingBlanks ? section.slice(0, section.length - trailingBlanks.length) : section;
+  const appended = sectionCore.length > 0 ? `${sectionCore}\n\n${text}` : text;
+
+  return body.slice(0, headingEnd) + appended + trailingBlanks + body.slice(sectionEnd);
+}
+
+/** The `##` heading in `body` that names `wanted`, compared as a reader would. */
+function findSection(body: string, wanted: string): HeadingLine | null {
+  const key = headingKey(wanted);
+  return scanHeadings(body).find((h) => h.key === key) ?? null;
+}
+
+/**
+ * The headings that close a page in either schema. A reader's subtopics come
+ * before these, so a section created for a new subtopic is placed ahead of
+ * the first of them that the page has, and at the end when it has none.
+ */
+const TRAILING_HEADINGS = [
+  /^##\s+Highlights\s*$/m,
+  /^##\s+Mentions in Source\s*$/m,
+  /^##\s+Related Concepts\s*$/m,
+  /^##\s+Related Entities\s*$/m,
+  /^##\s+Related topics\s*$/m,
+  /^##\s+Flashcard Seeds\s*$/m,
+  /^##\s+Key claims\s*$/m,
+];
+
+function insertBeforeTrailing(body: string, sectionText: string): string {
+  let at = -1;
+  for (const re of TRAILING_HEADINGS) {
+    const m = re.exec(body);
+    if (m && (at < 0 || m.index < at)) at = m.index;
+  }
+  if (at < 0) return `${body.replace(/\n*$/, "")}\n\n${sectionText}\n`;
+  return `${body.slice(0, at).replace(/\n*$/, "")}\n\n${sectionText}\n\n${body.slice(at)}`;
+}
+
+/**
  * Append highlights not already present anywhere in `existingMd` (by
  * `highlightKey`, checked over the whole note since hand-written wiki notes
  * carry PDF++ links inside prose and under arbitrary headings, not only under
  * `## Highlights`) into the `## Highlights` section, in page order. When the
  * section is missing, it is appended at EOF. Everything else is
  * byte-identical.
+ *
+ * With `section`, the highlights go under that `##` heading instead — the
+ * reader's own subtopic — and the heading is created inside the page when it
+ * does not exist yet. The result says which, so a preview can show it.
  */
 export interface MergeWikiOptions {
   schema?: WikiSchema;
   /** Today, so a caller can pin the date in a test. */
   today?: string;
+  /** The heading the highlights belong under; empty or absent means the page's highlights section. */
+  section?: string;
 }
 
 export function mergeWikiHighlights(
@@ -655,6 +803,32 @@ export function mergeWikiHighlights(
   const reviewed = /^reviewed:\s*true\s*$/m.test(existingMd);
   const body = schema === "karpathy" && !reviewed ? touchFrontmatter(existingMd, options) : existingMd;
 
+  // A span may name the section of the page it belongs under — "Receptors" in
+  // a pharmacology note — rather than the page as a whole. Its callouts go at
+  // the end of that section, and a section the page lacks is created for it,
+  // placed with the other subtopics rather than after the highlights: that is
+  // where the reader will look for it.
+  const wanted = safeHeading(options.section ?? "");
+  if (wanted) {
+    if (toAdd.length === 0) return { md: body, added: 0, skipped };
+    const callouts = toAdd.map((h) => renderCallout(pdfBasename, h.target, wikiDisplay(pdfBasename, h.page), h.text)).join("\n\n");
+    const found = findSection(body, wanted);
+    if (found) {
+      return {
+        md: spliceIntoSection(body, found.end, callouts),
+        added: toAdd.length,
+        skipped,
+        section: { heading: found.heading, created: false },
+      };
+    }
+    return {
+      md: insertBeforeTrailing(body, `## ${wanted}\n\n${callouts}`),
+      added: toAdd.length,
+      skipped,
+      section: { heading: wanted, created: true },
+    };
+  }
+
   // Karpathy pages keep their quotes under `## Mentions in Source`; the class
   // schema uses `## Highlights`. Merging into the wrong one would append a
   // second section the page's own schema does not have.
@@ -665,22 +839,9 @@ export function mergeWikiHighlights(
     if (toAdd.length === 0) {
       return { md: body, added: 0, skipped };
     }
-
-    const headingEnd = headingMatch.index + headingMatch[0].length;
-    const rest = body.slice(headingEnd);
-    const nextHeadingMatch = /^##\s/m.exec(rest);
-    const sectionEnd = nextHeadingMatch ? headingEnd + nextHeadingMatch.index : body.length;
-    const section = body.slice(headingEnd, sectionEnd);
-
-    const trailingBlanksMatch = /\n*$/.exec(section);
-    const trailingBlanks = trailingBlanksMatch ? trailingBlanksMatch[0] : "";
-    const sectionCore = trailingBlanks ? section.slice(0, section.length - trailingBlanks.length) : section;
-
     const newCallouts = toAdd.map((h) => renderCallout(pdfBasename, h.target, wikiDisplay(pdfBasename, h.page), h.text));
-    const appended = sectionCore.length > 0 ? `${sectionCore}\n\n${newCallouts.join("\n\n")}` : newCallouts.join("\n\n");
-
-    const newMd = body.slice(0, headingEnd) + appended + trailingBlanks + body.slice(sectionEnd);
-    return { md: newMd, added: toAdd.length, skipped };
+    const headingEnd = headingMatch.index + headingMatch[0].length;
+    return { md: spliceIntoSection(body, headingEnd, newCallouts.join("\n\n")), added: toAdd.length, skipped };
   }
 
   if (toAdd.length === 0) {

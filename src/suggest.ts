@@ -17,9 +17,10 @@ import { askDigestOptions, askInstruction, previewSuggestions } from "./modals";
 import { buildPageMap, type PageMap } from "./pageMap";
 import { collectPdfHighlights, writeManifest } from "./pdfHighlights";
 import type { SuggestDraft } from "./schemas";
+import type { SuggestExistingNote } from "./prompt";
 import { SUGGEST_PER_PAGE } from "./settings";
 import { batchPages, planWikiNotes, toManifestHighlights, verifySpans, type VerifiedSpan, type WikiNoteIn } from "./suggestPlan";
-import { safeTitle } from "./topicNote";
+import { noteSections, safeTitle } from "./topicNote";
 
 /** How much of an already-selected passage the prompt shows (src/prompt.ts:267). */
 const ALREADY_SELECTED_CHARS = 80;
@@ -72,18 +73,27 @@ async function wikiNotes(plugin: WikiLmPlugin, classCode: string, sources: strin
   return out.sort((a, b) => a.title.localeCompare(b.title));
 }
 
-/** Titles the model may reuse: the vault's notes plus what earlier batches proposed. */
-function existingNotesFor(
-  wiki: WikiNoteIn[],
-  newNotes: SuggestDraft["new_notes"],
-): Array<{ title: string; kind: "concept" | "entity" }> {
-  const out: Array<{ title: string; kind: "concept" | "entity" }> = [];
+/**
+ * Titles the model may reuse: the vault's notes plus what earlier batches
+ * proposed. A vault note is listed with its `##` headings, so the model can
+ * file a span under the subtopic it belongs to rather than found a note
+ * beside it; a note proposed earlier in this run has no page yet and so no
+ * sections.
+ */
+function existingNotesFor(wiki: WikiNoteIn[], newNotes: SuggestDraft["new_notes"]): SuggestExistingNote[] {
+  const out: SuggestExistingNote[] = [];
   const seen = new Set<string>();
-  for (const n of [...wiki, ...newNotes]) {
+  for (const n of wiki) {
     const key = n.title.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ title: n.title, kind: n.kind });
+    out.push({ title: n.title, kind: n.kind, sections: noteSections(n.md) });
+  }
+  for (const n of newNotes) {
+    const key = n.title.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ title: n.title, kind: n.kind, sections: [] });
   }
   return out;
 }

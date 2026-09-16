@@ -220,10 +220,12 @@ export function buildQuizGradeMessage(a: QuizGradeMessageArgs): string {
   ].join("\n\n");
 }
 
-/** One existing wiki note as the suggest prompt sees it: its title and which of the two kinds it is. */
+/** One existing wiki note as the suggest prompt sees it: its title, which of the two kinds it is, and its sections. */
 export interface SuggestExistingNote {
   title: string;
   kind: "concept" | "entity";
+  /** The note's `##` headings in order — its subtopics. Empty or absent for a note with none, or one not written yet. */
+  sections?: string[];
 }
 
 export interface SuggestMessageArgs {
@@ -242,6 +244,9 @@ export interface SuggestMessageArgs {
 /** How much of an already-selected passage is shown before it is cut: enough to recognise, not enough to re-quote. */
 const ALREADY_SELECTED_CHARS = 80;
 
+/** How many of a note's sections are listed. A page with more than this is an outline, not a note, and its first twenty say what it holds. */
+const SECTIONS_SHOWN = 20;
+
 /**
  * Build the user message for a suggest request.
  *
@@ -250,6 +255,12 @@ const ALREADY_SELECTED_CHARS = 80;
  * last, so the model reads the task with the material already in view. Each
  * page is introduced by its own `[page N]` marker, because every span reports
  * the page it came from and a span that crossed a marker could not name one.
+ *
+ * Each existing note is listed with its `##` headings indented beneath it.
+ * Shown titles alone, the model founded a new note for every subtopic it met
+ * — "Receptor Subtypes" beside a pharmacology note that already had a
+ * Receptors section — because it could not see that the subtopic had a home.
+ * The headings are what let a span be filed inside the note it belongs to.
  *
  * The already-selected passages are printed cut to their first eighty
  * characters. They are there so the model does not offer the same passage
@@ -264,7 +275,9 @@ export function buildSuggestMessage(a: SuggestMessageArgs): string {
   const body = a.pages.map((p) => `[page ${p.page}]\n${p.text}`).join("\n\n");
   const first = a.pages.length ? a.pages[0].page : 0;
   const last = a.pages.length ? a.pages[a.pages.length - 1].page : 0;
-  const notes = a.existingNotes.map((n) => `${n.title} (${n.kind})`).join("\n");
+  const notes = a.existingNotes
+    .map((n) => [`${n.title} (${n.kind})`, ...(n.sections ?? []).slice(0, SECTIONS_SHOWN).map((s) => `  ## ${s}`)].join("\n"))
+    .join("\n");
   const selected = a.alreadySelected.map((s) => `p.${s.page}: ${cut(s.text, ALREADY_SELECTED_CHARS)}`).join("\n");
   const cap = transcript
     ? `The transcript is a recording of the lecture that accompanies these pages. Select at most ${a.perPage} spans per page and at most ${a.remaining} in this batch, and fewer when the transcript supports fewer.`

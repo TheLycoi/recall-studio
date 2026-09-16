@@ -721,3 +721,147 @@ test("the class schema still merges under Highlights", () => {
   assert.ok(!r.md.includes("## Mentions in Source"));
   assert.ok(!r.md.includes("updated:"), "the class schema has no dated frontmatter to touch");
 });
+
+// ---- sections: filing a span under a note's own subtopic ----------------
+
+test("noteSections lists a note's ## headings as the reader wrote them, marks and links removed", () => {
+  const md = [
+    "---",
+    "class: HBIO250",
+    "---",
+    "# Pharmacology",
+    "",
+    "## Dosing",
+    "text",
+    "## Drug Safety & The Therapeutic Index",
+    "text",
+    "## Receptors ",
+    "text",
+    "## [[WADA]]",
+    "## ==Preparation",
+    "## **Equations of Motion**:",
+    "### A division of one, not a place of its own",
+    "```",
+    "## not a heading",
+    "```",
+    "## Dosing",
+    "",
+  ].join("\n");
+  assert.deepEqual(tn.noteSections(md), [
+    "Dosing",
+    "Drug Safety & The Therapeutic Index",
+    "Receptors",
+    "WADA",
+    "Preparation",
+    "Equations of Motion",
+  ]);
+});
+
+test("headingKey and safeHeading fold the forms a heading is typed in", () => {
+  assert.equal(tn.headingKey("## Receptors "), "receptors");
+  assert.equal(tn.headingKey("**Receptors**:"), "receptors");
+  assert.equal(tn.safeHeading("## Receptors\n"), "Receptors");
+  assert.equal(tn.safeHeading("   "), "");
+});
+
+test("a merge with a section appends inside that section, before the next heading", () => {
+  const existing = `---
+class: HBIO250
+---
+
+## Dosing
+Dose text.
+
+## Receptors
+Receptor text.
+
+## Highlights
+
+> [!PDF|yellow] [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|${PDF_BASENAME}, p.4]]
+> > Some highlight text
+`;
+  // "receptors" finds "## Receptors " — case and the trailing space are not part of the name.
+  const r = tn.mergeWikiHighlights(existing, PDF_BASENAME, "HBIO250", [wikiHighlight(), HL(6, "b")], { section: "receptors" });
+  assert.equal(r.added, 1);
+  assert.equal(r.skipped, 1, "the highlight the page already holds is still skipped");
+  assert.deepEqual(r.section, { heading: "Receptors", created: false });
+
+  const receptors = r.md.indexOf("## Receptors");
+  const newLink = r.md.indexOf("page=6&selection=0,0,0,4");
+  const highlights = r.md.indexOf("## Highlights");
+  assert.ok(receptors < newLink && newLink < highlights, "the callout sits inside Receptors, ahead of Highlights");
+  assert.ok(r.md.includes("Receptor text.\n\n> [!PDF"), "appended after the section's own text");
+  assert.ok(r.md.includes("## Dosing\nDose text.\n\n## Receptors"), "the sections before it are untouched");
+});
+
+test("a merge with a section the page lacks creates it before the trailing sections", () => {
+  const existing = `---
+class: HBIO250
+---
+
+## Receptors
+Receptor text.
+
+## Highlights
+
+## Related topics
+- [[Pharmacology]]
+`;
+  const r = tn.mergeWikiHighlights(existing, PDF_BASENAME, "HBIO250", [HL(19, "c")], { section: "COX Inhibitors and NSAIDs" });
+  assert.equal(r.added, 1);
+  assert.deepEqual(r.section, { heading: "COX Inhibitors and NSAIDs", created: true });
+  const receptors = r.md.indexOf("## Receptors");
+  const cox = r.md.indexOf("## COX Inhibitors and NSAIDs");
+  const highlights = r.md.indexOf("## Highlights");
+  assert.ok(receptors < cox && cox < highlights, "a new subtopic sits with the subtopics, ahead of the highlights");
+  assert.ok(r.md.includes("## COX Inhibitors and NSAIDs\n\n> [!PDF"), r.md);
+});
+
+test("a karpathy merge with a new section places it before Related Concepts and still dates the page", () => {
+  const page = `---
+type: concept
+created: 2026-09-01
+updated: 2026-09-01
+tags: [theory]
+aliases:
+  - "Kept Alias"
+generation_complete: true
+---
+
+
+# Chunking
+
+## Definition
+Text.
+
+## Related Concepts
+- [[x]]
+
+## Mentions in Source
+
+`;
+  const r = tn.mergeWikiHighlights(page, "Paper", "", [HL(2, "a")], { schema: "karpathy", section: "Chunk Size", today: "2026-09-16" });
+  assert.equal(r.added, 1);
+  const definition = r.md.indexOf("## Definition");
+  const section = r.md.indexOf("## Chunk Size");
+  const related = r.md.indexOf("## Related Concepts");
+  assert.ok(definition < section && section < related, r.md);
+  assert.ok(r.md.includes("updated: 2026-09-16"));
+  assert.ok(r.md.includes("created: 2026-09-01"));
+});
+
+test("a section merge with nothing new to add leaves the page byte-identical", () => {
+  const existing = `---
+class: HBIO250
+---
+
+## Receptors
+
+> [!PDF|yellow] [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|${PDF_BASENAME}, p.4]]
+> > Some highlight text
+`;
+  const r = tn.mergeWikiHighlights(existing, PDF_BASENAME, "HBIO250", [wikiHighlight()], { section: "Receptors" });
+  assert.equal(r.added, 0);
+  assert.equal(r.md, existing);
+  assert.equal(r.section, undefined);
+});

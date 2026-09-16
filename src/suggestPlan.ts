@@ -4,7 +4,7 @@
 // `obsidian` import (see src/pageMap.ts:1-8): bundled standalone and exercised
 // with node --test (test/suggestPlan.test.mjs).
 import { selectionFor, type PageMap } from "./pageMap";
-import { mergeWikiHighlights, renderWikiNote, safeTitle, type PreparedNote, type WikiSchema } from "./topicNote";
+import { mergeWikiHighlights, renderWikiNote, safeHeading, safeTitle, type PreparedNote, type WikiSchema } from "./topicNote";
 import type { SuggestDraft } from "./schemas";
 import { MANIFEST_CONTEXT_CHARS, sortAndAssignIds, type ManifestHighlight } from "./manifest";
 import { highlightKey, type PdfTarget } from "./pdflink";
@@ -31,6 +31,8 @@ export interface VerifiedSpan {
   label: string;
   noteTitle: string;
   noteKind: "concept" | "entity";
+  /** The `##` heading of the note this span goes under, or "" for the note as a whole. */
+  noteSection: string;
   target: PdfTarget;
   key: string;
   sel: SelectionRange;
@@ -113,6 +115,7 @@ export function verifySpans(draft: SuggestDraft, maps: Map<number, PageMap>, opt
       label: s.label,
       noteTitle: safeTitle(s.note_title ?? ""),
       noteKind: s.note_kind,
+      noteSection: safeHeading(s.note_section ?? ""),
       target,
       key,
       sel,
@@ -193,6 +196,8 @@ interface Group {
   title: string;
   kind: "concept" | "entity";
   rows: ManifestHighlight[];
+  /** The section each row was assigned to, by highlight key; "" for the note as a whole. */
+  sectionByKey: Map<string, string>;
 }
 
 /**
@@ -204,6 +209,12 @@ interface Group {
  * kept under its own title rather than dumped into a note named after the
  * source PDF. `orphanTitles` still records these, in first-seen order, so the
  * preview can flag them.
+ *
+ * Within an existing note, spans are filed by the section they named: each
+ * section is merged in turn on the same text, so a note gains as many
+ * sections as its spans asked for and is still written once. A note written
+ * fresh takes its sections from the schema, not from the spans, so a section
+ * named on one of those is set aside.
  */
 export function planWikiNotes(
   spans: VerifiedSpan[],
@@ -239,11 +250,14 @@ export function planWikiNotes(
 
     let group = groups.get(key);
     if (!group) {
-      group = { title: s.noteTitle, kind: s.noteKind, rows: [] };
+      group = { title: s.noteTitle, kind: s.noteKind, rows: [], sectionByKey: new Map() };
       groups.set(key, group);
       order.push(key);
     }
-    if (!group.rows.some((r) => r.key === row.key)) group.rows.push(row);
+    if (!group.rows.some((r) => r.key === row.key)) {
+      group.rows.push(row);
+      group.sectionByKey.set(row.key, s.noteSection);
+    }
   }
 
   const notes: PreparedNote[] = [];
@@ -254,10 +268,33 @@ export function planWikiNotes(
 
     const existing = wikiByTitle.get(key);
     if (existing) {
-      const merged = mergeWikiHighlights(existing.md, opts.pdfBasename, opts.classCode, rows, { schema: opts.schema });
+      const bySection = new Map<string, ManifestHighlight[]>();
+      for (const row of rows) {
+        const section = group.sectionByKey.get(row.key) ?? "";
+        const list = bySection.get(section);
+        if (list) list.push(row);
+        else bySection.set(section, [row]);
+      }
+
+      let md = existing.md;
+      let added = 0;
+      let skipped = 0;
+      const sections: NonNullable<PreparedNote["sections"]> = [];
+      for (const [section, sectionRows] of bySection) {
+        const merged = mergeWikiHighlights(md, opts.pdfBasename, opts.classCode, sectionRows, {
+          schema: opts.schema,
+          section: section || undefined,
+        });
+        md = merged.md;
+        added += merged.added;
+        skipped += merged.skipped;
+        if (merged.section) {
+          sections.push({ heading: merged.section.heading, keys: sectionRows.map((r) => r.key), created: merged.section.created });
+        }
+      }
       // Nothing new to write: the note already holds every one of these
       // callouts, so offering it to the user would be a no-op diff.
-      if (merged.added === 0) continue;
+      if (added === 0) continue;
       notes.push({
         title: group.title,
         path: existing.path,
@@ -265,9 +302,10 @@ export function planWikiNotes(
         summary: "",
         highlights: rows,
         related: [],
-        content: merged.md,
-        added: merged.added,
-        skipped: merged.skipped,
+        content: md,
+        added,
+        skipped,
+        sections,
       });
       continue;
     }

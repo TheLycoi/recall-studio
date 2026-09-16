@@ -543,8 +543,8 @@ test("buildSuggestMessage cuts an already-selected passage to eighty characters"
 test("SuggestOut accepts a draft of spans and new notes", () => {
   const draft = {
     spans: [
-      { page: 3, quote: "Doping is defined in the Code.", label: "Definition of doping", note_title: "Doping", note_kind: "concept" },
-      { page: 4, quote: "WADA was founded in 1999.", label: "WADA founded 1999", note_title: "WADA", note_kind: "entity" },
+      { page: 3, quote: "Doping is defined in the Code.", label: "Definition of doping", note_title: "Doping", note_kind: "concept", note_section: "Definitions" },
+      { page: 4, quote: "WADA was founded in 1999.", label: "WADA founded 1999", note_title: "WADA", note_kind: "entity", note_section: "" },
     ],
     new_notes: [{ title: "WADA", kind: "entity", summary: "One. Two. Three." }],
   };
@@ -601,4 +601,40 @@ test("SUGGEST_SYSTEM reuses the highlighter's and the digest's own sentences", (
   );
   assert.ok(src.includes("Nothing from outside the paper."), "the digest's summary rules are reused");
   assert.ok(src.includes("[page N]"), "the page marker is named");
+});
+
+test("buildSuggestMessage lists each existing note's sections under its title", () => {
+  const msg = p.buildSuggestMessage({
+    ...suggestBase,
+    existingNotes: [
+      { title: "Pharmacology", kind: "concept", sections: ["Dosing", "Receptors"] },
+      { title: "Pharmacodynamics", kind: "concept", sections: [] },
+      { title: "WADA", kind: "entity" },
+    ],
+  });
+  assert.ok(
+    msg.includes("Pharmacology (concept)\n  ## Dosing\n  ## Receptors\nPharmacodynamics (concept)\nWADA (entity)"),
+    "sections are indented under their note; a note without any prints as before",
+  );
+
+  const many = Array.from({ length: 25 }, (_, i) => `Section ${i + 1}`);
+  const capped = p.buildSuggestMessage({ ...suggestBase, existingNotes: [{ title: "Outline", kind: "concept", sections: many }] });
+  assert.ok(capped.includes("  ## Section 20"), "the first twenty are shown");
+  assert.ok(!capped.includes("  ## Section 21"), "and no more");
+});
+
+test("SuggestOut requires note_section on every span", () => {
+  const draft = {
+    spans: [{ page: 3, quote: "Q.", label: "L", note_title: "Doping", note_kind: "concept" }],
+    new_notes: [],
+  };
+  assert.equal(schemas.SuggestOut.safeParse(draft).success, false, "a span without note_section does not parse");
+  assert.equal(schemas.SuggestOut.safeParse({ ...draft, spans: [{ ...draft.spans[0], note_section: "" }] }).success, true, "empty is the form for none");
+});
+
+test("SUGGEST_SYSTEM tells the model where in a note a span goes", () => {
+  const src = readFileSync("src/llm.ts", "utf8");
+  assert.ok(src.includes("<where_in_a_note_a_span_goes>"), "the rule block exists");
+  assert.ok(src.includes("A subtopic of an existing note belongs inside that note, not beside it."), "and states the rule");
+  assert.ok(src.includes("every note_section is"), "the closing check covers the section");
 });
