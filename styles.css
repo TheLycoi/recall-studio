@@ -500,6 +500,16 @@
   width: 100%;
   margin-bottom: var(--size-4-2);
 }
+/* The lint report scrolls inside the modal so the fix buttons below it stay
+   on screen: a vault with 200 findings would otherwise push them out of
+   reach, which is the one thing the reader opened the modal for. */
+.wikilm-lint-report {
+  max-height: 50vh;
+  overflow-y: auto;
+  padding: var(--size-4-2) 0;
+  font-size: var(--font-ui-small);
+  white-space: pre-wrap;
+}
 
 /* Status bar ----------------------------------------------------------- */
 .wikilm-statusbar {

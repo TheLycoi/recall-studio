@@ -13,6 +13,8 @@ import {
 } from "./retrieval";
 import type { Graph } from "./graph";
 import { lintVault, renderVaultLint, WIKI_SCHEMA, type LintPage } from "./vaultLint";
+import { planLinkFixes, applyFixesToNote, type FixPage, type LinkFix } from "./vaultFix";
+import { LintReportModal } from "./modals";
 import { checkAnswer, emptyIndexAnswer, noEvidenceAnswer, renderGroundingLine, VERIFY_BANNER, type GroundingReport } from "./askCheck";
 import { matchCommand, renderHelp, tokenOverlapScorer } from "./chatCommands";
 import { WIKILM_COMMANDS, type WikiLmCommand } from "./commands";
@@ -219,10 +221,101 @@ export class ChatPanel {
         sources.set(file.path, await this.plugin.app.vault.cachedRead(file));
       }
 
-      this.turns.push({ role: "assistant", text: renderVaultLint(lintVault(pages, { schema: WIKI_SCHEMA, sources })) });
+      const report = lintVault(pages, { schema: WIKI_SCHEMA, sources });
+      const rendered = renderVaultLint(report);
+      this.turns.push({ role: "assistant", text: rendered });
       this.trim();
+
+      // The report is a turn in the log either way; the modal is what makes it
+      // actionable. Planning the fixes here rather than inside the modal keeps
+      // the button's count honest — it says what will actually change, not how
+      // many dead links were found.
+      const plan = planLinkFixes(report.issues, this.fixPages(pages), new Map(pages.map((p) => [p.path, p.content])), prefix);
+      const schemaViolations = report.issues.filter((i) => i.id === "schema-violation").length;
+      new LintReportModal(
+        this.plugin.app,
+        rendered,
+        { deadLinksFixable: plan.fixable.length, deadLinksUnresolved: plan.unresolved.length, schemaViolations },
+        { onFixDeadLinks: () => void this.applyLinkFixes(plan.fixable) },
+      ).open();
     } catch (e) {
       this.pushSystem(`Wiki check failed: ${describeError(e)}`);
+    } finally {
+      this.busy = false;
+      this.status = "";
+      this.rerender();
+    }
+  }
+
+  /**
+   * The wiki pages as link targets.
+   *
+   * `title` is the filename, because that is what a wikilink addresses.
+   * `displayTitle` is the page's own `# Heading`, which is what a repaired
+   * link should show the reader — a slug in prose reads as a filename, and
+   * title-casing one cannot recover the punctuation a real heading has.
+   */
+  private fixPages(pages: LintPage[]): FixPage[] {
+    return pages.map((p) => {
+      const cache = this.plugin.app.metadataCache.getCache(p.path);
+      const fmAliases = cache?.frontmatter?.aliases;
+      const aliases = Array.isArray(fmAliases)
+        ? fmAliases.filter((a): a is string => typeof a === "string")
+        : typeof fmAliases === "string"
+          ? [fmAliases]
+          : [];
+      return {
+        path: p.path,
+        title: (p.path.split("/").pop() ?? p.path).replace(/\.md$/i, ""),
+        displayTitle: cache?.headings?.find((h) => h.level === 1)?.heading,
+        aliases,
+      };
+    });
+  }
+
+  /**
+   * Write the planned link rewrites, one pass per note.
+   *
+   * Grouped by note so a page with six bad links is read and written once, and
+   * `process` is used rather than `modify` so a note edited between the lint
+   * and the click is rewritten from what it says now, not from the stale copy
+   * the lint read.
+   */
+  private async applyLinkFixes(fixes: LinkFix[]): Promise<void> {
+    if (this.busy || fixes.length === 0) return;
+    this.busy = true;
+    this.status = "fixing links…";
+    this.rerender();
+    try {
+      const byNote = new Map<string, LinkFix[]>();
+      for (const fix of fixes) {
+        const list = byNote.get(fix.path);
+        if (list) list.push(fix);
+        else byNote.set(fix.path, [fix]);
+      }
+
+      let changed = 0;
+      let skipped = 0;
+      for (const [notePath, list] of byNote) {
+        const file = this.plugin.app.vault.getAbstractFileByPath(notePath);
+        if (!(file instanceof TFile)) {
+          skipped += list.length;
+          continue;
+        }
+        let touched = false;
+        await this.plugin.app.vault.process(file, (data) => {
+          const next = applyFixesToNote(data, list);
+          touched = next !== data;
+          return next;
+        });
+        if (touched) changed += list.length;
+        else skipped += list.length;
+      }
+
+      const note = skipped > 0 ? ` ${skipped} left as they were.` : "";
+      this.pushSystem(`Fixed ${changed} link${changed === 1 ? "" : "s"} across ${byNote.size} note${byNote.size === 1 ? "" : "s"}.${note}`);
+    } catch (e) {
+      this.pushSystem(`Fixing links failed: ${describeError(e)}`);
     } finally {
       this.busy = false;
       this.status = "";

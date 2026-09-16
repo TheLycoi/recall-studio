@@ -673,3 +673,97 @@ export function previewSuggestions(
 ): Promise<SuggestPreviewChoice[] | null> {
   return new Promise((resolve) => new SuggestPreviewModal(app, notes, extras, pdfBasename, resolve).open());
 }
+
+/** What the lint found, in the shape the report modal needs to draw its buttons. */
+export interface LintFixCounts {
+  deadLinksFixable: number;
+  deadLinksUnresolved: number;
+  schemaViolations: number;
+}
+
+/** What each button does. An absent callback hides its button. */
+export interface LintFixActions {
+  onFixDeadLinks?: () => void;
+  onRetagViolations?: () => void;
+}
+
+/**
+ * The lint report, with a button per repair the report makes possible.
+ *
+ * The report itself is markdown rendered into a scrolling box, so it reads the
+ * same here as it does in the chat log. The buttons below it are gated on
+ * counts rather than always shown: a button offering to fix nothing teaches
+ * the reader to ignore the row it sits in.
+ *
+ * Only repairs that need no judgement appear. A dead link whose page exists
+ * under another spelling is a rewrite; a dead link to a page nobody has
+ * written is a decision, and is reported but never offered as a button.
+ *
+ * Shape follows gd4ai/obsidian-llm-wiki's lint modal — report, then
+ * count-gated fix buttons — reimplemented against this plugin's own types.
+ */
+export class LintReportModal extends Modal {
+  constructor(
+    app: App,
+    private report: string,
+    private counts: LintFixCounts,
+    private actions: LintFixActions,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.addClass("wikilm-modal");
+    contentEl.createEl("h3", { text: "Wiki check" });
+
+    const box = contentEl.createDiv({ cls: "wikilm-lint-report" });
+    // The report is this plugin's own markdown, not user input, but it is
+    // rendered as text rather than HTML so a note title containing angle
+    // brackets cannot become markup.
+    for (const line of this.report.split("\n")) box.createDiv({ text: line });
+
+    const { deadLinksFixable, deadLinksUnresolved, schemaViolations } = this.counts;
+    const row = new Setting(contentEl);
+
+    if (deadLinksFixable > 0 && this.actions.onFixDeadLinks) {
+      row.addButton((b) =>
+        b
+          .setCta()
+          .setButtonText(`Fix ${deadLinksFixable} link${deadLinksFixable === 1 ? "" : "s"}`)
+          .setTooltip("Rewrite links whose page exists under another spelling")
+          .onClick(() => {
+            this.close();
+            this.actions.onFixDeadLinks?.();
+          }),
+      );
+    }
+
+    if (schemaViolations > 0 && this.actions.onRetagViolations) {
+      row.addButton((b) =>
+        b
+          .setButtonText(`Retag ${schemaViolations}`)
+          .setTooltip("Set each page's tag to one this wiki uses")
+          .onClick(() => {
+            this.close();
+            this.actions.onRetagViolations?.();
+          }),
+      );
+    }
+
+    row.addButton((b) => b.setButtonText("Close").onClick(() => this.close()));
+
+    // Said plainly rather than left as the gap between two numbers: these are
+    // the links a button cannot honestly fix.
+    if (deadLinksUnresolved > 0) {
+      contentEl.createEl("p", {
+        cls: "wikilm-muted",
+        text: `${deadLinksUnresolved} dead link${deadLinksUnresolved === 1 ? "" : "s"} point at pages that do not exist. Write the page or drop the link — the report lists them.`,
+      });
+    }
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
