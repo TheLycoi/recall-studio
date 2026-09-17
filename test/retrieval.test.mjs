@@ -144,6 +144,43 @@ test("indexNote returns 14 units across the three notes with the right kinds", (
   assert.ok(stages.every((u) => u.kind === "claim"));
 });
 
+test("indexNote skips the line that says where a hand-written note came from", () => {
+  // No `## Highlights`, no `## Key claims`: the prose fallback indexes this.
+  const md = [
+    "## Stages of Change",
+    "",
+    "Source: *The Professional's Guide to Health and Wellness Coaching* (American Council on Exercise), Chapter 3.",
+    "",
+    "- **Traits:** Unaware or under-aware of the problem, or believe it cannot be solved.",
+    "- Explain and personalize the inherent risks",
+  ].join("\n");
+  const units = rt.indexNote("wiki/concepts/Stages of Change.md", md);
+
+  // The attribution is metadata about the note, not a claim in it. Left in, the
+  // quiz asked which organisation published the table instead of asking about
+  // the stages themselves.
+  assert.equal(
+    units.some((u) => /American Council on Exercise/.test(u.text)),
+    false,
+    "the citation line is not evidence",
+  );
+  assert.equal(units.length, 2, "the two real statements survive");
+  assert.match(units[0].text, /Unaware or under-aware/);
+});
+
+test("indexNote keeps a sentence that merely mentions a source", () => {
+  // The rule is anchored at the start of the line, so a real statement that
+  // happens to discuss sources is still evidence.
+  const md = [
+    "## Media",
+    "",
+    "- Utilize general sources, including media, Internet, and brochures to increase awareness",
+  ].join("\n");
+  const units = rt.indexNote("wiki/concepts/Media.md", md);
+  assert.equal(units.length, 1);
+  assert.match(units[0].text, /Utilize general sources/);
+});
+
 test("indexNote carries titles, ids, pages and targets", () => {
   const receptors = rt.indexNote(RECEPTORS_PATH, RECEPTORS_MD);
   assert.deepEqual(receptors.map((u) => u.page), [4, 5, 6]);

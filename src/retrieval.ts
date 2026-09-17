@@ -177,6 +177,12 @@ function proseUnits(path: string, noteTitle: string, body: string): EvidenceUnit
     const text = cleanProse(line);
     // Below the length of a real statement, a fragment only adds noise.
     if (text.length < 12) continue;
+    // A line naming where the note came from is metadata about the note, not a
+    // claim inside it — the same reason a heading is skipped. Left in, it is
+    // indistinguishable from evidence, and the quiz asked which organisation
+    // published the source table: bibliography the reader never set out to
+    // learn, in place of the subject sitting directly under it.
+    if (CITATION_LINE.test(text)) continue;
 
     out.push({
       id: `${path}#p${i}`,
@@ -193,6 +199,16 @@ function proseUnits(path: string, noteTitle: string, body: string): EvidenceUnit
 
   return out;
 }
+
+/**
+ * A line that says where the note's material came from.
+ *
+ * Anchored at the start so it catches the citation and not a sentence that
+ * happens to discuss sources: "Source: …", "Adapted from …", "Reference: …"
+ * open a line whose job is attribution. A passing mention inside a real
+ * statement never matches, because the words are not at the front.
+ */
+const CITATION_LINE = /^\s*(?:source|sources|adapted from|adapted|reference|references|ref|citation|cited from|from|credit|credits|via|see also|further reading)\b\s*[::—–-]?/i;
 
 /** The first PDF wikilink on a line, when it resolves to a real target. */
 function firstPdfTarget(line: string): { target: PdfTarget; pdfBasename: string } | null {
