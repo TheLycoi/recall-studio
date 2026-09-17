@@ -17,11 +17,15 @@
  */
 import { indexNote, type EvidenceUnit } from "./retrieval";
 import { linkKey, noteLinks } from "./graph";
+import { noteAliases } from "./topicNote";
+import { highlightKey } from "./pdflink";
+import { findDuplicates, type DuplicatePage } from "./duplicates";
 
 export type VaultIssueId =
   | "empty-note"
   | "no-evidence"
   | "dead-link"
+  | "duplicate-pages"
   | "orphan"
   | "unlinked"
   | "ungrounded-quote"
@@ -267,11 +271,20 @@ export function lintVault(pages: LintPage[], options: LintOptions = {}): VaultLi
   }
 
   let units = 0;
+  const dupPages: DuplicatePage[] = [];
   for (const page of pages) {
     const title = titleOf(page.path);
     const body = page.content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
     const indexed: EvidenceUnit[] = indexNote(page.path, page.content);
     units += indexed.length;
+    dupPages.push({
+      path: page.path,
+      title,
+      aliases: noteAliases(page.content),
+      evidence: indexed
+        .filter((u) => u.target !== null && u.pdfBasename !== null)
+        .map((u) => `${u.pdfBasename}#${highlightKey(u.target as NonNullable<EvidenceUnit["target"]>)}`),
+    });
 
     if (body.length === 0) {
       issues.push({ id: "empty-note", path: page.path, title });
@@ -358,6 +371,10 @@ export function lintVault(pages: LintPage[], options: LintOptions = {}): VaultLi
     else if (inn === 0) issues.push({ id: "unlinked", path: page.path, title });
   }
 
+  for (const dup of findDuplicates(dupPages)) {
+    issues.push({ id: "duplicate-pages", path: dup.a, title: titleOf(dup.a), target: dup.b, detail: dup.detail });
+  }
+
   // Sorted by how much a finding matters, then by note, so an unchanged vault
   // produces a byte-identical report and the worst thing is always on top.
   const severity = new Map(ORDER.map((id, i) => [id, i]));
@@ -381,6 +398,7 @@ export const VAULT_ISSUE_LABELS: Record<VaultIssueId, string> = {
   orphan: "Cut off: no links in or out, so the graph cannot reach it",
   "schema-violation": "Off-schema: a reader filtering by kind or tag will miss it",
   "dead-link": "Dead link: points at a note that does not exist",
+  "duplicate-pages": "Two pages, one subject: they share a name or cite the same span",
   "no-aliases": "No aliases: only found under its own exact title",
   unlinked: "Nothing links here: only reachable by searching its own words",
 };
@@ -398,6 +416,7 @@ const ORDER: VaultIssueId[] = [
   "schema-violation",
   "no-aliases",
   "dead-link",
+  "duplicate-pages",
   "orphan",
   "unlinked",
   "empty-note",

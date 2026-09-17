@@ -236,3 +236,16 @@ test("the ungrounded quote leads the report", () => {
   assert.ok(quoteAt > -1 && emptyAt > -1);
   assert.ok(quoteAt < emptyAt, "a wrong answer outranks a missing one");
 });
+
+test("two pages citing the same PDF span are reported as duplicate pages", () => {
+  const callout = (q) =>
+    `## Highlights\n\n> [!PDF|yellow] [[Pharm.pdf#page=4&selection=2,0,33,19&color=yellow|Pharm, p.4]]\n> > ${q}`;
+  const r = vl.lintVault([
+    page("wiki/a.md", "type: concept", callout("Receptors bind ligands with high affinity.")),
+    page("wiki/b.md", "type: concept", callout("Receptors bind ligands with high affinity.")),
+  ]);
+  const dup = r.issues.filter((i) => i.id === "duplicate-pages");
+  assert.equal(dup.length, 1);
+  assert.equal(dup[0].path, "wiki/a.md");
+  assert.equal(dup[0].target, "wiki/b.md");
+});
