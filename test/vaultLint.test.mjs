@@ -168,11 +168,33 @@ test("a quote citing a source the vault does not hold is unverifiable, not ungro
   assert.deepEqual(r.issues.filter((i) => i.id === "ungrounded-quote"), []);
 });
 
-test("an uncited quote is checked against every source", () => {
-  const ok = vl.lintVault([QUOTED("spacing improves retention", null)], { sources: SOURCES });
-  assert.deepEqual(ok.issues.filter((i) => i.id.endsWith("-quote")), []);
-  const bad = vl.lintVault([QUOTED("spacing is a myth", null)], { sources: SOURCES });
-  assert.equal(bad.issues.filter((i) => i.id === "ungrounded-quote").length, 1);
+test("an uncited quote is unattributed, never ungrounded, even when a source happens to contain it", () => {
+  const present = vl.lintVault([QUOTED("spacing improves retention", null)], { sources: SOURCES });
+  assert.equal(present.issues.filter((i) => i.id === "unattributed-quote").length, 1);
+  assert.deepEqual(present.issues.filter((i) => i.id === "ungrounded-quote"), []);
+  // A coincidental match in an unrelated source is not provenance.
+  const absent = vl.lintVault([QUOTED("spacing is a myth", null)], { sources: SOURCES });
+  assert.equal(absent.issues.filter((i) => i.id === "unattributed-quote").length, 1);
+  assert.deepEqual(absent.issues.filter((i) => i.id === "ungrounded-quote"), []);
+  assert.match(absent.issues[0].detail, /myth/);
+});
+
+test("findings sort by severity class before path", () => {
+  const pages = [
+    page("wiki/a.md", "type: concept", ""),
+    page(
+      "wiki/z.md",
+      'type: concept\ntags: [method]\naliases:\n  - "Z"',
+      'Prose about it.\n\n## Mentions in Source\n\n- "spacing is a myth" — [[sources/paper]]',
+    ),
+  ];
+  const r = vl.lintVault(pages, { sources: SOURCES });
+  assert.equal(r.issues[0].id, "ungrounded-quote", "a wrong quote on z outranks an empty page on a");
+  assert.equal(r.issues[0].path, "wiki/z.md");
+});
+
+test("the unattributed label says nothing can confirm the quote, not that it is wrong", () => {
+  assert.match(vl.VAULT_ISSUE_LABELS["unattributed-quote"], /No source recorded/);
 });
 
 test("quote matching survives reflowing and smart quotes", () => {

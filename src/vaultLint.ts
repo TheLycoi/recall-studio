@@ -26,6 +26,7 @@ export type VaultIssueId =
   | "unlinked"
   | "ungrounded-quote"
   | "unverifiable-quote"
+  | "unattributed-quote"
   | "schema-violation"
   | "no-aliases";
 
@@ -309,22 +310,26 @@ export function lintVault(pages: LintPage[], options: LintOptions = {}): VaultLi
         const needle = normalizeForQuote(mention.quote);
         if (needle.length === 0) continue;
 
-        const cited = mention.cited ? resolveSource(mention.cited, options.sources, known) : null;
-        if (mention.cited && cited === null) {
+        if (!mention.cited) {
+          // No source named. Nothing can confirm or deny the quote, so this
+          // is a fault of the page's record-keeping, not an accusation
+          // against the quote. Searching every source for it — what this
+          // used to do — reported "the source does not say this" about a
+          // source that was never named, and a match found that way would
+          // have been coincidence rather than provenance.
+          issues.push({ id: "unattributed-quote", path: page.path, title, detail: mention.quote });
+          continue;
+        }
+
+        const cited = resolveSource(mention.cited, options.sources, known);
+        if (cited === null) {
           // It names a source that is not in the vault, so nothing can confirm
           // or deny the quote. Distinct from a wrong quote on purpose.
           issues.push({ id: "unverifiable-quote", path: page.path, title, target: mention.cited, detail: mention.quote });
           continue;
         }
-
-        const bodies = cited !== null ? [cited] : Array.from(options.sources.values());
-        if (bodies.length === 0) {
-          issues.push({ id: "unverifiable-quote", path: page.path, title, detail: mention.quote });
-          continue;
-        }
-        const grounded = bodies.some((text) => normalizeForQuote(text).includes(needle));
-        if (!grounded) {
-          issues.push({ id: "ungrounded-quote", path: page.path, title, target: mention.cited ?? undefined, detail: mention.quote });
+        if (!normalizeForQuote(cited).includes(needle)) {
+          issues.push({ id: "ungrounded-quote", path: page.path, title, target: mention.cited, detail: mention.quote });
         }
       }
     }
@@ -353,9 +358,16 @@ export function lintVault(pages: LintPage[], options: LintOptions = {}): VaultLi
     else if (inn === 0) issues.push({ id: "unlinked", path: page.path, title });
   }
 
-  // Sorted so an unchanged vault produces a byte-identical report, which is
-  // what lets a reader diff two runs and see only what they actually fixed.
-  issues.sort((a, b) => a.path.localeCompare(b.path) || a.id.localeCompare(b.id) || (a.detail ?? "").localeCompare(b.detail ?? ""));
+  // Sorted by how much a finding matters, then by note, so an unchanged vault
+  // produces a byte-identical report and the worst thing is always on top.
+  const severity = new Map(ORDER.map((id, i) => [id, i]));
+  issues.sort(
+    (a, b) =>
+      (severity.get(a.id) ?? ORDER.length) - (severity.get(b.id) ?? ORDER.length) ||
+      a.path.localeCompare(b.path) ||
+      a.id.localeCompare(b.id) ||
+      (a.detail ?? "").localeCompare(b.detail ?? ""),
+  );
   return { notes: pages.length, units, issues };
 }
 
@@ -363,6 +375,7 @@ export function lintVault(pages: LintPage[], options: LintOptions = {}): VaultLi
 export const VAULT_ISSUE_LABELS: Record<VaultIssueId, string> = {
   "ungrounded-quote": "Quote not in its source: the page claims something the source does not say",
   "unverifiable-quote": "Quote cannot be checked: the source it cites is not in the vault",
+  "unattributed-quote": "No source recorded: nothing can confirm this quote",
   "empty-note": "Empty: nothing written in it yet",
   "no-evidence": "Nothing quotable: Ask cannot answer from this note",
   orphan: "Cut off: no links in or out, so the graph cannot reach it",
@@ -373,21 +386,22 @@ export const VAULT_ISSUE_LABELS: Record<VaultIssueId, string> = {
 };
 
 /**
- * Worst first, and the order is a claim about this product rather than a
- * generic severity scale: a page that misquotes its source is the one failure
- * that makes an answer wrong rather than merely missing, so it leads. Then
- * pages Ask cannot use at all, then pages it can use but cannot find.
+ * Worst first, in four classes: provenance and schema (what a page claims and
+ * how it is filed), then structure (links), then reachability, then emptiness.
+ * A page that misquotes its source leads because it is the one failure that
+ * makes an answer wrong rather than merely missing.
  */
 const ORDER: VaultIssueId[] = [
   "ungrounded-quote",
   "unverifiable-quote",
+  "unattributed-quote",
+  "schema-violation",
+  "no-aliases",
+  "dead-link",
+  "orphan",
+  "unlinked",
   "empty-note",
   "no-evidence",
-  "orphan",
-  "schema-violation",
-  "dead-link",
-  "no-aliases",
-  "unlinked",
 ];
 
 /** The report as markdown for the chat, worst first, with the notes named. */
