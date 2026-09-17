@@ -1,0 +1,30 @@
+WikiLM
+Copyright (c) 2026 Conrad Kelonu
+
+This product includes designs derived from obsidian-llm-wiki
+(https://github.com/gd4ai/obsidian-llm-wiki), Copyright 2025-2026
+Greener-Dalii, licensed under the Apache License, Version 2.0:
+
+    https://www.apache.org/licenses/LICENSE-2.0
+
+No source code from that project is included here. The following parts of
+WikiLM were written independently against its published design, and each
+credits it in a comment at the point of use:
+
+  - src/retrieval.ts, src/askCheck.ts — the seed-selection cascade (lexical,
+    keyword, graph expansion), the title-over-body scoring weight, and
+    answering from general knowledge with a label rather than refusing.
+
+  - src/vaultLint.ts — the vault scanners: orphans, dead links, empty pages,
+    missing aliases.
+
+  - src/vaultFix.ts, src/modals.ts — dead-link repair by tiered name
+    resolution, and a lint report whose fix buttons are gated on counts.
+
+  - src/topicNote.ts, src/suggestPlan.ts — filing new material into a section
+    of an existing page, and creating that section when it is absent.
+
+WikiLM's own policies differ from upstream's where they conflict: notably,
+new material is appended into an existing page whenever one is related,
+rather than given a page of its own unless an existing page denotes the same
+thing.

@@ -1111,3 +1111,21 @@ Layout:
 - `src/inboxView.ts` — the inbox and the Ask chat panel's host (Inbox | Chat toggle)
 - `src/anki.ts` — AnkiConnect client, note building, export
 - `src/store.ts`, `src/model.ts`, `src/util.ts`, `src/settings.ts`, `src/modals.ts`
+
+## License and credits
+
+WikiLM is MIT licensed; see [LICENSE](LICENSE).
+
+Parts of it were written against the published design of
+[obsidian-llm-wiki](https://github.com/gd4ai/obsidian-llm-wiki) (Apache-2.0,
+Copyright 2025-2026 Greener-Dalii) — the retrieval cascade, the vault lint
+scanners, dead-link repair with count-gated fix buttons, and filing new
+material into a section of an existing page. None of its source code is
+included here: each part was reimplemented against this plugin's own types and
+credits it in a comment at the point of use. [NOTICE](NOTICE) lists them.
+
+Where the two disagree, WikiLM keeps its own policy. The clearest case is what
+happens to a new subject: upstream gives every entity and concept a page of its
+own and merges only when an existing page denotes the same thing, while WikiLM
+appends into an existing page whenever one is related and creates a page only
+when nothing is.
