@@ -17,7 +17,7 @@ import {
 import { describeError } from "./llm";
 import type { Manifest, ManifestHighlight } from "./manifest";
 import { renderPdfSubpath } from "./pdflink";
-import type { EvidenceUnit } from "./retrieval";
+import { missTitle, renderMissInstruction, type QuizMiss } from "./quiz";
 
 function stripMarks(s: string): string {
   return s.replace(/==/g, "");
@@ -403,20 +403,21 @@ export function captureManifestHighlights(
 }
 
 /**
- * Queue quiz-missed evidence units as inbox highlights, so the writer /
- * critique / linter chain turns a missed question into card material. A
- * PDF-backed unit resolves back to the PDF file (so the inbox opens the exact
- * PDF++ highlight, as `captureManifestHighlights` does above); otherwise the
- * note itself is the source.
+ * Queue the passages a quiz found the reader did not know as inbox highlights,
+ * so the writer / critique / linter chain turns each into a card. The missed
+ * question rides along as the highlight's title and as the writer's
+ * per-highlight instruction (src/quiz.ts renderMissInstruction), so the card
+ * tests the fact the reader missed rather than whichever fact in the passage
+ * the writer would have chosen on its own. A PDF-backed unit resolves back to
+ * the PDF file (so the inbox opens the exact PDF++ highlight, as
+ * `captureManifestHighlights` does above); otherwise the note itself is the
+ * source.
  */
-export function captureEvidenceUnits(
-  plugin: WikiLmPlugin,
-  units: EvidenceUnit[],
-  title: string,
-): { added: number; skipped: number } {
+export function captureQuizMisses(plugin: WikiLmPlugin, misses: QuizMiss[]): { added: number; skipped: number } {
   let added = 0;
   let skipped = 0;
-  for (const unit of units) {
+  for (const miss of misses) {
+    const unit = miss.unit;
     const text = unit.text.trim();
     if (text.length < 3) {
       skipped++;
@@ -456,7 +457,8 @@ export function captureEvidenceUnits(
       line: 0,
       page,
       heading,
-      title,
+      title: missTitle(miss),
+      instruction: renderMissInstruction(miss),
       subpath,
       origin: "quiz",
     });

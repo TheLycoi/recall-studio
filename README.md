@@ -657,9 +657,8 @@ from the vault; nothing is asked that the evidence does not state.
 | `/quiz this` | quiz on the active note |
 | `/quiz <words>` | quiz on the highlights and claims that share words with `<words>` |
 | `/hint` | show the question's hint (once) |
-| `/skip` | move on; the answer and passage are shown |
-| `/idk` (or `idk`, `?`, an empty line) | "I don't know": the answer and passage are shown, nothing is graded as wrong |
-| `/stop` | end the quiz and show the summary |
+| `/skip`, `/idk` (or `idk`, `?`, an empty line) | decline the question: the answer and passage are shown, and the passage counts as one you could not produce |
+| `/stop` | end the quiz early and show the summary |
 
 Plain phrases work too: "quiz me", "quiz me on receptors", "test me on
 this note", "start a quiz about affinity"; while a quiz runs, "stop",
@@ -676,16 +675,32 @@ expected answer, and yours; it returns ✓ correct, △ partly, or ✗ not quite
 with feedback in the passage's own words, then the expected answer and the
 passage as a PDF++ callout or quote block.
 
-Difficulty escalates: a correct answer moves the next question from recall
-(a fact) to why (a mechanism) to distinguish (what separates two similar
-things); a wrong answer keeps the level and re-asks the same passage from
-another angle once. Five questions by default (**Questions per quiz**),
-retries included. The summary shows the score and the missed passages with
-two chips: **Send N missed to inbox**, which hands those passages to the
-card writer, critique, and linter like any capture (they arrive with the
-origin "quiz miss"), and **Quiz again**.
+**The quiz runs until it finds the edge of what you know.** There is no
+fixed number of questions. The probe rules follow
+[amosblomqvist/learn](https://github.com/amosblomqvist/learn): a correct
+answer jumps the tier, from recall (a fact) to why (a mechanism) to
+distinguish (what separates two similar things), and two in a row go
+straight to the top; a wrong or declined answer drops it. The edge is
+located only when it is *bracketed*: a tier you cleared (a floor) sitting
+below a tier you missed twice (a ceiling). A run of right answers is not
+"done", it means the questions were too easy, and one miss is not done
+either, because a slip and a real gap look the same at one data point. So
+the grader also names what an answer revealed, *slip*, *vocabulary*,
+*detail*, or *misconception*, with a note on the specific gap: a
+misconception is probed twice more from other angles, a slip not at all.
+**Question cap per quiz** (30) is a runaway guard, not a target.
 
-Settings: **Questions per quiz** (5), **Evidence pool per quiz** (20
+The summary shows the score, why the quiz stopped, and the missed passages
+with two chips. **Send N missed to inbox** hands each missed passage to the
+card writer, critique, and linter like any capture, with the question you
+missed, the expected answer, and the grader's diagnosis attached as the
+highlight's instruction, so the card tests the fact you missed rather than
+whichever fact in the passage the writer would have picked. Slips are not
+sent: you knew it. The highlights arrive titled with the missed question and
+with the origin "quiz miss". **Quiz again** reruns the same scope with a
+fresh pool.
+
+Settings: **Question cap per quiz** (30), **Evidence pool per quiz** (20
 matching highlights and claims), **Standing instructions for quizzes**.
 
 **What is checked before you see it (0.8.1).** The expected answer must be
@@ -712,7 +727,7 @@ One question tests one piece of evidence. Pick the number of the piece you are t
 </the_evidence_is_the_whole_source>
 
 <the_answer_must_be_in_the_evidence>
-The expected answer must be stated in the evidence you cited, and the passage that states it goes into quote, copied character for character from that piece: the words themselves, not a paraphrase, not a tidied version, not two fragments spliced with an ellipsis. The software looks the quote up in the evidence you named, and a question whose quote is not found there is thrown away and asked again, so a quote you smoothed out is a question the reader never sees.
+The expected answer must be stated in the evidence you cited, and the passage that states it goes into quote, copied character for character from that piece: the words themselves, not a paraphrase, not a tidied version, not two fragments spliced with an ellipsis. The software looks the quote up in the evidence you named, and a question whose quote is not found there is thrown away and asked again once; if that fails too, the passage is set aside for the rest of the quiz, so a quote you smoothed out is a question the reader never sees.
 
 Finding that passage first is also how you tell whether the question is askable. If you cannot point at the words that answer it, the evidence does not answer it, and you should be asking something else about the same passage.
 </the_answer_must_be_in_the_evidence>
@@ -726,7 +741,7 @@ Consistent: ask so that the same question would draw the same answer every time,
 Tractable: ask something a reader who studied this passage would get right; obscurity is not difficulty.
 Effortful: ask something that requires retrieval rather than recognition, inference from the wording, or a guess.
 
-Never ask a yes/no question, and never one whose answer is a choice between two things you named. Half of those are right by luck, and the reader learns nothing from a coin that lands well. If the answer you are about to write is "yes" or "no", the question is wrong, not the answer.
+Never ask a yes/no question, and never one whose answer is a choice between two things you named; the software rejects a question whose wording contains its own answer, and one that asks for a list. Half of those are right by luck, and the reader learns nothing from a coin that lands well. If the answer you are about to write is "yes" or "no", the question is wrong, not the answer.
 
 Never give the answer away in the wording. A question that contains the term it is asking for, or that describes the mechanism and then asks what it is called, is answered by reading it. The reader's own vocabulary is fine and preferred; the answer itself is not.
 </what_makes_a_question_worth_asking>
@@ -739,6 +754,8 @@ Difficulty 2 is a mechanism or a reason: why something happens, or how it works.
 Difficulty 3 is a distinction or an application: what separates two similar things, or which case a rule applies to. Set kind to distinguish.
 
 The tier describes what is asked, not how obscure it is. A difficulty 3 question is still answerable from the passage in front of you by a reader who studied it; it just asks them to do something with it rather than repeat it.
+
+The tier moves because the quiz is searching for one thing: the edge of what this reader knows — the point where what they can produce runs out. A right answer only proves a floor, so the tier jumps rather than inches; a wrong answer or an admitted gap marks a ceiling, so it comes back down to find where between the two the edge actually sits. Write the hardest honest question the tier allows. A quiz the reader answers perfectly has told them nothing they did not already know.
 </difficulty>
 
 <what_has_been_asked_already>
@@ -755,8 +772,8 @@ The hint is one clause the reader can ask for when they are stuck. It narrows th
 <example>
 <evidence>[3] (Receptors, p.4) Receptors have 2 important properties: they bind ligands with relatively high affinity, and they transduce a signal to produce a biological effect.</evidence>
 <task>Difficulty 1: a definition, a number, a name: recall of one fact.</task>
-<output>question: "What are the two properties that define a receptor?"; answer: "Binding ligands with high affinity, and transducing a signal to produce a biological effect."; evidence_n: 3; quote: "they bind ligands with relatively high affinity, and they transduce a signal to produce a biological effect"; hint: "One is about what it attaches to, the other about what it does next."; kind: "recall".</output>
-<note>The quote is the span that carries the answer, copied whole. The question names the subject so it is answerable without the passage in view, and it does not contain either property, so reading it gives nothing away. The hint points at the shape of the answer without naming affinity or transduction.</note>
+<output>question: "With what degree of affinity do receptors bind their ligands?"; answer: "Relatively high affinity."; evidence_n: 3; quote: "they bind ligands with relatively high affinity"; hint: "It is about how tightly, not about what happens next."; kind: "recall".</output>
+<note>One fact, not a list: the passage names two properties, and a question asking for "the two properties" would be a set the reader has to recite whole, which the software rejects. The quote is the span that carries the answer, copied whole. The question names the subject so it is answerable without the passage in view and does not contain the answer, so reading it gives nothing away. The hint points at the kind of thing wanted without naming it.</note>
 </example>
 <example>
 <evidence>[5] (Receptors, p.4) Receptors bind ligands with high affinity and transduce a signal to produce a biological effect; this distinguishes receptors from inert binding sites such as albumin, which binds and carries many drugs but does not transduce a signal.</evidence>
@@ -792,8 +809,22 @@ A blank answer never reaches you, and neither does "I don't know" or any of its 
 <feedback_and_quote>
 Feedback is one or two sentences saying what the answer got right and what it missed, in the evidence's own words. Never introduce a fact the evidence does not state, however true it is and however much it would help: the reader is checking your feedback against the passage printed below it, and a sentence they cannot find there is one they cannot use.
 
-Quote the passage that settles the grade, copied character for character from the evidence, not paraphrased. It is checked against the evidence and shown only if it is found there, which is what lets the reader overrule you when they think you were wrong.
+Quote the passage that settles the grade, copied character for character from the evidence, not paraphrased. It is checked against the evidence and shown under the grade only if it is found there; a quote that is not found marks the grade as unverified, which is what lets the reader overrule you when they think you were wrong.
 </feedback_and_quote>
+
+<what_the_answer_reveals>
+A verdict says whether the answer was right. It does not say what to do next, and those are different questions: a careless slip and a confidently-held wrong belief both score incorrect, but one needs nothing and the other needs dislodging. So name the kind of gap the answer reveals, in "gap":
+
+none — nothing worth recording. A correct answer, or one whose only fault is wording.
+slip — they know this. A typo, a misremembered name, an answer that contradicts itself in a way a second's thought would catch.
+vocabulary — the idea is right and the term for it is missing or wrong. They understand the thing and cannot name it.
+detail — the shape of the answer is right and a specific fact inside it is missing or wrong.
+misconception — they stated something the evidence contradicts, as though it were true. This is the one that matters most: a wrong model produces more wrong answers until it is replaced, so it is worth more attention than a fact that is merely absent.
+
+"gapNote" is one short clause naming the specific thing — the belief they hold, or the piece they lack. "Thinks self-efficacy rises from watching others succeed" is a gapNote; "did not understand the question" is not. It is what the next question probes, so it has to be specific enough to write a question against. Leave it empty when gap is none.
+
+Judge the gap from the answer in front of you, not from what a reader like this usually gets wrong.
+</what_the_answer_reveals>
 
 <examples>
 <example>
@@ -806,11 +837,11 @@ Quote the passage that settles the grade, copied character for character from th
 </example>
 <example>
 <evidence>[1] (Receptors, p.4) Receptors have 2 important properties: they bind ligands with relatively high affinity, and they transduce a signal to produce a biological effect.</evidence>
-<question>What are the two properties that define a receptor?</question>
-<expected_answer>Binding ligands with high affinity, and transducing a signal to produce a biological effect.</expected_answer>
-<student_answer>they bind to ligands</student_answer>
-<output>verdict: "partial"; feedback: "Binding ligands with high affinity is one of the two; the other is that they transduce a signal to produce a biological effect."; quote: "they bind ligands with relatively high affinity, and they transduce a signal to produce a biological effect".</output>
-<note>Half of what was asked for, so partial rather than incorrect. The feedback names the missing half in the evidence's words and stops there, without explaining what transduction is.</note>
+<question>What does a receptor do after it binds a ligand?</question>
+<expected_answer>It transduces a signal to produce a biological effect.</expected_answer>
+<student_answer>it binds things and then something happens</student_answer>
+<output>verdict: "partial"; feedback: "Something does happen, but the evidence names it: the receptor transduces a signal to produce a biological effect."; quote: "they transduce a signal to produce a biological effect".</output>
+<note>Right in direction, too vague to count as recall of the fact, so partial rather than incorrect. The feedback supplies the missing words from the evidence and stops there, without explaining what transduction is.</note>
 </example>
 </examples>
 
@@ -833,7 +864,7 @@ Before you return, check that your verdict rests on what the evidence states and
 | Standing instructions for Ask | *(empty)* | appended to every Ask prompt |
 | Verify answers with a second model call | off | re-checks each drafted sentence against its cited evidence before assembly; doubles the cost of a question |
 | Show the grounding line under answers | on | the coverage / kept / removed / verified summary and the unverified badge |
-| Questions per quiz | 5 | graded questions per `/quiz` session, retries included |
+| Question cap per quiz | 30 | a runaway guard: a quiz ends when it brackets the edge of what you know, and this only stops one that never does |
 | Evidence pool per quiz | 20 | matching highlights and claims a quiz draws from |
 | Standing instructions for quizzes | *(empty)* | appended to every question-writing prompt |
 

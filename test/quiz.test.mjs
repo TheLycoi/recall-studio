@@ -835,3 +835,98 @@ test("renderGradeMarkdown shows the dispute note and the verified grade quote", 
   assert.equal(s.asked[0].gradeQuoteRejected, false);
   assert.equal(s.asked[0].feedbackGrounded, true);
 });
+
+// ---- misses as cards ---------------------------------------------------------
+
+test("missesForInbox carries the missed question, its answer and the diagnosis with each passage", () => {
+  let s = session();
+  s = ask(s, { evidence_n: 1 }, "incorrect", "a ligand", { gap: "vocabulary", gapNote: "said ligand for drug" });
+  s = ask(s, { evidence_n: 2, quote: "Affinity is the strength", answer: "binding strength" }, "skipped", "", {
+    gap: "detail",
+    gapNote: "could not recall it at all",
+  });
+  s = ask(s, { evidence_n: 5, quote: "fall by half", answer: "half" }, "correct");
+  const misses = q.missesForInbox(s);
+  assert.deepEqual(
+    misses.map((m) => [m.unit.id, m.question, m.answer, m.verdict, m.gap, m.gapNote]),
+    [
+      ["r0", "What does a receptor bind with high affinity?", "a drug", "incorrect", "vocabulary", "said ligand for drug"],
+      ["r1", "What does a receptor bind with high affinity?", "binding strength", "skipped", "detail", "could not recall it at all"],
+    ],
+    "one entry per missed passage, in the order they were asked; the correct one is not there",
+  );
+});
+
+test("missesForInbox agrees with summary: slips are left out and a retried passage appears once", () => {
+  let s = session();
+  s = ask(s, { evidence_n: 1 }, "incorrect", "an answer", { gap: "slip" });
+  s = ask(s, { evidence_n: 2, quote: "Affinity is the strength", answer: "binding strength" }, "incorrect", "x", {
+    gap: "misconception",
+    gapNote: "thinks affinity is speed",
+  });
+  // The retry on the same passage, from another angle.
+  s = ask(
+    s,
+    { evidence_n: 2, question: "Affinity measures what about a drug and its receptor?", quote: "Affinity is the strength", answer: "binding strength" },
+    "incorrect",
+    "y",
+    { gap: "misconception", gapNote: "still speed" },
+  );
+  const misses = q.missesForInbox(s);
+  assert.deepEqual(misses.map((m) => m.unit.id), ["r1"]);
+  // The first miss is the one recorded: it is the question the reader failed,
+  // and the retry only confirmed it.
+  assert.equal(misses[0].question, "What does a receptor bind with high affinity?");
+  assert.equal(misses[0].gapNote, "thinks affinity is speed");
+});
+
+test("renderMissInstruction tells the writer which question was missed and why", () => {
+  const text = q.renderMissInstruction({
+    unit: unit("r0", RECEPTORS, "Receptors", "A receptor is a macromolecule that binds a drug with high affinity."),
+    question: "What does a receptor bind with high affinity?",
+    answer: "a drug",
+    verdict: "incorrect",
+    gap: "vocabulary",
+    gapNote: "said ligand for drug",
+  });
+  assert.match(text, /missed this question in a quiz/i);
+  assert.match(text, /Question: What does a receptor bind with high affinity\?/);
+  assert.match(text, /Expected answer: a drug/);
+  assert.match(text, /vocabulary: said ligand for drug/);
+  assert.match(text, /tests exactly this/i, "the card must test the fact that was missed, not another in the passage");
+});
+
+test("renderMissInstruction says when the reader declined rather than answered wrong", () => {
+  const skipped = q.renderMissInstruction({
+    unit: unit("r1", RECEPTORS, "Receptors", "Affinity is the strength with which a drug binds its receptor."),
+    question: "What does affinity measure?",
+    answer: "binding strength",
+    verdict: "skipped",
+    gap: "detail",
+    gapNote: "could not recall it at all",
+  });
+  assert.match(skipped, /could not answer it/i);
+  assert.doesNotMatch(skipped, /answered wrong/i);
+
+  // A partial with nothing diagnosed carries no gap line at all.
+  const partial = q.renderMissInstruction({
+    unit: unit("r1", RECEPTORS, "Receptors", "Affinity is the strength with which a drug binds its receptor."),
+    question: "What does affinity measure?",
+    answer: "binding strength",
+    verdict: "partial",
+    gap: "none",
+    gapNote: "",
+  });
+  assert.match(partial, /answered it only partly/i);
+  assert.doesNotMatch(partial, /none/);
+});
+
+test("missTitle is the question, shortened to a label", () => {
+  const short = { question: "What does affinity measure?" };
+  assert.equal(q.missTitle(short), "What does affinity measure?");
+  const long = { question: "In the passage on receptor pharmacology, what is the one property that separates a receptor from an inert binding site such as albumin?" };
+  const title = q.missTitle(long);
+  assert.ok(title.length <= 80, `title is ${title.length} chars`);
+  assert.ok(title.endsWith("…"), "a cut title says it was cut");
+  assert.ok(!/\s…$/.test(title), "no trailing space before the ellipsis");
+});

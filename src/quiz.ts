@@ -778,6 +778,81 @@ export function summary(session: QuizSession): { line: string; misses: AskedQues
 }
 
 /**
+ * One missed passage as the inbox receives it: the passage, the question the
+ * reader failed on it, and what the grader made of the failure.
+ *
+ * The passage alone was what the inbox used to get, and the writer then chose
+ * for itself which fact in it to card — often a different one from the fact
+ * the reader had just shown they did not know. The point of sending a miss is
+ * that specific gap, so the question travels with the passage.
+ */
+export interface QuizMiss {
+  unit: EvidenceUnit;
+  question: string;
+  answer: string;
+  verdict: Verdict;
+  gap: Gap;
+  gapNote: string;
+}
+
+/**
+ * The misses in the form the inbox wants.
+ *
+ * Built on `summary` so the two never disagree about what counts as a miss:
+ * the chip says "Send 3 missed" and three is what gets sent. A retried passage
+ * keeps its first missed question, because that is the one the reader failed;
+ * the retry only confirmed the gap from another angle.
+ */
+export function missesForInbox(session: QuizSession): QuizMiss[] {
+  const unitById = new Map(session.pool.map((u) => [u.id, u]));
+  const out: QuizMiss[] = [];
+  for (const m of summary(session).misses) {
+    const unit = unitById.get(m.unitId);
+    if (!unit) continue;
+    out.push({ unit, question: m.question, answer: m.answer, verdict: m.verdict, gap: m.gap, gapNote: m.gapNote });
+  }
+  return out;
+}
+
+/**
+ * The per-highlight instruction the card writer reads (src/llm.ts:413).
+ *
+ * It names the question and the expected answer so the card tests the fact the
+ * reader missed rather than whichever fact in the passage the writer would
+ * have picked, and it passes the diagnosis on, because a misconception wants a
+ * card whose cue rules the wrong belief out and a missing detail wants the
+ * detail. The writer's own rules still apply on top: it may shorten the answer
+ * or turn the question into a cloze, but not change what is being asked.
+ */
+export function renderMissInstruction(miss: QuizMiss): string {
+  const how =
+    miss.verdict === "skipped"
+      ? "could not answer it"
+      : miss.verdict === "partial"
+        ? "answered it only partly"
+        : "answered it wrong";
+  const lines = [
+    `The reader missed this question in a quiz on their notes; they ${how}.`,
+    `Question: ${miss.question}`,
+    `Expected answer: ${miss.answer}`,
+  ];
+  if (miss.gap !== "none" && miss.gapNote.trim()) lines.push(`What went wrong — ${miss.gap}: ${miss.gapNote.trim()}`);
+  lines.push(
+    "Write the card that tests exactly this: keep the question's subject and its expected answer (shortened or as a cloze deletion is fine), and do not card a different fact from the passage instead.",
+  );
+  return lines.join("\n");
+}
+
+const TITLE_MAX = 80;
+
+/** The highlight's label in the inbox: the question, cut to fit a title. */
+export function missTitle(miss: Pick<QuizMiss, "question">): string {
+  const q = miss.question.trim().replace(/\s+/g, " ");
+  if (q.length <= TITLE_MAX) return q;
+  return q.slice(0, TITLE_MAX - 1).replace(/\s+\S*$/, "") + "…";
+}
+
+/**
  * One question as the reader sees it: the header, then the question.
  *
  * The header carries the number and the kind and not the difficulty tier — the

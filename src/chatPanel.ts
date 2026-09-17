@@ -18,7 +18,7 @@ import { LintReportModal } from "./modals";
 import { checkAnswer, emptyIndexAnswer, noEvidenceAnswer, renderGroundingLine, VERIFY_BANNER, type GroundingReport } from "./askCheck";
 import { matchCommand, renderHelp, tokenOverlapScorer } from "./chatCommands";
 import { WIKILM_COMMANDS, type WikiLmCommand } from "./commands";
-import { captureEvidenceUnits } from "./capture";
+import { captureQuizMisses } from "./capture";
 import {
   acceptQuestion,
   applyGrade,
@@ -32,9 +32,10 @@ import {
   renderSummaryMarkdown,
   resolvePool,
   startSession,
-  summary,
+  missesForInbox,
   usableUnits,
   verifyGradeQuote,
+  type QuizMiss,
   type QuizScope,
   type QuizSession,
   type Verdict,
@@ -78,7 +79,7 @@ interface ChatTurn {
     kind: "question" | "grade" | "summary";
     index?: number;
     verdict?: Verdict;
-    misses?: EvidenceUnit[];
+    misses?: QuizMiss[];
     unverified?: boolean;
   };
 }
@@ -121,7 +122,7 @@ export class ChatPanel {
    */
   session: QuizSession | null = null;
   /** What the last finished quiz was and what was missed, kept for the summary's two chips. */
-  private lastQuiz: { scope: QuizScope; query: string; misses: EvidenceUnit[] } | null = null;
+  private lastQuiz: { scope: QuizScope; query: string; misses: QuizMiss[] } | null = null;
   /** Set by the first `/quiz` typed during a quiz; the next one restarts, any other message clears it. */
   private restartArmed = false;
 
@@ -952,17 +953,15 @@ export class ChatPanel {
   private async finishQuiz(): Promise<void> {
     const session = this.session;
     if (!session) return;
-    const { misses } = summary(session);
-    const unitById = new Map(session.pool.map((u) => [u.id, u]));
-    const missedUnits = misses
-      .map((m) => unitById.get(m.unitId))
-      .filter((u): u is EvidenceUnit => Boolean(u));
+    // Each miss carries the question the reader failed, so the card written
+    // from it tests that fact and not another one in the same passage.
+    const misses = missesForInbox(session);
 
-    this.lastQuiz = { scope: session.scope, query: session.query, misses: missedUnits };
+    this.lastQuiz = { scope: session.scope, query: session.query, misses };
     this.turns.push({
       role: "assistant",
       text: renderSummaryMarkdown(session),
-      quiz: { kind: "summary", misses: missedUnits },
+      quiz: { kind: "summary", misses },
     });
     this.session = null;
     this.restartArmed = false;
@@ -981,7 +980,7 @@ export class ChatPanel {
       this.pushSystem("Nothing was missed.");
       return;
     }
-    const { added, skipped } = captureEvidenceUnits(this.plugin, last.misses, "quiz");
+    const { added, skipped } = captureQuizMisses(this.plugin, last.misses);
     this.pushSystem(
       `Sent ${added} passage${added === 1 ? "" : "s"} to the inbox${skipped ? `, ${skipped} already there` : ""}.`,
     );
@@ -1248,7 +1247,7 @@ export class ChatPanel {
    * quiz. Sending nothing is not offered: the chip is disabled at zero rather
    * than writing an empty batch to the inbox.
    */
-  private renderSummaryChips(el: HTMLElement, misses: EvidenceUnit[]): void {
+  private renderSummaryChips(el: HTMLElement, misses: QuizMiss[]): void {
     const row = el.createDiv({ cls: "wikilm-chat-offer" });
     const send = row.createEl("button", {
       cls: "mod-cta",
