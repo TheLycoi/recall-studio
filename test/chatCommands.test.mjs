@@ -175,6 +175,21 @@ test("a prose question that mentions a command word is still answered", () => {
   assert.deepEqual(cc.matchCommand("what does the wiki say", cmds, fuzzy), { kind: "question" });
 });
 
+test("a question opening with an interrogative outranks its word overlap", () => {
+  const cmds = COMMANDS();
+  // Renaming lint-wiki to "Lint wiki: find gaps…" put both "lint" and "wiki"
+  // in the name, so this question started scoring 2 — the offer threshold —
+  // and could no longer be asked. Word count cannot separate it from the real
+  // command below; the opening word can.
+  const lint = cmds.find((c) => c.id === "lint-wiki");
+  assert.equal(fuzzy("how do I lint a wiki note")(lint.name), 2);
+  assert.deepEqual(cc.matchCommand("how do I lint a wiki note", cmds, fuzzy), { kind: "question" });
+  // Without the interrogative it is an instruction, and still offered.
+  assert.deepEqual(cc.matchCommand("lint the wiki", cmds, fuzzy), { kind: "offer", id: "lint-wiki", score: 2 });
+  // A question mark is not required for the guard to apply.
+  assert.deepEqual(cc.matchCommand("where is the wiki lint", cmds, fuzzy), { kind: "question" });
+});
+
 test("renderHelp lists one line per command", () => {
   const lines = cc
     .renderHelp(table.COMMAND_TABLE.map((c) => ({ id: c.id, name: c.name, aliases: c.aliases, hint: c.hint, available: c.hint === "always" })))

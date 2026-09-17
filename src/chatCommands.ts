@@ -61,6 +61,22 @@ const SLASH_OFFER_SCORE = 1;
  */
 const ALIAS_BONUS = 0.5;
 
+/**
+ * Words that open a question rather than an instruction.
+ *
+ * Deliberately only the opening word: "lint the wiki" is a command and "how do
+ * I lint the wiki" is not, and the difference is entirely at the front. A
+ * command phrased as a request ("show me the inbox") does not start with one
+ * of these, so it can still be offered.
+ */
+const QUESTION_OPENERS = new Set("what which who whom whose when where why how is are was were do does did can could should would will am".split(" "));
+
+/** Whether a line opens with an interrogative, so it reads as a question even without a "?". */
+function opensLikeQuestion(s: string): boolean {
+  const first = s.trim().toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean)[0];
+  return first !== undefined && QUESTION_OPENERS.has(first);
+}
+
 /** Only short lines are considered command-like; longer ones read as prose. */
 const MAX_OFFER_WORDS = 8;
 
@@ -151,6 +167,14 @@ export function matchCommand(input: string, commands: CommandLike[], fuzzy: Fuzz
   // A question mark or a long sentence is prose, whatever it scores.
   if (trimmed.endsWith("?")) return { kind: "question" };
   if (wordCount(trimmed) > MAX_OFFER_WORDS) return { kind: "question" };
+  // So is anything that opens like a question, mark or no mark. Word overlap
+  // cannot separate "lint the wiki" from "how do I lint a wiki note" — both
+  // share two words with the lint command — but the opening word can, and
+  // plenty of readers never type the "?". This matters because an offer
+  // replaces the answer (src/chatPanel.ts:427-443): a question read as a
+  // command cannot be asked at all, while a command read as a question costs
+  // one retype.
+  if (opensLikeQuestion(trimmed)) return { kind: "question" };
 
   const score = fuzzy(trimmed);
   const byName = best(commands, (c) => score(c.name));
