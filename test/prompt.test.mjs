@@ -546,7 +546,7 @@ test("SuggestOut accepts a draft of spans and new notes", () => {
       { page: 3, quote: "Doping is defined in the Code.", label: "Definition of doping", note_title: "Doping", note_kind: "concept", note_section: "Definitions" },
       { page: 4, quote: "WADA was founded in 1999.", label: "WADA founded 1999", note_title: "WADA", note_kind: "entity", note_section: "" },
     ],
-    new_notes: [{ title: "WADA", kind: "entity", summary: "One. Two. Three." }],
+    new_notes: [{ title: "WADA", kind: "entity", summary: "One. Two. Three.", closest_existing: "", why_new: "No listed note is about the agency." }],
   };
   const ok = schemas.SuggestOut.safeParse(draft);
   assert.equal(ok.success, true, "a full draft parses");
@@ -637,4 +637,19 @@ test("SUGGEST_SYSTEM tells the model where in a note a span goes", () => {
   assert.ok(src.includes("<where_in_a_note_a_span_goes>"), "the rule block exists");
   assert.ok(src.includes("A subtopic of an existing note belongs inside that note, not beside it."), "and states the rule");
   assert.ok(src.includes("every note_section is"), "the closing check covers the section");
+});
+
+test("SuggestOut requires a new note to name its closest existing note and its reason", () => {
+  const base = { spans: [], new_notes: [{ title: "X", kind: "concept", summary: "S." }] };
+  assert.equal(schemas.SuggestOut.safeParse(base).success, false, "closest_existing and why_new are required");
+  const full = { spans: [], new_notes: [{ ...base.new_notes[0], closest_existing: "", why_new: "Nothing listed is related." }] };
+  assert.equal(schemas.SuggestOut.safeParse(full).success, true);
+});
+
+test("SUGGEST_SYSTEM makes a new note the exception reached at the wall", () => {
+  const src = readFileSync("src/llm.ts", "utf8");
+  assert.ok(src.includes("the order of preference is fixed"), "the preference order is stated");
+  assert.ok(src.includes("If you can name a closest existing note, you have not reached the wall"), "naming a home means no new note");
+  assert.ok(src.includes("When unsure, prefer concept."), "the kind rule ends where upstream's does");
+  assert.ok(src.includes("every new note names a closest_existing"), "the closing check covers new notes");
 });

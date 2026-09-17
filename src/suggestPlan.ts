@@ -4,10 +4,21 @@
 // `obsidian` import (see src/pageMap.ts:1-8): bundled standalone and exercised
 // with node --test (test/suggestPlan.test.mjs).
 import { selectionFor, type PageMap } from "./pageMap";
-import { mergeWikiHighlights, renderWikiNote, safeHeading, safeTitle, type PreparedNote, type WikiSchema } from "./topicNote";
+import {
+  headingKey,
+  mergeWikiHighlights,
+  noteAliases,
+  noteSections,
+  renderWikiNote,
+  safeHeading,
+  safeTitle,
+  type PreparedNote,
+  type WikiSchema,
+} from "./topicNote";
 import type { SuggestDraft } from "./schemas";
 import { MANIFEST_CONTEXT_CHARS, sortAndAssignIds, type ManifestHighlight } from "./manifest";
 import { highlightKey, type PdfTarget } from "./pdflink";
+import { significantTokens } from "./retrieval";
 import { contextFor, pageText, selectionText, type SelectionRange } from "./pdftext";
 import { normalizeWs } from "./util";
 
@@ -181,11 +192,27 @@ export interface PlanWikiOptions {
   entitiesFolder: string;
   /** Page format this vault uses. Defaults to `class`, which is what it was. */
   schema?: WikiSchema;
+  /**
+   * Proposed titles the reader insisted on keeping as their own notes, so the
+   * routing below leaves them alone. Set from the preview's "keep as its own
+   * note" choice; empty on the first plan.
+   */
+  keepAsNew?: string[];
+}
+
+/** A proposed note filed into an existing one instead of being created. */
+export interface RoutedNote {
+  from: string;
+  to: string;
+  /** The heading it became inside `to`; empty when it was another name for `to` and its spans went to the note as a whole. */
+  heading: string;
+  why: string;
 }
 
 export interface PlanWikiResult {
   notes: PreparedNote[];
   orphanTitles: string[];
+  routed: RoutedNote[];
 }
 
 function joinPath(folder: string, file: string): string {
@@ -198,7 +225,113 @@ interface Group {
   rows: ManifestHighlight[];
   /** The section each row was assigned to, by highlight key; "" for the note as a whole. */
   sectionByKey: Map<string, string>;
+  /** Proposed notes filed into this group, by their proposed title, with the highlights each brought. */
+  routedByFrom: Map<string, { route: Route; keys: string[] }>;
 }
+
+/** Where a proposed note goes instead of being created. */
+interface Route {
+  to: WikiNoteIn;
+  heading: string;
+  why: string;
+}
+
+/**
+ * The existing note a proposed one belongs in, or null at the wall.
+ *
+ * Three tests, in order, and all of them in code rather than left to the
+ * model, because each is a fact about the vault the model can only guess at:
+ *
+ *   1. The model named a `closest_existing`. It was told that naming one
+ *      means the spans belong there, so a "new" note that still names a home
+ *      is a slip the planner corrects: it becomes a heading inside that note.
+ *   2. The proposed title is already a `##` heading of an existing note. The
+ *      subtopic has a home whether or not the model noticed; the spans go
+ *      under that heading.
+ *   3. The proposed title is an alias of an existing note — another name the
+ *      reader gave it. That is the same note, so the spans go to the note as
+ *      a whole, not under a heading named after it.
+ *   4. The proposed title is a specialization of an existing heading: every
+ *      content word of the heading occurs in it — "Receptors" in "Receptor
+ *      Subtypes and Off-Target Effects" — so the spans go under that heading.
+ *      Headings every page has are excluded, or "Summary of the Trial" would
+ *      land under ## Summary.
+ *   5. The same test against note titles: "Anti-Doping Code" is a kind of
+ *      Doping, and becomes a heading inside it.
+ *
+ * Titles the reader has insisted on keeping (`keepAsNew`) skip all five.
+ */
+function routeProposed(
+  title: string,
+  proposed: SuggestDraft["new_notes"][number] | undefined,
+  wiki: WikiNoteIn[],
+  wikiByTitle: Map<string, WikiNoteIn>,
+  keepAsNew: Set<string>,
+): Route | null {
+  if (keepAsNew.has(title.toLowerCase())) return null;
+
+  const closest = safeTitle(proposed?.closest_existing ?? "").trim();
+  if (closest && closest !== "Untitled") {
+    const home = wikiByTitle.get(closest.toLowerCase()) ?? wiki.find((w) => headingKey(w.title) === headingKey(closest));
+    if (home) {
+      const why = (proposed?.why_new ?? "").trim();
+      return { to: home, heading: title, why: why || `the model named it as part of ${home.title}` };
+    }
+  }
+
+  const key = headingKey(title);
+  for (const w of wiki) {
+    const hit = noteSections(w.md).find((h) => headingKey(h) === key);
+    if (hit) return { to: w, heading: hit, why: `“${title}” is already a section of ${w.title}` };
+  }
+  for (const w of wiki) {
+    if (noteAliases(w.md).some((a) => headingKey(a) === key)) {
+      return { to: w, heading: "", why: `“${title}” is another name for ${w.title}` };
+    }
+  }
+
+  // A one-word proposal cannot be a specialization of anything; and the
+  // heading or title must be the shorter side, or "Drug Metabolism" would
+  // count as a kind of "Drug Safety & The Therapeutic Index" on the word
+  // they share.
+  const words = new Set(significantTokens(title));
+  const specializes = (of: string): boolean => {
+    const t = significantTokens(of);
+    return t.length > 0 && t.length < words.size && t.every((x) => words.has(x));
+  };
+  if (words.size >= 2) {
+    for (const w of wiki) {
+      const hit = noteSections(w.md).find((h) => !GENERIC_HEADINGS.has(headingKey(h)) && specializes(h));
+      if (hit) return { to: w, heading: hit, why: `“${title}” is a kind of ${w.title}'s “${hit}”` };
+    }
+    for (const w of wiki) {
+      if (specializes(w.title)) return { to: w, heading: title, why: `“${title}” is a kind of ${w.title}` };
+    }
+  }
+  return null;
+}
+
+/** Headings a page has because of its schema, not because of its subject; never a home for a specialization. */
+const GENERIC_HEADINGS: ReadonlySet<string> = new Set(
+  [
+    "Summary",
+    "Highlights",
+    "Mentions in Source",
+    "Related topics",
+    "Related Concepts",
+    "Related Entities",
+    "Flashcard Seeds",
+    "Key claims",
+    "Definition",
+    "Description",
+    "Key Characteristics",
+    "Applications",
+    "Notes",
+    "References",
+    "Sources",
+    "See also",
+  ].map((h) => headingKey(h)),
+);
 
 /**
  * Group verified spans into notes to write. A title the vault already has is
@@ -209,6 +342,13 @@ interface Group {
  * kept under its own title rather than dumped into a note named after the
  * source PDF. `orphanTitles` still records these, in first-seen order, so the
  * preview can flag them.
+ *
+ * Before any of that, a proposed or orphan title is tested against the vault
+ * (`routeProposed`): one that has a home in an existing note is filed there
+ * as a heading, and only a title with no home becomes a note of its own. The
+ * policy is append-first — a new note is what happens at the wall, not the
+ * default for every subject with a name — and `routed` reports each filing
+ * so the preview can show it and the reader can overrule it.
  *
  * Within an existing note, spans are filed by the section they named: each
  * section is merged in turn on the same text, so a note gains as many
@@ -235,28 +375,61 @@ export function planWikiNotes(
     if (!newByTitle.has(k)) newByTitle.set(k, n);
   }
 
+  const keepAsNew = new Set((opts.keepAsNew ?? []).map((t) => safeTitle(t).toLowerCase()));
+  // One routing decision per proposed title, cached: every span of a
+  // proposed note goes where the note goes.
+  const routeByTitle = new Map<string, Route | null>();
+  const routeFor = (title: string): Route | null => {
+    const k = title.toLowerCase();
+    if (!routeByTitle.has(k)) routeByTitle.set(k, routeProposed(title, newByTitle.get(k), wiki ?? [], wikiByTitle, keepAsNew));
+    return routeByTitle.get(k) ?? null;
+  };
+
   const groups = new Map<string, Group>();
   const order: string[] = [];
   const orphanTitles: string[] = [];
+  const routed: RoutedNote[] = [];
 
   for (const s of spans) {
     const row = rowByKey.get(s.key);
     if (!row) continue;
 
-    const key = s.noteTitle.toLowerCase();
-    if (!wikiByTitle.has(key) && !newByTitle.has(key)) {
-      if (!orphanTitles.includes(s.noteTitle)) orphanTitles.push(s.noteTitle);
+    // A span's note is the one it named — unless that note is a proposed or
+    // orphan title with a home in the vault, in which case its note is the
+    // home and its section is the heading the proposal becomes.
+    let title = s.noteTitle;
+    let section = s.noteSection;
+    let route: Route | null = null;
+    if (!wikiByTitle.has(title.toLowerCase())) {
+      route = routeFor(title);
+      if (route) {
+        title = route.to.title;
+        section = section || route.heading;
+      }
+    }
+
+    const key = title.toLowerCase();
+    if (!route && !wikiByTitle.has(key) && !newByTitle.has(key)) {
+      if (!orphanTitles.includes(title)) orphanTitles.push(title);
     }
 
     let group = groups.get(key);
     if (!group) {
-      group = { title: s.noteTitle, kind: s.noteKind, rows: [], sectionByKey: new Map() };
+      group = { title, kind: s.noteKind, rows: [], sectionByKey: new Map(), routedByFrom: new Map() };
       groups.set(key, group);
       order.push(key);
     }
     if (!group.rows.some((r) => r.key === row.key)) {
       group.rows.push(row);
-      group.sectionByKey.set(row.key, s.noteSection);
+      group.sectionByKey.set(row.key, section);
+      if (route) {
+        const entry = group.routedByFrom.get(s.noteTitle);
+        if (entry) entry.keys.push(row.key);
+        else {
+          group.routedByFrom.set(s.noteTitle, { route, keys: [row.key] });
+          routed.push({ from: s.noteTitle, to: route.to.title, heading: route.heading, why: route.why });
+        }
+      }
     }
   }
 
@@ -306,6 +479,7 @@ export function planWikiNotes(
         added,
         skipped,
         sections,
+        routed: [...group.routedByFrom.entries()].map(([from, { route, keys }]) => ({ from, heading: route.heading, why: route.why, keys })),
       });
       continue;
     }
@@ -336,5 +510,5 @@ export function planWikiNotes(
     });
   }
 
-  return { notes, orphanTitles };
+  return { notes, orphanTitles, routed };
 }

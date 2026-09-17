@@ -97,6 +97,26 @@ export function noteSections(md: string): string[] {
   return out;
 }
 
+/**
+ * The `aliases:` of a note's frontmatter, inline (`[a, b]`) or as a block
+ * list, unquoted. Another name a reader gave the note is another name the
+ * suggester should not found a second note under.
+ */
+export function noteAliases(md: string): string[] {
+  const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(md)?.[1] ?? "";
+  const unquote = (s: string) => s.trim().replace(/^["']|["']$/g, "").trim();
+  const inline = /^aliases:\s*\[(.*)\]\s*$/m.exec(fm);
+  if (inline) return inline[1].split(",").map(unquote).filter(Boolean);
+  const block = /^aliases:\s*\n((?:[ \t]*-[^\n]*\n?)*)/m.exec(fm);
+  if (block) {
+    return block[1]
+      .split("\n")
+      .map((l) => unquote(l.replace(/^[ \t]*-\s*/, "")))
+      .filter(Boolean);
+  }
+  return [];
+}
+
 export interface RenderTopicNoteArgs {
   title: string;
   classCode: string;
@@ -320,6 +340,12 @@ export interface PreparedNote {
    * the preview can label each one. Absent for a note written fresh.
    */
   sections?: Array<{ heading: string; keys: string[]; created: boolean }>;
+  /**
+   * Notes the model proposed that the planner filed into this one instead of
+   * creating: what each was called, the heading it became (empty when it was
+   * another name for this note), why, and which highlights it brought.
+   */
+  routed?: Array<{ from: string; heading: string; why: string; keys: string[] }>;
 }
 
 export interface PlanTopicNotesResult {

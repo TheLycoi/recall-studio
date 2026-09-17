@@ -145,6 +145,11 @@ export type QuizGradeDraft = z.infer<typeof QuizGradeOut>;
  * model is shown each note's headings, and a subtopic of a note is filed
  * inside it — under a heading the note has, or one the plugin creates — rather
  * than founded as a second note beside it.
+ *
+ * A new note is the exception, reached only when nothing existing is related.
+ * Each one names the closest existing note and says why it cannot live there,
+ * so the decision is visible — and checkable: a "new" note that names a home
+ * is filed into it by the planner rather than created.
  */
 export const SuggestOut = z.object({
   spans: z.array(
@@ -159,7 +164,9 @@ export const SuggestOut = z.object({
         .describe("The note this span belongs in: an existing title copied exactly, or the title of one of your new_notes."),
       note_kind: z
         .enum(["concept", "entity"])
-        .describe("concept: a mechanism, a classification, a definition and what follows from it; entity: a named person, organisation, drug, instrument, or law."),
+        .describe(
+          "entity: a named person, organisation, project, place or event, or a named product, drug or instrument that is itself what the reader would look up; concept: a mechanism, method, theory, classification, phenomenon, or any term explaining how something works — a named thing mentioned only as a tool or an example is a concept of its role, and when unsure prefer concept.",
+        ),
       note_section: z
         .string()
         .describe(
@@ -174,6 +181,16 @@ export const SuggestOut = z.object({
       summary: z
         .string()
         .describe("Three to five sentences about this note drawn from the paper, in the reader's language; no links, ids, or page numbers."),
+      closest_existing: z
+        .string()
+        .describe(
+          "The existing note this subject is most nearly part of — a parent topic, a broader note, one whose headings it would sit under — copied exactly; empty only when no listed note is related at all. Naming one means the wall was not reached: the spans belong in that note, and the plugin files them there under a heading.",
+        ),
+      why_new: z
+        .string()
+        .describe(
+          "One sentence on the decision: when closest_existing is empty, why no listed note can hold this subject; when it is set, what makes the subject part of that note.",
+        ),
     }),
   ),
 });

@@ -757,6 +757,13 @@ test("noteSections lists a note's ## headings as the reader wrote them, marks an
   ]);
 });
 
+test("noteAliases reads inline and block aliases, unquoted", () => {
+  assert.deepEqual(tn.noteAliases(`---\naliases: ["Drug Action", 'PK']\n---\nbody`), ["Drug Action", "PK"]);
+  assert.deepEqual(tn.noteAliases(`---\ntags: [x]\naliases:\n  - "Drug Action"\n  - Pharma\ncreated: 2026-09-01\n---\n`), ["Drug Action", "Pharma"]);
+  assert.deepEqual(tn.noteAliases(`---\naliases: []\n---\n`), []);
+  assert.deepEqual(tn.noteAliases("no frontmatter"), []);
+});
+
 test("headingKey and safeHeading fold the forms a heading is typed in", () => {
   assert.equal(tn.headingKey("## Receptors "), "receptors");
   assert.equal(tn.headingKey("**Receptors**:"), "receptors");

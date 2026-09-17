@@ -219,10 +219,16 @@ export async function suggestPdfHighlights(plugin: WikiLmPlugin, pdf: TFile): Pr
     const choices = await previewSuggestions(
       plugin.app,
       plan.notes,
-      { flashcards, unlocated, orphanTitles: plan.orphanTitles, alreadyPresent },
+      { flashcards, unlocated, orphanTitles: plan.orphanTitles, alreadyPresent, routed: plan.routed.length },
       manifest.pdfBasename,
     );
     if (choices === null) return;
+
+    // A choice titled with a proposed note the planner had filed into an
+    // existing one is the reader overruling that filing: the title goes back
+    // to being a note of its own, and the re-plan below is told to leave it.
+    const routedFrom = new Set(plan.routed.map((r) => r.from.toLowerCase()));
+    const keepAsNew = [...new Set(choices.map((c) => safeTitle(c.title)).filter((t) => routedFrom.has(t.toLowerCase())))];
 
     // (8) Re-plan against the user's edits. The planner is pure, so rather than
     // patch rendered content — which for an existing note is built from the file
@@ -235,7 +241,7 @@ export async function suggestPdfHighlights(plugin: WikiLmPlugin, pdf: TFile): Pr
     }
 
     const wikiTitles = new Set(wiki.map((w) => w.title.toLowerCase()));
-    const newNotesEdited = newNotes.slice();
+    let newNotesEdited = newNotes.slice();
     const keptSpans: VerifiedSpan[] = [];
     for (const sp of accepted) {
       const title = titleByKey.get(sp.key);
@@ -248,15 +254,19 @@ export async function suggestPdfHighlights(plugin: WikiLmPlugin, pdf: TFile): Pr
       if (wikiTitles.has(key)) continue;
       if (newNotesEdited.some((n) => safeTitle(n.title).toLowerCase() === key)) continue;
       const original = newNotes.find((n) => safeTitle(n.title).toLowerCase() === sp.noteTitle.toLowerCase());
-      newNotesEdited.push(original ? { ...original, title } : { title, kind: sp.noteKind, summary: "" });
+      newNotesEdited.push(original ? { ...original, title } : { title, kind: sp.noteKind, summary: "", closest_existing: "", why_new: "" });
     }
+    // A note the reader kept as its own no longer names a home, or the planner
+    // would file it again on the model's say-so.
+    const keep = new Set(keepAsNew.map((t) => t.toLowerCase()));
+    newNotesEdited = newNotesEdited.map((n) => (keep.has(safeTitle(n.title).toLowerCase()) ? { ...n, closest_existing: "" } : n));
 
     if (keptSpans.length === 0) {
       new Notice("WikiLM: nothing selected; nothing written.");
       return;
     }
 
-    const final = planWikiNotes(keptSpans, highlights, newNotesEdited, wiki, planOpts);
+    const final = planWikiNotes(keptSpans, highlights, newNotesEdited, wiki, { ...planOpts, keepAsNew });
 
     // (9) Write. Same vault idiom as the digest (src/digest.ts:278-294).
     let spansWritten = 0;
@@ -304,8 +314,10 @@ export async function suggestPdfHighlights(plugin: WikiLmPlugin, pdf: TFile): Pr
     const written = final.notes.length - refused;
     const tail = queued > 0 ? `, ${queued} queued as flashcards` : "";
     const refusedTail = refused > 0 ? `, ${refused} refused (a source is never a note)` : "";
+    const filed = final.routed.length;
+    const filedTail = filed > 0 ? `, ${filed} proposed note${filed === 1 ? "" : "s"} filed into existing ones` : "";
     new Notice(
-      `WikiLM: wrote ${spansWritten} span${spansWritten === 1 ? "" : "s"} into ${written} note${written === 1 ? "" : "s"} (${newCount} new)${tail}${refusedTail}.`,
+      `WikiLM: wrote ${spansWritten} span${spansWritten === 1 ? "" : "s"} into ${written} note${written === 1 ? "" : "s"} (${newCount} new)${filedTail}${tail}${refusedTail}.`,
       8000,
     );
   } catch (e) {

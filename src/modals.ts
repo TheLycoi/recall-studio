@@ -531,6 +531,8 @@ export interface SuggestPreviewExtras {
   unlocated: number;
   orphanTitles: string[];
   alreadyPresent: number;
+  /** Proposed notes the planner filed into existing ones instead of creating. */
+  routed: number;
 }
 
 export interface SuggestPreviewChoice {
@@ -549,6 +551,8 @@ export class SuggestPreviewModal extends Modal {
   private titles: string[];
   private resolved = false;
   private writeBtn!: ButtonComponent;
+  /** Routed groups the reader has taken back as notes of their own, as `<card index>|<proposed title>`. */
+  private unrouted = new Set<string>();
 
   constructor(
     app: App,
@@ -574,6 +578,9 @@ export class SuggestPreviewModal extends Modal {
       `${this.extras.unlocated} could not be located`;
     if (this.extras.orphanTitles.length) {
       countsText += ` · unmatched titles: ${this.extras.orphanTitles.join(", ")}`;
+    }
+    if (this.extras.routed > 0) {
+      countsText += ` · ${this.extras.routed} proposed note${this.extras.routed === 1 ? "" : "s"} filed into existing ones`;
     }
     if (this.extras.flashcards > 0) countsText += ` · ${this.extras.flashcards} flashcards will be queued`;
     contentEl.createEl("p", { text: countsText, cls: "wikilm-muted wikilm-preview-counts" });
@@ -624,6 +631,33 @@ export class SuggestPreviewModal extends Modal {
           li.createSpan({ cls: "wikilm-muted", text: ` → ${section.heading}${section.created ? " (new section)" : ""}` });
         }
       });
+
+      // A proposed note the planner filed into this one, with the reason and
+      // a way out: the policy is append-first, but the reader outranks it, and
+      // taking a group back is one click rather than a re-run.
+      for (const r of note.routed ?? []) {
+        const row = card.createDiv({ cls: "wikilm-muted wikilm-preview-routed" });
+        const id = `${i}|${r.from}`;
+        const line = row.createSpan();
+        const button = row.createEl("button", { cls: "wikilm-preview-routed-btn" });
+        const draw = () => {
+          const kept = this.unrouted.has(id);
+          line.setText(
+            kept
+              ? `Will be its own note “${r.from}”. `
+              : r.heading
+                ? `Filed here as “${r.heading}” instead of a new note “${r.from}” — ${r.why}. `
+                : `Filed here instead of a new note “${r.from}” — ${r.why}. `,
+          );
+          button.setText(kept ? "File here after all" : "Keep as its own note");
+        };
+        button.addEventListener("click", () => {
+          if (this.unrouted.has(id)) this.unrouted.delete(id);
+          else this.unrouted.add(id);
+          draw();
+        });
+        draw();
+      }
     });
 
     const buttons = new Setting(contentEl).addButton((b) => b.setButtonText("Cancel").onClick(() => this.close()));
@@ -657,10 +691,19 @@ export class SuggestPreviewModal extends Modal {
     this.resolved = true;
     const result: SuggestPreviewChoice[] = [];
     this.notes.forEach((note, i) => {
-      const highlights = note.highlights.filter((_, j) => this.checked[i][j]);
-      if (highlights.length > 0) {
-        result.push({ note, title: this.titles[i], highlights });
+      const checked = note.highlights.filter((_, j) => this.checked[i][j]);
+      // A routed group the reader took back leaves this card as a choice of
+      // its own under the proposed title; the caller re-plans per highlight,
+      // so one card can resolve to several notes.
+      const taken = new Set<string>();
+      for (const r of note.routed ?? []) {
+        if (!this.unrouted.has(`${i}|${r.from}`)) continue;
+        const own = checked.filter((h) => r.keys.includes(h.key));
+        for (const h of own) taken.add(h.key);
+        if (own.length > 0) result.push({ note, title: r.from, highlights: own });
       }
+      const rest = checked.filter((h) => !taken.has(h.key));
+      if (rest.length > 0) result.push({ note, title: this.titles[i], highlights: rest });
     });
     this.resolve(result);
     this.close();

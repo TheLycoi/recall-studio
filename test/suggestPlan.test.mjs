@@ -424,3 +424,118 @@ test("planWikiNotes sets a section aside on a note that does not exist yet", () 
   assert.ok(!out.notes[0].content.includes("## Albumin"), "a fresh note takes its sections from the schema");
   assert.equal(out.notes[0].sections, undefined);
 });
+
+// ---- append-first: a proposed note with a home is filed, not created --------
+
+const PHARMACOLOGY = {
+  title: "Pharmacology",
+  kind: "concept",
+  path: "wiki/concepts/Pharmacology.md",
+  md: `---\nclass: ${CLASS_CODE}\naliases:\n  - "Drug Action"\n---\n\n## Receptors\n\nA receptor binds and transduces.\n\n## Highlights\n\n`,
+};
+
+const newNote = (title, over = {}) => ({ title, kind: "concept", summary: "S.", closest_existing: "", why_new: "", ...over });
+
+test("a proposed note that names a closest existing note is filed there as a new heading", () => {
+  const m = maps();
+  const proposed = [newNote("COX Inhibitors", { closest_existing: "Pharmacology", why_new: "NSAIDs are a subtopic of pharmacology" })];
+  const res = sp.verifySpans(draftOf([span(1, "Albumin is an inert binding protein.", "COX Inhibitors")], proposed), m, opts());
+  const rows = sp.toManifestHighlights(res.spans, m);
+  const out = sp.planWikiNotes(res.spans, rows, proposed, [PHARMACOLOGY], planOpts);
+
+  assert.equal(out.notes.length, 1, "no second note");
+  const note = out.notes[0];
+  assert.equal(note.exists, true);
+  assert.equal(note.path, PHARMACOLOGY.path);
+  assert.ok(note.content.includes("## COX Inhibitors\n\n> [!PDF"), "the proposal became a heading inside the home");
+  assert.deepEqual(out.routed, [{ from: "COX Inhibitors", to: "Pharmacology", heading: "COX Inhibitors", why: "NSAIDs are a subtopic of pharmacology" }]);
+  assert.deepEqual(note.routed.map((r) => [r.from, r.heading, r.keys.length]), [["COX Inhibitors", "COX Inhibitors", 1]]);
+  assert.deepEqual(out.orphanTitles, [], "a routed title is not an orphan");
+});
+
+test("a proposed title that is already a heading of an existing note goes under that heading", () => {
+  const m = maps();
+  // closest_existing left empty: the model missed the home; the planner does not.
+  const proposed = [newNote("receptors")];
+  const res = sp.verifySpans(draftOf([span(1, "Albumin is an inert binding protein.", "receptors")], proposed), m, opts());
+  const rows = sp.toManifestHighlights(res.spans, m);
+  const out = sp.planWikiNotes(res.spans, rows, proposed, [PHARMACOLOGY], planOpts);
+  assert.equal(out.notes.length, 1);
+  assert.equal(out.notes[0].path, PHARMACOLOGY.path);
+  assert.equal(out.routed[0].heading, "Receptors", "the note's own spelling of the heading is used");
+  assert.ok(/## Receptors\n\nA receptor binds and transduces\.\n\n> \[!PDF/.test(out.notes[0].content), "appended inside the existing section");
+});
+
+test("a proposed title that is an alias of an existing note goes to the note as a whole", () => {
+  const m = maps();
+  const proposed = [newNote("Drug Action")];
+  const res = sp.verifySpans(draftOf([span(1, "Albumin is an inert binding protein.", "Drug Action")], proposed), m, opts());
+  const rows = sp.toManifestHighlights(res.spans, m);
+  const out = sp.planWikiNotes(res.spans, rows, proposed, [PHARMACOLOGY], planOpts);
+  assert.equal(out.notes.length, 1);
+  assert.equal(out.notes[0].path, PHARMACOLOGY.path);
+  assert.equal(out.routed[0].heading, "", "another name for the note is the note, not a section of it");
+  assert.ok(!out.notes[0].content.includes("## Drug Action"));
+  assert.ok(/## Highlights\n\n> \[!PDF/.test(out.notes[0].content), "so the span lands under Highlights");
+});
+
+test("at the wall — nothing related — a proposed note is created as before", () => {
+  const m = maps();
+  const proposed = [newNote("Self-Efficacy", { why_new: "a belief construct none of the listed notes would hold" })];
+  const res = sp.verifySpans(draftOf([span(1, "Albumin is an inert binding protein.", "Self-Efficacy")], proposed), m, opts());
+  const rows = sp.toManifestHighlights(res.spans, m);
+  const out = sp.planWikiNotes(res.spans, rows, proposed, [PHARMACOLOGY], planOpts);
+  assert.equal(out.notes.length, 1);
+  assert.equal(out.notes[0].exists, false);
+  assert.equal(out.notes[0].path, "wiki/concepts/Self-Efficacy.md");
+  assert.deepEqual(out.routed, []);
+});
+
+test("a proposed title that specializes an existing heading goes under that heading", () => {
+  const m = maps();
+  // The reported case: the model left closest_existing empty and proposed a
+  // page for what is a subtopic of the note's own ## Receptors section.
+  const proposed = [newNote("Receptor Subtypes and Off-Target Effects")];
+  const res = sp.verifySpans(draftOf([span(1, "Albumin is an inert binding protein.", "Receptor Subtypes and Off-Target Effects")], proposed), m, opts());
+  const rows = sp.toManifestHighlights(res.spans, m);
+  const out = sp.planWikiNotes(res.spans, rows, proposed, [PHARMACOLOGY], planOpts);
+  assert.equal(out.notes.length, 1);
+  assert.equal(out.notes[0].path, PHARMACOLOGY.path);
+  assert.equal(out.routed[0].heading, "Receptors");
+  assert.ok(/## Receptors\n\nA receptor binds and transduces\.\n\n> \[!PDF/.test(out.notes[0].content));
+});
+
+test("sharing a word with a heading is not specializing it", () => {
+  const m = maps();
+  const wiki = [{ ...PHARMACOLOGY, md: `---\nclass: ${CLASS_CODE}\n---\n\n## Drug Safety & The Therapeutic Index\n\nText.\n\n## Highlights\n\n` }];
+  const proposed = [newNote("Drug Metabolism")];
+  const res = sp.verifySpans(draftOf([span(1, "Albumin is an inert binding protein.", "Drug Metabolism")], proposed), m, opts());
+  const rows = sp.toManifestHighlights(res.spans, m);
+  const out = sp.planWikiNotes(res.spans, rows, proposed, wiki, planOpts);
+  assert.equal(out.notes[0].exists, false, "the wall: a new note");
+  assert.deepEqual(out.routed, []);
+});
+
+test("a proposed title that specializes an existing note's title becomes a heading inside it", () => {
+  const m = maps();
+  const proposed = [newNote("Clinical Pharmacology")];
+  const res = sp.verifySpans(draftOf([span(1, "Albumin is an inert binding protein.", "Clinical Pharmacology")], proposed), m, opts());
+  const rows = sp.toManifestHighlights(res.spans, m);
+  const out = sp.planWikiNotes(res.spans, rows, proposed, [PHARMACOLOGY], planOpts);
+  assert.equal(out.notes.length, 1);
+  assert.equal(out.notes[0].path, PHARMACOLOGY.path);
+  assert.deepEqual(out.routed, [{ from: "Clinical Pharmacology", to: "Pharmacology", heading: "Clinical Pharmacology", why: "“Clinical Pharmacology” is a kind of Pharmacology" }]);
+  assert.ok(out.notes[0].content.includes("## Clinical Pharmacology\n\n> [!PDF"));
+});
+
+test("a title the reader kept as its own note is not routed, whatever it names", () => {
+  const m = maps();
+  const proposed = [newNote("COX Inhibitors", { closest_existing: "Pharmacology", why_new: "part of pharmacology" })];
+  const res = sp.verifySpans(draftOf([span(1, "Albumin is an inert binding protein.", "COX Inhibitors")], proposed), m, opts());
+  const rows = sp.toManifestHighlights(res.spans, m);
+  const out = sp.planWikiNotes(res.spans, rows, proposed, [PHARMACOLOGY], { ...planOpts, keepAsNew: ["COX Inhibitors"] });
+  assert.equal(out.notes.length, 1);
+  assert.equal(out.notes[0].exists, false);
+  assert.equal(out.notes[0].title, "COX Inhibitors");
+  assert.deepEqual(out.routed, []);
+});
