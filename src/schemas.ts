@@ -126,6 +126,16 @@ export const QuizGradeOut = z.object({
     .string()
     .describe("One or two sentences in the evidence's own words naming what the answer got right and what it missed. No new facts."),
   quote: z.string().describe("The passage from the evidence that settles the grade, copied verbatim, character for character."),
+  gap: z
+    .enum(["none", "slip", "vocabulary", "detail", "misconception"])
+    .describe(
+      "What the answer reveals about the reader's understanding. none: nothing wrong worth recording. slip: they know it, the answer was careless or a typo. vocabulary: the idea is right but the term is missing or wrong. detail: the shape is right and a specific fact is missing. misconception: they hold a belief the evidence contradicts.",
+    ),
+  gapNote: z
+    .string()
+    .describe(
+      "When gap is not none, one short clause naming the specific wrong belief or missing piece — what to probe next. Empty when gap is none.",
+    ),
 });
 
 export type QuizQuestionDraft = z.infer<typeof QuizQuestionOut>;

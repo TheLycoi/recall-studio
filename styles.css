@@ -16,52 +16,17 @@
    sideways — controls at the right edge end up clipped rather than wrapped. */
 .wikilm-notebook {
   padding: 0 var(--size-4-4) var(--size-4-8);
-  overflow-x: hidden;
-  overflow-y: auto;
   min-width: 0;
   outline: none;
   container-type: inline-size;
 }
-
-/* Narrow pane (right sidebar): stack the highlight above its cards. */
-@container (max-width: 620px) {
-  .wikilm-hl {
-    grid-template-columns: 1fr;
-  }
-  .wikilm-cards {
-    grid-template-columns: 1fr;
-  }
-  .wikilm-header {
-    flex-wrap: wrap;
-  }
-  .wikilm-header-right {
-    flex-wrap: wrap;
-  }
-}
-
-/* A docked sidebar is nearer 300px than 600px, and the header's four controls
-   need ~600px on one line. Below this the title takes its own row so the
-   controls get the full width, and the export button drops its label to an
-   icon-width minimum rather than pushing the overflow menu out of reach. */
-@container (max-width: 400px) {
-  .wikilm-header-left {
-    flex-basis: 100%;
-  }
-  .wikilm-header-right {
-    width: 100%;
-    justify-content: flex-start;
-  }
-  .wikilm-header-right .mod-cta {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  /* The chat's own controls wrap for the same reason the header's do: in a
-     docked sidebar Send, Clear and the model picker do not fit on one line,
-     and without this the last of them is clipped by the pane edge. */
-  .wikilm-chat-buttons {
-    flex-wrap: wrap;
-  }
+/* Obsidian sets `.mod-right-split .view-content { overflow-x: auto }` at three
+   classes of specificity, which silently beats a one-class rule here and turns
+   any overflow into a sideways scroll. This selector matches that weight and
+   loads later, so it wins. */
+.workspace-leaf-content > .view-content.wikilm-notebook {
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .wikilm-muted {
@@ -784,7 +749,6 @@ body.wikilm-highlighter-active .textLayer ::selection {
 .wikilm-chat-turn.wikilm-quiz-grade.is-incorrect {
   border-left-color: var(--color-red);
 }
-.wikilm-chat-turn.wikilm-quiz-grade.is-dontknow,
 .wikilm-chat-turn.wikilm-quiz-grade.is-skipped {
   border-left-color: var(--text-muted);
 }
@@ -815,4 +779,65 @@ body.wikilm-highlighter-active .textLayer ::selection {
   background: var(--background-modifier-error-hover);
   color: var(--text-normal);
   font-size: var(--font-ui-smaller);
+}
+
+/* Narrow-pane overrides -------------------------------------------------
+   These must stay at the END of the file. An @container block adds no
+   specificity, so a `.wikilm-hl { grid-template-columns }` written later in
+   the sheet overrides the one-column layout below at equal weight, and the
+   sidebar silently keeps its two-column grid — measured live at 320px as
+   `220px 53px`, with 240px cards spilling out of the 53px cell. */
+
+/* Narrow pane (right sidebar): stack the highlight above its cards. minmax(0,…)
+   rather than 1fr: a bare 1fr track has an `auto` minimum equal to the widest
+   card's min-content, which is the badge row plus four action buttons. */
+@container (max-width: 620px) {
+  .wikilm-hl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .wikilm-cards,
+  .wikilm-flagged-box {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .wikilm-header {
+    flex-wrap: wrap;
+  }
+  .wikilm-header-right {
+    flex-wrap: wrap;
+  }
+}
+
+/* A docked sidebar is nearer 300px than 600px, and the header's four controls
+   need ~600px on one line. Below this the title takes its own row so the
+   controls get the full width, and the export button drops its label to an
+   icon-width minimum rather than pushing the overflow menu out of reach. */
+@container (max-width: 400px) {
+  .wikilm-header-left {
+    flex-basis: 100%;
+  }
+  .wikilm-header-right {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .wikilm-header-right .mod-cta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* A card's badge row and its four action buttons need ~215px together;
+     below this the actions drop to their own line instead of leaving the card. */
+  .wikilm-card-top {
+    flex-wrap: wrap;
+  }
+  /* The source row is title, count and an Export button that cannot shrink;
+     measured live at 260px the button sat 28px past the pane edge. */
+  .wikilm-source-head {
+    flex-wrap: wrap;
+  }
+  /* The chat's own controls wrap for the same reason the header's do: in a
+     docked sidebar Send, Clear and the model picker do not fit on one line,
+     and without this the last of them is clipped by the pane edge. */
+  .wikilm-chat-buttons {
+    flex-wrap: wrap;
+  }
 }

@@ -941,6 +941,20 @@ Feedback is one or two sentences saying what the answer got right and what it mi
 Quote the passage that settles the grade, copied character for character from the evidence, not paraphrased. It is checked against the evidence and shown under the grade only if it is found there; a quote that is not found marks the grade as unverified, which is what lets the reader overrule you when they think you were wrong.
 </feedback_and_quote>
 
+<what_the_answer_reveals>
+A verdict says whether the answer was right. It does not say what to do next, and those are different questions: a careless slip and a confidently-held wrong belief both score incorrect, but one needs nothing and the other needs dislodging. So name the kind of gap the answer reveals, in "gap":
+
+none — nothing worth recording. A correct answer, or one whose only fault is wording.
+slip — they know this. A typo, a misremembered name, an answer that contradicts itself in a way a second's thought would catch.
+vocabulary — the idea is right and the term for it is missing or wrong. They understand the thing and cannot name it.
+detail — the shape of the answer is right and a specific fact inside it is missing or wrong.
+misconception — they stated something the evidence contradicts, as though it were true. This is the one that matters most: a wrong model produces more wrong answers until it is replaced, so it is worth more attention than a fact that is merely absent.
+
+"gapNote" is one short clause naming the specific thing — the belief they hold, or the piece they lack. "Thinks self-efficacy rises from watching others succeed" is a gapNote; "did not understand the question" is not. It is what the next question probes, so it has to be specific enough to write a question against. Leave it empty when gap is none.
+
+Judge the gap from the answer in front of you, not from what a reader like this usually gets wrong.
+</what_the_answer_reveals>
+
 <examples>
 <example>
 <evidence>[1] (Receptors, p.4) Receptors bind ligands with relatively high affinity and transduce a signal to produce a biological effect.</evidence>

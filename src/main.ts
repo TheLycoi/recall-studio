@@ -104,6 +104,17 @@ export default class WikiLmPlugin extends Plugin {
       this.settings.markModeMigrated = true;
       await this.saveData(this.settings);
     }
+    // 0.11.0: a quiz runs until it brackets the edge, so `quizQuestions` (a
+    // target, default 5) became `quizCap` (a runaway guard). The old number is
+    // not carried over — it would cap every quiz at five and defeat the change —
+    // and `quizCap` is not reset either: `Object.assign` above already gave it
+    // the default, and an install that has both keys (downgraded and back) has
+    // a cap the reader chose. Only the stale key is dropped.
+    type LegacySettings = Partial<WikiLmSettings> & { quizQuestions?: number };
+    if ((saved as LegacySettings | null)?.quizQuestions !== undefined) {
+      delete (this.settings as LegacySettings).quizQuestions;
+      await this.saveData(this.settings);
+    }
   }
 
   async saveSettings(): Promise<void> {

@@ -93,7 +93,11 @@ export interface WikiLmSettings {
   askGeneralKnowledge: boolean;
   /** Show the line under an answer reporting what was kept, removed, verified, and rejected. */
   askShowGrounding: boolean;
-  quizQuestions: number;
+  /**
+   * A runaway guard, not a target: the quiz ends when it brackets the edge of
+   * what the reader knows. This only stops a session that never gets there.
+   */
+  quizCap: number;
   quizPoolSize: number;
   quizInstructions: string;
 
@@ -169,7 +173,7 @@ export const DEFAULT_SETTINGS: WikiLmSettings = {
   askKeywordExpansion: true,
   askGeneralKnowledge: false,
   askShowGrounding: true,
-  quizQuestions: 5,
+  quizCap: 30,
   quizPoolSize: 20,
   quizInstructions: "",
 
@@ -732,14 +736,17 @@ export class WikiLmSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Questions per quiz")
+      .setName("Question cap per quiz")
+      .setDesc(
+        "A safety limit, not a target. A quiz runs until it finds the edge of what you know; this only stops one that never does.",
+      )
       .addSlider((sl) =>
         sl
-          .setLimits(3, 15, 1)
-          .setValue(s.quizQuestions)
+          .setLimits(5, 60, 5)
+          .setValue(s.quizCap)
           .setDynamicTooltip()
           .onChange((v) => {
-            s.quizQuestions = v;
+            s.quizCap = v;
             save();
           }),
       );

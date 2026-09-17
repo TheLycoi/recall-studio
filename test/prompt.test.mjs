@@ -441,12 +441,19 @@ test("QuizQuestionOut accepts a grounded draft and rejects an unknown kind or a 
 });
 
 test("QuizGradeOut accepts a verdict with feedback and a quote", () => {
-  const ok = schemas.QuizGradeOut.safeParse({ verdict: "partial", feedback: "f", quote: "q" });
+  const full = { verdict: "partial", feedback: "f", quote: "q", gap: "detail", gapNote: "missed the second property" };
+  const ok = schemas.QuizGradeOut.safeParse(full);
   assert.equal(ok.success, true, "a partial grade parses");
-  assert.deepEqual(ok.data, { verdict: "partial", feedback: "f", quote: "q" });
+  assert.deepEqual(ok.data, full);
 
-  assert.equal(schemas.QuizGradeOut.safeParse({ verdict: "maybe", feedback: "f", quote: "q" }).success, false, "verdict is one of three");
+  assert.equal(schemas.QuizGradeOut.safeParse({ ...full, verdict: "maybe" }).success, false, "verdict is one of three");
   assert.equal(schemas.QuizGradeOut.safeParse({ verdict: "correct", feedback: "f" }).success, false, "quote is required");
+
+  // The diagnosis drives both the probing and what becomes a card, so it is
+  // required and its kinds are closed.
+  assert.equal(schemas.QuizGradeOut.safeParse({ verdict: "partial", feedback: "f", quote: "q" }).success, false, "gap is required");
+  assert.equal(schemas.QuizGradeOut.safeParse({ ...full, gap: "careless" }).success, false, "gap is one of five");
+  assert.equal(schemas.QuizGradeOut.safeParse({ ...full, gap: "none", gapNote: "" }).success, true, "none with an empty note parses");
 });
 
 test("QuizQuestionOut and QuizGradeOut serialize strictly at every level", () => {

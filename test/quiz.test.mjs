@@ -73,8 +73,8 @@ function wordScorer(query) {
   };
 }
 
-function session(total = 5, pool = units()) {
-  return q.startSession({ kind: "all", label: "all topic notes" }, "", pool, total);
+function session(cap = 30, pool = units()) {
+  return q.startSession({ kind: "all", label: "all topic notes" }, "", pool, cap);
 }
 
 function draft(over = {}) {
@@ -90,11 +90,11 @@ function draft(over = {}) {
 }
 
 /** Check, accept, and grade one question in one go. */
-function ask(s, over, verdict, userAnswer = "an answer") {
+function ask(s, over, verdict, userAnswer = "an answer", extras = {}) {
   const checked = q.checkQuestion(draft(over), s);
   assert.equal(checked.ok, true, checked.ok ? "" : checked.reason);
   const withCurrent = q.acceptQuestion(s, checked.question);
-  return q.applyGrade(withCurrent, verdict, "feedback", "", userAnswer);
+  return q.applyGrade(withCurrent, verdict, "feedback", "", userAnswer, extras);
 }
 
 // ---- parseQuizCommand --------------------------------------------------------
@@ -112,7 +112,7 @@ test("parseQuizCommand covers the chat-local commands", () => {
   assert.deepEqual(q.parseQuizCommand("/skip"), { kind: "skip" });
   assert.deepEqual(q.parseQuizCommand("/next"), { kind: "skip" });
   assert.deepEqual(q.parseQuizCommand("/hint"), { kind: "hint" });
-  assert.deepEqual(q.parseQuizCommand("/idk"), { kind: "dontknow" });
+  assert.deepEqual(q.parseQuizCommand("/idk"), { kind: "skip" });
   assert.equal(q.parseQuizCommand("hello"), null);
 });
 
@@ -161,26 +161,45 @@ test("resolvePool: this with no active file is empty", () => {
   assert.equal(r.pool.length, 0);
 });
 
-test("resolvePool: query ranks the matching units first and caps at poolSize", () => {
+test("resolvePool: query takes whole notes, including passages that never say the word", () => {
   const r = q.resolvePool("query", "receptor", units(), null, wordScorer("receptor"), 20);
+  assert.equal(r.label, "receptor");
+  // The Receptors note wins, so all three of its passages come, not only the
+  // ones containing "receptor". A passage's neighbours are evidence for it: the
+  // best material on a subject often never restates the subject's name.
   assert.deepEqual(
     r.pool.map((u) => u.id).sort(),
     ["r0", "r1", "r2"],
   );
-  assert.equal(r.label, "receptor");
-  for (const u of r.pool) assert.match(u.text.toLowerCase(), /receptor/);
 
-  // poolSize is rankEvidence's k, so its per-note cap of ceil(k/2) applies
-  // unchanged (src/retrieval.ts:158): at k=4 one note may contribute 2.
-  const capped = q.resolvePool("query", "receptor", units(), null, wordScorer("receptor"), 4);
+  // k still bounds the pool, and the winning note fills it first.
+  const capped = q.resolvePool("query", "receptor", units(), null, wordScorer("receptor"), 2);
   assert.equal(capped.pool.length, 2);
+  assert.deepEqual(capped.pool.map((u) => u.notePath).sort(), [RECEPTORS, RECEPTORS]);
 });
 
-test("resolvePool: query with a mixed query spreads across notes under the cap", () => {
+test("resolvePool: query does not pad the pool with a note about something else", () => {
+  // "plasma" appears once, in the kinetics note; "receptor" runs through the
+  // whole receptors note. The weaker note must not fill the empty slots — that
+  // is the bug where a quiz on one subject asked about another.
+  const r = q.resolvePool("query", "receptor", units(), null, wordScorer("receptor"), 20);
+  assert.equal(
+    r.pool.some((u) => u.notePath === KINETICS),
+    false,
+    "the unrelated note contributes nothing",
+  );
+});
+
+test("resolvePool: a query spanning two notes draws on both", () => {
   const r = q.resolvePool("query", "drug receptor plasma", units(), null, wordScorer("drug receptor plasma"), 6);
   const notes = new Set(r.pool.map((u) => u.notePath));
-  assert.equal(notes.size, 2, "both notes contribute");
+  assert.equal(notes.size, 2, "both notes are genuinely relevant here");
   assert.equal(r.pool.length <= 6, true);
+});
+
+test("resolvePool: query returns nothing when no note matches", () => {
+  const r = q.resolvePool("query", "photosynthesis", units(), null, wordScorer("photosynthesis"), 20);
+  assert.deepEqual(r.pool, []);
 });
 
 // ---- session and usableUnits -------------------------------------------------
@@ -198,6 +217,136 @@ test("startSession freezes the numbering", () => {
   assert.deepEqual(s.dropped, []);
 });
 
+test("a misconception is probed further than an ordinary miss", () => {
+  // The reference system's rule: a confidently-held wrong model keeps producing
+  // wrong answers until it is replaced, so it earns more than one follow-up.
+  let s = session();
+  s = ask(s, { evidence_n: 1 }, "incorrect", "an answer", {
+    gap: "misconception",
+    gapNote: "thinks affinity means efficacy",
+  });
+  assert.equal(s.retryOf, "r0");
+  assert.equal(s.retryAngle, "thinks affinity means efficacy", "the probe aims at the belief, not the old question");
+
+  s = ask(s, { evidence_n: 1, question: "Why does affinity matter here?" }, "incorrect", "an answer", {
+    gap: "misconception",
+    gapNote: "still conflating the two",
+  });
+  assert.equal(s.retryOf, "r0", "a misconception gets a second probe");
+
+  s = ask(s, { evidence_n: 1, question: "What else does affinity govern?" }, "incorrect", "an answer", {
+    gap: "misconception",
+  });
+  assert.equal(s.retryOf, null, "but not a third");
+});
+
+test("a slip is not probed at all", () => {
+  // They know it; a follow-up would spend a question on a typo.
+  let s = session();
+  s = ask(s, { evidence_n: 1 }, "incorrect", "an answer", { gap: "slip" });
+  assert.equal(s.retryOf, null);
+});
+
+test("summary keeps real gaps out of the inbox but drops slips", () => {
+  let s = session();
+  s = ask(s, { evidence_n: 1 }, "incorrect", "an answer", { gap: "slip" });
+  s = ask(s, { evidence_n: 2, quote: "Affinity is the strength", answer: "binding strength" }, "incorrect", "x", {
+    gap: "misconception",
+  });
+  const { misses } = q.summary(s);
+  assert.deepEqual(
+    misses.map((m) => m.unitId),
+    ["r1"],
+    "the misconception is card-worthy; the slip is not",
+  );
+});
+
+test("the quiz stops once the edge is bracketed, before the question count", () => {
+  // Right at tier 1 (a floor), then two misses at tier 2 (a confirmed ceiling):
+  // the edge sits between, so there is nothing left to learn from question 4.
+  let s = session();
+  s = ask(s, { evidence_n: 1 }, "correct");
+  assert.equal(s.finished, false, "a floor alone brackets nothing");
+  s = ask(s, { evidence_n: 2, quote: "Affinity is the strength", answer: "binding strength" }, "incorrect");
+  assert.equal(s.finished, false, "one miss is a single coordinate, not a ceiling");
+  s = ask(s, { evidence_n: 3, quote: "an agonist binds a receptor and activates", answer: "it activates" }, "incorrect");
+  assert.equal(s.finished, true, "the second miss confirms the ceiling");
+  assert.equal(s.asked.length, 3, "it stopped at three of five");
+});
+
+test("an all-correct run never counts as bracketed", () => {
+  // The rule that matters most: no misses means the questions were too easy,
+  // so the quiz must keep going rather than declare success.
+  let s = session();
+  s = ask(s, { evidence_n: 1 }, "correct");
+  s = ask(s, { evidence_n: 2, quote: "Affinity is the strength", answer: "binding strength" }, "correct");
+  s = ask(s, { evidence_n: 3, quote: "an agonist binds a receptor and activates", answer: "it activates" }, "correct");
+  assert.equal(s.finished, false, "a floor with no ceiling is not an edge");
+  assert.equal(s.difficulty, 3, "it escalated instead");
+});
+
+test("a skip serves as a ceiling", () => {
+  let s = session();
+  s = ask(s, { evidence_n: 1 }, "correct");
+  s = ask(s, { evidence_n: 2, quote: "Affinity is the strength", answer: "binding strength" }, "skipped");
+  s = ask(s, { evidence_n: 3, quote: "an agonist binds a receptor and activates", answer: "it activates" }, "skipped");
+  assert.equal(s.finished, true, "an honest gap bounds the edge like a wrong answer");
+});
+
+// One grounded question/quote/answer triple per fixture unit, in pool order.
+// Each answer is stated in its passage and absent from its own question, which
+// is what `checkQuestion` enforces.
+const GROUNDED = [
+  { question: "What kind of molecule is a receptor?", quote: "A receptor is a macromolecule", answer: "a macromolecule" },
+  { question: "What does affinity measure?", quote: "Affinity is the strength", answer: "binding strength" },
+  { question: "What does an agonist do to a receptor?", quote: "an agonist binds a receptor and activates", answer: "it activates" },
+  { question: "Where does first-pass metabolism happen?", quote: "First-pass metabolism removes drug", answer: "the liver" },
+  { question: "What is the plasma halving time called?", quote: "the time for the plasma concentration to fall by half", answer: "half-life" },
+  { question: "What fraction of a dose reaches circulation?", quote: "the fraction of a dose that reaches", answer: "bioavailability" },
+];
+
+test("an all-correct run is not stopped at five: the edge is not found yet", () => {
+  let s = session();
+  // Six straight correct answers. Under the old fixed length this quiz was over
+  // after five; the rule is that a run of right answers proves only that the
+  // questions were too easy, so it has to keep escalating.
+  for (let i = 0; i < 6; i++) {
+    s = ask(s, { evidence_n: i + 1, ...GROUNDED[i] }, "correct");
+    assert.equal(s.finished, false, `stopped after ${i + 1} correct without a ceiling`);
+  }
+  assert.equal(s.asked.length, 6, "the quiz ran past the old five-question limit");
+  assert.equal(s.difficulty, 3, "and escalated to the hardest tier");
+});
+
+test("the cap ends a quiz that never brackets", () => {
+  let s = session(3);
+  for (let i = 0; i < 3; i++) {
+    s = ask(s, { evidence_n: i + 1, ...GROUNDED[i] }, "correct");
+  }
+  assert.equal(s.finished, true, "the guard fires so a session cannot run away");
+  const r = q.summary(s);
+  assert.match(r.line, /stopped at the question cap without finding your edge/);
+});
+
+test("misses alone do not bracket an edge: there is no floor", () => {
+  let s = session();
+  s = ask(s, { evidence_n: 1 }, "incorrect");
+  s = ask(s, { evidence_n: 2, quote: "Affinity is the strength", answer: "binding strength" }, "incorrect");
+  s = ask(s, { evidence_n: 3, quote: "an agonist binds a receptor and activates", answer: "it activates" }, "incorrect");
+  assert.equal(s.finished, false, "nothing they got right means no floor to bracket against");
+  assert.equal(s.asked.length, 3, "so it keeps going toward the full count");
+});
+
+test("summary scores against what was asked, and says why it stopped early", () => {
+  let s = session();
+  s = ask(s, { evidence_n: 1 }, "correct");
+  s = ask(s, { evidence_n: 2, quote: "Affinity is the strength", answer: "binding strength" }, "incorrect");
+  s = ask(s, { evidence_n: 3, quote: "an agonist binds a receptor and activates", answer: "it activates" }, "incorrect");
+  const { line } = q.summary(s);
+  assert.match(line, /1 of 3 correct/, "scored out of what was actually asked");
+  assert.match(line, /found your edge/);
+});
+
 test("usableUnits excludes dropped and asked but keeps the retry unit", () => {
   let s = session();
   s = ask(s, { evidence_n: 1 }, "incorrect"); // r0 asked, and now the retry unit
@@ -207,7 +356,8 @@ test("usableUnits excludes dropped and asked but keeps the retry unit", () => {
   assert.equal(ids.includes("r0"), true, "the retry unit stays usable");
   assert.deepEqual(ids, ["r0", "r1", "r2", "k1", "k2"]);
 
-  // Once the retry is spent, the asked unit drops out.
+  // Once the probes on that unit are spent, the asked unit drops out. An
+  // undiagnosed miss gets one follow-up, so the second one ends it.
   const spent = ask(s, { evidence_n: 1 }, "incorrect");
   assert.equal(
     q.usableUnits(spent).map((u) => u.id).includes("r0"),
@@ -341,16 +491,36 @@ test("acceptQuestion numbers questions from 1 and carries the difficulty", () =>
 
 // ---- applyGrade --------------------------------------------------------------
 
-test("applyGrade: correct raises the difficulty to a ceiling of 3", () => {
+test("applyGrade: correct escalates, jumping to the top tier on a streak", () => {
   let s = session();
   s = ask(s, { evidence_n: 1 }, "correct");
-  assert.equal(s.difficulty, 2);
+  assert.equal(s.difficulty, 2, "one right answer steps up");
   assert.equal(s.correct, 1);
   assert.equal(s.retryOf, null);
+  // Two in a row: a floor with no ceiling in sight, so jump rather than inch.
   s = ask(s, { evidence_n: 2, quote: "Affinity is the strength", answer: "binding strength" }, "correct");
   assert.equal(s.difficulty, 3);
   s = ask(s, { evidence_n: 3, quote: "an agonist binds a receptor and activates", answer: "it activates" }, "correct");
   assert.equal(s.difficulty, 3, "capped at 3");
+});
+
+test("applyGrade: a miss brackets the edge from above and narrows back down", () => {
+  let s = session();
+  s = ask(s, { evidence_n: 1 }, "correct");
+  s = ask(s, { evidence_n: 2, quote: "Affinity is the strength", answer: "binding strength" }, "correct");
+  assert.equal(s.difficulty, 3);
+  s = ask(s, { evidence_n: 3, quote: "an agonist binds a receptor and activates", answer: "it activates" }, "incorrect");
+  assert.equal(s.difficulty, 2, "the ceiling is found, so narrow back in");
+});
+
+test("applyGrade: a broken streak does not count as one", () => {
+  let s = session();
+  s = ask(s, { evidence_n: 1 }, "correct");
+  s = ask(s, { evidence_n: 2, quote: "Affinity is the strength", answer: "binding strength" }, "incorrect");
+  assert.equal(s.difficulty, 1, "back to the floor");
+  // One correct answer after a miss is a streak of one, not two: step, not jump.
+  s = ask(s, { evidence_n: 3, quote: "an agonist binds a receptor and activates", answer: "it activates" }, "correct");
+  assert.equal(s.difficulty, 2);
 });
 
 test("applyGrade: incorrect arms a retry once, then clears it", () => {
@@ -358,7 +528,7 @@ test("applyGrade: incorrect arms a retry once, then clears it", () => {
   s = ask(s, { evidence_n: 1 }, "incorrect");
   assert.equal(s.retryOf, "r0");
   assert.equal(s.retryAngle, "What does a receptor bind with high affinity?");
-  assert.equal(s.difficulty, 1, "a miss does not change the tier");
+  assert.equal(s.difficulty, 1, "already at the floor, so it stays there");
   assert.equal(s.wrong, 1);
 
   // The retry itself misses: the probe is spent, so no second retry.
@@ -368,22 +538,23 @@ test("applyGrade: incorrect arms a retry once, then clears it", () => {
   assert.equal(s.difficulty, 1);
 });
 
-test("applyGrade: partial, dontknow and skipped leave the tier alone and arm no retry", () => {
+test("applyGrade: a skip lowers the tier but arms no retry", () => {
+  let s = session();
+  s = ask(s, { evidence_n: 1 }, "correct");
+  assert.equal(s.difficulty, 2);
+  s = ask(s, { evidence_n: 2, quote: "Affinity is the strength", answer: "binding strength" }, "skipped");
+  assert.equal(s.skipped, 1);
+  assert.equal(s.difficulty, 1, "a declined answer is a ceiling too");
+  assert.equal(s.retryOf, null, "nothing to dislodge, so no retry");
+});
+
+test("applyGrade: a partial leaves the tier alone and arms no retry", () => {
   let s = session();
   s = ask(s, { evidence_n: 1 }, "partial");
   assert.equal(s.partial, 1);
   assert.equal(s.difficulty, 1);
   assert.equal(s.retryOf, null);
 
-  s = ask(s, { evidence_n: 2, quote: "Affinity is the strength", answer: "binding strength" }, "dontknow");
-  assert.equal(s.dontKnow, 1);
-  assert.equal(s.difficulty, 1);
-  assert.equal(s.retryOf, null);
-
-  s = ask(s, { evidence_n: 3, quote: "an agonist binds a receptor and activates", answer: "it activates" }, "skipped");
-  assert.equal(s.skipped, 1);
-  assert.equal(s.difficulty, 1);
-  assert.equal(s.retryOf, null);
 });
 
 test("applyGrade is immutable and records the answer", () => {
@@ -403,17 +574,19 @@ test("applyGrade is immutable and records the answer", () => {
   assert.equal(a.n, 1);
 });
 
-test("a retry counts toward the total", () => {
-  // total 3: correct, incorrect, incorrect-on-the-retry → finished.
+test("a retry counts toward the cap", () => {
+  // Cap 3, and no correct answer anywhere, so nothing can bracket: the only
+  // way this quiz ends is the cap, and the retry has to count toward it.
   let s = session(3);
-  s = ask(s, { evidence_n: 1 }, "correct");
+  s = ask(s, { evidence_n: 1 }, "incorrect");
+  assert.equal(s.finished, false);
+  assert.equal(s.retryOf, "r0");
+  s = ask(s, { evidence_n: 1, question: "Same passage, other angle?" }, "incorrect");
   assert.equal(s.finished, false);
   s = ask(s, { evidence_n: 2, quote: "Affinity is the strength", answer: "binding strength" }, "incorrect");
-  assert.equal(s.finished, false);
-  assert.equal(s.retryOf, "r1");
-  s = ask(s, { evidence_n: 2, question: "Why does affinity matter?", quote: "Affinity is the strength", answer: "binding strength" }, "incorrect");
   assert.equal(s.asked.length, 3);
-  assert.equal(s.finished, true);
+  assert.equal(s.finished, true, "the retry was the second of three graded questions");
+  assert.match(q.summary(s).line, /stopped at the question cap/, "ended by the cap, not by bracketing");
 });
 
 // ---- dropUnit and nextRequest ------------------------------------------------
@@ -443,14 +616,14 @@ test("nextRequest carries the tier, the asked questions and the retry number", (
 // ---- summary and rendering ---------------------------------------------------
 
 test("summary counts misses and formats the score line", () => {
-  let s = session(5);
+  let s = session();
   s = ask(s, { evidence_n: 1 }, "correct");
   s = ask(s, { evidence_n: 2, quote: "Affinity is the strength", answer: "binding strength" }, "correct");
   s = ask(s, { evidence_n: 3, quote: "an agonist binds a receptor and activates", answer: "it activates" }, "correct");
   s = ask(s, { evidence_n: 4, quote: "First-pass metabolism removes drug", answer: "the liver" }, "partial");
   s = ask(s, { evidence_n: 5, quote: "the time for the plasma concentration to fall by half", answer: "half-life" }, "incorrect");
   const r = q.summary(s);
-  assert.equal(r.line, "3 of 5 correct · 1 partial · 1 wrong · 0 passed · 0 skipped");
+  assert.equal(r.line, "3 of 5 correct · 1 partial · 1 wrong · 0 skipped");
   assert.deepEqual(
     r.misses.map((m) => m.unitId),
     ["k0", "k1"],
@@ -458,15 +631,15 @@ test("summary counts misses and formats the score line", () => {
   );
 });
 
-test("summary counts a dontknow as a miss and a skip as neither", () => {
-  let s = session(2);
-  s = ask(s, { evidence_n: 1 }, "dontknow");
+test("summary counts every skip as a miss", () => {
+  let s = session();
+  s = ask(s, { evidence_n: 1 }, "skipped");
   s = ask(s, { evidence_n: 2, quote: "Affinity is the strength", answer: "binding strength" }, "skipped");
   const r = q.summary(s);
-  assert.equal(r.line, "0 of 2 correct · 0 partial · 0 wrong · 1 passed · 1 skipped");
+  assert.equal(r.line, "0 of 2 correct · 0 partial · 0 wrong · 2 skipped");
   assert.deepEqual(
     r.misses.map((m) => m.unitId),
-    ["r0"],
+    ["r0", "r1"],
   );
 });
 
@@ -482,9 +655,9 @@ test("renderQuestionMarkdown's first line is exactly the header", () => {
     difficulty: 2,
     kind: "why",
   };
-  const md = q.renderQuestionMarkdown(question, 5);
+  const md = q.renderQuestionMarkdown(question);
   const lines = md.split("\n");
-  assert.equal(lines[0], "**Question 2/5** *(why)*");
+  assert.equal(lines[0], "**Question 2** *(why)*", "no denominator: the quiz has no target length");
   assert.equal(lines[1], "");
   assert.equal(lines[2], "Why does a receptor's affinity matter?");
   assert.equal(md.includes("difficulty"), false, "the tier is internal");
@@ -517,7 +690,6 @@ test("renderGradeMarkdown shows the verdict, feedback, answer and passage", () =
   for (const [verdict, line] of [
     ["partial", "△ Partly"],
     ["incorrect", "✗ Not quite"],
-    ["dontknow", "– You passed"],
     ["skipped", "→ Skipped"],
   ]) {
     const out = q.renderGradeMarkdown({ ...asked, verdict }, u);
@@ -547,11 +719,11 @@ test("renderGradeMarkdown omits empty feedback", () => {
 });
 
 test("renderSummaryMarkdown links each miss to its note", () => {
-  let s = session(2);
+  let s = session();
   s = ask(s, { evidence_n: 1 }, "correct");
   s = ask(s, { evidence_n: 4, quote: "First-pass metabolism removes drug", answer: "the liver" }, "incorrect");
   const md = q.renderSummaryMarkdown(s);
-  assert.match(md, /^1 of 2 correct · 0 partial · 1 wrong · 0 passed · 0 skipped/);
+  assert.match(md, /^1 of 2 correct · 0 partial · 1 wrong · 0 skipped/);
   assert.match(md, /\*\*Missed:\*\*/);
   assert.match(
     md,
@@ -560,7 +732,7 @@ test("renderSummaryMarkdown links each miss to its note", () => {
 });
 
 test("renderSummaryMarkdown says so when nothing was missed", () => {
-  let s = session(1);
+  let s = session();
   s = ask(s, { evidence_n: 1 }, "correct");
   const md = q.renderSummaryMarkdown(s);
   assert.match(md, /No misses\./);
@@ -568,11 +740,11 @@ test("renderSummaryMarkdown says so when nothing was missed", () => {
 });
 
 test("summary lists a retried passage once", () => {
-  let s = session(3);
+  let s = session();
   s = ask(s, { evidence_n: 1 }, "incorrect", "wrong");
   // the retry asks the same passage again from another angle
   s = ask(s, { evidence_n: 1, question: "Same passage, other angle?" }, "incorrect", "wrong again");
-  s = ask(s, { evidence_n: 2, quote: "the strength with which a drug binds its receptor", answer: "the strength of binding" }, "dontknow", "");
+  s = ask(s, { evidence_n: 2, quote: "the strength with which a drug binds its receptor", answer: "the strength of binding" }, "skipped", "");
   const { misses } = q.summary(s);
   assert.equal(misses.length, 2);
   assert.equal(new Set(misses.map((m) => m.unitId)).size, 2);
@@ -654,7 +826,7 @@ test("resolvePool caps the all scope evenly across the ordered pool", () => {
 });
 
 test("renderGradeMarkdown shows the dispute note and the verified grade quote", () => {
-  let s = session(2);
+  let s = session();
   const checked = q.checkQuestion(draft(), s);
   s = q.acceptQuestion(s, checked.question);
   s = q.applyGrade(s, "incorrect", "Not what the passage says.", "binds a drug with high affinity", "a drug", { dispute: "Your answer contains the expected wording; the grade may be too strict.", gradeQuoteRejected: false, feedbackGrounded: true });

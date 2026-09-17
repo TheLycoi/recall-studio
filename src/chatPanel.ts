@@ -77,7 +77,6 @@ interface ChatTurn {
   quiz?: {
     kind: "question" | "grade" | "summary";
     index?: number;
-    total?: number;
     verdict?: Verdict;
     misses?: EvidenceUnit[];
     unverified?: boolean;
@@ -453,6 +452,15 @@ export class ChatPanel {
     if (quizCommand) {
       this.draft = "";
       if (quizCommand.kind === "start") {
+        // What the reader typed goes in the log like any other line of theirs.
+        // Starting a quiz used to be swallowed — the log jumped from nothing to
+        // "Quiz on X: 5 questions", so a reader scrolling back could not see
+        // what they had asked for, and a quiz that came back on the wrong
+        // subject looked like the panel ignoring them rather than a query that
+        // read differently than intended. The other quiz commands are left
+        // alone: `/skip` and `/idk` are echoed by `gradeWithout`, and `/hint`
+        // and `/stop` are answered by the line that follows them.
+        this.turns.push({ role: "user", text: q });
         if (this.session && !this.restartArmed) {
           this.restartArmed = true;
           this.pushSystem("A quiz is running. Type /quiz again to restart it.");
@@ -471,14 +479,12 @@ export class ChatPanel {
         case "stop":
           await this.finishQuiz();
           return;
-        case "skip":
-          await this.gradeWithout("skipped", "");
-          return;
         case "hint":
           this.showHint();
           return;
         default:
-          await this.gradeWithout("dontknow", q);
+          // `q` is the command itself, so the log shows which one was typed.
+          await this.gradeWithout("skipped", q);
           return;
       }
     }
@@ -492,7 +498,7 @@ export class ChatPanel {
     if (this.session && !q.startsWith("/")) {
       this.draft = "";
       if (isDontKnow(q)) {
-        await this.gradeWithout("dontknow", q);
+        await this.gradeWithout("skipped", q);
         return;
       }
       await this.answerQuiz(q);
@@ -724,9 +730,9 @@ export class ChatPanel {
     }
 
     const kind: QuizScope["kind"] = scope === "all" ? "all" : scope === "this" ? "note" : "query";
-    this.session = startSession({ kind, label }, query, pool, Math.max(1, this.plugin.settings.quizQuestions));
+    this.session = startSession({ kind, label }, query, pool, Math.max(1, this.plugin.settings.quizCap));
     this.pushSystem(
-      `Quiz on ${label}: ${this.session.total} questions. Answer in your own words; /hint, /skip, /idk, /stop.`,
+      `Quiz on ${label}: questions keep coming until the edge of what you know is found, then the misses go to your inbox as cards. /hint, /skip, /stop.`,
     );
     await this.nextQuestion();
   }
@@ -790,8 +796,8 @@ export class ChatPanel {
           if (!current) return;
           this.turns.push({
             role: "assistant",
-            text: renderQuestionMarkdown(current, next.total),
-            quiz: { kind: "question", index: current.n, total: next.total },
+            text: renderQuestionMarkdown(current),
+            quiz: { kind: "question", index: current.n },
           });
           return;
         }
@@ -861,6 +867,8 @@ export class ChatPanel {
         gradeQuoteRejected: !!grade.quote.trim() && !gradeQuote,
         feedbackGrounded: feedbackGrounded(grade.feedback, evidence.text, text),
         dispute: disputeGrade(text, current.answer, grade.verdict, !!gradeQuote),
+        gap: grade.gap,
+        gapNote: grade.gapNote,
       };
       this.pushGrade(applyGrade(session, grade.verdict, grade.feedback, gradeQuote, text, extras), current.evidenceN);
     } catch (e) {
@@ -879,18 +887,22 @@ export class ChatPanel {
 
   /**
    * A verdict that needs no model call: `/skip` and `/idk` (and a blank line,
-   * which `ask` routes here). Both show the expected answer and the passage,
-   * because the point of "I don't know" in the reference quiz is to be told
-   * rather than to be marked wrong.
+   * which `ask` routes here) are one and the same — a declined answer. It shows
+   * the expected answer and the passage, because the point of declining in the
+   * reference quiz is to be told rather than to be marked wrong.
    */
   private async gradeWithout(verdict: Verdict, userAnswer: string): Promise<void> {
     const session = this.session;
     const current = session?.current;
     if (!session || !current || this.busy) return;
-    if (verdict === "dontknow" && userAnswer.trim()) {
+    if (userAnswer.trim()) {
       this.turns.push({ role: "user", text: userAnswer, quiz: { kind: "grade" } });
     }
-    this.pushGrade(applyGrade(session, verdict, "", "", userAnswer), current.evidenceN);
+    // Nothing was graded, so nothing diagnosed it — but declining is its own
+    // diagnosis: a passage the reader would not attempt, which is exactly what
+    // a card is for.
+    const extras = { gap: "detail" as const, gapNote: "could not recall it at all" };
+    this.pushGrade(applyGrade(session, verdict, "", "", userAnswer, extras), current.evidenceN);
     await this.afterGrade();
   }
 
@@ -1016,6 +1028,7 @@ export class ChatPanel {
     const wrap = root.createDiv({ cls: "wikilm-chat" });
 
     const log = wrap.createDiv({ cls: "wikilm-chat-log" });
+    this.wireInternalLinks(log);
 
     const prefix = this.folderPrefix();
     if (this.turns.length === 0) {
@@ -1032,6 +1045,48 @@ export class ChatPanel {
 
     this.renderInput(wrap);
     log.scrollTop = log.scrollHeight;
+  }
+
+  /**
+   * Make the wikilinks inside rendered markdown open their notes.
+   *
+   * `MarkdownRenderer.render` writes a real `a.internal-link` carrying its
+   * target in `data-href`, but it attaches no click handler: Obsidian wires
+   * those inside its own `MarkdownView`, and this is a plain `ItemView`, so in
+   * the panel they rendered as links that did nothing. The quiz felt the gap
+   * most — a grade cites `[17] Self-Efficacy` (src/quiz.ts:604), and the note
+   * behind the citation is the thing a reader wants after getting one wrong.
+   *
+   * One delegated listener on the log covers every turn that goes through the
+   * markdown renderer — grades, the closing "Missed" list (src/quiz.ts:617),
+   * `/help` — rather than each render site wiring its own. `render` rebuilds
+   * the log on every state change, so the handler is recreated with it and
+   * cannot stack up.
+   *
+   * Links open in the root split (`"tab"`, obsidian.d.ts:7883), not in the
+   * active leaf: the panel usually *is* the active leaf, and a note opened
+   * over it would replace the conversation it was opened from. `inboxView.ts`
+   * opens its links the same way. The source path is empty because the links
+   * evidence writes are vault-absolute, so there is nothing relative to
+   * resolve against (obsidian.d.ts:7914).
+   */
+  private wireInternalLinks(log: HTMLElement): void {
+    const open = (e: MouseEvent): void => {
+      const target = e.target;
+      if (!(target instanceof HTMLElement)) return;
+      const link = target.closest<HTMLElement>("a.internal-link");
+      if (!link || !log.contains(link)) return;
+      const href = link.getAttribute("data-href") ?? link.getAttribute("href");
+      if (!href) return;
+      e.preventDefault();
+      void this.plugin.app.workspace.openLinkText(href, "", "tab");
+    };
+
+    log.addEventListener("click", open);
+    // Middle-click, which everywhere else in Obsidian also opens a tab.
+    log.addEventListener("auxclick", (e) => {
+      if (e.button === 1) open(e);
+    });
   }
 
   private renderTurn(log: HTMLElement, turn: ChatTurn): void {

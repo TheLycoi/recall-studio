@@ -200,11 +200,11 @@ export function matchCommand(input: string, commands: CommandLike[], fuzzy: Fuzz
  * so `renderHelp` prints it with the rest and a line here would duplicate it.
  */
 export const QUIZ_HELP = [
-  "- **/quiz** [this | words] — start a quiz on all topic notes, the active note, or matching passages",
+  "- **/quiz** [this | words] — quiz all topic notes, the active note, or matching passages; runs until it finds the edge of what you know",
   "- **/hint** — one clue for the current question",
-  "- **/skip** — skip the current question",
-  "- **/idk** — I don't know: show the answer without counting it wrong",
-  "- **/stop** — end the quiz and show the score",
+  "- **/skip** — skip the current question: shows the answer, and counts as a passage you could not produce",
+  "- **/idk** — the same as /skip",
+  "- **/stop** — end the quiz early and show the score",
 ].join("\n");
 
 /**
