@@ -110,3 +110,23 @@ test("isGraphUsable refuses a wiki with too few links to walk", () => {
   );
   assert.equal(g.isGraphUsable(linked), true);
 });
+
+test("linkKey folds a prose link and a slug filename to one key", () => {
+  assert.equal(g.linkKey("concepts/Model Context Protocol"), g.linkKey("wiki/concepts/model-context-protocol.md"));
+  assert.equal(g.linkKey("Spaced  Repetition!"), "spaced-repetition");
+  assert.equal(g.linkKey("Prompts, revisited"), "prompts-revisited");
+  assert.equal(g.linkKey("Café Culture"), "café-culture", "letters outside ASCII survive");
+});
+
+test("linkKey keeps genuinely different pages apart", () => {
+  assert.notEqual(g.linkKey("agents"), g.linkKey("agentic-systems"));
+  assert.notEqual(g.linkKey("concepts/agents"), g.linkKey("concepts/agent"));
+});
+
+test("buildGraph resolves a prose link to a slugified page", () => {
+  const graph = g.buildGraph([
+    { path: "wiki/concepts/agentic-systems.md", content: "See [[concepts/Model Context Protocol|MCP]]." },
+    { path: "wiki/concepts/model-context-protocol.md", content: "A protocol." },
+  ]);
+  assert.deepEqual(graph.edges.get("wiki/concepts/agentic-systems.md"), ["wiki/concepts/model-context-protocol.md"]);
+});

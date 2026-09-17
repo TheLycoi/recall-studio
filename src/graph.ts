@@ -75,9 +75,20 @@ export function noteLinks(content: string): Array<{ raw: string; embed: boolean 
   return out;
 }
 
-/** A link target reduced to the key both resolvers match on: basename, no extension, lowercased. */
+/**
+ * A link target reduced to the key every resolver matches on.
+ *
+ * Basename, no `.md`, lowercased — and slugified: runs of anything that is
+ * not a letter or a digit become one hyphen, trimmed at the ends. The wiki's
+ * pages are slugs on disk (`model-context-protocol.md`) while its links are
+ * written in prose (`[[concepts/Model Context Protocol]]`); before this fold
+ * the two never met, and 196 of the vault's 226 "dead" links were this bug.
+ * Letters outside ASCII are kept, so a title with an accent still resolves
+ * to the file named after it.
+ */
 export function linkKey(raw: string): string {
-  return (raw.split("/").pop() ?? raw).replace(/\.md$/i, "").toLowerCase();
+  const base = (raw.split("/").pop() ?? raw).replace(/\.md$/i, "").toLowerCase();
+  return base.replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "");
 }
 
 /**
