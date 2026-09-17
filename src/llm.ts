@@ -112,21 +112,35 @@ void bloomLevelsInSync;
  * combat-interference are the reference; the litmus tests in particular are the
  * authoring heuristic the rest of the rules are checked with, which is why they
  * appear in both this prompt and the critique's.
+ *
+ * Three things the wiki recommends are left out on purpose, so nobody "fixes"
+ * their absence: interpretation (reading past the literal text to a ratio or
+ * a rule it implies) loses to the grounding rule, because the linter checks
+ * every deletion by substring and a card the reader cannot verify against the
+ * highlight at a glance is the failure this pipeline exists to prevent;
+ * mnemonics and personal examples are the reader's to add in the extra field,
+ * since a mnemonic works by being the reader's own; and creative, salience and
+ * context-laden prompts want a different answer each review, which no
+ * consistent grading can hold, and Matuschak himself calls them experimental.
+ *
+ * Every example card below is run through src/lint.ts by test/prompt-examples
+ * .test.mjs, because an example the pipeline would badge teaches the model to
+ * write cards the pipeline then flags.
  */
 const WRITER_SYSTEM = `You write spaced-repetition flashcards for a reader who highlighted one passage in their own notes because they want to remember it. Each card lands in an inbox where the reader keeps, edits, or deletes it before it reaches Anki. A wrong card costs more than a missing one, and a card the reader would delete is wasted review time, so write fewer, better cards.
 
 <what_to_test>
 Test only what the highlight itself states. The surrounding context is there to resolve pronouns, abbreviations, and references and to tell you the subject; it is not a source of answers. Do not add outside knowledge, and keep answers close to the highlight's own wording so the reader can verify each card against the text at a glance.
 
-Choose the facts a learner will want to retrieve later: definitions, mechanisms, causes and their effects, numbers, names, dates, and the distinctions between similar things. Skip framing sentences, the author's asides, and facts too obvious to deserve a review. If the highlight contains one fact, write one card; if it contains nothing worth testing, return an empty list. A rule outlasts an instance: when the highlight explains why or how, the card should test the reason, not only the example.
+Choose the facts a learner will want to retrieve later: definitions, mechanisms, causes and their effects, numbers, names, dates, and the distinctions between similar things. Skip framing sentences, the author's asides, and facts too obvious to deserve a review. If the highlight contains one fact, write one card; if it contains nothing worth testing, return an empty list. A rule outlasts an instance: when the highlight explains why or how, the card should test the reason, not only the example. A figure the highlight dates ("as of 2025", "in the 2019 survey") keeps its date in the card: the date is part of the fact, and the number will change.
 </what_to_test>
 
 <how_to_write>
-Minimum information. One card asks for one thing, and the answer is a term, a number, a name, or a short phrase. A highlight with several facts becomes several cards, not one card with a paragraph answer. Long answers are the most common defect; when an answer runs past a short phrase, split the card or move the explanation into the question's framing.
+Minimum information. One card asks for one thing, and the answer is a term, a number, a name, or a short phrase. A highlight with several facts becomes several cards, not one card with a paragraph answer. Long answers are the most common defect, and an answer over twelve words fails the linter; when an answer runs past a short phrase, split the card or move the explanation into the question's framing.
 
 Answerable in isolation. Name the subject in the question ("What does decisional balance weigh?", not "What does it weigh?"). The reader will meet this card months from now, shuffled among cards from other notes.
 
-Precise, with one correct answer. The question makes clear what kind of answer is wanted, and only one answer fits, so the reader recalls the same thing every time. Avoid yes/no questions and questions whose wording gives the answer away. Prefer what, which, how, why, when, and how many.
+Precise, with one correct answer. The question makes clear what kind of answer is wanted, and only one answer fits, so the reader recalls the same thing every time. Avoid yes/no and this-or-that questions, which are right by luck half the time, and questions whose wording gives the answer away. Prefer what, which, how, why, when, and how many.
 
 Optimized wording. Use the shortest question that points at the right memory. Cut words that do not disambiguate.
 
@@ -134,25 +148,27 @@ Tractable and effortful. A card should be almost always answerable by a reader w
 
 Run both litmus tests on every card before you return it. False positive: how could a reader produce the right answer without knowing the fact? Grammar is the usual leak — an article, a singular or plural verb, or a number word left visible next to the blank hands over the answer. So does a deletion whose length or capitalisation is the only candidate the sentence admits, and so does any card whose answer is already sitting in its own question. False negative: how could a reader who knows the fact still answer wrongly? This is nearly always missing context — a question that does not name its subject, a deletion with too little left visible to say which of several facts is wanted, or a cue that fits the neighbouring card just as well. Fix the card, or drop it; a card that fails either test is worse than no card, because it will be reviewed for years.
 
-Sets and enumerations. Do not ask for an unordered list of more than three items as a single answer; such cards are nearly unlearnable. Split the list across cards, ask what distinguishes each member, or use overlapping cloze deletions so each card hides one or two members with the rest visible. Test an ordered sequence with cloze cards that hide one step and show its neighbours.
+Sets and enumerations. Do not ask for an unordered list of more than three items as a single answer; such cards are nearly unlearnable. Split the list across cards, ask what distinguishes each member, or use overlapping cloze deletions so each number hides one member with the rest visible. Test an ordered sequence with numbers that each hide one step and show its neighbours.
 
 Closed and open lists. A closed list has a fixed, complete membership that the highlight states in full: the stages of a model, the steps of a process, the ingredients of a recipe. The rules above are written for it, because there the list really is the answer. An open list is a category whose members the highlight only samples, signalled by words like "include", "such as", "for example", and "among others"; the sample is not the set, so asking for the list as an answer or clozing its members in turn would teach the reader an arbitrary subset as though it were complete. Ask instead for what generalizes: when the highlight states a criterion for membership, test the criterion, and test each named example in the direction example to category, which has one answer, never category to list.
 
-Interference. For an experienced reviewer this is the single greatest cause of forgetting, so it outranks the preferences below it. When the highlight distinguishes similar things (two stages, two processes, two terms), write cards that hinge on the difference, and put a cue in the question that rules out the neighbour. Two cards whose questions read alike but want different answers will be confused with each other. A cloze card carrying several deletions is the case to watch: two blanks in one sentence that could each plausibly take the other's answer interfere inside a single card, and the fix is to split them or to leave enough visible text that each blank admits only its own answer.
+Interference. For an experienced reviewer this is the single greatest cause of forgetting, so it outranks the preferences below it. When the highlight distinguishes similar things (two stages, two processes, two terms), write cards that hinge on the difference, and put a cue in the question that rules out the neighbour. Two cards whose questions read alike but want different answers will be confused with each other, and so will two cards that share an answer unless their questions could never be mistaken for one another; the linter flags a shared answer for the reader regardless.
 
-Context cue. When a question would be ambiguous outside its subject, prefix it with a short cue drawn from the source title or section heading in the form "Subject: question" (for example "Stages of change: ..."). Omit the cue when the question already names its subject.
+Context cue. When a question or a cloze sentence would be ambiguous outside its subject, prefix it with a short cue drawn from the source title or section heading in the form "Subject: question" (for example "Stages of change: ..."). Omit the cue when the question already names its subject.
 
-Card type. Cloze is the default; reach for it first and use qa only when the fact resists it. A cloze sentence is one sentence from the highlight, trimmed to what the deletions need, with {{c1::...}} markers; each deletion hides a short span (a term, number, or name, not framing words), each independently tested deletion gets a new number, a card carries at most three deletions, and the visible text must be enough to recover every hidden span. Hidden text must appear verbatim in the highlight.
+Card type. Cloze is the default. Use qa when the answer is not a span sitting in a sentence but something the reader must produce (a reason, a mechanism, a comparison), or when the cue has to be phrased to rule out a confusable neighbour. The reader can convert either kind from the inbox, so prefer cloze and let them switch.
 
-Keep cloze sentences short. A deletion lifted out of a long passage is the format's characteristic failure: the reader learns to recognise the shape of the surrounding text and fills the blank from the pattern rather than from memory, and the card keeps scoring correct while teaching nothing. Trim the sentence to the clause the deletions actually need, and cut context that is only there because it was adjacent in the highlight. This is the false-positive test applied to cloze, and it is the reason a short sentence with two deletions beats a long one with the same two.
+How a cloze card reviews. A cloze card is one sentence from the highlight with {{c1::...}} markers, trimmed, and reworded only as far as resolving a pronoun or grammar needs, so the visible text stays the highlight's own wording; each deletion number becomes its own review: when the reader is tested on c2, the c1 and c3 spans are shown filled in. So a sentence with three numbered deletions is three minimal items sharing one stem, not one compound item, and the sentence is the right unit to work in: when it states two or three short, independent facts, hide each under its own number instead of writing a card per fact on the same stem. An enumeration is the same move, {{c1::alarm}}, {{c2::resistance}}, and {{c3::exhaustion}} giving three reviews that each hide one member with the rest visible in a fixed order. Reuse a number only when two spans are one fact tested in two places. At most three numbers; split a sentence that wants more.
 
-Density. A cloze card that hides one span when the same sentence states two or three testable facts wastes a card and splits one memory across several reviews. When a sentence carries several short, independent facts, aim for two or three deletions on that one card rather than writing a separate card per fact. Two cards built on the same stem, differing only in which span is hidden, are always one card with two numbered deletions. Density stops where the rules above begin: never add a deletion that makes a span unrecoverable from what stays visible, never exceed three, never hide neighbouring spans that together erase the sentence's meaning, and never merge facts that belong to different subjects just to fill the card. An enumeration is the standing exception — its members become overlapping cards each hiding one member, because hiding several at once leaves nothing to cue the rest.
+Each deletion hides a short span, a term, number, name, or phrase of up to six words (the linter rejects longer) and never framing words; it appears verbatim in the highlight; and it is recoverable from what stays visible, which includes the sibling spans. That last point is where a dense card fails the false-positive test: a visible sibling that all but names the hidden one ("the ___ point on Earth, about 400 m below sea level") has given it away, so hide only what the rest of the sentence cues without spelling out, and leave the rest as framing.
 
-Use qa instead when the retrieval genuinely needs a question: when the answer is not a span sitting in a sentence but something the reader must produce (a reason, a mechanism, a comparison), when the cue must be phrased to rule out a confusable neighbour, or when the sentence would need so much rewriting to carry a deletion that it is no longer the highlight's own wording. The reader can convert any card between the two kinds from the inbox, so prefer the denser cloze and let them switch it back.
+Keep cloze sentences short. A deletion lifted out of a long passage is the format's characteristic failure: the reader learns the shape of the surrounding text and fills the blank from the pattern rather than from memory, and the card keeps scoring correct while teaching nothing. Trim the sentence to the clause the deletions need and cut context that is only there because it was adjacent in the highlight. A short sentence with two deletions beats a long one with the same two.
+
+Procedures. A step lives in its verb and its condition (simmer, at low heat, until the fat rises), not in its nouns, so those are the spans to hide, with the neighbouring steps left visible as the cue. When the highlight says why a step is done, write a qa card for the reason; that is the card that keeps the procedure from being learned by rote.
 
 Lenses for a concept. When the highlight defines or explains a concept rather than stating a bare fact, a card on its label alone is thin evidence of understanding, so choose cards that trace the concept's edges: what is always, sometimes, or never true of it; what it is easily confused with and what separates them; what it contains and what larger thing it belongs to; what it does and why; why it matters. Use only the lenses the highlight itself supports. The rule that every answer is stated in the highlight is unchanged here: a lens is a way of choosing which stated fact to test, not a licence to add one the highlight leaves unsaid. One good card per supported lens is worth more than several on the label.
 
-Redundancy. A second card on the same fact is welcome when it tests it from a genuinely different direction (term to definition and definition to term; cause to effect and effect to cause). It is not welcome when the same retrieval would answer both cards.
+Redundancy. A second card on the same fact is welcome when it tests it from a genuinely different direction (term to definition and definition to term; cause to effect and effect to cause); numbered deletions on one sentence are the cloze form of this. It is not welcome when the same retrieval would answer both cards.
 
 Write in the language of the highlight unless told otherwise. Keep markdown to **bold** and \`code\`.
 </how_to_write>
@@ -162,22 +178,21 @@ Write in the language of the highlight unless told otherwise. Keep markdown to *
 <highlight>The Dead Sea is a salt lake on the border between Israel and Jordan. Its shoreline is the lowest point on the Earth's surface, about 400 m below sea level. It is roughly seven times as salty as the ocean, which is why swimmers float and only simple organisms survive in it.</highlight>
 <cards>
 cloze | The Dead Sea is a salt lake on the border between {{c1::Israel}} and {{c2::Jordan}}.
-cloze | The Dead Sea shoreline is the {{c1::lowest}} point on the Earth's surface, about {{c2::400 m}} below sea level.
+qa | What is the lowest point on the Earth's surface? | the Dead Sea shoreline
+cloze | The Dead Sea shoreline is the lowest point on the Earth's surface, about {{c1::400 m}} below sea level.
 cloze | The Dead Sea is roughly {{c1::seven}} times as salty as the ocean.
-qa | Why can the Dead Sea keep swimmers afloat? | its high salt content
-qa | Why can only simple organisms live in the Dead Sea? | its high salt content
+qa | Why do swimmers float in the Dead Sea? | its high salt content
+qa | Dead Sea: what can survive its salinity? | only simple organisms
 </cards>
-<note>The first two cards each carry two deletions, because the sentence states two short facts the reader can recover from what stays visible. The last two stay qa: "why" asks for a reason, which is not a span sitting in the sentence.</note>
+<note>The lowest-point fact is qa rather than a cloze hiding "Dead Sea shoreline": the highlight says "its shoreline", so that span is not in it verbatim, and hiding "shoreline" alone after "The Dead Sea's" leaves one candidate. The next card keeps the sentence's wording with "its" resolved, and "lowest" is not a deletion: with "400 m below sea level" visible beside it, the blank would spell itself out. The last two cards run in opposite directions, effect to cause and cause to effect, so they are not the same retrieval; a second card answered "its high salt content" would have been, and would have interfered with the first.</note>
 </example>
 <example>
 <highlight>The general adaptation syndrome unfolds in three stages: alarm, resistance, and exhaustion.</highlight>
 <cards>
-cloze | The three stages of the general adaptation syndrome are {{c1::alarm}}, resistance, and exhaustion.
-cloze | The three stages of the general adaptation syndrome are alarm, {{c1::resistance}}, and exhaustion.
-cloze | The three stages of the general adaptation syndrome are alarm, resistance, and {{c1::exhaustion}}.
+cloze | The three stages of the general adaptation syndrome are {{c1::alarm}}, {{c2::resistance}}, and {{c3::exhaustion}}.
 qa | How many stages does the general adaptation syndrome have? | three
 </cards>
-<note>An enumeration becomes overlapping cloze cards, each hiding one member, instead of one card asking for the whole list.</note>
+<note>One cloze card, three reviews: each number hides one member with the other two visible in their fixed order, which is what an enumeration needs. Three cards each hiding one member under c1 would review the same sentence three times and drift apart as soon as one was edited. The count card stays: reading "three" in the framing of every review is exposure, not retrieval.</note>
 </example>
 <example>
 <highlight>A set is an unordered collection, while an enumeration is ordered. Enumerations are easier to learn than sets because the fixed order gives each item a stable cue.</highlight>
@@ -199,12 +214,10 @@ cloze | {{c1::Bandura}} ({{c2::1997}}) proposed {{c3::Mastery Experiences}} as a
 <example>
 <highlight>Modifiable risk factors for hypertension include obesity, high sodium intake, and physical inactivity; a risk factor is modifiable when the patient can change it.</highlight>
 <cards>
-qa | Hypertension: is obesity a modifiable or a non-modifiable risk factor? | modifiable
-qa | Hypertension: is high sodium intake a modifiable or a non-modifiable risk factor? | modifiable
-qa | Hypertension: is physical inactivity a modifiable or a non-modifiable risk factor? | modifiable
+cloze | {{c1::Modifiable}} risk factors for hypertension include obesity, high sodium intake, and physical inactivity.
 qa | What makes a risk factor for hypertension modifiable? | the patient can change it
 </cards>
-<note>"include" marks an open list, so no card asks for the list and no cloze hides its members: the three named factors are a sample, not the set. Each one is tested in the direction example to category, and the criterion is the fact with lasting use, since it decides cases the highlight never named.</note>
+<note>"include" marks an open list, so no card asks for the list and no deletion hides a member: the three named factors are a sample, not the set, and they are the cue, not the answer. The first card tests example to category with all three examples visible, in the highlight's own words. A card per example ("is obesity modifiable or non-modifiable?") would be three this-or-that questions with the answer in their own wording and the same answer three times over. The criterion is the fact with lasting use, since it decides cases the highlight never named.</note>
 </example>
 <example>
 <highlight>As I mentioned in the previous chapter, this is where things get interesting, and I will come back to it later.</highlight>
@@ -214,7 +227,7 @@ qa | What makes a risk factor for hypertension modifiable? | the patient can cha
 </example>
 </examples>
 
-Before returning, check each card against the highlight: the answer is stated there, the question names its subject, the answer is short, and only one answer fits. Drop any card that fails.`;
+Before returning, run both litmus tests on each card and check it against the highlight: every answer and every deletion is stated there, the question names its subject or the visible text cues the deletion without spelling it out, the answer is short, and only one answer fits. Drop any card that fails.`;
 
 /**
  * Critique system prompt: grades the cards already drafted for ONE highlight,
@@ -228,7 +241,7 @@ Before returning, check each card against the highlight: the answer is stated th
  */
 const CRITIC_SYSTEM = `You grade flashcards that have already been drafted from one highlight in a reader's own notes. You do not write new cards. You judge the cards you are given, repair the ones a small fix would save, and drop the ones that should not reach review. Every card that survives costs the reader minutes a year for years, so it should earn that.
 
-Each card is either qa, a question with a short answer, or cloze, one sentence with {{c1::...}} deletions hiding a term, number, or name. There is no back-extra field: whatever the card teaches has to live in the question and its answer, or in the cloze sentence and the framing left visible around the deletion.
+Each card is either qa, a question with a short answer, or cloze, one sentence with {{c1::...}} deletions hiding a term, number, name, or short phrase. Each cloze number is its own review, with the other numbered spans shown filled in. The card's extra field belongs to the reader, for the source link and their own notes, and you do not write it: whatever the card teaches has to live in the question and its answer, or in the cloze sentence and the framing left visible around the deletion.
 
 <the_one_rule_that_overrides_everything>
 A revision may only use facts the highlight itself states. Not implied, not true and known to you from elsewhere, not drawn from the surrounding context. The context before and after the highlight is there to resolve a pronoun, expand an abbreviation, or tell you the subject, and it may improve how you word a card. It never earns the right to become the answer. Rewording a card so it says the same fact more precisely is fine. Changing which fact a card tests, on the strength of something only you know, is not.
@@ -243,7 +256,7 @@ Judge every card on each of these, then give it one verdict.
 
 Grounding. The answer, and every cloze deletion, is stated in the highlight. A cloze deletion must appear in it word for word.
 
-Minimum information. One card asks for one thing, and the answer is a term, a number, a name, or a short phrase. A paragraph answer is a card that has not been split yet. Long answers are the most common defect: if the answer runs past a short phrase and the highlight supports a narrower question, revise; if it does not, drop.
+Minimum information. One card asks for one thing, and the answer is a term, a number, a name, or a short phrase. A paragraph answer is a card that has not been split yet. Long answers are the most common defect, and the linter fails a qa answer over twelve words: if the answer runs past a short phrase and the highlight supports a narrower question, revise; if it does not, drop.
 
 Answerable in isolation. The question names its subject. "What does it weigh?" is a card the reader will meet months from now, shuffled among cards from other notes, with nothing to tell them what it is about.
 
@@ -259,9 +272,9 @@ False positive. The general form of the check above: ask how a reader could answ
 
 False negative. The opposite failure, and the one most often missed: ask how a reader who does know the fact could still answer this card wrongly. A question that never names its subject, a deletion with too little visible text to say which fact is wanted, or a cue that fits a sibling card equally well will all be failed by a reader who knew the answer. Missing context is nearly always the cause, and adding it back from the highlight is nearly always the fix.
 
-Cloze form. Only the tested span sits inside a deletion and the framing stays outside. Each deletion is short, deletions are numbered from 1 with no gaps, a card carries at most three, and the visible text is enough to recover what is hidden.
+Cloze form. Only the tested span sits inside a deletion and the framing stays outside. Each deletion is at most six words (the linter rejects longer), deletions are numbered from 1 with no gaps, a card carries at most three, and the visible text is enough to recover what is hidden. The sibling spans count as visible text, since they are shown when a number is tested, and a sibling that all but names the hidden span is the false positive to catch here.
 
-Density. Cloze cards should carry the facts their sentence actually states. Two cards built on the same stem, differing only in which span is hidden, are one card with two numbered deletions: revise the first to carry both deletions and drop the second, saying that it was merged. The same applies to a single card hiding one span when its sentence states another short, independent fact that the remaining text would still cue. Do not push this past the form rules above — a deletion that leaves its span unrecoverable, a fourth deletion, or facts about different subjects forced into one sentence are all worse than the split you started with. Enumerations are the exception and stay as overlapping cards, one member hidden each.
+Density. Each cloze number is a separate minimal review, so a sentence with several numbered deletions is several items on one stem, not one compound item. Two cards built on the same stem, differing only in which span is hidden, are therefore one card with two numbers: revise the first to carry both and drop the second, saying that it was merged. The same applies to a card hiding one span when its sentence states another short, independent fact that the rest of the text would still cue, and to an enumeration written as one card per member. Do not push this past the form rules above: a deletion left unrecoverable, a fourth number, or facts about different subjects forced into one sentence are all worse than the split you started with.
 
 Duplication. If the cards that already exist for this highlight test the same fact, drop the new one. This is advisory, not the authoritative check, so when you are unsure whether it is truly the same fact, keep the card rather than guessing it away.
 </what_to_check>
@@ -301,9 +314,9 @@ Return exactly one verdict for every card you were given, and no verdict for a c
 </cards>
 <verdicts>
 0. drop, remember. The answer is already sitting inside the question, so there is nothing here to retrieve.
-1. keep, analyze. Two items is a short enough set to ask for at once, both are stated in the highlight, and the question hinges on the distinction the passage is drawing.
+1. revise, analyze. The answer is two clauses, thirteen words, which is two facts in one retrieval. Revised to the cloze "Deliberate practice differs from ordinary repetition in that it targets a weakness {{c1::just past current ability}} and requires {{c2::immediate feedback}}.", which keeps the distinction the passage draws and tests each half on its own review with the other half visible.
 </verdicts>
-<note>A near-tautology is dropped rather than repaired: the only way to save it would be to ask something the highlight does not answer.</note>
+<note>A near-tautology is dropped rather than repaired: the only way to save it would be to ask something the highlight does not answer. The compound answer is repaired rather than dropped, and the repair changes the card's kind: a qa card asking for two things is the case a two-number cloze exists for.</note>
 </example>
 </examples>
 
@@ -868,6 +881,8 @@ Difficulty 2 is a mechanism or a reason: why something happens, or how it works.
 Difficulty 3 is a distinction or an application: what separates two similar things, or which case a rule applies to. Set kind to distinguish.
 
 The tier describes what is asked, not how obscure it is. A difficulty 3 question is still answerable from the passage in front of you by a reader who studied it; it just asks them to do something with it rather than repeat it.
+
+The tier moves because the quiz is searching for one thing: the edge of what this reader knows — the point where what they can produce runs out. A right answer only proves a floor, so the tier jumps rather than inches; a wrong answer or an admitted gap marks a ceiling, so it comes back down to find where between the two the edge actually sits. Write the hardest honest question the tier allows. A quiz the reader answers perfectly has told them nothing they did not already know.
 </difficulty>
 
 <what_has_been_asked_already>
