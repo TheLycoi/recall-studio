@@ -243,7 +243,7 @@ interface Group {
 }
 
 /** Where a proposed note goes instead of being created. */
-interface Route {
+export interface Route {
   to: WikiNoteIn;
   heading: string;
   why: string;
@@ -274,7 +274,7 @@ interface Route {
  *
  * Titles the reader has insisted on keeping (`keepAsNew`) skip all five.
  */
-function routeProposed(
+export function routeProposed(
   title: string,
   proposed: SuggestDraft["new_notes"][number] | undefined,
   wiki: WikiNoteIn[],

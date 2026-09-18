@@ -45,12 +45,24 @@ export interface DigestHighlightIn {
   text: string;
 }
 
+/** One page the digest may file highlights into, as the prompt lists it. */
+export interface DigestExistingNote {
+  title: string;
+  kind: "concept" | "entity";
+  aliases: string[];
+  /** The page's `##` headings, in order; the first twenty are shown. */
+  sections: string[];
+  /** The first sentence of its summary, or "". */
+  summary: string;
+  classCodes: string[];
+}
+
 export interface DigestMessageArgs {
   pdfTitle: string;
   classCode: string;
   paperText: string;
   highlights: DigestHighlightIn[];
-  existingTitles: string[];
+  existingNotes: DigestExistingNote[];
   maxNotes: number;
   standingInstructions: string;
   instruction: string;
@@ -68,7 +80,17 @@ export interface DigestMessageArgs {
  */
 export function buildDigestMessage(a: DigestMessageArgs): string {
   const paper = a.paperText.trim();
-  const titles = a.existingTitles.map((t) => t.trim()).filter(Boolean);
+  const notes = a.existingNotes
+    .map((n) => {
+      const parts: string[] = [n.kind];
+      if (n.aliases.length) parts.push(`aliases: ${n.aliases.join(", ")}`);
+      if (n.classCodes.length) parts.push(`class ${n.classCodes.join(", ")}`);
+      const lines = [`${n.title.trim()} (${parts.join("; ")})`];
+      for (const s of n.sections.slice(0, 20)) lines.push(`  ## ${s}`);
+      if (n.summary.trim()) lines.push(`  summary: ${n.summary.trim()}`);
+      return lines.join("\n");
+    })
+    .join("\n");
   const standing = a.standingInstructions.trim();
   const instruction = a.instruction.trim();
   const highlights = a.highlights
@@ -77,7 +99,7 @@ export function buildDigestMessage(a: DigestMessageArgs): string {
   return [
     paper ? `<paper title="${a.pdfTitle}" class="${a.classCode}">\n${paper}\n</paper>` : "",
     `<highlights>\n${highlights}\n</highlights>`,
-    titles.length ? `<existing_notes>\n${titles.join("\n")}\n</existing_notes>` : "",
+    notes ? `<existing_notes>\n${notes}\n</existing_notes>` : "",
     `Write at most ${a.maxNotes} topic notes.`,
     standing ? `Standing instructions: ${standing}` : "",
     instruction ? `Instructions for this PDF: ${instruction}` : "",

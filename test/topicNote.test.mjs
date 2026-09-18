@@ -47,11 +47,13 @@ const RECT_HIGHLIGHT = {
 };
 
 const LITERAL_NOTE = `---
-type: topic
+type: concept
 class: HBIO250
 created: 2026-09-10
 source_file: "[[HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf]]"
-tags: [hbio250]
+tags: [term]
+aliases:
+  - "Drug Receptors"
 ---
 
 # Receptors
@@ -81,6 +83,9 @@ test("renderTopicNote produces the literal two-highlight note", () => {
     summary: SUMMARY,
     highlights: [SELECTION_HIGHLIGHT, RECT_HIGHLIGHT],
     related: ["Pharmacology"],
+    kind: "concept",
+    tag: "term",
+    aliases: ["Drug Receptors"],
   });
   assert.equal(rendered, LITERAL_NOTE);
 });
@@ -122,6 +127,9 @@ test("renderTopicNote groups by ### Page N headings when highlights span more th
     summary: SUMMARY,
     highlights: [SELECTION_HIGHLIGHT, p5, p6],
     related: [],
+    kind: "concept",
+    tag: "term",
+    aliases: [],
   });
   assert.ok(rendered.includes("### Page 4\n"));
   assert.ok(rendered.includes("### Page 5\n"));
@@ -228,7 +236,7 @@ test("planTopicNotes reports unknownIds and keeps the note", () => {
     classCode: "HBIO250",
     topicFolder: "classes",
     created: "2026-09-10",
-    existing: {},
+    pages: [],
   });
   assert.deepEqual(result.unknownIds, ["H99"]);
   assert.equal(result.notes.length, 1);
@@ -245,7 +253,7 @@ test("planTopicNotes drops a note whose only id is unknown", () => {
     classCode: "HBIO250",
     topicFolder: "classes",
     created: "2026-09-10",
-    existing: {},
+    pages: [],
   });
   assert.equal(result.droppedNotes, 1);
   assert.equal(result.notes.length, 0);
@@ -267,7 +275,7 @@ test("planTopicNotes merges duplicate titles case-insensitively", () => {
     classCode: "HBIO250",
     topicFolder: "classes",
     created: "2026-09-10",
-    existing: {},
+    pages: [],
   });
   assert.equal(result.notes.length, 1);
   assert.equal(result.notes[0].highlights.length, 2);
@@ -286,9 +294,73 @@ test("planTopicNotes reports an id in no note and not in unused_ids as unassigne
     classCode: "HBIO250",
     topicFolder: "classes",
     created: "2026-09-10",
-    existing: {},
+    pages: [],
   });
   assert.deepEqual(result.unassignedIds, ["H02"]);
+});
+
+test("renderTopicNote writes a class list when a page belongs to two classes, and addClassCode grows it", () => {
+  const md = tn.renderTopicNote({ title: "Muscle", classCode: "HBIO408", classCodes: ["HBIO408", "PHED163"], created: "2026-09-17", pdfBasename: "P", summary: "S", highlights: [], related: [], kind: "concept", tag: "term", aliases: [] });
+  assert.ok(md.includes("class: [HBIO408, PHED163]"));
+  assert.ok(!md.includes("aliases:"), "no aliases, no key");
+  const scalar = "---\ntype: concept\nclass: HBIO408\ncreated: 2026-09-17\n---\n# Muscle\n";
+  assert.ok(tn.addClassCode(scalar, "PHED163").includes("class: [HBIO408, PHED163]"));
+  assert.equal(tn.addClassCode(scalar, "HBIO408"), scalar, "already there: byte-identical");
+  const list = "---\nclass: [HBIO408, PHED163]\n---\n";
+  assert.ok(tn.addClassCode(list, "PSYC360").includes("class: [HBIO408, PHED163, PSYC360]"));
+  assert.ok(tn.addClassCode("---\ntype: concept\n---\n# M\n", "PHED163").includes("class: PHED163"), "a page with no class gains one");
+});
+
+test("planTopicNotes merges into a page from another class by alias and appends the class", () => {
+  const other = {
+    path: "classes/HBIO408/Skeletal Muscle.md",
+    title: "Skeletal Muscle",
+    kind: "concept",
+    aliases: ["Muscle Fibres"],
+    classCodes: ["HBIO408"],
+    md: "---\ntype: concept\nclass: HBIO408\ncreated: 2026-09-10\n---\n\n# Skeletal Muscle\n\n## Summary\nS.\n\n## Highlights\n\n## Related topics\n",
+  };
+  const manifest = { pdfPath: "sources/class notes/PHED163/Deck.pdf", pdfBasename: "Deck", classCode: "PHED163", extracted: "", sources: [], highlights: [SELECTION_HIGHLIGHT] };
+  const draft = {
+    notes: [{ title: "Muscle Fibres", kind: "concept", aliases: [], tag: "term", closest_existing: "", why_new: "", summary: "S.", highlight_ids: ["H04"], related: [] }],
+    unused_ids: [],
+  };
+  const out = tn.planTopicNotes(draft, manifest, { classCode: "PHED163", topicFolder: "classes", created: "2026-09-17", pages: [other] });
+  assert.equal(out.notes.length, 1);
+  assert.equal(out.notes[0].path, other.path, "the alias found the page in the other class");
+  assert.equal(out.notes[0].exists, true);
+  assert.ok(out.notes[0].content.includes("class: [HBIO408, PHED163]"), out.notes[0].content);
+});
+
+test("planTopicNotes files a new title that names a home into that page under a heading, and creates one that has none", () => {
+  const home = {
+    path: "classes/HBIO250/Pharmacology.md",
+    title: "Pharmacology",
+    kind: "concept",
+    aliases: [],
+    classCodes: ["HBIO250"],
+    md: "---\ntype: concept\nclass: HBIO250\n---\n\n# Pharmacology\n\n## Summary\nS.\n\n## Highlights\n\n## Related topics\n",
+  };
+  const manifest = { pdfPath: "sources/class notes/HBIO250/Deck.pdf", pdfBasename: "Deck", classCode: "HBIO250", extracted: "", sources: [], highlights: [SELECTION_HIGHLIGHT, { ...RECT_HIGHLIGHT, text: "Aspirin inhibits COX." }] };
+  const draft = {
+    notes: [
+      { title: "COX Inhibitors", kind: "concept", aliases: ["NSAIDs"], tag: "term", closest_existing: "Pharmacology", why_new: "part of pharmacology", summary: "S.", highlight_ids: ["H05"], related: [] },
+      { title: "Self-Efficacy", kind: "concept", aliases: ["Self-efficacy belief"], tag: "term", closest_existing: "", why_new: "nothing listed is about beliefs", summary: "A belief.", highlight_ids: ["H04"], related: [] },
+    ],
+    unused_ids: [],
+  };
+  const out = tn.planTopicNotes(draft, manifest, { classCode: "HBIO250", topicFolder: "classes", created: "2026-09-17", pages: [home] });
+  const filed = out.notes.find((n) => n.path === home.path);
+  assert.ok(filed, "COX Inhibitors was filed into Pharmacology");
+  assert.ok(filed.content.includes("## COX Inhibitors"), "under a heading named after the proposal");
+  assert.deepEqual(filed.routed.map((r) => [r.from, r.heading]), [["COX Inhibitors", "COX Inhibitors"]]);
+  const created = out.notes.find((n) => n.title === "Self-Efficacy");
+  assert.equal(created.exists, false);
+  assert.equal(created.path, "classes/HBIO250/Self-Efficacy.md");
+  assert.equal(created.whyNew, "nothing listed is about beliefs");
+  assert.ok(created.content.includes("type: concept"));
+  assert.ok(created.content.includes('- "Self-efficacy belief"'));
+  assert.ok(created.content.includes("tags: [term]"));
 });
 
 test("safeTitle strips illegal characters and falls back to Untitled", () => {

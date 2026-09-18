@@ -18,7 +18,8 @@ import { collectPdfHighlights, readManifestNote, writeManifest } from "./pdfHigh
 import { isPdfFile } from "./pdf";
 import { DigestOut, type DigestDraft } from "./schemas";
 import { suggestPdfHighlights } from "./suggest";
-import { planTopicNotes, safeTitle } from "./topicNote";
+import { noteAliases, noteSections, parseTopicNote, planTopicNotes, safeTitle, type ExistingPage } from "./topicNote";
+import type { DigestExistingNote } from "./prompt";
 
 /** Local calendar date, `YYYY-MM-DD`, for the topic note's `created` field. */
 function today(): string {
@@ -99,32 +100,38 @@ async function resolveSource(plugin: WikiLmPlugin, source: TFile): Promise<Resol
   return { manifest, paperText: "" };
 }
 
-/** Titles of the notes already in `<topicFolder>/<classCode>`, minus the class hub note. */
-function existingTitles(plugin: WikiLmPlugin, topicFolder: string, classCode: string): string[] {
-  const prefix = `${normalizePath(`${topicFolder}/${classCode}`)}/`;
-  const titles: string[] = [];
+/** Every page under the topic folder, all classes, minus the hub notes: what the digest may merge into or file under. */
+async function existingPages(plugin: WikiLmPlugin, topicFolder: string): Promise<ExistingPage[]> {
+  const prefix = `${normalizePath(topicFolder)}/`;
+  const out: ExistingPage[] = [];
   for (const file of plugin.app.vault.getMarkdownFiles()) {
     if (!file.path.startsWith(prefix)) continue;
-    if (file.path.slice(prefix.length).includes("/")) continue; // directly under the class folder only
-    if (file.basename === classCode) continue; // the hub note
-    titles.push(file.basename);
+    const md = await plugin.app.vault.cachedRead(file);
+    const parsed = parseTopicNote(md);
+    const type = /^type:\s*(.+)$/m.exec(/^---\r?\n([\s\S]*?)\r?\n---/.exec(md)?.[1] ?? "")?.[1]?.trim() ?? "";
+    if (type === "topic-index") continue;
+    out.push({
+      path: file.path,
+      title: parsed.title || file.basename,
+      kind: type === "entity" ? "entity" : "concept",
+      aliases: noteAliases(md),
+      classCodes: parsed.classCodes,
+      md,
+    });
   }
-  return titles.sort((a, b) => a.localeCompare(b));
+  return out.sort((a, b) => a.title.localeCompare(b.title));
 }
 
-/** Read every planned path that already exists, for the planner's merge branch. */
-async function readExisting(plugin: WikiLmPlugin, paths: string[]): Promise<Record<string, string>> {
-  const existing: Record<string, string> = {};
-  for (const path of paths) {
-    const file = plugin.app.vault.getAbstractFileByPath(normalizePath(path));
-    if (file instanceof TFile) existing[path] = await plugin.app.vault.cachedRead(file);
-  }
-  return existing;
-}
-
-/** The path `planTopicNotes` derives for a title (kept in step with it here). */
-function pathFor(topicFolder: string, classCode: string, title: string): string {
-  return `${topicFolder}/${classCode}/${safeTitle(title)}.md`;
+/** The same pages as the prompt lists them: what each is, what it is also called, and what is already under it. */
+function toDigestExisting(pages: ExistingPage[]): DigestExistingNote[] {
+  return pages.map((p) => ({
+    title: p.title,
+    kind: p.kind,
+    aliases: p.aliases,
+    sections: noteSections(p.md).filter((s) => !/^(Summary|Highlights|Related topics|Flashcard Seeds|Key claims)$/i.test(s)),
+    summary: (parseTopicNote(p.md).summary.split(/(?<=[.!?])\s/)[0] ?? "").trim(),
+    classCodes: p.classCodes,
+  }));
 }
 
 /** Ask the model for a draft; null when the call failed (the Notice is raised here). */
@@ -134,6 +141,7 @@ async function draftFromModel(
   classCode: string,
   paperText: string,
   instruction: string,
+  pages: ExistingPage[],
 ): Promise<DigestDraft | null> {
   const s = plugin.settings;
   try {
@@ -142,7 +150,7 @@ async function draftFromModel(
       classCode,
       paperText,
       highlights: manifest.highlights.map((h) => ({ id: h.id, page: h.page, text: h.text })),
-      existingTitles: existingTitles(plugin, s.topicFolder, classCode),
+      existingNotes: toDigestExisting(pages),
       maxNotes: s.digestMaxNotes,
       standingInstructions: s.digestInstructions,
       instruction,
@@ -245,19 +253,17 @@ export async function digestPdf(
       return;
     }
 
+    const topicFolder = plugin.settings.topicFolder;
+    const pages = await existingPages(plugin, topicFolder);
+
     const draft =
       mode === "model"
-        ? await draftFromModel(plugin, manifest, classCode, paperText, instruction)
+        ? await draftFromModel(plugin, manifest, classCode, paperText, instruction, pages)
         : await draftFromPaste(plugin);
     if (!draft) return;
 
-    const topicFolder = plugin.settings.topicFolder;
     const created = today();
-    const plan = async (d: DigestDraft) => {
-      const paths = d.notes.map((n) => pathFor(topicFolder, classCode, n.title));
-      const existing = await readExisting(plugin, paths);
-      return planTopicNotes(d, manifest, { classCode, topicFolder, created, existing });
-    };
+    const plan = async (d: DigestDraft) => planTopicNotes(d, manifest, { classCode, topicFolder, created, pages });
 
     const planned = await plan(draft);
     if (planned.notes.length === 0) {
@@ -302,7 +308,6 @@ export async function digestPdf(
     const toWrite = finalPlan.notes.filter((n) => keptTitles.has(n.title.toLowerCase()));
 
     // Write.
-    const folder = normalizePath(`${topicFolder}/${classCode}`);
     let written = 0;
     let appended = 0;
     let alreadyPresent = 0;
@@ -313,8 +318,11 @@ export async function digestPdf(
       if (file instanceof TFile) {
         await plugin.app.vault.modify(file, note.content); // obsidian.d.ts:7467
       } else {
-        // Same folder-creation pattern as the Anki export in src/main.ts.
-        if (!(await plugin.app.vault.adapter.exists(folder))) {
+        // A merge may land in another class's folder, so each note names its
+        // own parent. Same folder-creation pattern as the Anki export in
+        // src/main.ts.
+        const folder = normalizePath(note.path.split("/").slice(0, -1).join("/"));
+        if (folder && !(await plugin.app.vault.adapter.exists(folder))) {
           await plugin.app.vault.createFolder(folder); // obsidian.d.ts:7404
         }
         await plugin.app.vault.create(path, note.content); // obsidian.d.ts:7386

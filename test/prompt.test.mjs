@@ -92,7 +92,7 @@ const digestBase = {
     { id: "H01", page: 2, text: "Pharmacology is the study of the action of drugs." },
     { id: "H02", page: 4, text: "Receptors bind ligands with high affinity." },
   ],
-  existingTitles: ["Pharmacology"],
+  existingNotes: [{ title: "Pharmacology", kind: "concept", aliases: ["Drug Action"], sections: ["Receptors", "Dosing"], summary: "The study of drug action.", classCodes: ["HBIO250"] }],
   maxNotes: 6,
   standingInstructions: "",
   instruction: "",
@@ -128,12 +128,16 @@ test("every highlight carries its id and page, text-less ones included", () => {
   assert.ok(msg.includes('<highlight id="H03" page="9"></highlight>'), "a text-less highlight is still listed");
 });
 
-test("existing notes are one title per line and the block vanishes when empty", () => {
-  const msg = p.buildDigestMessage({ ...digestBase, existingTitles: ["Pharmacology", "Receptors"] });
-  assert.ok(msg.includes("<existing_notes>\nPharmacology\nReceptors\n</existing_notes>"), "one title per line");
-
-  const bare = p.buildDigestMessage({ ...digestBase, existingTitles: [] });
-  assert.ok(!bare.includes("<existing_notes>"), "no existing titles adds no block");
+test("existing notes print title, kind, aliases, class, sections and a summary line", () => {
+  const msg = p.buildDigestMessage({ ...digestBase });
+  assert.ok(
+    msg.includes("<existing_notes>\nPharmacology (concept; aliases: Drug Action; class HBIO250)\n  ## Receptors\n  ## Dosing\n  summary: The study of drug action.\n</existing_notes>"),
+    msg,
+  );
+  const bare = p.buildDigestMessage({ ...digestBase, existingNotes: [] });
+  assert.ok(!bare.includes("<existing_notes>"));
+  const plain = p.buildDigestMessage({ ...digestBase, existingNotes: [{ title: "WADA", kind: "entity", aliases: [], sections: [], summary: "", classCodes: [] }] });
+  assert.ok(plain.includes("<existing_notes>\nWADA (entity)\n</existing_notes>"), "empty parts are left out");
 });
 
 test("digest instruction lines follow the limit, standing before per-PDF, and vanish when blank", () => {
@@ -260,7 +264,19 @@ test("the ask message ends with the answer-then-cite instruction, after the ques
 
 test("DigestOut accepts a well-formed draft and rejects a note without highlight_ids", () => {
   const ok = schemas.DigestOut.safeParse({
-    notes: [{ title: "T", summary: "S", highlight_ids: ["H01"], related: [] }],
+    notes: [
+      {
+        title: "T",
+        summary: "S",
+        highlight_ids: ["H01"],
+        related: [],
+        kind: "concept",
+        aliases: ["T2"],
+        tag: "term",
+        closest_existing: "",
+        why_new: "Nothing listed holds it.",
+      },
+    ],
     unused_ids: [],
   });
   assert.equal(ok.success, true, "a complete note parses");
@@ -270,6 +286,13 @@ test("DigestOut accepts a well-formed draft and rejects a note without highlight
 
   const noUnused = schemas.DigestOut.safeParse({ notes: [] });
   assert.equal(noUnused.success, false, "unused_ids is required too");
+});
+
+test("DigestOut requires kind, aliases, tag, closest_existing and why_new on every note", () => {
+  const note = { title: "T", summary: "S", highlight_ids: ["H01"], related: [] };
+  assert.equal(schemas.DigestOut.safeParse({ notes: [note], unused_ids: [] }).success, false);
+  const full = { ...note, kind: "concept", aliases: ["T2"], tag: "term", closest_existing: "", why_new: "Nothing listed holds it." };
+  assert.equal(schemas.DigestOut.safeParse({ notes: [full], unused_ids: [] }).success, true);
 });
 
 /**

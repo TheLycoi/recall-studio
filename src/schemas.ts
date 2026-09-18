@@ -33,6 +33,31 @@ export const DigestOut = z.object({
         .array(z.string())
         .describe('Ids of the highlights that belong to this topic, e.g. ["H03","H04"]. At least one; every id must appear in the input.'),
       related: z.array(z.string()).describe("Titles of other notes in this response or of the existing notes listed. Empty when none."),
+      kind: z
+        .enum(["concept", "entity"])
+        .describe(
+          "entity: a named person, organisation, agency, product, drug or event that is itself what the reader would look up; concept: a mechanism, method, theory, classification, phenomenon, or term. When unsure, prefer concept.",
+        ),
+      aliases: z
+        .array(z.string())
+        .describe(
+          "One or two other names a reader would search for this note under: an abbreviation, the expanded form, a variant spelling. Empty only when the subject has one name.",
+        ),
+      tag: z
+        .string()
+        .describe(
+          "The note's subtype, one word. For a concept: method, theory, term, phenomenon, standard, field, or other. For an entity: product, person, organization, project, event, place, or other.",
+        ),
+      closest_existing: z
+        .string()
+        .describe(
+          "For a title not in the existing notes: the existing note this subject is most nearly part of, copied exactly; empty only when no listed note is related at all. Naming one means the highlights belong in that note under a heading. Empty for a title that is itself an existing note.",
+        ),
+      why_new: z
+        .string()
+        .describe(
+          "For a title not in the existing notes: one sentence on the decision — why no listed note can hold it, or what makes it part of closest_existing. Empty for an existing title.",
+        ),
     }),
   ),
   unused_ids: z.array(z.string()).describe("Ids of highlights that belong to no topic (slide titles, logistics, empty rectangles)."),

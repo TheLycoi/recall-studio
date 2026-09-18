@@ -1,10 +1,11 @@
 // Pure topic-note render/parse/merge and the digest planner. No `obsidian`
 // import (see src/lint.ts:1-6); bundled standalone and exercised with
 // node --test (test/topicNote.test.mjs).
-import { splitFrontmatter, basenameNoExt } from "./util";
+import { splitFrontmatter } from "./util";
 import { findAllPdfReferences, highlightKey, pdfFileName, renderCallout, type PdfTarget } from "./pdflink";
 import type { ManifestHighlight, Manifest } from "./manifest";
 import type { DigestDraft } from "./schemas";
+import { routeProposed, type WikiNoteIn } from "./suggestPlan";
 
 /** Strip characters illegal in vault filenames, collapse whitespace, "Untitled" when empty. */
 export function safeTitle(title: string): string {
@@ -136,6 +137,14 @@ export interface RenderTopicNoteArgs {
   summary: string;
   highlights: ManifestHighlight[];
   related: string[];
+  /** Whether the page is a concept or a named thing; becomes `type:`. */
+  kind: WikiKind;
+  /** Other names a reader would search the page under; becomes the `aliases:` block when non-empty. */
+  aliases: string[];
+  /** The page's subtype, checked against the kind's vocabulary; becomes the one `tags:` entry. */
+  tag: string;
+  /** Every class the page belongs to; defaults to `[classCode]`. */
+  classCodes?: string[];
 }
 
 function highlightsBody(pdfBasename: string, highlights: ManifestHighlight[]): string {
@@ -162,12 +171,18 @@ function highlightsBody(pdfBasename: string, highlights: ManifestHighlight[]): s
 export function renderTopicNote(args: RenderTopicNoteArgs): string {
   const { title, classCode, created, pdfBasename, summary, highlights, related } = args;
   const lines: string[] = [];
+  const codes = (args.classCodes && args.classCodes.length ? args.classCodes : [classCode]).filter(Boolean);
   lines.push("---");
-  lines.push("type: topic");
-  lines.push(`class: ${classCode}`);
+  lines.push(`type: ${args.kind}`);
+  lines.push(codes.length > 1 ? `class: [${codes.join(", ")}]` : `class: ${codes[0] ?? classCode}`);
   lines.push(`created: ${created}`);
   lines.push(`source_file: "[[${pdfFileName(pdfBasename)}]]"`);
-  lines.push(`tags: [${classCode.toLowerCase()}]`);
+  lines.push(`tags: [${validTag(args.kind, args.tag)}]`);
+  const aliases = args.aliases.map((s) => s.trim()).filter(Boolean);
+  if (aliases.length) {
+    lines.push("aliases:");
+    for (const al of aliases) lines.push(`  - ${JSON.stringify(al)}`);
+  }
   lines.push("---");
   lines.push("");
   lines.push(`# ${title}`);
@@ -269,12 +284,61 @@ export interface MergeResult {
 }
 
 /**
+ * Give a page a second class. A scalar `class:` becomes a list at the second
+ * value; a list grows; a page with no class gains one after `type:` when it
+ * has that key and at the top of the frontmatter otherwise. A class already
+ * present leaves the page byte-identical.
+ */
+export function addClassCode(md: string, code: string): string {
+  const c = code.trim();
+  if (!c) return md;
+  const m = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(md);
+  if (!m) return `---\nclass: ${c}\n---\n${md}`;
+  let fm = m[2];
+  const have = fmList(fm, "class");
+  if (have.includes(c)) return md;
+  const next = [...have, c];
+  const line = next.length > 1 ? `class: [${next.join(", ")}]` : `class: ${c}`;
+  if (/^class:\s*\[.*\]\s*$/m.test(fm)) fm = fm.replace(/^class:\s*\[.*\]\s*$/m, line);
+  else if (/^class:\s*\n(?:[ \t]*-[^\n]*\n?)*/m.test(fm)) fm = fm.replace(/^class:\s*\n(?:[ \t]*-[^\n]*\n?)*/m, `${line}\n`).replace(/\n$/, "");
+  else if (/^class:.*$/m.test(fm)) fm = fm.replace(/^class:.*$/m, line);
+  else if (/^type:.*$/m.test(fm)) fm = fm.replace(/^(type:.*)$/m, `$1\n${line}`);
+  else fm = `${line}\n${fm}`;
+  return md.slice(0, m.index) + m[1] + fm + m[3] + md.slice(m.index + m[0].length);
+}
+
+/** Where a merge puts the highlights, and which class the page ends up carrying. */
+export interface MergeTopicOptions {
+  /** The class this digest run is for; appended to the page's `class:` when it is missing. */
+  classCode?: string;
+  /** A `##` heading inside the page the highlights belong under, instead of its highlights section. */
+  section?: string;
+}
+
+/**
  * Append highlights not already present (by `highlightKey`) into the
  * `## Highlights` section of `existingMd`, in page order. When the section is
  * missing, it is inserted (with its new callouts) before `## Related topics`
  * when present, else at EOF. Everything else is byte-identical.
+ *
+ * A page the digest merges into may belong to another class than the run's:
+ * it gains this one rather than being copied, so the concept keeps one page.
+ * With a `section`, the highlights go under that heading instead, which is
+ * what the class schema's own merge already does.
  */
-export function mergeTopicHighlights(existingMd: string, pdfBasename: string, highlights: ManifestHighlight[]): MergeResult {
+export function mergeTopicHighlights(
+  existingMd: string,
+  pdfBasename: string,
+  highlights: ManifestHighlight[],
+  opts: MergeTopicOptions = {},
+): MergeResult {
+  const result = opts.section
+    ? mergeWikiHighlights(existingMd, pdfBasename, opts.classCode ?? "", highlights, { schema: "class", section: opts.section })
+    : mergeTopicHighlightsBody(existingMd, pdfBasename, highlights);
+  return opts.classCode ? { ...result, md: addClassCode(result.md, opts.classCode) } : result;
+}
+
+function mergeTopicHighlightsBody(existingMd: string, pdfBasename: string, highlights: ManifestHighlight[]): MergeResult {
   const headingRe = /^##\s+Highlights\s*$/m;
   const headingMatch = headingRe.exec(existingMd);
 
@@ -330,11 +394,22 @@ export function mergeTopicHighlights(existingMd: string, pdfBasename: string, hi
   return { md: newMd, added: toAdd.length, skipped: 0 };
 }
 
+/** One page already in the vault, anywhere under the topic folder, as the planner sees it. */
+export interface ExistingPage {
+  path: string;
+  title: string;
+  kind: WikiKind;
+  aliases: string[];
+  classCodes: string[];
+  md: string;
+}
+
 export interface PlanTopicNotesOptions {
   classCode: string;
   topicFolder: string;
   created: string;
-  existing: Record<string, string>;
+  /** Every page the draft may merge into or be filed under, across every class. */
+  pages: ExistingPage[];
 }
 
 export interface PreparedNote {
@@ -359,6 +434,10 @@ export interface PreparedNote {
    * another name for this note), why, and which highlights it brought.
    */
   routed?: Array<{ from: string; heading: string; why: string; keys: string[] }>;
+  /** What the page is, when the planner knows: the kind it was created as, or the kind of the page merged into. */
+  kind?: WikiKind;
+  /** For a page created fresh, the model's one sentence on why nothing existing could hold it. */
+  whyNew?: string;
 }
 
 export interface PlanTopicNotesResult {
@@ -434,7 +513,26 @@ export function planTopicNotes(draft: DigestDraft, manifest: Manifest, opts: Pla
   // Titles available for `related` filtering: other notes in this draft (by
   // group title) and existing notes (by basename of the `existing` keys).
   const draftTitles = new Set(groupOrder.map((k) => groups.get(k)!.title));
-  const existingTitles = new Set(Object.keys(opts.existing).map((p) => basenameNoExt(p)));
+  const existingTitles = new Set(opts.pages.map((p) => p.title));
+
+  // A page answers to its title and to every alias the reader gave it, so a
+  // draft title that is another name for a page it already has merges into
+  // that page rather than founding a second one beside it.
+  const byName = new Map<string, ExistingPage>();
+  for (const p of opts.pages) {
+    for (const name of [p.title, ...p.aliases]) {
+      const k = safeTitle(name).toLowerCase();
+      if (k && !byName.has(k)) byName.set(k, p);
+    }
+  }
+  const wiki: WikiNoteIn[] = opts.pages.map((p) => ({ title: p.title, kind: p.kind, path: p.path, md: p.md }));
+  const wikiByTitle = new Map(wiki.map((w) => [w.title.toLowerCase(), w]));
+
+  // Two groups routed into the same page must each see the previous one's
+  // work, or the second merge would be computed against the file on disk and
+  // silently drop the first.
+  const latest = new Map<string, string>();
+  const mdOf = (page: ExistingPage): string => latest.get(page.path) ?? page.md;
 
   const notes: PreparedNote[] = [];
   for (const groupKey of groupOrder) {
@@ -450,20 +548,79 @@ export function planTopicNotes(draft: DigestDraft, manifest: Manifest, opts: Pla
       );
     });
 
-    const path = `${opts.topicFolder}/${opts.classCode}/${group.title}.md`;
-    const existingMd = opts.existing[path];
-    const exists = existingMd !== undefined;
+    const draftNote = draft.notes.find((n) => safeTitle(n.title).toLowerCase() === groupKey);
 
-    let content: string;
-    let added: number;
-    let skipped: number;
-    if (exists) {
-      const result = mergeTopicHighlights(existingMd, manifest.pdfBasename, group.highlights);
-      content = result.md;
-      added = result.added;
-      skipped = result.skipped;
-    } else {
-      content = renderTopicNote({
+    const home = byName.get(group.title.toLowerCase());
+    if (home) {
+      const merged = mergeTopicHighlights(mdOf(home), manifest.pdfBasename, group.highlights, { classCode: opts.classCode });
+      latest.set(home.path, merged.md);
+      notes.push({
+        title: home.title,
+        path: home.path,
+        exists: true,
+        summary: group.summary,
+        highlights: group.highlights,
+        related: relatedTitles,
+        content: merged.md,
+        added: merged.added,
+        skipped: merged.skipped,
+        kind: home.kind,
+      });
+      continue;
+    }
+
+    const route = routeProposed(
+      group.title,
+      draftNote
+        ? {
+            title: group.title,
+            kind: draftNote.kind,
+            summary: draftNote.summary,
+            closest_existing: draftNote.closest_existing,
+            why_new: draftNote.why_new,
+            aliases: draftNote.aliases,
+            tag: draftNote.tag,
+          }
+        : undefined,
+      wiki,
+      wikiByTitle,
+      new Set(),
+    );
+    if (route) {
+      const target = opts.pages.find((p) => p.path === route.to.path)!;
+      const merged = mergeTopicHighlights(mdOf(target), manifest.pdfBasename, group.highlights, {
+        classCode: opts.classCode,
+        section: route.heading || undefined,
+      });
+      latest.set(target.path, merged.md);
+      notes.push({
+        title: target.title,
+        path: target.path,
+        exists: true,
+        summary: group.summary,
+        highlights: group.highlights,
+        related: relatedTitles,
+        content: merged.md,
+        added: merged.added,
+        skipped: merged.skipped,
+        kind: target.kind,
+        sections: merged.section
+          ? [{ heading: merged.section.heading, keys: group.highlights.map((h) => h.key), created: merged.section.created }]
+          : undefined,
+        routed: [{ from: group.title, heading: route.heading, why: route.why, keys: group.highlights.map((h) => h.key) }],
+      });
+      continue;
+    }
+
+    const kind: WikiKind = draftNote?.kind ?? "concept";
+    notes.push({
+      title: group.title,
+      path: `${opts.topicFolder}/${opts.classCode}/${group.title}.md`,
+      exists: false,
+      summary: group.summary,
+      highlights: group.highlights,
+      related: relatedTitles,
+      content: renderTopicNote({
         title: group.title,
         classCode: opts.classCode,
         created: opts.created,
@@ -471,21 +628,14 @@ export function planTopicNotes(draft: DigestDraft, manifest: Manifest, opts: Pla
         summary: group.summary,
         highlights: group.highlights,
         related: relatedTitles,
-      });
-      added = group.highlights.length;
-      skipped = 0;
-    }
-
-    notes.push({
-      title: group.title,
-      path,
-      exists,
-      summary: group.summary,
-      highlights: group.highlights,
-      related: relatedTitles,
-      content,
-      added,
-      skipped,
+        kind,
+        aliases: draftNote?.aliases ?? [],
+        tag: draftNote?.tag ?? "other",
+      }),
+      added: group.highlights.length,
+      skipped: 0,
+      kind,
+      whyNew: draftNote?.why_new ?? "",
     });
   }
 

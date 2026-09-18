@@ -26,6 +26,9 @@ before(async () => {
     summary: "Receptors bind drugs with high affinity and transduce a signal.",
     highlights: RECEPTORS_HIGHLIGHTS,
     related: [],
+    kind: "concept",
+    tag: "term",
+    aliases: [],
   });
   KINETICS_MD = tn.renderTopicNote({
     title: "Pharmacokinetics",
@@ -35,6 +38,9 @@ before(async () => {
     summary: "What the body does to the drug: absorption, distribution, metabolism, excretion.",
     highlights: KINETICS_HIGHLIGHTS,
     related: [],
+    kind: "concept",
+    tag: "term",
+    aliases: [],
   });
 });
 

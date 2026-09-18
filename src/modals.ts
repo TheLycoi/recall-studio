@@ -465,7 +465,12 @@ export class DigestPreviewModal extends Modal {
         this.titles[i] = titleInput.value;
       });
 
-      const badgeText = note.exists ? `exists: +${note.added}, ${note.skipped} skipped` : "new";
+      // A merge and a filing both land in a page that exists; only the badge
+      // tells them apart, and a page created fresh says what it is and why it
+      // had to be one.
+      const badgeText = note.exists
+        ? `${note.routed?.length ? "filed" : "merge"}: +${note.added}, ${note.skipped} skipped`
+        : `new ${note.kind ?? "concept"}${note.whyNew ? ` — ${note.whyNew}` : ""}`;
       head.createSpan({ text: badgeText, cls: "wikilm-badge wikilm-preview-badge" });
 
       card.createEl("div", { text: note.path, cls: "wikilm-muted" });
@@ -478,6 +483,15 @@ export class DigestPreviewModal extends Modal {
         const cut = h.text.length > 80 ? `${h.text.slice(0, 80)}…` : h.text;
         li.createSpan({ text: cut });
       });
+
+      for (const r of note.routed ?? []) {
+        card.createDiv({
+          cls: "wikilm-muted wikilm-preview-routed",
+          text: r.heading
+            ? `Filed here as \u201C${r.heading}\u201D instead of a new note \u201C${r.from}\u201D \u2014 ${r.why}.`
+            : `Filed here instead of a new note \u201C${r.from}\u201D \u2014 ${r.why}.`,
+        });
+      }
 
       if (note.related.length > 0) {
         card.createEl("div", { text: `Related: ${note.related.join(", ")}`, cls: "wikilm-muted" });
