@@ -27,6 +27,10 @@ export interface FixPage {
   aliases: string[];
 }
 
+/** How the page a dead link meant was found, most certain first. */
+export type FixConfidence = "title" | "alias" | "slug" | "alias-slug";
+const CONFIDENCE_BY_TIER: FixConfidence[] = ["title", "alias", "slug", "alias-slug"];
+
 /** One rewrite, ready to preview or apply. */
 export interface LinkFix {
   /** The note being edited. */
@@ -37,6 +41,8 @@ export interface LinkFix {
   toPath: string;
   /** The replacement link text, e.g. "[[concepts/spaced-repetition|Spaced repetition]]". */
   to: string;
+  /** Which tier matched: an exact title, an exact alias, a slug-folded title, or a slug-folded alias. */
+  confidence: FixConfidence;
 }
 
 /**
@@ -65,7 +71,10 @@ export function nameKey(text: string): string {
  * and `ambiguous` reports that another had equal claim, so the caller can leave
  * it for a human instead of picking for them.
  */
-export function findLinkTarget(pages: FixPage[], target: string): { page: FixPage; ambiguous: boolean } | null {
+export function findLinkTarget(
+  pages: FixPage[],
+  target: string,
+): { page: FixPage; ambiguous: boolean; confidence: FixConfidence } | null {
   const basename = target.includes("/") ? (target.split("/").pop() ?? target) : target;
   const lower = basename.trim().toLowerCase();
   const key = nameKey(basename);
@@ -78,9 +87,9 @@ export function findLinkTarget(pages: FixPage[], target: string): { page: FixPag
     (p) => p.aliases.some((a) => nameKey(a) === key),
   ];
 
-  for (const matches of tiers) {
+  for (const [i, matches] of tiers.entries()) {
     const hits = pages.filter(matches);
-    if (hits.length > 0) return { page: hits[0], ambiguous: hits.length > 1 };
+    if (hits.length > 0) return { page: hits[0], ambiguous: hits.length > 1, confidence: CONFIDENCE_BY_TIER[i] };
   }
   return null;
 }
@@ -162,7 +171,7 @@ export function planLinkFixes(
     const replacement = buildReplacement(found.page, wikiPrefix);
     const body = contents.get(issue.path);
     if (body === undefined || applyLinkFix(body, issue.target, replacement) === body) continue;
-    fixable.push({ path: issue.path, from: issue.target, toPath: found.page.path, to: replacement });
+    fixable.push({ path: issue.path, from: issue.target, toPath: found.page.path, to: replacement, confidence: found.confidence });
   }
 
   return { fixable, unresolved, ambiguous };

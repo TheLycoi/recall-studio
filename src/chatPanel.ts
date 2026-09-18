@@ -237,6 +237,7 @@ export class ChatPanel {
         rendered,
         { deadLinksFixable: plan.fixable.length, deadLinksUnresolved: plan.unresolved.length, schemaViolations },
         { onFixDeadLinks: () => void this.applyLinkFixes(plan.fixable) },
+        plan.fixable,
       ).open();
     } catch (e) {
       this.pushSystem(`Wiki check failed: ${describeError(e)}`);

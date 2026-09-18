@@ -2,6 +2,7 @@ import { App, ButtonComponent, FuzzySuggestModal, Modal, Notice, Setting, Sugges
 import type { TranscriptRecord } from "./model";
 import type { PreparedNote } from "./topicNote";
 import type { ManifestHighlight } from "./manifest";
+import type { LinkFix } from "./vaultFix";
 
 /** Ask for a free-text instruction. Resolves null when cancelled. */
 export class InstructionModal extends Modal {
@@ -752,12 +753,23 @@ export interface LintFixActions {
  * Shape follows gd4ai/obsidian-llm-wiki's lint modal — report, then
  * count-gated fix buttons — reimplemented against this plugin's own types.
  */
+const CONFIDENCE_LABEL: Record<LinkFix["confidence"], string> = {
+  title: "exact title",
+  alias: "exact alias",
+  slug: "same name, different spelling",
+  "alias-slug": "an alias, different spelling",
+};
+
+/** Most repairs listed before the list folds; enough to audit, not a wall. */
+const FIXES_SHOWN = 30;
+
 export class LintReportModal extends Modal {
   constructor(
     app: App,
     private report: string,
     private counts: LintFixCounts,
     private actions: LintFixActions,
+    private fixes: LinkFix[] = [],
   ) {
     super(app);
   }
@@ -802,6 +814,17 @@ export class LintReportModal extends Modal {
     }
 
     row.addButton((b) => b.setButtonText("Close").onClick(() => this.close()));
+
+    // Each repair, with the page it points at and how sure the match is, so
+    // the button above is a decision the reader can audit rather than trust.
+    if (this.fixes.length > 0) {
+      contentEl.createEl("p", { cls: "wikilm-muted", text: "What the fix would rewrite:" });
+      const list = contentEl.createEl("ul", { cls: "wikilm-lint-fixes" });
+      for (const fix of this.fixes.slice(0, FIXES_SHOWN)) {
+        list.createEl("li", { text: `${fix.from} → ${fix.toPath.replace(/\.md$/i, "")} (${CONFIDENCE_LABEL[fix.confidence]})` });
+      }
+      if (this.fixes.length > FIXES_SHOWN) list.createEl("li", { cls: "wikilm-muted", text: `…and ${this.fixes.length - FIXES_SHOWN} more` });
+    }
 
     // Said plainly rather than left as the gap between two numbers: these are
     // the links a button cannot honestly fix.

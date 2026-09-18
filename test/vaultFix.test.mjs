@@ -121,3 +121,23 @@ test("applyFixesToNote applies every fix for one note in one pass", () => {
   ]);
   assert.equal(out, "[[concepts/spaced-repetition|Spaced repetition]] and [[concepts/mnemonic-medium|Mnemonic medium]]");
 });
+
+test("a fix says how confident it is: title, alias, slug, or alias-slug", () => {
+  const pages = PAGES();
+  assert.equal(vf.findLinkTarget(pages, "spaced-repetition").confidence, "title");
+  assert.equal(vf.findLinkTarget(pages, "spacing effect").confidence, "alias");
+  assert.equal(vf.findLinkTarget(pages, "Spaced repetition").confidence, "slug");
+  assert.equal(vf.findLinkTarget(pages, "spacing-effect").confidence, "alias-slug");
+});
+
+test("planLinkFixes carries the confidence onto each fix and never invents a page", () => {
+  const issues = [
+    { id: "dead-link", path: "wiki/x.md", title: "x", target: "Spaced repetition" },
+    { id: "dead-link", path: "wiki/x.md", title: "x", target: "Nobody Wrote This" },
+  ];
+  const contents = new Map([["wiki/x.md", "[[Spaced repetition]] and [[Nobody Wrote This]]"]]);
+  const plan = vf.planLinkFixes(issues, PAGES(), contents, "wiki");
+  assert.equal(plan.fixable.length, 1);
+  assert.equal(plan.fixable[0].confidence, "slug");
+  assert.equal(plan.unresolved.length, 1, "an unwritten page is reported, never created");
+});
