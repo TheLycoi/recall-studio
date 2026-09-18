@@ -1,8 +1,10 @@
-import { App, ButtonComponent, FuzzySuggestModal, Modal, Notice, Setting, SuggestModal, TFile, TFolder } from "obsidian";
+import { App, ButtonComponent, Component, FuzzySuggestModal, MarkdownRenderer, Modal, Notice, Setting, SuggestModal, TFile, TFolder } from "obsidian";
 import type { TranscriptRecord } from "./model";
 import type { PreparedNote } from "./topicNote";
 import type { ManifestHighlight } from "./manifest";
-import type { LinkFix } from "./vaultFix";
+import type { FixPage, LinkFix } from "./vaultFix";
+import type { Fix, FixKind } from "./fixPlan";
+import { describeError } from "./llm";
 
 /** Ask for a free-text instruction. Resolves null when cancelled. */
 export class InstructionModal extends Modal {
@@ -786,12 +788,24 @@ const CONFIDENCE_LABEL: Record<LinkFix["confidence"], string> = {
 const FIXES_SHOWN = 30;
 
 export class LintReportModal extends Modal {
+  /**
+   * The lifetime the rendered markdown hangs off.
+   *
+   * `MarkdownRenderer.render` wants a `Component` (obsidian.d.ts:4147) and a
+   * `Modal` is not one in these typings, so the modal owns one, loads it when
+   * the report is drawn and unloads it on close. Without the unload, whatever
+   * the renderer registered — an embed's own child components — would outlive
+   * the modal that asked for them.
+   */
+  private renderHost = new Component();
+
   constructor(
     app: App,
     private report: string,
     private counts: LintFixCounts,
     private actions: LintFixActions,
     private fixes: LinkFix[] = [],
+    private onSuggestFixes?: () => void,
   ) {
     super(app);
   }
@@ -802,25 +816,58 @@ export class LintReportModal extends Modal {
     contentEl.createEl("h3", { text: "Wiki check" });
 
     const box = contentEl.createDiv({ cls: "wikilm-lint-report" });
-    // The report is this plugin's own markdown, not user input, but it is
-    // rendered as text rather than HTML so a note title containing angle
-    // brackets cannot become markup.
-    for (const line of this.report.split("\n")) box.createDiv({ text: line });
+    // Rendered as markdown, so the report reads here the way it reads in the
+    // chat log — and so its wikilinks are links. sourcePath "" because the
+    // report's links are vault-absolute and have nothing to resolve against.
+    this.renderHost.load();
+    void MarkdownRenderer.render(this.app, this.report, box, "", this.renderHost);
+
+    // Obsidian only wires internal links inside a MarkdownView; in a modal they
+    // render as anchors that go nowhere, so the click is handled here. The
+    // modal closes first: the note opens behind it, and leaving the report over
+    // the note the reader asked to see would hide it.
+    box.addEventListener("click", (e) => {
+      const target = (e.target as HTMLElement | null)?.closest("a.internal-link");
+      if (!target) return;
+      const href = target.getAttribute("href") ?? target.getAttribute("data-href");
+      if (!href) return;
+      e.preventDefault();
+      this.close();
+      void this.app.workspace.openLinkText(href, "", false);
+    });
 
     const { deadLinksFixable, deadLinksUnresolved, schemaViolations } = this.counts;
     const row = new Setting(contentEl);
 
-    if (deadLinksFixable > 0 && this.actions.onFixDeadLinks) {
+    // Before Close, and a CTA, because it is the one button that offers every
+    // repair rather than one kind of repair.
+    if (this.onSuggestFixes) {
       row.addButton((b) =>
         b
           .setCta()
+          .setButtonText("Suggest fixes")
+          .setTooltip("Open a plan of the repairs for what this check found")
+          .onClick(() => {
+            this.close();
+            this.onSuggestFixes?.();
+          }),
+      );
+    }
+
+    if (deadLinksFixable > 0 && this.actions.onFixDeadLinks) {
+      row.addButton((b) => {
+        // Still here, and unchanged, for one release. It stops being the
+        // primary action once the plan exists: two CTAs in a row tell the
+        // reader nothing about which one to press.
+        if (!this.onSuggestFixes) b.setCta();
+        return b
           .setButtonText(`Fix ${deadLinksFixable} link${deadLinksFixable === 1 ? "" : "s"}`)
           .setTooltip("Rewrite links whose page exists under another spelling")
           .onClick(() => {
             this.close();
             this.actions.onFixDeadLinks?.();
-          }),
-      );
+          });
+      });
     }
 
     if (schemaViolations > 0 && this.actions.onRetagViolations) {
@@ -859,6 +906,7 @@ export class LintReportModal extends Modal {
   }
 
   onClose(): void {
+    this.renderHost.unload();
     this.contentEl.empty();
   }
 }
@@ -921,4 +969,239 @@ class PdfSuggestModal extends SuggestModal<TFile> {
 
 export function pickPdf(app: App, pdfs: TFile[]): Promise<TFile | null> {
   return new Promise((resolve) => new PdfSuggestModal(app, pdfs, resolve).open());
+}
+
+/**
+ * A heading per kind of repair, in the order `orderFixes` puts them in.
+ *
+ * The words are the reader's rather than the code's: a row under "Dead links"
+ * is about a link that goes nowhere, whatever the planner that produced it is
+ * called.
+ */
+const FIX_GROUP: Record<FixKind, string> = {
+  aliases: "Aliases and tags",
+  tag: "Aliases and tags",
+  "cross-link": "Duplicate pages",
+  relink: "Dead links",
+  repoint: "Dead links",
+  "hub-link": "Unlinked pages",
+  "related-link": "Unlinked pages",
+  "rect-callout": "Rect-only notes",
+  attribute: "Unattributed quotes",
+};
+
+/** What the plan needs from the vault, so the modal itself stays about the list. */
+export interface FixPlanHooks {
+  /** Ask the reader which note a dead link meant; null when they cancel. */
+  pickTarget: (row: Fix) => Promise<Fix | null>;
+  /** Ask the model for the aliases and tags the lint says are missing. Null hides the button. */
+  proposeAliases: (() => Promise<Fix[]>) | null;
+  /** Write the ticked rows. */
+  apply: (fixes: Fix[]) => Promise<void>;
+}
+
+/**
+ * The plan: one row per proposed edit, and nothing happens to any of them until
+ * Apply.
+ *
+ * The rows are grouped by what they repair rather than by note, because the
+ * reader is deciding whether to trust a *kind* of repair — every cross-link, or
+ * none — far more often than they are deciding about one page. A row that needs
+ * a target is drawn muted and cannot be ticked: there is nothing to tick yet,
+ * and a checkbox that applies nothing is a lie about what Apply will do.
+ *
+ * The model's rows are not here when the modal opens. They cost a request, and
+ * a plan that spent one before the reader had decided to want it would charge
+ * for a modal they may close.
+ */
+export class FixPlanModal extends Modal {
+  private applyBtn!: ButtonComponent;
+  private list!: HTMLElement;
+  private asking = false;
+
+  constructor(
+    app: App,
+    private fixes: Fix[],
+    private hooks: FixPlanHooks,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.addClass("wikilm-modal");
+    contentEl.createEl("h3", { text: "Fix plan" });
+    contentEl.createEl("p", {
+      cls: "wikilm-muted",
+      text: "Nothing is written until Apply, and only the rows left ticked. No pages are created, merged or unlinked.",
+    });
+
+    this.list = contentEl.createDiv({ cls: "wikilm-fix-plan" });
+    this.draw();
+
+    const row = new Setting(contentEl);
+    if (this.hooks.proposeAliases) {
+      row.addButton((b) =>
+        b
+          .setButtonText("Ask the model for aliases and tags")
+          .setTooltip("One request per 20 pages; every proposal becomes a row you can untick")
+          .onClick(() => void this.ask(b)),
+      );
+    }
+    row.addButton((b) => b.setButtonText("Cancel").onClick(() => this.close()));
+    row.addButton((b) => {
+      this.applyBtn = b;
+      b.setCta().onClick(() => void this.submit());
+    });
+    this.updateApply();
+  }
+
+  /** Redraw the list in place; the buttons below it keep their state. */
+  private draw(): void {
+    this.list.empty();
+    if (this.fixes.length === 0) {
+      this.list.createEl("p", { cls: "wikilm-muted", text: "Nothing here needs a mechanical repair." });
+      return;
+    }
+
+    let heading = "";
+    let group: HTMLElement | null = null;
+    for (const fix of this.fixes) {
+      const wanted = FIX_GROUP[fix.kind];
+      if (wanted !== heading || !group) {
+        heading = wanted;
+        group = this.list.createDiv({ cls: "wikilm-fix-group" });
+        group.createEl("h4", { text: heading });
+      }
+      this.drawRow(group, fix);
+    }
+  }
+
+  private drawRow(group: HTMLElement, fix: Fix): void {
+    const row = group.createDiv({ cls: "wikilm-fix-row" });
+    if (fix.needsTarget) row.addClass("is-pending");
+
+    const checkbox = row.createEl("input", { attr: { type: "checkbox" } }) as HTMLInputElement;
+    checkbox.checked = fix.enabled;
+    checkbox.disabled = Boolean(fix.needsTarget);
+    checkbox.addEventListener("change", () => {
+      fix.enabled = checkbox.checked;
+      this.updateApply();
+    });
+
+    // The note the edit lands in, which is not always the note the finding is
+    // about: a hub-link row edits the hub, not the orphan it lists.
+    row.createSpan({ cls: "wikilm-fix-note", text: (fix.path.split("/").pop() ?? fix.path).replace(/\.md$/i, "") });
+    row.createSpan({ cls: "wikilm-fix-label", text: fix.label });
+
+    if (fix.kind === "repoint" && fix.needsTarget) {
+      const btn = row.createEl("button", { text: "Point at…" });
+      btn.addEventListener("click", () => {
+        void this.hooks.pickTarget(fix).then((chosen) => {
+          if (!chosen) return;
+          const at = this.fixes.findIndex((f) => f.id === fix.id);
+          if (at < 0) return;
+          this.fixes[at] = chosen;
+          this.draw();
+          this.updateApply();
+        });
+      });
+    }
+  }
+
+  /**
+   * The model's rows, appended once. Asking twice would pay for the same answer
+   * again, so rows already in the plan are skipped by id rather than added
+   * beside their twins.
+   */
+  private async ask(button: ButtonComponent): Promise<void> {
+    if (this.asking || !this.hooks.proposeAliases) return;
+    this.asking = true;
+    button.setDisabled(true);
+    button.setButtonText("asking…");
+    try {
+      const rows = await this.hooks.proposeAliases();
+      const known = new Set(this.fixes.map((f) => f.id));
+      const added = rows.filter((r) => !known.has(r.id));
+      if (added.length === 0) new Notice("The model proposed nothing new.");
+      // Prepended rather than appended: aliases and tags are the first group in
+      // `orderFixes`, and the list is drawn in the order it is held in.
+      this.fixes = [...added, ...this.fixes];
+      this.draw();
+      this.updateApply();
+      button.setButtonText(`Asked (${added.length} row${added.length === 1 ? "" : "s"})`);
+    } catch (e) {
+      new Notice(`Could not get aliases and tags: ${describeError(e)}`);
+      button.setDisabled(false);
+      button.setButtonText("Ask the model for aliases and tags");
+    } finally {
+      this.asking = false;
+    }
+  }
+
+  private enabledFixes(): Fix[] {
+    return this.fixes.filter((f) => f.enabled && !f.needsTarget);
+  }
+
+  private updateApply(): void {
+    const n = this.enabledFixes().length;
+    this.applyBtn.setButtonText(`Apply ${n} fix${n === 1 ? "" : "es"}`);
+    this.applyBtn.setDisabled(n === 0);
+  }
+
+  private async submit(): Promise<void> {
+    const chosen = this.enabledFixes();
+    if (chosen.length === 0) return;
+    this.close();
+    await this.hooks.apply(chosen);
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
+
+/**
+ * Pick the note a dead link meant.
+ *
+ * Aliases are searched as well as titles, because the reader is typing the name
+ * they wrote in the link, and the link is dead precisely because that name is
+ * not the filename. The path is shown under each row: two pages can share a
+ * heading, and the folder is what tells them apart.
+ */
+class NoteSuggestModal extends SuggestModal<FixPage> {
+  private resolved = false;
+  constructor(
+    app: App,
+    private pages: FixPage[],
+    private resolve: (v: FixPage | null) => void,
+  ) {
+    super(app);
+    this.setPlaceholder("Which note did this link mean?");
+  }
+  getSuggestions(query: string): FixPage[] {
+    const q = query.trim().toLowerCase();
+    if (!q) return this.pages;
+    return this.pages.filter(
+      (p) =>
+        p.title.toLowerCase().includes(q) ||
+        (p.displayTitle ?? "").toLowerCase().includes(q) ||
+        p.aliases.some((a) => a.toLowerCase().includes(q)),
+    );
+  }
+  renderSuggestion(p: FixPage, el: HTMLElement): void {
+    el.createDiv({ text: p.displayTitle || p.title });
+    el.createDiv({ cls: "wikilm-muted", text: p.path });
+  }
+  onChooseSuggestion(p: FixPage): void {
+    this.resolved = true;
+    this.resolve(p);
+  }
+  onClose(): void {
+    if (!this.resolved) this.resolve(null);
+  }
+}
+
+export function pickNote(app: App, pages: FixPage[]): Promise<FixPage | null> {
+  return new Promise((resolve) => new NoteSuggestModal(app, pages, resolve).open());
 }

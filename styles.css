@@ -473,7 +473,13 @@
   overflow-y: auto;
   padding: var(--size-4-2) 0;
   font-size: var(--font-ui-small);
-  white-space: pre-wrap;
+}
+
+/* The report is markdown now, and a markdown list inside a modal has no
+   stylesheet of its own to indent it; without this every finding sits flush
+   against the heading it hangs under. */
+.wikilm-lint-report ul {
+  margin: 0 0 var(--size-4-2) var(--size-4-4);
 }
 
 .wikilm-lint-fixes {
@@ -481,6 +487,46 @@
   overflow-y: auto;
   font-size: var(--font-ui-smaller);
   padding-left: var(--size-4-4);
+}
+
+/* Fix plan ------------------------------------------------------------- */
+/* The same reasoning as the lint report: the list scrolls so Apply and Cancel
+   stay on screen however many rows a vault's findings produce. */
+.wikilm-fix-plan {
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.wikilm-fix-group {
+  margin-bottom: var(--size-4-3);
+}
+.wikilm-fix-group h4 {
+  margin: var(--size-4-2) 0 var(--size-4-1);
+}
+
+/* Baseline rather than centre: the note name and the label are text of the
+   same size and should sit on one line, while the checkbox and the Point at…
+   button are taller than both. */
+.wikilm-fix-row {
+  display: flex;
+  gap: var(--size-4-2);
+  align-items: baseline;
+  padding: var(--size-4-1) 0;
+}
+.wikilm-fix-note {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  flex-shrink: 0;
+}
+.wikilm-fix-label {
+  font-size: var(--font-ui-small);
+}
+
+/* A row waiting for a target applies nothing yet, and says so by looking
+   unfinished rather than by looking like a row that will be written. */
+.wikilm-fix-row.is-pending .wikilm-fix-label,
+.wikilm-fix-row.is-pending .wikilm-fix-note {
+  color: var(--text-faint);
 }
 
 /* Status bar ----------------------------------------------------------- */

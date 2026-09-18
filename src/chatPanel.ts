@@ -13,8 +13,10 @@ import {
 } from "./retrieval";
 import type { Graph } from "./graph";
 import { lintVault, renderVaultLint, WIKI_SCHEMA, type LintPage } from "./vaultLint";
-import { planLinkFixes, applyFixesToNote, type FixPage, type LinkFix } from "./vaultFix";
-import { LintReportModal } from "./modals";
+import { planLinkFixes, applyFixesToNote, type LinkFix } from "./vaultFix";
+import { FixPlanModal, LintReportModal, pickNote } from "./modals";
+import { repointFix, type Fix, type FixPageInfo } from "./fixPlan";
+import { applyPlan, buildPlan, fixPagesFor, pageInfos, proposeAliases, providerReady, type FixContext } from "./fixer";
 import { checkAnswer, emptyIndexAnswer, noEvidenceAnswer, renderGroundingLine, VERIFY_BANNER, type GroundingReport } from "./askCheck";
 import { matchIntent, renderHelp, type Intent, type IntentContext, type IntentPage, type Target } from "./chatCommands";
 import { WIKILM_COMMANDS, type WikiLmCommand } from "./commands";
@@ -294,14 +296,29 @@ export class ChatPanel {
       // actionable. Planning the fixes here rather than inside the modal keeps
       // the button's count honest — it says what will actually change, not how
       // many dead links were found.
-      const plan = planLinkFixes(report.issues, this.fixPages(pages), new Map(pages.map((p) => [p.path, p.content])), prefix);
+      const links = planLinkFixes(report.issues, fixPagesFor(this.plugin, pages), new Map(pages.map((p) => [p.path, p.content])), prefix);
       const schemaViolations = report.issues.filter((i) => i.id === "schema-violation").length;
+
+      const ctx: FixContext = { report, pages, sources, prefix };
+      const infos = pageInfos(this.plugin, pages);
+      const plan = await buildPlan(this.plugin, ctx);
+
+      // The model's rows are not in `plan` — they cost a request and are only
+      // asked for from inside the modal — so a vault whose only findings are
+      // missing aliases would otherwise have no way to reach the button that
+      // proposes them. That is what `aliasWork` keeps open.
+      const aliasWork = report.issues.some(
+        (i) => i.id === "no-aliases" || (i.id === "schema-violation" && i.detail?.startsWith("tag “")),
+      );
+      const canSuggest = plan.length > 0 || aliasWork;
+
       new LintReportModal(
         this.plugin.app,
         rendered,
-        { deadLinksFixable: plan.fixable.length, deadLinksUnresolved: plan.unresolved.length, schemaViolations },
-        { onFixDeadLinks: () => void this.applyLinkFixes(plan.fixable) },
-        plan.fixable,
+        { deadLinksFixable: links.fixable.length, deadLinksUnresolved: links.unresolved.length, schemaViolations },
+        { onFixDeadLinks: () => void this.applyLinkFixes(links.fixable) },
+        links.fixable,
+        canSuggest ? () => this.openFixPlan(plan, infos, ctx) : undefined,
       ).open();
     } catch (e) {
       this.pushSystem(`Wiki check failed: ${describeError(e)}`);
@@ -313,29 +330,42 @@ export class ChatPanel {
   }
 
   /**
-   * The wiki pages as link targets.
+   * Open the plan the Wiki check offered, and write what comes back ticked.
    *
-   * `title` is the filename, because that is what a wikilink addresses.
-   * `displayTitle` is the page's own `# Heading`, which is what a repaired
-   * link should show the reader — a slug in prose reads as a filename, and
-   * title-casing one cannot recover the punctuation a real heading has.
+   * The hooks are wired here rather than inside the modal because all three
+   * need the plugin: the picker needs the vault's pages, the model button needs
+   * the client and the settings, and Apply needs `vault.process`.
+   *
+   * The re-lint is deliberately *not* awaited inside `apply`. This method is
+   * called from the report modal's button, long after `runVaultLint`'s
+   * `finally` has cleared `busy` — but `runVaultLint` returns early while busy,
+   * and `applyPlan` is itself the reader's write, so the re-run is started once
+   * the writes have resolved and the panel is idle again. `void` rather than
+   * `await` so the modal's Apply does not sit open across a second full lint.
    */
-  private fixPages(pages: LintPage[]): FixPage[] {
-    return pages.map((p) => {
-      const cache = this.plugin.app.metadataCache.getCache(p.path);
-      const fmAliases = cache?.frontmatter?.aliases;
-      const aliases = Array.isArray(fmAliases)
-        ? fmAliases.filter((a): a is string => typeof a === "string")
-        : typeof fmAliases === "string"
-          ? [fmAliases]
-          : [];
-      return {
-        path: p.path,
-        title: (p.path.split("/").pop() ?? p.path).replace(/\.md$/i, ""),
-        displayTitle: cache?.headings?.find((h) => h.level === 1)?.heading,
-        aliases,
-      };
-    });
+  private openFixPlan(plan: Fix[], infos: Map<string, FixPageInfo>, ctx: FixContext): void {
+    const pages = fixPagesFor(this.plugin, ctx.pages);
+    new FixPlanModal(this.plugin.app, plan, {
+      pickTarget: (row) => pickNote(this.plugin.app, pages).then((p) => (p ? repointFix(row, p, ctx.prefix) : null)),
+      proposeAliases: providerReady(this.plugin.settings)
+        ? () => proposeAliases(this.plugin, infos, ctx.report)
+        : null,
+      apply: async (fixes) => {
+        try {
+          const r = await applyPlan(this.plugin, fixes);
+          const noteWord = r.notes === 1 ? "note" : "notes";
+          const fixWord = r.fixes === 1 ? "fix" : "fixes";
+          const skipped = r.skipped > 0 ? ` ${r.skipped} had nothing left to change.` : "";
+          this.pushSystem(`Applied ${r.fixes} ${fixWord} across ${r.notes} ${noteWord}.${skipped}`);
+        } catch (e) {
+          this.pushSystem(`Applying the fixes failed: ${describeError(e)}`);
+          return;
+        }
+        // Outside the write's own promise chain: the check the reader now wants
+        // is about the vault after the writes, and it re-opens its own modal.
+        void this.runVaultLint();
+      },
+    }).open();
   }
 
   /**
