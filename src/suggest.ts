@@ -147,6 +147,7 @@ export async function writeNotes(
  * and a batch that throws aborts the whole run with nothing written.
  */
 export async function suggestPdfHighlights(plugin: WikiLmPlugin, pdf: TFile): Promise<void> {
+  let ownsRun = false;
   try {
     const s = plugin.settings;
 
@@ -198,7 +199,16 @@ export async function suggestPdfHighlights(plugin: WikiLmPlugin, pdf: TFile): Pr
     const newNotes: SuggestDraft["new_notes"] = [];
     let unlocated = 0;
 
+    ownsRun = !plugin.cancel.active;
+    if (ownsRun) plugin.cancel.begin(`highlighting ${manifest.pdfBasename}`);
+    let stopped = false;
+
     for (const batch of batchPages(pages.length, s.suggestPagesPerBatch)) {
+      if (plugin.cancel.cancelled) {
+        stopped = true;
+        break;
+      }
+      plugin.cancel.progress(`pages ${batch.from}–${batch.to} of ${pages.length}`);
       const remaining = cap - accepted.length;
       if (remaining <= 0) break;
 
@@ -239,6 +249,8 @@ export async function suggestPdfHighlights(plugin: WikiLmPlugin, pdf: TFile): Pr
         newNotes.push(n);
       }
     }
+    if (ownsRun) plugin.cancel.end();
+    if (stopped) new Notice("WikiLM: stopped; keeping what was already verified.");
 
     if (accepted.length === 0) {
       new Notice("WikiLM: no highlights suggested.");
@@ -306,6 +318,7 @@ export async function suggestPdfHighlights(plugin: WikiLmPlugin, pdf: TFile): Pr
       8000,
     );
   } catch (e) {
+    if (ownsRun) plugin.cancel.end();
     console.error("WikiLM: suggesting highlights failed", e);
     new Notice(`WikiLM: suggesting highlights failed. ${describeError(e)}`, 8000);
   }

@@ -1,6 +1,7 @@
 import { MarkdownView, Notice, Plugin, TFile, normalizePath } from "obsidian";
 import { WIKILM_ICON, WIKILM_SPARK_ICON, registerWikiLmIcon } from "./icon";
 import { AnkiClient, exportToAnki, finalizeHighlights, buildNote } from "./anki";
+import { CancelToken } from "./cancel";
 import { captureSelection } from "./capture";
 import { WIKILM_COMMANDS } from "./commands";
 import { Generator } from "./generator";
@@ -20,6 +21,7 @@ export default class WikiLmPlugin extends Plugin {
   llm!: LlmClient;
   anki!: AnkiClient;
   highlighter!: Highlighter;
+  cancel = new CancelToken();
   private statusBar: HTMLElement | null = null;
 
   async onload(): Promise<void> {
@@ -40,8 +42,16 @@ export default class WikiLmPlugin extends Plugin {
     this.addRibbonIcon(WIKILM_ICON, "WikiLM inbox", () => void this.openInbox());
     this.statusBar = this.addStatusBarItem();
     this.statusBar.addClass("wikilm-statusbar");
-    this.statusBar.addEventListener("click", () => void this.openInbox());
+    this.statusBar.addEventListener("click", () => {
+      if (this.cancel.active) {
+        this.cancel.cancel();
+        new Notice("WikiLM: stopping after this batch.");
+        return;
+      }
+      void this.openInbox();
+    });
     this.store.onChange(() => this.refreshStatusBar());
+    this.cancel.onChange(() => this.refreshStatusBar());
     this.highlighter = new Highlighter(this);
     this.highlighter.install();
     this.refreshStatusBar();
@@ -127,13 +137,14 @@ export default class WikiLmPlugin extends Plugin {
     const c = this.store.counts();
     const parts: string[] = [];
     if (this.highlighter?.enabled) parts.push("🖊 highlighter");
+    if (this.cancel.active) parts.push(`⏹ ${this.cancel.cancelled ? "stopping…" : this.cancel.label}`);
     if (c.queued + c.generating) parts.push(`✎ ${c.queued + c.generating}`);
     if (c.toReview) parts.push(`⧉ ${c.toReview}`);
     if (c.flagged) parts.push(`⚑ ${c.flagged}`);
     if (c.errors) parts.push(`⚠ ${c.errors}`);
     this.statusBar.setText(parts.length ? `WikiLM ${parts.join(" · ")}` : "WikiLM");
     this.statusBar.toggleClass("wikilm-statusbar-highlighter", !!this.highlighter?.enabled);
-    this.statusBar.title = `WikiLM: ${this.highlighter?.enabled ? "highlighter mode on, " : ""}${c.queued + c.generating} writing, ${c.toReview} cards to review${c.flagged ? `, ${c.flagged} flagged` : ""}${c.errors ? `, ${c.errors} failed` : ""}. Click to open the inbox.`;
+    this.statusBar.title = `${this.cancel.active ? `Click to stop: ${this.cancel.label}. ` : ""}WikiLM: ${this.highlighter?.enabled ? "highlighter mode on, " : ""}${c.queued + c.generating} writing, ${c.toReview} cards to review${c.flagged ? `, ${c.flagged} flagged` : ""}${c.errors ? `, ${c.errors} failed` : ""}. Click to open the inbox.`;
   }
 
   async openInbox(): Promise<void> {

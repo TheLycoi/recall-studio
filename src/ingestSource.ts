@@ -12,7 +12,7 @@
  * frontmatter. Asking a question about it returned "no coverage" for material
  * the vault plainly held, because nothing had ever read it.
  */
-import { Notice, TFile } from "obsidian";
+import { Notice, TFile, TFolder } from "obsidian";
 import type WikiLmPlugin from "./main";
 import { describeError } from "./llm";
 import { makeHighlight } from "./model";
@@ -54,6 +54,7 @@ const MAX_PER_NOTE = 24;
  * with a citation that would not survive being clicked.
  */
 export async function ingestSourceNote(plugin: WikiLmPlugin, file: TFile, opts: { quiet?: boolean } = {}): Promise<"written" | "nothing"> {
+  let ownsRun = false;
   try {
     const s = plugin.settings;
     const md = await plugin.app.vault.read(file); // obsidian.d.ts:7424
@@ -97,7 +98,16 @@ export async function ingestSourceNote(plugin: WikiLmPlugin, file: TFile, opts: 
     const wiki = await wikiNotes(plugin, "", []);
     const newNotes: SuggestDraft["new_notes"] = [];
 
+    ownsRun = !plugin.cancel.active;
+    if (ownsRun) plugin.cancel.begin(`reading ${title}`);
+    let stopped = false;
+
     for (const [n, batch] of batches.entries()) {
+      if (plugin.cancel.cancelled) {
+        stopped = true;
+        break;
+      }
+      plugin.cancel.progress(`part ${n + 1} of ${batches.length}`);
       const remaining = MAX_PER_NOTE - accepted.length;
       if (remaining <= 0) break;
 
@@ -139,6 +149,8 @@ export async function ingestSourceNote(plugin: WikiLmPlugin, file: TFile, opts: 
         newNotes.push(n);
       }
     }
+    if (ownsRun) plugin.cancel.end();
+    if (stopped) new Notice("WikiLM: stopped; keeping what was already verified.");
 
     if (accepted.length === 0) {
       new Notice(
@@ -198,6 +210,7 @@ export async function ingestSourceNote(plugin: WikiLmPlugin, file: TFile, opts: 
     if (!opts.quiet || result.written > 0) new Notice(`WikiLM: ${title} — ${bits.join(", ")}.`, 8000);
     return result.written > 0 || queued > 0 ? "written" : "nothing";
   } catch (e) {
+    if (ownsRun) plugin.cancel.end();
     new Notice(`WikiLM: ${describeError(e)}`, 8000);
     return "nothing";
   }
@@ -251,4 +264,54 @@ export function previewBatch(md: string): string {
   const map = buildSourceMap(md);
   const indexOf = new Map(map.segments.map((seg, i) => [seg, i + 1]));
   return renderBatch(map.segments, (seg) => indexOf.get(seg) as number);
+}
+
+/**
+ * Read every note under a folder into the wiki, one preview per note, skipping
+ * notes whose content the store has already recorded as ingested. Cancelling
+ * stops before the next note; the notes already written stay written.
+ */
+export async function ingestFolder(plugin: WikiLmPlugin, folder: TFolder): Promise<void> {
+  const files: TFile[] = [];
+  const visit = (f: TFolder): void => {
+    for (const child of f.children) {
+      if (child instanceof TFolder) visit(child);
+      else if (child instanceof TFile && child.extension === "md") files.push(child);
+    }
+  };
+  visit(folder);
+  files.sort((a, b) => a.path.localeCompare(b.path));
+
+  const todo: TFile[] = [];
+  let skipped = 0;
+  for (const f of files) {
+    const md = await plugin.app.vault.cachedRead(f);
+    if (plugin.store.ingestedHash(f.path) === contentHash(md)) skipped++;
+    else todo.push(f);
+  }
+  if (todo.length === 0) {
+    new Notice(`WikiLM: every note in ${folder.path} is already in the wiki (${skipped} skipped).`);
+    return;
+  }
+
+  plugin.cancel.begin(`ingesting ${folder.name}`);
+  let done = 0;
+  let cancelled = false;
+  try {
+    for (const [i, f] of todo.entries()) {
+      if (plugin.cancel.cancelled) {
+        cancelled = true;
+        break;
+      }
+      plugin.cancel.progress(`${i + 1}/${todo.length} ${f.basename}`);
+      await ingestSourceNote(plugin, f, { quiet: true });
+      done++;
+    }
+  } finally {
+    plugin.cancel.end();
+  }
+  new Notice(
+    `WikiLM: ${done} of ${todo.length} note${todo.length === 1 ? "" : "s"} read${skipped ? `, ${skipped} already done` : ""}${cancelled ? ", stopped at your request" : ""}.`,
+    8000,
+  );
 }

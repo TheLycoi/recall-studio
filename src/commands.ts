@@ -12,13 +12,13 @@
 import { Notice } from "obsidian";
 import type WikiLmPlugin from "./main";
 import { COMMAND_TABLE, type CommandSpec } from "./commandTable";
-import { ingestSourceNote } from "./ingestSource";
+import { ingestFolder, ingestSourceNote } from "./ingestSource";
 import { aiHighlightNote, captureMarkdownHighlights, capturePdfSelection, captureReadingSelection, captureSelection } from "./capture";
 import { isPdfFile, readPdfSelection } from "./pdf";
 import { isManifestNote } from "./pdfHighlights";
 import { digestPdf, extractPdfHighlights } from "./digest";
 import { suggestPdfHighlights } from "./suggest";
-import { askInstruction, askTranscript } from "./modals";
+import { askInstruction, askTranscript, pickFolder } from "./modals";
 import { normalizeTranscript, truncateTranscript } from "./util";
 
 export interface WikiLmCommand extends CommandSpec {
@@ -104,6 +104,20 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
       const file = p.app.workspace.getActiveFile();
       if (!file || file.extension !== "md") return;
       ingestSourceNote(p, file);
+    },
+  },
+  "ingest-folder": {
+    available: () => true,
+    run: async (p) => {
+      const folder = await pickFolder(p.app);
+      if (folder) await ingestFolder(p, folder);
+    },
+  },
+  "cancel-ingestion": {
+    available: (p) => p.cancel.active,
+    run: (p) => {
+      p.cancel.cancel();
+      new Notice("WikiLM: stopping after this batch.");
     },
   },
   "ai-highlight": {

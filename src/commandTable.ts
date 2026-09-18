@@ -68,6 +68,18 @@ export const COMMAND_TABLE: CommandSpec[] = [
     hint: "needs an open note",
   },
   {
+    id: "ingest-folder",
+    name: "Ingest folder: read every note in a folder into the wiki",
+    aliases: ["ingest-folder", "read-folder"],
+    hint: "always",
+  },
+  {
+    id: "cancel-ingestion",
+    name: "Cancel the running AI highlight or ingest",
+    aliases: ["cancel", "stop-run"],
+    hint: "while a run is in progress",
+  },
+  {
     id: "add-transcript",
     name: "Add transcript for document highlighting",
     aliases: ["transcript"],

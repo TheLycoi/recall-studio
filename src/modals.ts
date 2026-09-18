@@ -1,4 +1,4 @@
-import { App, ButtonComponent, FuzzySuggestModal, Modal, Notice, Setting, SuggestModal, TFile } from "obsidian";
+import { App, ButtonComponent, FuzzySuggestModal, Modal, Notice, Setting, SuggestModal, TFile, TFolder } from "obsidian";
 import type { TranscriptRecord } from "./model";
 import type { PreparedNote } from "./topicNote";
 import type { ManifestHighlight } from "./manifest";
@@ -839,4 +839,33 @@ export class LintReportModal extends Modal {
   onClose(): void {
     this.contentEl.empty();
   }
+}
+
+/** Pick a folder of notes to read into the wiki. */
+class FolderSuggestModal extends FuzzySuggestModal<TFolder> {
+  private resolved = false;
+  constructor(
+    app: App,
+    private resolve: (v: TFolder | null) => void,
+  ) {
+    super(app);
+    this.setPlaceholder("Folder to ingest");
+  }
+  getItems(): TFolder[] {
+    return this.app.vault.getAllLoadedFiles().filter((f): f is TFolder => f instanceof TFolder && f.path !== "/");
+  }
+  getItemText(f: TFolder): string {
+    return f.path;
+  }
+  onChooseItem(f: TFolder): void {
+    this.resolved = true;
+    this.resolve(f);
+  }
+  onClose(): void {
+    if (!this.resolved) this.resolve(null);
+  }
+}
+
+export function pickFolder(app: App): Promise<TFolder | null> {
+  return new Promise((resolve) => new FolderSuggestModal(app, resolve).open());
 }
