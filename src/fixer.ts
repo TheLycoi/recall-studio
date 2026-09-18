@@ -108,6 +108,11 @@ export function pageInfos(plugin: WikiLmPlugin, pages: LintPage[]): Map<string, 
   return out;
 }
 
+/** The frontmatter `type:` a page declares, read the same way `pageInfos` reads it. */
+function rawTypeOf(content: string): string {
+  return (fmList(frontmatterOf(content), "type")[0] ?? "").trim().toLowerCase();
+}
+
 /** Which pages are `type: topic-index`, so a hub can be told from a page. */
 function isHub(page: FixPageInfo): boolean {
   return (fmList(frontmatterOf(page.content), "type")[0] ?? "").trim().toLowerCase() === "topic-index";
@@ -315,6 +320,13 @@ export async function proposeAliases(
   const wantsAliases = new Set<string>();
   const wantsTag = new Set<string>();
   for (const issue of report.issues) {
+    const info = infos.get(issue.path);
+    // The tag and alias vocabularies belong to the page's own kind — a
+    // `type: source` page has no concept/entity vocabulary to be offered, so
+    // only concept and entity pages are eligible at all.
+    if (!info) continue;
+    const type = rawTypeOf(info.content);
+    if (type !== "concept" && type !== "entity") continue;
     if (issue.id === "no-aliases") wantsAliases.add(issue.path);
     else if (issue.id === "schema-violation" && issue.detail?.startsWith("tag “")) wantsTag.add(issue.path);
   }
@@ -327,14 +339,15 @@ export async function proposeAliases(
     const batch = paths.slice(i, i + ALIASES_BATCH);
     // The title the request carries is the title the answer is matched on, so
     // two pages reaching the model under one name would be indistinguishable
-    // coming back; the second is left for the next run rather than guessed at.
+    // coming back; the second is sent with its filename appended so the name
+    // stays unique and the reply still matches back to the right page.
     const byTitle = new Map<string, FixPageInfo>();
     const asked: AliasesPageIn[] = [];
     for (const path of batch) {
       const info = infos.get(path);
       if (!info) continue;
-      const name = info.displayTitle || info.title;
-      if (byTitle.has(name)) continue;
+      const base = info.displayTitle || info.title;
+      const name = byTitle.has(base) ? `${base} (${info.title})` : base;
       byTitle.set(name, info);
       asked.push({ title: name, kind: info.kind, excerpt: excerptOf(info.content) });
     }
