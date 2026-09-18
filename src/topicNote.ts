@@ -50,7 +50,7 @@ export function headingKey(heading: string): string {
   return headingDisplay(heading.replace(/^\s*#+\s*/, "")).toLowerCase();
 }
 
-interface HeadingLine {
+export interface HeadingLine {
   heading: string;
   key: string;
   /** Offset just past the heading's text, before its line break. */
@@ -1018,7 +1018,7 @@ function touchFrontmatter(md: string, options: MergeWikiOptions): string {
  * keeping whatever blank lines separated that section from the next heading
  * so the page's own spacing survives the edit.
  */
-function spliceIntoSection(body: string, headingEnd: number, text: string): string {
+export function spliceIntoSection(body: string, headingEnd: number, text: string): string {
   const rest = body.slice(headingEnd);
   const nextHeadingMatch = /^##\s/m.exec(rest);
   const sectionEnd = nextHeadingMatch ? headingEnd + nextHeadingMatch.index : body.length;
@@ -1033,7 +1033,7 @@ function spliceIntoSection(body: string, headingEnd: number, text: string): stri
 }
 
 /** The `##` heading in `body` that names `wanted`, compared as a reader would. */
-function findSection(body: string, wanted: string): HeadingLine | null {
+export function findSection(body: string, wanted: string): HeadingLine | null {
   const key = headingKey(wanted);
   return scanHeadings(body).find((h) => h.key === key) ?? null;
 }
@@ -1053,7 +1053,7 @@ const TRAILING_HEADINGS = [
   /^##\s+Key claims\s*$/m,
 ];
 
-function insertBeforeTrailing(body: string, sectionText: string): string {
+export function insertBeforeTrailing(body: string, sectionText: string): string {
   let at = -1;
   for (const re of TRAILING_HEADINGS) {
     const m = re.exec(body);
