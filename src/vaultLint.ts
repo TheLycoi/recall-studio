@@ -60,6 +60,8 @@ export interface SchemaRules {
   tagsByKind: Record<string, readonly string[]>;
   /** Kinds that should carry at least one alias, so a search by another name finds them. */
   aliasKinds: readonly string[];
+  /** Kinds the wiki also uses that carry no tag rule: legacy pages the lint must not report as off-schema. */
+  freeKinds?: readonly string[];
 }
 
 export interface LintOptions {
@@ -99,6 +101,7 @@ export const WIKI_SCHEMA: SchemaRules = {
     source: ["clippings", "paper", "lecture", "book", "other"],
   },
   aliasKinds: ["concept", "entity"],
+  freeKinds: ["topic", "topic-index"],
 };
 
 function titleOf(path: string): string {
@@ -312,7 +315,7 @@ export function lintVault(pages: LintPage[], options: LintOptions = {}): VaultLi
             issues.push({ id: "schema-violation", path: page.path, title, detail: `tag “${tag}” is not one of ${allowed.join(", ")}` });
           }
         }
-      } else if (kind && !(kind in schema.tagsByKind)) {
+      } else if (kind && !(kind in schema.tagsByKind) && !(schema.freeKinds ?? []).includes(kind)) {
         issues.push({ id: "schema-violation", path: page.path, title, detail: `${schema.kindKey}: ${kind} is not a kind this wiki uses` });
       }
       if (kind && schema.aliasKinds.includes(kind) && !hasAlias(fm)) {

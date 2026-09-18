@@ -258,3 +258,15 @@ test("two pages citing the same PDF page, with no span, are not duplicates", () 
   ]);
   assert.deepEqual(r.issues.filter((i) => i.id === "duplicate-pages"), []);
 });
+
+test("a legacy topic page is a known kind with no tag rule, not a schema violation", () => {
+  const r = vl.lintVault([page("classes/HBIO250/Doping.md", "type: topic\nclass: HBIO250\ntags: [hbio250]", "A sentence of prose here.")], { schema: vl.WIKI_SCHEMA });
+  assert.deepEqual(r.issues.filter((i) => i.id === "schema-violation"), []);
+  const hub = vl.lintVault([page("classes/PHED163/PHED163.md", "type: topic-index\nclass: PHED163", "A sentence of prose here.")], { schema: vl.WIKI_SCHEMA });
+  assert.deepEqual(hub.issues.filter((i) => i.id === "schema-violation"), []);
+});
+
+test("an unknown kind is still a schema violation", () => {
+  const r = vl.lintVault([page("wiki/x.md", "type: nonsense", "A sentence of prose here.")], { schema: vl.WIKI_SCHEMA });
+  assert.equal(r.issues.filter((i) => i.id === "schema-violation").length, 1);
+});
