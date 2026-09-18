@@ -148,10 +148,31 @@ test("addRelatedLink fills an empty section and a prose-only one without breakin
   assert.equal(fp.addRelatedLink(added, "concepts/y", "Y", "class", "concept"), added);
 });
 
-test("addRelatedLink creates the missing section before the trailing headings", () => {
+test("addRelatedLink creates a karpathy page's missing section before the trailing headings", () => {
+  // A karpathy page's Related Concepts/Entities do precede Mentions in Source
+  // and Highlights, so `insertBeforeTrailing` is still the right placement.
+  const out = fp.addRelatedLink(NO_SECTION_PAGE, "concepts/x", "X", "karpathy", "concept");
+  assert.match(out, /## Related Concepts\n- \[\[concepts\/x\|X\]\]/);
+  assert.ok(out.indexOf("## Related Concepts") < out.indexOf("## Highlights"));
+  assert.equal(fp.addRelatedLink(out, "concepts/x", "X", "karpathy", "concept"), out);
+});
+
+test("addRelatedLink puts a class page's new Related topics after its Highlights", () => {
+  // `renderTopicNote` writes Summary, Highlights, Related topics, Flashcard
+  // Seeds; a created section takes that place, never the one ahead of
+  // Highlights that `insertBeforeTrailing` would pick.
   const out = fp.addRelatedLink(NO_SECTION_PAGE, "concepts/x", "X", "class", "concept");
   assert.match(out, /## Related topics\n- \[\[concepts\/x\|X\]\]/);
-  assert.ok(out.indexOf("## Related topics") < out.indexOf("## Highlights"));
+  assert.ok(out.indexOf("## Highlights") < out.indexOf("## Related topics"));
+  assert.ok(out.indexOf("## Related topics") < out.indexOf("## Flashcard Seeds"));
+  assert.equal(fp.addRelatedLink(out, "concepts/x", "X", "class", "concept"), out);
+});
+
+test("addRelatedLink appends a class page's new Related topics at EOF with no Flashcard Seeds", () => {
+  const page = "# Doping\n\n## Summary\nSport pharmacology.\n\n## Highlights\n\n- something\n";
+  const out = fp.addRelatedLink(page, "concepts/x", "X", "class", "concept");
+  assert.ok(out.indexOf("## Highlights") < out.indexOf("## Related topics"));
+  assert.match(out, /- something\n\n## Related topics\n- \[\[concepts\/x\|X\]\]\n$/);
   assert.equal(fp.addRelatedLink(out, "concepts/x", "X", "class", "concept"), out);
 });
 
@@ -194,6 +215,25 @@ test("rectToCallout leaves the note alone with no text or no matching key", () =
   assert.equal(fp.rectToCallout(RECT_NOTE, "page=99&rect=1,2,3,4", "HBIO 250", "text"), RECT_NOTE);
 });
 
+test("rectToCallout keeps the prose that shares the embed's line", () => {
+  const note = "# X\n\nSee this: ![[X.pdf#page=2&rect=1,2,3,4|X, p.2]] which shows it.\n";
+  const out = fp.rectToCallout(note, "page=2&rect=1,2,3,4", "X", "The banned list.");
+  assert.equal(
+    out,
+    "# X\n\nSee this:\n> [!PDF] [[X.pdf#page=2&rect=1,2,3,4|X, p.2]]\n> > The banned list.\nwhich shows it.\n",
+  );
+  assert.equal(fp.rectToCallout(out, "page=2&rect=1,2,3,4", "X", "The banned list."), out);
+});
+
+test("rectToCallout changes only the matching embed when a line holds two", () => {
+  const note = "# X\n\n![[X.pdf#page=2&rect=1,2,3,4|a]] ![[X.pdf#page=3&rect=5,6,7,8|b]]\n";
+  const out = fp.rectToCallout(note, "page=3&rect=5,6,7,8", "X", "Second only.");
+  assert.match(out, /!\[\[X\.pdf#page=2&rect=1,2,3,4\|a\]\]/);
+  assert.doesNotMatch(out, /!\[\[X\.pdf#page=3/);
+  assert.match(out, /> \[!PDF\] \[\[X\.pdf#page=3&rect=5,6,7,8\|b\]\]\n> > Second only\./);
+  assert.equal(fp.rectToCallout(out, "page=3&rect=5,6,7,8", "X", "Second only."), out);
+});
+
 // ----------------------------------------------------------- attributeQuote
 
 test("attributeQuote appends the citation to the matching bullet only", () => {
@@ -211,6 +251,36 @@ test("attributeQuote matches through smart quotes and spacing", () => {
 
 test("attributeQuote leaves a note with no such quote unchanged", () => {
   assert.equal(fp.attributeQuote(QUOTE_NOTE, "Never said.", "sources/prompts"), QUOTE_NOTE);
+});
+
+test("attributeQuote cites the Mentions bullet, not the same words under Highlights", () => {
+  // The lint raises `unattributed-quote` only from `## Mentions in Source`, so
+  // citing a repeat of the bullet elsewhere leaves the finding standing and the
+  // next Apply cites again.
+  const both = `---
+type: concept
+---
+
+# Repeated
+
+## Highlights
+
+- "The prompt is the unit of work."
+
+## Mentions in Source
+
+- "The prompt is the unit of work."
+`;
+  const out = fp.attributeQuote(both, "The prompt is the unit of work.", "sources/prompts");
+  assert.match(out, /## Highlights\n\n- "The prompt is the unit of work\."\n/);
+  assert.match(out, /## Mentions in Source\n\n- "The prompt is the unit of work\." — \[\[sources\/prompts\]\]\n/);
+  // Applying twice equals once.
+  assert.equal(fp.attributeQuote(out, "The prompt is the unit of work.", "sources/prompts"), out);
+});
+
+test("attributeQuote leaves a note with no Mentions in Source section alone", () => {
+  const noMentions = '# Page\n\n## Highlights\n\n- "The prompt is the unit of work."\n';
+  assert.equal(fp.attributeQuote(noMentions, "The prompt is the unit of work.", "sources/prompts"), noMentions);
 });
 
 // ---------------------------------------------------------------- frontmatter
@@ -450,6 +520,20 @@ test("planAttributions cites a quote found in exactly one source", () => {
   ]);
   assert.deepEqual(fp.planAttributions(issues, two), []);
   assert.deepEqual(fp.planAttributions(issues, new Map()), []);
+});
+
+test("planAttributions ignores a quote too short to identify a source", () => {
+  // "the cell" is nine characters: a substring hit says nothing about which
+  // document the page was reading.
+  const sources = new Map([["sources/bio.md", "Inside the cell, the mitochondrion works."]]);
+  const short = [{ id: "unattributed-quote", path: "wiki/concepts/q.md", title: "Q", detail: "the cell" }];
+  assert.deepEqual(fp.planAttributions(short, sources), []);
+
+  // A sentence is long enough to mean something.
+  const long = [
+    { id: "unattributed-quote", path: "wiki/concepts/q.md", title: "Q", detail: "Inside the cell, the mitochondrion works." },
+  ];
+  assert.equal(fp.planAttributions(long, sources).length, 1);
 });
 
 test("planAliases proposes aliases and a tag, dropping one outside the vocabulary", () => {

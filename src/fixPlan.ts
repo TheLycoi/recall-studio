@@ -25,7 +25,7 @@
 import type { VaultIssue } from "./vaultLint";
 import type { FixPage, LinkFix, FixConfidence } from "./vaultFix";
 import { applyLinkFix, buildReplacement } from "./vaultFix";
-import { findAllPdfReferences, highlightKey, renderCallout } from "./pdflink";
+import { findAllPdfReferences, highlightKey, parsePdfSubpath, renderCallout } from "./pdflink";
 import { linkKey } from "./graph";
 import { findSection, spliceIntoSection, insertBeforeTrailing } from "./topicNote";
 
@@ -126,9 +126,13 @@ export function relatedHeading(schema: PageSchema, kind: "concept" | "entity"): 
  * anchor) counts as there: the comparison is `linkKey`, the same identity the
  * graph resolves links by, so the fix does not add a second link to one page.
  *
- * A page missing the section gains it before its trailing headings, where
- * `mergeWikiHighlights` puts a new one, so the reader's subtopics stay ahead of
- * Highlights and Flashcard Seeds.
+ * A karpathy page missing the section gains it before its trailing headings,
+ * where `mergeWikiHighlights` puts a new one: there Related Concepts and
+ * Related Entities do precede Mentions in Source. A class page's order is the
+ * one `renderTopicNote` writes — Summary, Highlights, Related topics,
+ * Flashcard Seeds — so a created `## Related topics` goes before
+ * `## Flashcard Seeds` when the page has one and at the end when it does not,
+ * never ahead of Highlights.
  *
  * The new line joins the existing list rather than going through
  * `spliceIntoSection`: that one separates what it appends with a blank line,
@@ -152,7 +156,11 @@ export function addRelatedLink(
     // Nowhere to look, so nothing can already be there.
     // `renderTopicNote` writes the list directly under its heading; a created
     // section matches that rather than the blank-line shape of a prose section.
-    return insertBeforeTrailing(md, `## ${heading}\n${line}`);
+    const section = `## ${heading}\n${line}`;
+    if (schema !== "class") return insertBeforeTrailing(md, section);
+    const seeds = /^##\s+Flashcard Seeds\s*$/m.exec(md);
+    if (!seeds) return `${md.replace(/\n*$/, "")}\n\n${section}\n`;
+    return `${md.slice(0, seeds.index).replace(/\n*$/, "")}\n\n${section}\n\n${md.slice(seeds.index)}`;
   }
 
   const rest = md.slice(found.end);
@@ -228,13 +236,39 @@ export function rectToCallout(md: string, key: string, pdfBasename: string, text
   const lines = md.split("\n");
   if (ref.line < 0 || ref.line >= lines.length) return md;
   const replacement = renderCallout(pdfBasename, ref.target, ref.display, text.trim());
-  if (lines[ref.line] === replacement) return md;
-  lines[ref.line] = replacement;
-  return lines.join("\n");
+  const line = lines[ref.line];
+  if (line === replacement) return md;
+
+  // Only the embed's own `![[…]]` span is rewritten, so prose sharing the line
+  // and a second embed beside it both survive. A callout must begin at the
+  // start of a line, so what sat before the embed keeps its own line above the
+  // callout and what sat after it gets its own line below.
+  const embeds = /!\[\[([^\]]+)\]\]/g;
+  let m: RegExpExecArray | null;
+  while ((m = embeds.exec(line))) {
+    const hash = m[1].indexOf("#");
+    if (hash < 0) continue;
+    const parsed = parsePdfSubpath(m[1].slice(hash + 1).split("|")[0]);
+    if (!parsed || highlightKey(parsed) !== key) continue;
+
+    const before = line.slice(0, m.index).replace(/\s+$/, "");
+    const after = line.slice(m.index + m[0].length).replace(/^\s+/, "");
+    const parts = [before, replacement, after].filter((p) => p !== "");
+    lines.splice(ref.line, 1, ...parts.join("\n").split("\n"));
+    return lines.join("\n");
+  }
+  return md;
 }
 
 /**
  * Name the source a quote came from, on the bullet that holds it.
+ *
+ * The search is bounded to `## Mentions in Source`, from that heading to the
+ * next `## ` heading or EOF, because that block is the only place
+ * `vaultLint`'s `mentionQuotes` raises an `unattributed-quote` from. A note
+ * repeating the same bullet under `## Highlights` would otherwise have the
+ * wrong bullet cited: the finding would stand and the next Apply would cite
+ * again.
  *
  * Only a bullet with no citation is touched: one that already says
  * ` — [[somewhere]]` is the reader's attribution, right or wrong, and not this
@@ -245,8 +279,21 @@ export function attributeQuote(md: string, quote: string, sourceLinkPath: string
   const needle = fold(quote).replace(/^["']|["']$/g, "");
   if (!needle) return md;
 
+  const heading = /^##\s+Mentions in Source\s*$/m.exec(md);
+  if (!heading) return md;
+  const blockStart = heading.index + heading[0].length;
+  const after = /^##\s/m.exec(md.slice(blockStart));
+  const blockEnd = after ? blockStart + after.index : md.length;
+
   const lines = md.split("\n");
+  let offset = 0;
   for (let i = 0; i < lines.length; i++) {
+    // Where this line starts in `md`, so the scan can stay inside the block.
+    const lineStart = offset;
+    offset += lines[i].length + 1;
+    if (lineStart < blockStart) continue;
+    if (lineStart >= blockEnd) break;
+
     const line = lines[i];
     if (!/^[ \t]*-\s/.test(line)) continue;
     if (line.includes(" — [[")) continue;
@@ -587,8 +634,12 @@ export function planRectCallouts(issues: VaultIssue[], rectText: (path: string) 
  *
  * Two sources holding the same sentence is not evidence about which one the
  * page was reading, and zero is not evidence at all; both stay in the report
- * unrepaired. Only a unique match is a fact about provenance.
+ * unrepaired. Only a unique match is a fact about provenance, and only when the
+ * quote is long enough for the match to mean anything.
  */
+/** Shorter than this, a quote is a phrase any document might hold: no evidence of provenance. */
+const MIN_ATTRIBUTE_CHARS = 20;
+
 export function planAttributions(issues: VaultIssue[], sources: Map<string, string>): Fix[] {
   const folded = [...sources.entries()].map(([path, content]) => [path, fold(content)] as const);
   const fixes: Fix[] = [];
@@ -596,7 +647,7 @@ export function planAttributions(issues: VaultIssue[], sources: Map<string, stri
   for (const issue of issues) {
     if (issue.id !== "unattributed-quote" || !issue.detail) continue;
     const needle = fold(issue.detail).replace(/^["']|["']$/g, "");
-    if (!needle) continue;
+    if (needle.length < MIN_ATTRIBUTE_CHARS) continue;
 
     const hits = folded.filter(([, content]) => content.includes(needle));
     if (hits.length !== 1) continue;
