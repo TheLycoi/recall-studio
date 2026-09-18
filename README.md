@@ -553,7 +553,9 @@ only when you click **Ask the model for aliases and tags** inside the plan. A
 dead link whose page does not exist is repointed at a note you pick with
 **Point at…**; the fixer never creates a stub page, never merges two pages,
 and never drops a link. After Apply the lint runs again so you see what
-changed.
+changed. Suggest fixes covers exactly the notes the lint covers — those under
+the topic notes folder — so the wiki's own concept and entity pages are
+offered fixes only when that folder is theirs.
 
 A name that fits two files is offered as buttons, never guessed. A palette
 command typed exactly by name still runs.

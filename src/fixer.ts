@@ -266,11 +266,11 @@ export async function buildPlan(plugin: WikiLmPlugin, ctx: FixContext): Promise<
   const lookup = await rectText(plugin, rectPaths);
 
   return orderFixes([
-    ...planCrossLinks(ctx.report.issues, infos),
+    ...planCrossLinks(ctx.report.issues, infos, ctx.prefix),
     ...planRelinks(links.fixable),
     ...planRepoints(links.unresolved),
-    ...planHubLinks(ctx.report.issues, infos, hubs(infos)),
-    ...planRelatedFrom(ctx.report.issues, infos, neighbourOf(infos, graph)),
+    ...planHubLinks(ctx.report.issues, infos, hubs(infos), ctx.prefix),
+    ...planRelatedFrom(ctx.report.issues, infos, neighbourOf(infos, graph), ctx.prefix),
     ...planRectCallouts(ctx.report.issues, lookup),
     ...planAttributions(ctx.report.issues, ctx.sources),
   ]);

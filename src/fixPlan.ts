@@ -414,7 +414,7 @@ const CONFIDENCE_WORDS: Record<FixConfidence, string> = {
 };
 
 /** The path a wikilink should carry: vault-relative, without the wiki folder or the extension. */
-function linkPathOf(path: string, wikiPrefix = "wiki/"): string {
+function linkPathOf(path: string, wikiPrefix: string): string {
   const prefix = wikiPrefix.endsWith("/") ? wikiPrefix : `${wikiPrefix}/`;
   const rel = path.startsWith(prefix) ? path.slice(prefix.length) : path;
   return rel.replace(/\.md$/i, "");
@@ -428,7 +428,7 @@ function linkPathOf(path: string, wikiPrefix = "wiki/"): string {
  * same thing" and leaves both standing, which is the claim the lint actually
  * made.
  */
-export function planCrossLinks(issues: VaultIssue[], pages: Map<string, FixPageInfo>): Fix[] {
+export function planCrossLinks(issues: VaultIssue[], pages: Map<string, FixPageInfo>, wikiPrefix: string): Fix[] {
   const fixes: Fix[] = [];
   let n = 0;
   for (const issue of issues) {
@@ -448,7 +448,7 @@ export function planCrossLinks(issues: VaultIssue[], pages: Map<string, FixPageI
         path: from.path,
         label,
         enabled: true,
-        apply: (content) => addRelatedLink(content, linkPathOf(to.path), shown(to), from.schema, to.kind),
+        apply: (content) => addRelatedLink(content, linkPathOf(to.path, wikiPrefix), shown(to), from.schema, to.kind),
       });
     }
   }
@@ -461,7 +461,7 @@ export function planRelinks(fixable: LinkFix[]): Fix[] {
     id: `relink:${fix.path}:${n}`,
     kind: "relink" as const,
     path: fix.path,
-    label: `Rewrite → ${linkPathOf(fix.toPath)} (${CONFIDENCE_WORDS[fix.confidence]})`,
+    label: `Rewrite → ${linkPathOf(fix.toPath, "wiki/")} (${CONFIDENCE_WORDS[fix.confidence]})`,
     enabled: true,
     apply: (content: string) => applyLinkFix(content, fix.from, fix.to),
   }));
@@ -535,6 +535,7 @@ export function planHubLinks(
   issues: VaultIssue[],
   pages: Map<string, FixPageInfo>,
   hubs: Map<string, FixPageInfo>,
+  wikiPrefix: string,
 ): Fix[] {
   const fixes: Fix[] = [];
   let n = 0;
@@ -552,7 +553,7 @@ export function planHubLinks(
       path: hub.path,
       label: `List ${shown(page)} in ${shown(hub)} hub`,
       enabled: true,
-      apply: (content) => hubListLink(content, linkPathOf(page.path), shown(page)),
+      apply: (content) => hubListLink(content, linkPathOf(page.path, wikiPrefix), shown(page)),
     });
   }
   return fixes;
@@ -569,6 +570,7 @@ export function planRelatedFrom(
   issues: VaultIssue[],
   pages: Map<string, FixPageInfo>,
   neighbourOf: (path: string) => FixPageInfo | null,
+  wikiPrefix: string,
 ): Fix[] {
   const fixes: Fix[] = [];
   let n = 0;
@@ -584,7 +586,7 @@ export function planRelatedFrom(
       path: neighbour.path,
       label: `Relate ${shown(page)} from ${shown(neighbour)}`,
       enabled: true,
-      apply: (content) => addRelatedLink(content, linkPathOf(page.path), shown(page), neighbour.schema, page.kind),
+      apply: (content) => addRelatedLink(content, linkPathOf(page.path, wikiPrefix), shown(page), neighbour.schema, page.kind),
     });
   }
   return fixes;

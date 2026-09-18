@@ -353,7 +353,7 @@ test("planCrossLinks proposes both directions of a duplicate pair", () => {
       target: "wiki/concepts/empowering-behavior-change.md",
     },
   ];
-  const fixes = fp.planCrossLinks(issues, PAGES());
+  const fixes = fp.planCrossLinks(issues, PAGES(), "wiki/");
   assert.equal(fixes.length, 2);
   assert.deepEqual(fixes.map((f) => f.kind), ["cross-link", "cross-link"]);
   assert.deepEqual(fixes.map((f) => f.path), [
@@ -365,6 +365,33 @@ test("planCrossLinks proposes both directions of a duplicate pair", () => {
   // The edit is the related-link edit, applied to the note's own text.
   const applied = fixes[0].apply(CLASS_PAGE);
   assert.match(applied, /- \[\[concepts\/empowering-behavior-change\|Empowering Behavior Change\]\]/);
+});
+
+test("planCrossLinks under a topic folder prefix writes links relative to that folder", () => {
+  const pages = new Map([
+    [
+      "classes/HBIO250/receptors.md",
+      { path: "classes/HBIO250/receptors.md", title: "receptors", displayTitle: "Receptors", schema: "class", kind: "concept", classCodes: ["HBIO250"], content: CLASS_PAGE },
+    ],
+    [
+      "classes/HBIO250/agonists.md",
+      { path: "classes/HBIO250/agonists.md", title: "agonists", displayTitle: "Agonists", schema: "class", kind: "concept", classCodes: ["HBIO250"], content: CLASS_PAGE },
+    ],
+  ]);
+  const issues = [
+    {
+      id: "duplicate-pages",
+      path: "classes/HBIO250/receptors.md",
+      title: "Receptors",
+      target: "classes/HBIO250/agonists.md",
+    },
+  ];
+  const fixes = fp.planCrossLinks(issues, pages, "classes/");
+  assert.equal(fixes.length, 2);
+  const applied = fixes[0].apply(CLASS_PAGE);
+  // Relative to the prefix, `.md` stripped, `|display` — the same shape
+  // `buildReplacement` gives a repoint under this prefix.
+  assert.match(applied, /- \[\[HBIO250\/agonists\|Agonists\]\]/);
 });
 
 test("planRelinks wraps the fixable rows the link fixer already found", () => {
@@ -436,7 +463,7 @@ test("planHubLinks lists an unlinked page in its class's hub", () => {
     ["HBIO250", { path: "classes/HBIO250/HBIO250.md", title: "HBIO250", schema: "class", kind: "concept", classCodes: ["HBIO250"], content: HUB }],
   ]);
   const issues = [{ id: "unlinked", path: "wiki/concepts/doping.md", title: "Doping" }];
-  const fixes = fp.planHubLinks(issues, pages, hubs);
+  const fixes = fp.planHubLinks(issues, pages, hubs, "wiki/");
   assert.equal(fixes.length, 1);
   assert.equal(fixes[0].kind, "hub-link");
   assert.equal(fixes[0].path, "classes/HBIO250/HBIO250.md");
@@ -445,9 +472,9 @@ test("planHubLinks lists an unlinked page in its class's hub", () => {
 
   // The hub is never listed in itself.
   const hubIssue = [{ id: "orphan", path: "classes/HBIO250/HBIO250.md", title: "HBIO250" }];
-  assert.deepEqual(fp.planHubLinks(hubIssue, hubs, hubs), []);
+  assert.deepEqual(fp.planHubLinks(hubIssue, hubs, hubs, "wiki/"), []);
   // A page whose class has no hub gets no row here.
-  assert.deepEqual(fp.planHubLinks(issues, pages, new Map()), []);
+  assert.deepEqual(fp.planHubLinks(issues, pages, new Map(), "wiki/"), []);
 });
 
 test("planRelatedFrom links an orphan from its nearest neighbour", () => {
@@ -467,7 +494,7 @@ test("planRelatedFrom links an orphan from its nearest neighbour", () => {
     content: CLASS_PAGE,
   };
   const issues = [{ id: "orphan", path: "wiki/concepts/doping.md", title: "Doping" }];
-  const fixes = fp.planRelatedFrom(issues, pages, () => neighbour);
+  const fixes = fp.planRelatedFrom(issues, pages, () => neighbour, "wiki/");
   assert.equal(fixes.length, 1);
   assert.equal(fixes[0].kind, "related-link");
   // The edit is applied to the neighbour, not the orphan.
@@ -475,7 +502,7 @@ test("planRelatedFrom links an orphan from its nearest neighbour", () => {
   assert.equal(fixes[0].label, "Relate Doping from Pharmacology");
   assert.match(fixes[0].apply(CLASS_PAGE), /- \[\[concepts\/doping\|Doping\]\]/);
 
-  assert.deepEqual(fp.planRelatedFrom(issues, pages, () => null), []);
+  assert.deepEqual(fp.planRelatedFrom(issues, pages, () => null, "wiki/"), []);
 });
 
 test("planRectCallouts proposes one row per rect-only note with text", () => {
@@ -609,7 +636,7 @@ test("every fix id is unique within a plan", () => {
     { id: "duplicate-pages", path: "wiki/concepts/coaching-communication.md", title: "Coaching Communication", target: "wiki/concepts/empowering-behavior-change.md" },
   ];
   const fixes = fp.orderFixes([
-    ...fp.planCrossLinks(issues, PAGES()),
+    ...fp.planCrossLinks(issues, PAGES(), "wiki/"),
     ...fp.planRepoints([
       { id: "dead-link", path: "wiki/a.md", title: "A", target: "X" },
       { id: "dead-link", path: "wiki/a.md", title: "A", target: "Y" },
