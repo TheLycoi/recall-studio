@@ -18,7 +18,7 @@ import { collectPdfHighlights, readManifestNote, writeManifest } from "./pdfHigh
 import { isPdfFile } from "./pdf";
 import { DigestOut, type DigestDraft } from "./schemas";
 import { suggestPdfHighlights } from "./suggest";
-import { noteAliases, noteSections, parseTopicNote, planTopicNotes, safeTitle, type ExistingPage } from "./topicNote";
+import { applyDigestChoices, noteAliases, noteSections, parseTopicNote, planTopicNotes, type ExistingPage } from "./topicNote";
 import type { DigestExistingNote } from "./prompt";
 
 /** Local calendar date, `YYYY-MM-DD`, for the topic note's `created` field. */
@@ -287,29 +287,17 @@ export async function digestPdf(
     // The preview lets titles be edited inline, which moves the path and can
     // flip a note between "create" and "merge into an existing note" — and the
     // content of a merge is built from the file it merges into. Rather than
-    // patch the rendered content, substitute the chosen titles back into the
-    // draft and re-plan against the pages read once before the preview.
-    // `previewDigest` returns the chosen notes with `title` overwritten by the
-    // edit box but `path` still the original, so the original title is the
-    // path's basename and the pair is unambiguous.
-    const renamed = new Map<string, string>();
-    const keptTitles = new Set<string>();
-    for (const note of chosen) {
-      const original = planned.notes.find((n) => n.path === note.path);
-      const from = original ? original.title : safeTitle(note.title);
-      const to = safeTitle(note.title);
-      if (to !== from) renamed.set(from, to);
-      keptTitles.add(to.toLowerCase());
-    }
-    const substituted: DigestDraft = {
-      ...draft,
-      notes: draft.notes.map((n) => {
-        const t = safeTitle(n.title);
-        return renamed.has(t) ? { ...n, title: renamed.get(t)! } : n;
-      }),
-    };
-    const finalPlan = renamed.size > 0 ? await plan(substituted) : planned;
-    const toWrite = finalPlan.notes.filter((n) => keptTitles.has(n.title.toLowerCase()));
+    // patch the rendered content, narrow the draft to the groups the reader
+    // kept (a row stands for one or more of the model's proposals; coalescing
+    // makes `path`, not the title, its key) and re-plan it against the pages
+    // read once before the preview. `previewDigest` returns the chosen rows
+    // with `title` overwritten by the edit box and `path` still the original,
+    // so the row is found by path and the pair is unambiguous. Re-planning
+    // always: it is pure and cheap, and one code path has one behaviour.
+    const chosenRows = chosen.map((n) => ({ path: n.path, title: n.title }));
+    const narrowed = applyDigestChoices(draft, planned.notes, chosenRows);
+    const finalPlan = await plan(narrowed);
+    const toWrite = finalPlan.notes;
 
     // Write.
     let written = 0;

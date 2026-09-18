@@ -461,6 +461,14 @@ export class DigestPreviewModal extends Modal {
       titleInput.addClass("wikilm-inline-input");
       titleInput.addClass("wikilm-preview-title");
       titleInput.value = note.title;
+      // A page that already exists keeps its name: `applyDigestChoices`
+      // (src/topicNote.ts) ignores an edit to an existing row's title, since
+      // renaming the file is the vault's job and not the digest's. Saying so
+      // in the box beats silently discarding what was typed into it.
+      if (note.exists) {
+        titleInput.readOnly = true;
+        titleInput.title = "An existing page keeps its name";
+      }
       titleInput.addEventListener("input", () => {
         this.titles[i] = titleInput.value;
       });

@@ -397,6 +397,138 @@ test("planTopicNotes gives one row per page when two proposals are filed into th
   assert.equal(rows[0].highlights.length, 2, "the union of both groups' highlights");
 });
 
+// ---- applyDigestChoices: the preview's checkboxes and renames, by group
+//
+// The digest's write filter used to be keyed by title, which stopped matching
+// the plan once coalescing made `path` the unique key of a row. These pin the
+// group-keyed narrowing the digest now does instead.
+
+const HOME_PHARM = {
+  path: "classes/HBIO250/Pharmacology.md",
+  title: "Pharmacology",
+  kind: "concept",
+  aliases: [],
+  classCodes: ["HBIO250"],
+  md: "---\ntype: concept\nclass: HBIO250\n---\n\n# Pharmacology\n\n## Summary\nS.\n\n## Highlights\n\n## Related topics\n",
+};
+
+function twoHighlightManifest() {
+  return {
+    pdfPath: "sources/class notes/HBIO250/Deck.pdf",
+    pdfBasename: "Deck",
+    classCode: "HBIO250",
+    extracted: "",
+    sources: [],
+    highlights: [SELECTION_HIGHLIGHT, { ...RECT_HIGHLIGHT, text: "Aspirin inhibits COX." }],
+  };
+}
+
+const DIGEST_OPTS = { classCode: "HBIO250", topicFolder: "classes", created: "2026-09-17" };
+
+test("applyDigestChoices drops both groups filed into one home when that row is unchecked", () => {
+  const manifest = twoHighlightManifest();
+  const draft = {
+    notes: [
+      { title: "COX Inhibitors", kind: "concept", aliases: [], tag: "term", closest_existing: "Pharmacology", why_new: "part of pharmacology", summary: "S.", highlight_ids: ["H05"], related: [] },
+      { title: "Beta Blockers", kind: "concept", aliases: [], tag: "term", closest_existing: "Pharmacology", why_new: "part of pharmacology", summary: "B.", highlight_ids: ["H04"], related: [] },
+    ],
+    unused_ids: [],
+  };
+  const planned = tn.planTopicNotes(draft, manifest, { ...DIGEST_OPTS, pages: [HOME_PHARM] });
+  assert.equal(planned.notes.length, 1, "coalesced into one row");
+  const narrowed = tn.applyDigestChoices(draft, planned.notes, []);
+  assert.deepEqual(narrowed.notes, [], "neither group survives an unchecked row");
+  assert.deepEqual(narrowed.unused_ids, draft.unused_ids);
+});
+
+test("applyDigestChoices renames a checked new row's one group, and re-planning moves the page", () => {
+  const manifest = twoHighlightManifest();
+  const draft = {
+    notes: [
+      { title: "Self-Efficacy", kind: "concept", aliases: [], tag: "term", closest_existing: "", why_new: "nothing listed is about beliefs", summary: "A belief.", highlight_ids: ["H04"], related: [] },
+    ],
+    unused_ids: [],
+  };
+  const planned = tn.planTopicNotes(draft, manifest, { ...DIGEST_OPTS, pages: [] });
+  assert.equal(planned.notes[0].exists, false);
+  const narrowed = tn.applyDigestChoices(draft, planned.notes, [{ path: planned.notes[0].path, title: "Self Efficacy Beliefs" }]);
+  assert.equal(narrowed.notes.length, 1);
+  assert.equal(narrowed.notes[0].title, "Self Efficacy Beliefs");
+  const replanned = tn.planTopicNotes(narrowed, manifest, { ...DIGEST_OPTS, pages: [] });
+  assert.equal(replanned.notes[0].path, "classes/HBIO250/Self Efficacy Beliefs.md");
+});
+
+test("applyDigestChoices keeps an unchecked merged group out even when another row is renamed onto its page", () => {
+  const manifest = twoHighlightManifest();
+  const draft = {
+    notes: [
+      { title: "Pharmacology", kind: "concept", aliases: [], tag: "term", closest_existing: "", why_new: "", summary: "S.", highlight_ids: ["H05"], related: [] },
+      { title: "Self-Efficacy", kind: "concept", aliases: [], tag: "term", closest_existing: "", why_new: "a belief", summary: "A belief.", highlight_ids: ["H04"], related: [] },
+    ],
+    unused_ids: [],
+  };
+  const planned = tn.planTopicNotes(draft, manifest, { ...DIGEST_OPTS, pages: [HOME_PHARM] });
+  const merged = planned.notes.find((n) => n.path === HOME_PHARM.path);
+  const fresh = planned.notes.find((n) => n.exists === false);
+  assert.ok(merged && fresh);
+  // The merged row is unticked; the new row is renamed to the merged page's title.
+  const narrowed = tn.applyDigestChoices(draft, planned.notes, [{ path: fresh.path, title: "Pharmacology" }]);
+  const titles = narrowed.notes.map((n) => n.title);
+  assert.deepEqual(titles, ["Pharmacology"], "only the renamed group survives");
+  assert.deepEqual(narrowed.notes[0].highlight_ids, ["H04"], "the unchecked group's highlights are gone");
+});
+
+test("applyDigestChoices ignores an edit to an existing row's title", () => {
+  const manifest = twoHighlightManifest();
+  const draft = {
+    notes: [
+      { title: "Pharmacology", kind: "concept", aliases: [], tag: "term", closest_existing: "", why_new: "", summary: "S.", highlight_ids: ["H05"], related: [] },
+    ],
+    unused_ids: [],
+  };
+  const planned = tn.planTopicNotes(draft, manifest, { ...DIGEST_OPTS, pages: [HOME_PHARM] });
+  assert.equal(planned.notes[0].exists, true);
+  const narrowed = tn.applyDigestChoices(draft, planned.notes, [{ path: planned.notes[0].path, title: "Pharmacology Renamed" }]);
+  assert.equal(narrowed.notes.length, 1);
+  assert.equal(narrowed.notes[0].title, "Pharmacology", "the page's name is the page's");
+});
+
+test("planTopicNotes records the draft groups each row came from", () => {
+  const manifest = twoHighlightManifest();
+  const draft = {
+    notes: [
+      { title: "COX Inhibitors", kind: "concept", aliases: [], tag: "term", closest_existing: "Pharmacology", why_new: "part of pharmacology", summary: "S.", highlight_ids: ["H05"], related: [] },
+      { title: "Beta Blockers", kind: "concept", aliases: [], tag: "term", closest_existing: "Pharmacology", why_new: "part of pharmacology", summary: "B.", highlight_ids: ["H04"], related: [] },
+    ],
+    unused_ids: [],
+  };
+  const coalesced = tn.planTopicNotes(draft, manifest, { ...DIGEST_OPTS, pages: [HOME_PHARM] });
+  assert.deepEqual(coalesced.notes[0].groups, ["COX Inhibitors", "Beta Blockers"], "a coalesced row lists both");
+
+  const alone = tn.planTopicNotes(draft, manifest, { ...DIGEST_OPTS, pages: [] });
+  assert.deepEqual(alone.notes.map((n) => n.groups), [["COX Inhibitors"], ["Beta Blockers"]]);
+});
+
+test("planTopicNotes merges into the same-named page in the run's own class", () => {
+  const pageA = {
+    path: "classes/AAA/Receptors.md",
+    title: "Receptors",
+    kind: "concept",
+    aliases: [],
+    classCodes: ["AAA"],
+    md: "---\ntype: concept\nclass: AAA\n---\n\n# Receptors\n\n## Summary\nA.\n\n## Highlights\n\n## Related topics\n",
+  };
+  const pageB = { ...pageA, path: "classes/BBB/Receptors.md", classCodes: ["BBB"], md: pageA.md.replace("class: AAA", "class: BBB") };
+  const manifest = twoHighlightManifest();
+  const draft = {
+    notes: [{ title: "Receptors", kind: "concept", aliases: [], tag: "term", closest_existing: "", why_new: "", summary: "S.", highlight_ids: ["H04"], related: [] }],
+    unused_ids: [],
+  };
+  const out = tn.planTopicNotes(draft, manifest, { classCode: "BBB", topicFolder: "classes", created: "2026-09-17", pages: [pageA, pageB] });
+  assert.equal(out.notes.length, 1);
+  assert.equal(out.notes[0].path, pageB.path, "the run's own class wins the merge");
+});
+
 test("safeTitle strips illegal characters and falls back to Untitled", () => {
   assert.equal(tn.safeTitle('Foo/Bar:Baz*?"<>|#^[]'), "FooBarBaz");
   assert.equal(tn.safeTitle("   "), "Untitled");

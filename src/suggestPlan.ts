@@ -493,6 +493,9 @@ export function planWikiNotes(
         skipped,
         sections,
         routed: [...group.routedByFrom.entries()].map(([from, { route, keys }]) => ({ from, heading: route.heading, why: route.why, keys })),
+        // `groups` belongs to the digest preview's narrowing
+        // (`applyDigestChoices`); the suggester narrows by span key instead.
+        groups: [group.title],
       });
       continue;
     }
@@ -525,6 +528,7 @@ export function planWikiNotes(
       content,
       added: rows.length,
       skipped: 0,
+      groups: [group.title],
     });
   }
 

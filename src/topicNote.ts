@@ -438,6 +438,14 @@ export interface PreparedNote {
   kind?: WikiKind;
   /** For a page created fresh, the model's one sentence on why nothing existing could hold it. */
   whyNew?: string;
+  /**
+   * The draft group titles (after `safeTitle`) that produced this row, in
+   * order. A row is unique by `path` — two groups filed into one page are
+   * coalesced into one row — so the group is the only handle the digest has on
+   * "which of the model's proposals did the reader keep" (see
+   * `applyDigestChoices`). `planWikiNotes` does not use it.
+   */
+  groups: string[];
 }
 
 export interface PlanTopicNotesResult {
@@ -518,8 +526,16 @@ export function planTopicNotes(draft: DigestDraft, manifest: Manifest, opts: Pla
   // A page answers to its title and to every alias the reader gave it, so a
   // draft title that is another name for a page it already has merges into
   // that page rather than founding a second one beside it.
+  //
+  // Two vaults can hold a page of the same name in two classes ("Receptors" in
+  // AAA and in BBB). The first one seen used to win regardless of class, which
+  // merged a BBB run into AAA's page; the run's own class is asked first.
+  const byNamePages = opts.pages
+    .map((p, i) => ({ p, i, mine: p.classCodes.includes(opts.classCode) ? 0 : 1 }))
+    .sort((a, b) => a.mine - b.mine || a.i - b.i)
+    .map((x) => x.p);
   const byName = new Map<string, ExistingPage>();
-  for (const p of opts.pages) {
+  for (const p of byNamePages) {
     for (const name of [p.title, ...p.aliases]) {
       const k = safeTitle(name).toLowerCase();
       if (k && !byName.has(k)) byName.set(k, p);
@@ -565,6 +581,7 @@ export function planTopicNotes(draft: DigestDraft, manifest: Manifest, opts: Pla
         added: merged.added,
         skipped: merged.skipped,
         kind: home.kind,
+        groups: [group.title],
       });
       continue;
     }
@@ -608,6 +625,7 @@ export function planTopicNotes(draft: DigestDraft, manifest: Manifest, opts: Pla
           ? [{ heading: merged.section.heading, keys: group.highlights.map((h) => h.key), created: merged.section.created }]
           : undefined,
         routed: [{ from: group.title, heading: route.heading, why: route.why, keys: group.highlights.map((h) => h.key) }],
+        groups: [group.title],
       });
       continue;
     }
@@ -636,6 +654,7 @@ export function planTopicNotes(draft: DigestDraft, manifest: Manifest, opts: Pla
       skipped: 0,
       kind,
       whyNew: draftNote?.why_new ?? "",
+      groups: [group.title],
     });
   }
 
@@ -667,9 +686,56 @@ export function planTopicNotes(draft: DigestDraft, manifest: Manifest, opts: Pla
     if (note.sections?.length) seen.sections = [...(seen.sections ?? []), ...note.sections];
     if (note.routed?.length) seen.routed = [...(seen.routed ?? []), ...note.routed];
     for (const r of note.related) if (!seen.related.includes(r)) seen.related.push(r);
+    for (const g of note.groups) if (!seen.groups.includes(g)) seen.groups.push(g);
   }
 
   return { notes: coalesced, unknownIds, unassignedIds, droppedNotes };
+}
+
+/** One row of the digest preview as the reader left it: the row it was, and the title in its box. */
+export interface DigestChoice {
+  path: string;
+  title: string;
+}
+
+/**
+ * The draft narrowed to what the reader kept in the preview: notes whose group
+ * sits in a checked row survive; a checked NEW row's edited title renames its
+ * one group; edits to an existing row's title are ignored (the page's name is
+ * the page's).
+ *
+ * The digest re-plans the narrowed draft rather than filtering the planned
+ * rows, because a rename can move a row between "create" and "merge into a
+ * page that already exists", and the content of a merge is built from the file
+ * it merges into. Narrowing by group, not by title, is what makes this exact:
+ * coalescing makes `path` the unique key of a row, so two groups can share a
+ * title or a path, and only the group says which proposal a reader unticked.
+ */
+export function applyDigestChoices(draft: DigestDraft, planned: PreparedNote[], chosen: DigestChoice[]): DigestDraft {
+  const byPath = new Map(planned.map((n) => [n.path, n]));
+  const keptGroups = new Set<string>();
+  const renamed = new Map<string, string>();
+  for (const choice of chosen) {
+    const row = byPath.get(choice.path);
+    const groups = row ? row.groups : [safeTitle(choice.title)];
+    for (const g of groups) keptGroups.add(g.toLowerCase());
+    // Only a new page can be renamed, and only when the row stands for exactly
+    // one group — otherwise there is no one proposal the new name belongs to.
+    if (row && row.exists === false && groups.length === 1) {
+      const to = safeTitle(choice.title);
+      if (to !== groups[0]) renamed.set(groups[0].toLowerCase(), to);
+    }
+  }
+
+  return {
+    ...draft,
+    notes: draft.notes
+      .filter((n) => keptGroups.has(safeTitle(n.title).toLowerCase()))
+      .map((n) => {
+        const key = safeTitle(n.title).toLowerCase();
+        return renamed.has(key) ? { ...n, title: renamed.get(key)! } : n;
+      }),
+  };
 }
 
 // ---- wiki notes
