@@ -771,7 +771,7 @@ export class ChatPanel {
   private async runCommand(id: string): Promise<void> {
     const command: WikiLmCommand | undefined = WIKILM_COMMANDS.find((c) => c.id === id);
     if (!command) {
-      this.pushSystem(`No command matches /${id}. Type /help.`);
+      this.pushSystem(`No command matches “${id}”. Say help.`);
       return;
     }
     if (!command.available(this.plugin)) {
@@ -934,7 +934,7 @@ export class ChatPanel {
 
     if (pool.length === 0) {
       this.session = null;
-      this.pushSystem(this.noEvidenceLine(scope, query));
+      this.pushSystem(this.noEvidenceLine(scope, query, classCode));
       return;
     }
 
@@ -945,15 +945,16 @@ export class ChatPanel {
     const kind: QuizScope["kind"] = scope === "all" ? "all" : scope === "this" ? "note" : "query";
     this.session = startSession({ kind, label }, query, pool, Math.max(1, this.plugin.settings.quizCap));
     this.pushSystem(
-      `Quiz on ${label}: questions keep coming until the edge of what you know is found, then the misses go to your inbox as cards. /hint, /skip, /stop.`,
+      `Quiz on ${label}: questions keep coming until the edge of what you know is found, then the misses go to your inbox as cards. Say hint, skip or stop.`,
     );
     await this.nextQuestion();
   }
 
   /** Why a scope has nothing to quiz on, in the scope's own words. */
-  private noEvidenceLine(scope: "all" | "this" | "query", query: string): string {
+  private noEvidenceLine(scope: "all" | "this" | "query", query: string, classCode: string | null = null): string {
     if (scope === "query") return `No highlights or claims match “${query.trim()}”.`;
     if (scope === "this") return "The active note has no highlights or claims.";
+    if (classCode) return `No topic notes carry class ${classCode} yet.`;
     return `No topic notes under ${this.folderPrefix()} yet.`;
   }
 

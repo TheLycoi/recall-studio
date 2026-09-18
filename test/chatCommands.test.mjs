@@ -151,6 +151,16 @@ test("a leading slash is tolerated and means the same thing", () => {
   assert.deepEqual(cc.matchIntent("/help", CTX), { kind: "help" });
 });
 
+test("the all-vault scope is reachable as a phrase, while quiz-shaped prose stays a question", () => {
+  const all = { kind: "quiz", target: { kind: "query", words: "" } };
+  assert.deepEqual(cc.matchIntent("/quiz all", CTX), all);
+  assert.deepEqual(cc.matchIntent("quiz all", CTX), all);
+  assert.deepEqual(cc.matchIntent("quiz everything", CTX), all);
+  assert.deepEqual(cc.matchIntent("quiz results are in", CTX), { kind: "question" });
+  assert.deepEqual(cc.matchIntent("test the hypothesis", CTX), { kind: "question" });
+  assert.deepEqual(cc.matchIntent("drill down into receptors", CTX), { kind: "question" });
+});
+
 test("everything else is a question, including sentences that mention a verb", () => {
   assert.deepEqual(cc.matchIntent("what does the wiki say about digestion of drugs?", CTX), { kind: "question" });
   assert.deepEqual(cc.matchIntent("how do I highlight in PDF++", CTX), { kind: "question" });

@@ -170,6 +170,10 @@ export function matchIntent(text: string, ctx: IntentContext): Intent {
   // has to be a page, an alias or a class code as well — a bare "quiz" plus
   // loose words is prose ("quiz results are in"), and the reader who means a
   // subject can say "quiz me about it".
+  // "quiz all" and "quiz everything" name the whole vault, which
+  // `parseQuizCommand`'s plain-phrase grammar also does not reach in this
+  // shape; an empty query is how the panel reads the all-vault scope.
+  if (/^quiz\s+(?:all|everything)$/.test(t)) return { kind: "quiz", target: { kind: "query", words: "" } };
   const bare = /^quiz\s+(?!me\b|all\b|everything\b|on\b|about\b|from\b|over\b)(.+)$/.exec(t);
   if (bare) {
     const named = quizTarget(bare[1], ctx);
