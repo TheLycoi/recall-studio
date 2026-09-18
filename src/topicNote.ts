@@ -486,6 +486,21 @@ export function wikiDisplay(pdfBasename: string, page: number): string {
   return `${pdfBasename}, p.${page}`;
 }
 
+/** One highlight as a page prints it: the note-sourced citation line when it has one, else the PDF++ callout. */
+function rowMarkdown(pdfBasename: string, h: ManifestHighlight): string {
+  return h.mention ?? renderCallout(pdfBasename, h.target, wikiDisplay(pdfBasename, h.page), h.text);
+}
+
+/** Case, whitespace and smart quotes folded, so a quote survives reflowing when it is looked for in a page. */
+function foldQuote(s: string): string {
+  return s
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
 /** A wiki page is a concept or a named thing; the two render differently. */
 export type WikiKind = "concept" | "entity";
 
@@ -664,9 +679,7 @@ export function renderKarpathyNote(a: RenderKarpathyNoteArgs): string {
   lines.push("## Mentions in Source");
   lines.push("");
   if (sorted.length > 0) {
-    lines.push(
-      sorted.map((h) => renderCallout(a.pdfBasename, h.target, wikiDisplay(a.pdfBasename, h.page), h.text)).join("\n\n"),
-    );
+    lines.push(sorted.map((h) => rowMarkdown(a.pdfBasename, h)).join("\n\n"));
   }
   return lines.join("\n").replace(/\n{3,}$/, "\n") + "\n";
 }
@@ -701,7 +714,7 @@ export function renderWikiNote(a: RenderWikiNoteArgs): string {
   }
   const { classCode, pdfBasename, summary, highlights } = a;
   const sorted = highlights.slice().sort((x, y) => x.page - y.page);
-  const callouts = sorted.map((h) => renderCallout(pdfBasename, h.target, wikiDisplay(pdfBasename, h.page), h.text));
+  const callouts = sorted.map((h) => rowMarkdown(pdfBasename, h));
 
   const lines: string[] = [];
   lines.push("---");
@@ -825,8 +838,11 @@ export function mergeWikiHighlights(
   }
 
   const existingKeys = new Set(findAllPdfReferences(existingMd).map((r) => highlightKey(r.target)));
+  // A PDF row is already on the page when its key is; a note-sourced row has
+  // no key the page could carry, so its quote is looked for instead.
+  const existingText = foldQuote(existingMd);
   const toAdd = highlights
-    .filter((h) => !existingKeys.has(h.key))
+    .filter((h) => (h.mention ? !existingText.includes(foldQuote(h.text)) : !existingKeys.has(h.key)))
     .slice()
     .sort((a, b) => a.page - b.page);
   const skipped = highlights.length - toAdd.length;
@@ -845,7 +861,7 @@ export function mergeWikiHighlights(
   const wanted = safeHeading(options.section ?? "");
   if (wanted) {
     if (toAdd.length === 0) return { md: body, added: 0, skipped };
-    const callouts = toAdd.map((h) => renderCallout(pdfBasename, h.target, wikiDisplay(pdfBasename, h.page), h.text)).join("\n\n");
+    const callouts = toAdd.map((h) => rowMarkdown(pdfBasename, h)).join("\n\n");
     const found = findSection(body, wanted);
     if (found) {
       return {
@@ -873,7 +889,7 @@ export function mergeWikiHighlights(
     if (toAdd.length === 0) {
       return { md: body, added: 0, skipped };
     }
-    const newCallouts = toAdd.map((h) => renderCallout(pdfBasename, h.target, wikiDisplay(pdfBasename, h.page), h.text));
+    const newCallouts = toAdd.map((h) => rowMarkdown(pdfBasename, h));
     const headingEnd = headingMatch.index + headingMatch[0].length;
     return { md: spliceIntoSection(body, headingEnd, newCallouts.join("\n\n")), added: toAdd.length, skipped };
   }
@@ -882,7 +898,7 @@ export function mergeWikiHighlights(
     return { md: body, added: 0, skipped };
   }
 
-  const newCallouts = toAdd.map((h) => renderCallout(pdfBasename, h.target, wikiDisplay(pdfBasename, h.page), h.text));
+  const newCallouts = toAdd.map((h) => rowMarkdown(pdfBasename, h));
   const sectionText = `## ${schema === "karpathy" ? "Mentions in Source" : "Highlights"}\n\n${newCallouts.join("\n\n")}`;
 
   // Insert before the first of `## Related topics` or `## Flashcard Seeds`

@@ -897,3 +897,37 @@ test("an off-vocabulary tag falls back to other, and the lint will say so", () =
   assert.equal(tn.validTag("concept", "nonsense"), "other");
   assert.equal(tn.validTag("entity", undefined), "other");
 });
+
+const MENTION_ROW = {
+  id: "M01",
+  key: "sources/clippings/prompts.md#120-180",
+  page: 0,
+  kind: "selection",
+  color: null,
+  target: { page: 0 },
+  text: "Retrieval practice strengthens memory.",
+  before: "",
+  after: "",
+  origins: ["sources/clippings/prompts.md"],
+  mention: '- "Retrieval practice strengthens memory." — [[sources/clippings/prompts#Why it works|How to write good prompts › Why it works]]',
+};
+
+test("a row with a mention renders that line instead of a callout, in both schemas", () => {
+  const karpathy = tn.renderWikiNote({ classCode: "", pdfBasename: "P", summary: "S.", highlights: [MENTION_ROW], schema: "karpathy", title: "Retrieval Practice", kind: "concept", today: "2026-09-17" });
+  assert.ok(karpathy.includes(MENTION_ROW.mention), "the mention line is printed verbatim");
+  assert.ok(!karpathy.includes("[!PDF"), "no callout is rendered for a note-sourced row");
+  const klass = tn.renderWikiNote({ classCode: "X", pdfBasename: "P", summary: "", highlights: [MENTION_ROW] });
+  assert.ok(klass.includes(MENTION_ROW.mention));
+});
+
+test("a merge skips a mention whose quote the page already holds and adds one it does not", () => {
+  const page = `---\ntype: concept\ncreated: 2026-09-01\nupdated: 2026-09-01\ntags: [theory]\naliases:\n  - "RP"\ngeneration_complete: true\n---\n\n\n# Retrieval Practice\n\n## Definition\nText.\n\n## Mentions in Source\n\n- "Retrieval  practice strengthens memory." — [[sources/clippings/prompts|How to write good prompts]]\n`;
+  const same = tn.mergeWikiHighlights(page, "P", "", [MENTION_ROW], { schema: "karpathy", today: "2026-09-17" });
+  assert.equal(same.added, 0, "whitespace differences do not make a new quote");
+  assert.equal(same.skipped, 1);
+  const other = { ...MENTION_ROW, key: "sources/clippings/prompts.md#300-340", text: "Spacing beats massing.", mention: '- "Spacing beats massing." — [[sources/clippings/prompts|How to write good prompts]]' };
+  const added = tn.mergeWikiHighlights(page, "P", "", [other], { schema: "karpathy", today: "2026-09-17" });
+  assert.equal(added.added, 1);
+  assert.ok(added.md.includes(other.mention));
+  assert.ok(added.md.indexOf(other.mention) > added.md.indexOf("## Mentions in Source"));
+});

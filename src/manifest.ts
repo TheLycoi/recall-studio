@@ -15,6 +15,13 @@ export interface ManifestHighlight {
   before: string;
   after: string;
   origins: string[];
+  /**
+   * A pre-rendered citation line for a highlight whose source is a markdown
+   * note rather than a PDF: `- "quote" — [[note#heading|Note › Heading]]`.
+   * Renderers print it in place of a PDF++ callout, and a merge dedupes it by
+   * its quote text, since it has no PDF++ key. Absent for every PDF row.
+   */
+  mention?: string;
 }
 
 export interface Manifest {
