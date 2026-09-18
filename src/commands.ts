@@ -14,11 +14,11 @@ import type WikiLmPlugin from "./main";
 import { COMMAND_TABLE, type CommandSpec } from "./commandTable";
 import { ingestFolder, ingestSourceNote } from "./ingestSource";
 import { aiHighlightNote, captureMarkdownHighlights, capturePdfSelection, captureReadingSelection, captureSelection } from "./capture";
-import { isPdfFile, readPdfSelection } from "./pdf";
+import { isPdfFile, pdfsLinkedFrom, readPdfSelection } from "./pdf";
 import { isManifestNote } from "./pdfHighlights";
 import { digestPdf, extractPdfHighlights } from "./digest";
 import { suggestPdfHighlights } from "./suggest";
-import { askInstruction, askTranscript, pickFolder } from "./modals";
+import { askInstruction, askTranscript, pickFolder, pickPdf } from "./modals";
 import { normalizeTranscript, truncateTranscript } from "./util";
 
 export interface WikiLmCommand extends CommandSpec {
@@ -183,12 +183,20 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
   "digest-pdf-highlights": {
     available: (p) => {
       const file = p.app.workspace.getActiveFile();
-      return !!file && (isPdfFile(file) || isManifestNote(p, file));
+      if (!file) return false;
+      const isMd = file.extension === "md";
+      return isPdfFile(file) || isManifestNote(p, file) || (isMd && pdfsLinkedFrom(p.app, file).length > 0);
     },
-    run: (p) => {
+    run: async (p) => {
       const file = p.app.workspace.getActiveFile();
-      if (!file || !(isPdfFile(file) || isManifestNote(p, file))) return;
-      void digestPdf(p, file, "model");
+      if (!file) return;
+      if (isPdfFile(file) || isManifestNote(p, file)) {
+        await digestPdf(p, file, "model");
+        return;
+      }
+      const pdfs = pdfsLinkedFrom(p.app, file);
+      const pdf = pdfs.length === 1 ? pdfs[0] : await pickPdf(p.app, pdfs);
+      if (pdf) await digestPdf(p, pdf, "model");
     },
   },
   "digest-pdf-highlights-from-json": {

@@ -180,6 +180,16 @@ Four commands, active on a PDF (or, for the last two, on a manifest note):
 | **Digest PDF highlights from pasted model output…** | Same, but the draft comes from JSON you paste in rather than a live model call — see "Interim: digesting by hand" below. |
 | **Ask the notes** | Opens the Recall sidebar in Chat mode (`src/main.ts:172-201`). |
 
+**Pages are concept or entity pages.** A new page carries `type: concept` or
+`type: entity`, a tag from the closed vocabulary, one or two `aliases:`, and
+its `class:`. The digest sees every page in every class — title, aliases,
+headings, a line of summary — and reuses a page wherever it lives: a concept
+first met in physiology gains `class: [HBIO408, PHED163]` when biomechanics
+meets it, rather than a second page. A topic that belongs inside a page is
+filed under a heading there; only a topic with no home becomes a page, and
+the preview says why. The command also runs on a class note that holds PDF++
+links, digesting the PDFs it cites.
+
 **The manifest.** One file per PDF, in the folder set by **Manifest folder**
 (default `recall-manifests/`), named after the PDF
 (`<manifestFolder>/<pdf basename>.md`). It lists every highlight in page
@@ -518,43 +528,21 @@ an error line — but the evidence list still appears beneath it, built and
 ranked with no model involved, and the no-evidence answer above needs no
 provider at all.
 
-**Commands from the chat.** The same box runs Recall's commands
-(`src/chatCommands.ts`, `src/commands.ts`):
+**The chat is the studio.** Plain phrases run the plugin's actions; anything
+else is a question for your notes. Three buttons above the box — **Quiz me**,
+**AI digest**, **AI highlight** — do the same for the open file.
 
-- `/help` (or `/commands`, `/?`) lists every command with its aliases and
-  whether it is available right now;
-- `/extract`, `/digest`, `/export` … — a slash followed by an alias, an id,
-  or a command name runs it immediately; an unknown name is reported;
-- a message equal to a command's name or alias (case-insensitive, trailing
-  `…` ignored) also runs it;
-- a plain sentence of eight words or fewer that does not end in `?` and
-  shares at least two words with a command name or alias (for example
-  *extract pdf highlights*) shows a **Run** chip with an **Ask instead**
-  button, so a question is never mistaken for an order;
-- anything else is a question for the model.
+| Say | What happens |
+| --- | --- |
+| **quiz me** | free-recall questions on the open note until the edge of what you know shows |
+| **quiz me on Receptors** / **on HBIO250** / **on everything** | a page by title or alias, a class, or every topic note |
+| **digest** / **digest Doping** | group the PDF++ highlights of the open file — or the PDF or note you name — into concept and entity pages, filing into pages you already have first |
+| **highlight** / **highlight Ch3** | the model picks spans in a PDF, each checked against the text layer; you can paste a transcript or study guide first |
+| **lint** | check the wiki for wrong quotes, dead links and duplicate pages |
+| **export**, **inbox**, **help** | send reviewed cards to Anki, open the inbox, list these phrases |
 
-A command that is not available (for example `/extract` with a note rather
-than a PDF active) says so with its hint. Commands behave exactly as from
-the command palette, modals and notices included; the chat logs that they
-ran.
-
-| Command | Aliases | Available |
-| --- | --- | --- |
-| Send selection to inbox | `/capture`, `/send` | needs an open note |
-| Send PDF selection to inbox | `/pdf` | needs an open PDF |
-| Send PDF selection to inbox with instructions… | `/pdf-instruct` | needs an open PDF |
-| Send selection to inbox with instructions… | `/capture-instruct` | needs an open note |
-| Send all ==highlights== in this note to inbox | `/highlights`, `/sweep` | needs an open note |
-| AI-highlight this note and write cards | `/ai` | needs an open note |
-| AI-highlight this note with instructions… | `/ai-instruct` | needs an open note |
-| Add transcript for document highlighting | `/transcript` | needs an open note |
-| Extract PDF highlights to manifest | `/extract` | needs an open PDF |
-| Digest PDF highlights into topic notes… | `/digest` | needs an open PDF or manifest note |
-| Digest PDF highlights from pasted model output… | `/digest-json`, `/paste` | needs an open PDF or manifest note |
-| Ask the notes | `/chat`, `/ask` | always |
-| Open inbox | `/inbox` | always |
-| Export all reviewed cards to Anki | `/export` | always |
-| Retry failed highlights | `/retry` | always |
+A name that fits two files is offered as buttons, never guessed. A palette
+command typed exactly by name still runs.
 
 <details>
 <summary><code>ASK_SYSTEM</code> (the Ask system prompt, verbatim)</summary>
@@ -651,14 +639,14 @@ you produce the answer from memory, the model grades it against the
 highlight, and the passage is shown after every answer. Everything comes
 from the vault; nothing is asked that the evidence does not state.
 
-| Command | What it does |
+| Say | What happens |
 | --- | --- |
-| `/quiz` | quiz on every topic note under the topic folder |
-| `/quiz this` | quiz on the active note |
-| `/quiz <words>` | quiz on the highlights and claims that share words with `<words>` |
-| `/hint` | show the question's hint (once) |
-| `/skip`, `/idk` (or `idk`, `?`, an empty line) | decline the question: the answer and passage are shown, and the passage counts as one you could not produce |
-| `/stop` | end the quiz early and show the summary |
+| **quiz me** | free-recall questions on the open note until the edge of what you know shows |
+| **quiz me on Receptors** / **on HBIO250** / **on everything** | a page by title or alias, a class, or every topic note |
+| **digest** / **digest Doping** | group the PDF++ highlights of the open file — or the PDF or note you name — into concept and entity pages, filing into pages you already have first |
+| **highlight** / **highlight Ch3** | the model picks spans in a PDF, each checked against the text layer; you can paste a transcript or study guide first |
+| **lint** | check the wiki for wrong quotes, dead links and duplicate pages |
+| **export**, **inbox**, **help** | send reviewed cards to Anki, open the inbox, list these phrases |
 
 Plain phrases work too: "quiz me", "quiz me on receptors", "test me on
 this note", "start a quiz about affinity"; while a quiz runs, "stop",
@@ -689,6 +677,11 @@ the grader also names what an answer revealed, *slip*, *vocabulary*,
 *detail*, or *misconception*, with a note on the specific gap: a
 misconception is probed twice more from other angles, a slip not at all.
 **Question cap per quiz** (30) is a runaway guard, not a target.
+
+**One more chance.** A first wrong or partial answer shows the question's hint
+and asks once more; only the second answer is recorded. Right after the hint
+counts as correct but holds the tier and starts no streak, and is never sent
+to the inbox as a miss.
 
 The summary shows the score, why the quiz stopped, and the missed passages
 with two chips. **Send N missed to inbox** hands each missed passage to the

@@ -302,7 +302,7 @@ export function buildSuggestMessage(a: SuggestMessageArgs): string {
     .join("\n");
   const selected = a.alreadySelected.map((s) => `p.${s.page}: ${cut(s.text, ALREADY_SELECTED_CHARS)}`).join("\n");
   const cap = transcript
-    ? `The transcript is a recording of the lecture that accompanies these pages. Select at most ${a.perPage} spans per page and at most ${a.remaining} in this batch, and fewer when the transcript supports fewer.`
+    ? `The transcript is a recording of the lecture, or a study guide the reader was given, that accompanies these pages. Select at most ${a.perPage} spans per page and at most ${a.remaining} in this batch, and fewer when the transcript supports fewer.`
     : `Select at most ${a.perPage} spans per page and at most ${a.remaining} in this batch; fewer is the expected outcome.`;
   return [
     `<paper title="${a.pdfTitle}" class="${a.classCode}" pages="${first}-${last}">\n${body}\n</paper>`,

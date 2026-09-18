@@ -883,3 +883,34 @@ class FolderSuggestModal extends FuzzySuggestModal<TFolder> {
 export function pickFolder(app: App): Promise<TFolder | null> {
   return new Promise((resolve) => new FolderSuggestModal(app, resolve).open());
 }
+
+/** Pick one PDF among several a note cites. */
+class PdfSuggestModal extends SuggestModal<TFile> {
+  private resolved = false;
+  constructor(
+    app: App,
+    private pdfs: TFile[],
+    private resolve: (v: TFile | null) => void,
+  ) {
+    super(app);
+    this.setPlaceholder("Which PDF?");
+  }
+  getSuggestions(query: string): TFile[] {
+    const q = query.toLowerCase();
+    return this.pdfs.filter((f) => f.basename.toLowerCase().includes(q));
+  }
+  renderSuggestion(f: TFile, el: HTMLElement): void {
+    el.setText(f.basename);
+  }
+  onChooseSuggestion(f: TFile): void {
+    this.resolved = true;
+    this.resolve(f);
+  }
+  onClose(): void {
+    if (!this.resolved) this.resolve(null);
+  }
+}
+
+export function pickPdf(app: App, pdfs: TFile[]): Promise<TFile | null> {
+  return new Promise((resolve) => new PdfSuggestModal(app, pdfs, resolve).open());
+}

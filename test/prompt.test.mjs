@@ -541,7 +541,7 @@ test("buildSuggestMessage orders the blocks long input first, instructions last"
   assert.ok(msg.includes("Doping (concept)") && msg.includes("WADA (entity)"), "each existing note prints its kind");
   assert.ok(msg.includes("p.2: An earlier passage."), "an already-selected passage prints its page");
   assert.ok(
-    msg.includes("The transcript is a recording of the lecture that accompanies these pages.") &&
+    msg.includes("The transcript is a recording of the lecture, or a study guide the reader was given, that accompanies these pages.") &&
       msg.includes("and fewer when the transcript supports fewer."),
     "the cap line is the transcript variant",
   );

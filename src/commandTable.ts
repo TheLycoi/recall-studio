@@ -95,7 +95,7 @@ export const COMMAND_TABLE: CommandSpec[] = [
     id: "digest-pdf-highlights",
     name: "Digest PDF highlights into topic notes…",
     aliases: ["digest"],
-    hint: "needs an open PDF or manifest note",
+    hint: "needs an open PDF, a manifest note, or a note with PDF++ links",
   },
   {
     id: "digest-pdf-highlights-from-json",
