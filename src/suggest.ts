@@ -15,7 +15,7 @@ import { captureManifestHighlights } from "./capture";
 import { describeError } from "./llm";
 import { askDigestOptions, askInstruction, previewSuggestions } from "./modals";
 import { buildPageMap, type PageMap } from "./pageMap";
-import { collectPdfHighlights, writeManifest } from "./pdfHighlights";
+import { collectPdfHighlights, frontmatterClasses, writeManifest } from "./pdfHighlights";
 import type { SuggestDraft } from "./schemas";
 import type { SuggestExistingNote } from "./prompt";
 import { SUGGEST_PER_PAGE } from "./settings";
@@ -24,18 +24,6 @@ import { noteSections, safeTitle, type PreparedNote } from "./topicNote";
 
 /** How much of an already-selected passage the prompt shows (src/prompt.ts:267). */
 const ALREADY_SELECTED_CHARS = 80;
-
-/**
- * The `class` frontmatter of a note, when it has one. Copied from
- * src/pdfHighlights.ts:339-345, which keeps it module-private.
- */
-function frontmatterClass(plugin: WikiLmPlugin, path: string): string {
-  const file = plugin.app.vault.getAbstractFileByPath(path); // obsidian.d.ts:7369
-  if (!(file instanceof TFile)) return "";
-  const fm = plugin.app.metadataCache.getFileCache(file)?.frontmatter; // obsidian.d.ts:4417, :1446
-  const value = fm?.class;
-  return typeof value === "string" ? value.trim() : "";
-}
 
 /**
  * The wiki notes this PDF is allowed to write into: everything under the
@@ -59,7 +47,7 @@ export async function wikiNotes(plugin: WikiLmPlugin, classCode: string, sources
     for (const file of plugin.app.vault.getMarkdownFiles()) { // obsidian.d.ts:7331
       if (!file.path.startsWith(prefix)) continue;
       if (seen.has(file.path)) continue;
-      if (frontmatterClass(plugin, file.path) !== classCode && !sourceSet.has(file.path)) continue;
+      if (!frontmatterClasses(plugin, file.path).includes(classCode) && !sourceSet.has(file.path)) continue;
       seen.add(file.path);
       out.push({
         title: file.basename,

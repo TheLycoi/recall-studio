@@ -478,10 +478,23 @@ export class ChatPanel {
       .map((t) => ({ role: t.role, text: t.text }));
   }
 
-  /** Keep the log bounded the way the settings ask: `askMaxTurns` exchanges, so twice that many entries. */
+  /**
+   * Keep the log bounded the way the settings ask: `askMaxTurns` exchanges, so
+   * twice that many entries.
+   *
+   * A chips turn is never dropped, however old it is. Chips are a question the
+   * panel is waiting on — a gate, or the transcript prompt — and the promise
+   * behind them is resolved by the click on one of those buttons. Evicting the
+   * turn takes its buttons off the screen with nothing left to resolve the
+   * promise, so the awaiting command hangs and the panel stays busy forever.
+   * A pending chips turn is removed when it is answered, not when it is old.
+   */
   private trim(): void {
     const cap = Math.max(2, this.plugin.settings.askMaxTurns * 2);
-    if (this.turns.length > cap) this.turns = this.turns.slice(this.turns.length - cap);
+    if (this.turns.length <= cap) return;
+    const keep = new Set(this.turns.filter((t) => t.chips));
+    for (const t of this.turns.filter((t) => !t.chips).slice(-cap)) keep.add(t);
+    this.turns = this.turns.filter((t) => keep.has(t));
   }
 
   // --------------------------------------------------------------- routing

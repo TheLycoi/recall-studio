@@ -319,7 +319,7 @@ export async function collectPdfHighlights(
 
   const classCode =
     classCodeFromPath(pdf.path) ||
-    (notes.length ? frontmatterClass(plugin, notes[0].path) : "") ||
+    (notes.length ? (frontmatterClasses(plugin, notes[0].path)[0] ?? "") : "") ||
     "";
 
   const manifest: Manifest = {
@@ -335,13 +335,26 @@ export async function collectPdfHighlights(
   return { manifest, paperText, truncated, warnings, pages: opts.pages ? kept : [] };
 }
 
-/** The `class` frontmatter of a note, when it has one. */
-function frontmatterClass(plugin: WikiLmPlugin, path: string): string {
+/**
+ * Every code in a note's `class:` frontmatter, in order; empty when it has
+ * none.
+ *
+ * A list, not a string: the digest writes `class: [HBIO408, PHED163]` on a
+ * page it merges across classes (src/topicNote.ts `addClassCode`), and a
+ * reader of that key that only understood a scalar saw such a page as having
+ * no class at all — which quietly dropped it out of the suggester's writable
+ * set and out of the manifest's class code.
+ */
+export function frontmatterClasses(plugin: WikiLmPlugin, path: string): string[] {
   const file = plugin.app.vault.getAbstractFileByPath(path);
-  if (!(file instanceof TFile)) return "";
+  if (!(file instanceof TFile)) return [];
   const fm = plugin.app.metadataCache.getFileCache(file)?.frontmatter; // obsidian.d.ts:4417, :1446
   const value = fm?.class;
-  return typeof value === "string" ? value.trim() : "";
+  return Array.isArray(value)
+    ? value.filter((v): v is string => typeof v === "string").map((v) => v.trim())
+    : typeof value === "string"
+      ? [value.trim()]
+      : [];
 }
 
 /**
