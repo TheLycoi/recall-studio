@@ -639,25 +639,25 @@ you produce the answer from memory, the model grades it against the
 highlight, and the passage is shown after every answer. Everything comes
 from the vault; nothing is asked that the evidence does not state.
 
-| Say | What happens |
+| Say | What it does |
 | --- | --- |
-| **quiz me** | free-recall questions on the open note until the edge of what you know shows |
+| **quiz me** | questions on the open note until the edge of what you know shows |
 | **quiz me on Receptors** / **on HBIO250** / **on everything** | a page by title or alias, a class, or every topic note |
-| **digest** / **digest Doping** | group the PDF++ highlights of the open file — or the PDF or note you name — into concept and entity pages, filing into pages you already have first |
-| **highlight** / **highlight Ch3** | the model picks spans in a PDF, each checked against the text layer; you can paste a transcript or study guide first |
-| **lint** | check the wiki for wrong quotes, dead links and duplicate pages |
-| **export**, **inbox**, **help** | send reviewed cards to Anki, open the inbox, list these phrases |
+| **hint** | one clue for the current question, once |
+| **skip**, **idk** (or an empty line) | decline the question: the answer and passage are shown, and the passage counts as one you could not produce |
+| **stop** | end the quiz early and show the summary |
 
 Plain phrases work too: "quiz me", "quiz me on receptors", "test me on
 this note", "start a quiz about affinity"; while a quiz runs, "stop",
 "skip", "next", and "give me a hint" act as the commands, and outside a
 quiz those words are ordinary questions.
 
-While a quiz runs, anything else you type that is not a slash command is your
-answer. Each question is written by one model call from the frozen evidence
-pool and carries a verbatim quote that code verifies against the cited
-passage before the question is shown; a draft that fails is regenerated once
-with the reason, then that passage is dropped. Yes/no answers are rejected.
+While a quiz runs, anything else you type that is not a quiz control (hint,
+skip, stop) is your answer. Each question is written by one model call from
+the frozen evidence pool and carries a verbatim quote that code verifies
+against the cited passage before the question is shown; a draft that fails
+is regenerated once with the reason, then that passage is dropped. Yes/no
+answers are rejected.
 Grading is one model call that sees only the passage, the question, the
 expected answer, and yours; it returns ✓ correct, △ partly, or ✗ not quite
 with feedback in the passage's own words, then the expected answer and the
@@ -1111,7 +1111,7 @@ Layout:
 - `src/retrieval.ts` — Ask: evidence index, lexical ranking, citation check, evidence rendering
 - `src/chatPanel.ts` — the Chat half of the sidebar
 - `src/askCheck.ts` — Ask answer assembly: quote verification, citation appending, unsupported-claim removal, the grounding report
-- `src/commandTable.ts` — the fifteen commands as pure data (ids, names, aliases, hints)
+- `src/commandTable.ts` — the twenty commands as pure data (ids, names, aliases, hints)
 - `src/commands.ts` — their availability checks and bodies; `main.ts` registers them in one loop
 - `src/chatCommands.ts` — `/slash`, exact-name, and Run-chip matching for the chat box
 - `src/quiz.ts` — quiz sessions: scope, frozen evidence numbering, grounded question checks, grading state, difficulty, rendering

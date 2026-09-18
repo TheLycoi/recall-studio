@@ -337,6 +337,10 @@ test("AskOut accepts an answer with its sources and rejects a bad coverage", () 
   );
 });
 
+test("DigestOut serializes strictly at every level", () => {
+  assertStrict(z.toJSONSchema(schemas.DigestOut), "DigestOut");
+});
+
 test("AskOut serializes strictly at every level", () => {
   const ask = z.toJSONSchema(schemas.AskOut);
   assertStrict(ask, "AskOut");
