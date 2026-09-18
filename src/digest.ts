@@ -10,12 +10,14 @@
 import { Notice, TFile, normalizePath } from "obsidian";
 import type WikiLmPlugin from "./main";
 import { captureManifestHighlights } from "./capture";
+import { decideGate, type GateDecision } from "./digestGate";
 import { describeError } from "./llm";
 import type { Manifest } from "./manifest";
 import { askDigestOptions, askInstruction, askPastedJson, previewDigest } from "./modals";
 import { collectPdfHighlights, readManifestNote, writeManifest } from "./pdfHighlights";
 import { isPdfFile } from "./pdf";
 import { DigestOut, type DigestDraft } from "./schemas";
+import { suggestPdfHighlights } from "./suggest";
 import { planTopicNotes, safeTitle } from "./topicNote";
 
 /** Local calendar date, `YYYY-MM-DD`, for the topic note's `created` field. */
@@ -179,16 +181,45 @@ async function draftFromPaste(plugin: WikiLmPlugin): Promise<DigestDraft | null>
   return checked.data;
 }
 
+export interface DigestOptions {
+  /**
+   * What to do when the source has no highlights with text. Absent (the
+   * palette): a Notice, and nothing is written. Present (the chat): the
+   * callback shows its chips and answers; "highlight" runs the suggester on
+   * the PDF first, "cancel" stops.
+   */
+  gate?: (decision: GateDecision) => Promise<"highlight" | "cancel">;
+}
+
 /**
  * "Digest PDF highlights…": manifest in, topic notes out, gated by a preview.
  * `mode` chooses where the draft comes from — the provider, or a JSON blob
  * pasted from a chat session (the interim path while no provider works).
  */
-export async function digestPdf(plugin: WikiLmPlugin, source: TFile, mode: "model" | "paste"): Promise<void> {
+export async function digestPdf(
+  plugin: WikiLmPlugin,
+  source: TFile,
+  mode: "model" | "paste",
+  opts: DigestOptions = {},
+): Promise<void> {
   try {
     const resolved = await resolveSource(plugin, source);
     if (!resolved) return;
     const { manifest, paperText } = resolved;
+
+    const gate = decideGate(manifest);
+    if (gate.action === "offer") {
+      if (!opts.gate) {
+        new Notice(
+          `WikiLM: ${manifest.pdfBasename} has no highlights with text (${gate.total} without). Highlight it in PDF++, or run “AI-highlight this PDF into the wiki…” first.`,
+          10000,
+        );
+        return;
+      }
+      const choice = await opts.gate(gate);
+      if (choice === "highlight" && isPdfFile(source)) await suggestPdfHighlights(plugin, source);
+      return;
+    }
 
     let classCode = manifest.classCode;
     if (!classCode) {
