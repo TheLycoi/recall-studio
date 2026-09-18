@@ -701,3 +701,80 @@ test("SUGGEST_SYSTEM asks for aliases and a tag from the closed vocabulary", () 
   assert.ok(src.includes("method, theory, term, phenomenon, standard or field"), "the concept vocabulary is named");
   assert.ok(src.includes("product, person, organization, project, event or place"), "the entity vocabulary is named");
 });
+
+/* ------------------------------------------------------ aliases and tags */
+
+const aliasesBase = {
+  pages: [
+    { title: "Anterior Cruciate Ligament", kind: "entity", excerpt: "A ligament of the knee that resists anterior translation of the tibia." },
+    { title: "Proprioception", kind: "concept", excerpt: "The sense of the position and movement of one's own body." },
+  ],
+  conceptTags: ["method", "theory", "term", "phenomenon", "standard", "field", "other"],
+  entityTags: ["product", "person", "organization", "project", "event", "place", "other"],
+};
+
+test("buildAliasesMessage puts the pages first, then both vocabularies, then the closing instruction", () => {
+  const msg = p.buildAliasesMessage(aliasesBase);
+  const pages = msg.indexOf("<pages>");
+  const concept = msg.indexOf("Concept tags:");
+  const entity = msg.indexOf("Entity tags:");
+  const closing = msg.indexOf("Return one entry per page");
+  assert.ok(pages !== -1 && concept !== -1 && entity !== -1 && closing !== -1, "all four blocks are present");
+  assert.ok(pages < concept, "the pages block precedes the vocabularies");
+  assert.ok(concept < entity, "the concept vocabulary precedes the entity one");
+  assert.ok(entity < closing, "the closing instruction comes last");
+  assert.ok(msg.includes("Concept tags: method, theory, term, phenomenon, standard, field, other"), "the concept vocabulary is listed");
+  assert.ok(msg.includes("Entity tags: product, person, organization, project, event, place, other"), "the entity vocabulary is listed");
+  assert.ok(
+    msg.includes("Return one entry per page, in the same order, with the title copied exactly."),
+    "the closing instruction is verbatim",
+  );
+});
+
+test("buildAliasesMessage prints each page with its title and kind", () => {
+  const msg = p.buildAliasesMessage(aliasesBase);
+  assert.ok(
+    msg.includes('<page title="Anterior Cruciate Ligament" kind="entity">'),
+    "the first page carries its title and kind",
+  );
+  assert.ok(msg.includes('<page title="Proprioception" kind="concept">'), "so does the second");
+  assert.ok(msg.includes("A ligament of the knee that resists anterior translation of the tibia."), "the excerpt is included");
+  assert.equal(msg.split("</page>").length - 1, 2, "one closing tag per page");
+});
+
+test("buildAliasesMessage cuts an excerpt at 400 characters and marks the cut", () => {
+  assert.equal(p.ALIASES_EXCERPT_CHARS, 400);
+  const long = "x".repeat(600);
+  const msg = p.buildAliasesMessage({ ...aliasesBase, pages: [{ title: "Long", kind: "concept", excerpt: long }] });
+  assert.ok(!msg.includes("x".repeat(401)), "no more than 400 characters of the excerpt survive");
+  assert.ok(msg.includes("x".repeat(400) + "…"), "the cut is marked with an ellipsis");
+
+  const short = p.buildAliasesMessage({ ...aliasesBase, pages: [{ title: "Short", kind: "concept", excerpt: "Brief." }] });
+  assert.ok(!short.includes("…"), "an excerpt that fits is not marked");
+});
+
+test("AliasesTagsOut accepts a page with no aliases and rejects one missing its tag", () => {
+  assert.equal(schemas.AliasesTagsOut.safeParse({ pages: [{ title: "T", aliases: [], tag: "other" }] }).success, true);
+  assert.equal(
+    schemas.AliasesTagsOut.safeParse({ pages: [{ title: "T", aliases: ["ACL"], tag: "term" }] }).success,
+    true,
+    "a page with aliases parses",
+  );
+  assert.equal(schemas.AliasesTagsOut.safeParse({ pages: [{ title: "T", aliases: [] }] }).success, false, "tag is required");
+  assert.equal(schemas.AliasesTagsOut.safeParse({ pages: [{ title: "T", tag: "term" }] }).success, false, "aliases is required");
+});
+
+test("AliasesTagsOut serializes strictly at every level", () => {
+  const json = z.toJSONSchema(schemas.AliasesTagsOut);
+  assertStrict(json, "AliasesTagsOut");
+  for (const [k, v] of Object.entries(json.properties.pages.items.properties)) {
+    assert.ok(typeof v.description === "string" && v.description.length > 0, `pages.${k} carries a description`);
+  }
+});
+
+test("ALIASES_SYSTEM says how many aliases and what other is for", () => {
+  const src = readFileSync("src/llm.ts", "utf8");
+  assert.ok(src.includes("const ALIASES_SYSTEM"), "the prompt exists");
+  assert.ok(src.includes("one or two"), "the number of aliases is stated");
+  assert.ok(src.includes("other is the escape hatch"), "other is named as the escape hatch, not a default");
+});

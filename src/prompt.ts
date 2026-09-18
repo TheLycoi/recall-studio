@@ -363,3 +363,58 @@ export function buildKeywordsMessage(a: KeywordsMessageArgs): string {
   parts.push("Give the search terms as JSON.");
   return parts.join("\n\n");
 }
+
+/* --------------------------------------------------- aliases and tags */
+
+/** One page the aliases call is asked about: what it is called, what kind it is, and enough of it to tell. */
+export interface AliasesPageIn {
+  title: string;
+  kind: "concept" | "entity";
+  excerpt: string;
+}
+
+export interface AliasesMessageArgs {
+  pages: AliasesPageIn[];
+  /** The closed vocabulary a concept's tag comes from, in the order the reader sees it. */
+  conceptTags: readonly string[];
+  /** The same for an entity. */
+  entityTags: readonly string[];
+}
+
+/**
+ * How much of a page's definition the model is shown.
+ *
+ * The first paragraph of a page says what it is, and what it is called is
+ * almost always in its first sentence — "the anterior cruciate ligament
+ * (ACL)". Sending the whole page would pay for the rest of it to learn
+ * nothing more, so the excerpt stops here and the cut is marked so the model
+ * reads a truncated sentence as truncated rather than as the page's own
+ * phrasing.
+ */
+export const ALIASES_EXCERPT_CHARS = 400;
+
+/**
+ * Build the user message for the aliases-and-tags request.
+ *
+ * The pages come first, because the vocabularies only mean anything once
+ * there is something to apply them to, and both vocabularies are always sent
+ * whichever kinds the batch happens to contain: the model reads each page's
+ * `kind` and picks from that page's list, and seeing the other list is what
+ * makes the boundary between the two legible. The lists arrive as arguments
+ * rather than as an import, so this module stays free of the plugin's model
+ * code and a test can pass its own.
+ */
+export function buildAliasesMessage(a: AliasesMessageArgs): string {
+  const pages = a.pages
+    .map((pg) => {
+      const excerpt = pg.excerpt.trim();
+      const cut = excerpt.length > ALIASES_EXCERPT_CHARS ? `${excerpt.slice(0, ALIASES_EXCERPT_CHARS)}…` : excerpt;
+      return `<page title="${pg.title.trim()}" kind="${pg.kind}">\n${cut}\n</page>`;
+    })
+    .join("\n");
+  return [
+    `<pages>\n${pages}\n</pages>`,
+    `Concept tags: ${a.conceptTags.join(", ")}\nEntity tags: ${a.entityTags.join(", ")}`,
+    "Return one entry per page, in the same order, with the title copied exactly.",
+  ].join("\n\n");
+}

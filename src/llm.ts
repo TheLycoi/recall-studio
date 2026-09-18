@@ -7,6 +7,7 @@ import { CodexBackend, CodexError } from "./codex";
 import { buildExamplesBlock } from "./examples";
 import type { BloomLevel, Card, Highlight } from "./model";
 import type {
+  AliasesMessageArgs,
   AskMessageArgs,
   KeywordsMessageArgs,
   DigestMessageArgs,
@@ -15,6 +16,7 @@ import type {
   SuggestMessageArgs,
 } from "./prompt";
 import {
+  buildAliasesMessage,
   buildAskMessage,
   buildKeywordsMessage,
   KEYWORDS_SYSTEM,
@@ -25,6 +27,7 @@ import {
   buildSuggestMessage,
 } from "./prompt";
 import {
+  AliasesTagsOut as AliasesTagsOutSchema,
   AskOut as AskOutSchema,
   KeywordsOut as KeywordsOutSchema,
   DigestOut as DigestOutSchema,
@@ -32,7 +35,7 @@ import {
   QuizQuestionOut as QuizQuestionOutSchema,
   SuggestOut as SuggestOutSchema,
 } from "./schemas";
-import type { AskDraft, DigestDraft, QuizGradeDraft, QuizQuestionDraft, SuggestDraft } from "./schemas";
+import type { AliasesTagsDraft, AskDraft, DigestDraft, QuizGradeDraft, QuizQuestionDraft, SuggestDraft } from "./schemas";
 import type { WikiLmSettings } from "./settings";
 
 const CardOut = z.object({
@@ -587,6 +590,25 @@ export class LlmClient {
   }
 
   /**
+   * "aliases and tags": the names a page is missing and the subtype it was
+   * never given. Nothing here is written to the vault — every proposal
+   * becomes a row in the fix plan, and only the rows the reader leaves ticked
+   * are applied — so the call is cheap by design: a short excerpt per page,
+   * twenty pages a request, and no extended thinking, because naming a thing
+   * that is already defined in front of you is recognition, not reasoning.
+   */
+  async aliasesAndTags(args: AliasesMessageArgs): Promise<AliasesTagsDraft> {
+    return this.backend().complete({
+      system: ALIASES_SYSTEM,
+      user: buildAliasesMessage(args),
+      schema: AliasesTagsOutSchema,
+      label: "aliases and tags",
+      maxTokens: 4000,
+      effort: "low",
+    });
+  }
+
+  /**
    * "quiz question": one retrieval-practice question written from the pool of
    * evidence a quiz was started on. As with `ask`, nothing is validated here:
    * src/quiz.ts checks the evidence number and the quote before the reader
@@ -768,6 +790,46 @@ Before returning, check your answer against the input: every note_title is eithe
  * claim that cited nothing. The prompt says so, because a rule the model knows
  * will be checked is one it follows.
  */
+/**
+ * The aliases-and-tags system prompt.
+ *
+ * The two questions are asked together because they are answered from the
+ * same sentence: a page's first paragraph usually carries both the names the
+ * subject goes by and the clue to what kind of thing it is. Aliases are
+ * recalled, never invented — an alias nobody would type is a search that
+ * still misses, and one the reader has to disown is worse than none — which
+ * is why the excerpt is in front of the model and the instruction is to take
+ * the names from it.
+ */
+const ALIASES_SYSTEM = `You give a page in a reader's wiki the other names it should be findable under, and the one word that says what kind of thing it is. You are shown each page's title, its kind, and the opening of its own definition. Nothing you return is written to the vault directly: the reader sees every proposal in a list and ticks the ones they want, so a proposal that is merely plausible costs them a decision.
+
+<aliases>
+An alias is another name a reader would actually type when looking for this page: an abbreviation of the title, the expanded form of an abbreviated title, a variant spelling, the name the field uses in place of the formal one. One or two per page — the ones a reader would really search under, not every string that could denote the subject. Take them from the excerpt, where a page usually names itself in its first sentence, or from the standard usage of the field when the excerpt shows the subject is known by that name. A name you cannot point to is coined, and a coined alias sends a search to a page that was never called that. When the subject genuinely has one name, return an empty list; that is the honest answer and the reader is shown it as such.
+
+An alias is not a translation of the title into other words, not a plural or a case variant of the title, and not a broader topic the page sits under.
+</aliases>
+
+<the_tag>
+The tag is the page's subtype, one word taken from the closed vocabulary given for its kind — the concept list for a concept, the entity list for an entity. It is what a reader filters by when they want every method, or every person, so it describes what the page is, not what it is about: a page on a researcher is a person even when the page is entirely about their theory.
+
+Pick the word that fits the subject as the excerpt describes it, and pick only from that page's own list. Where none of the words fit, other is the escape hatch — not the safe choice when two of them almost do; between two that both fit, take the more specific.
+</the_tag>
+
+<examples>
+<example>
+<input><page title="Anterior Cruciate Ligament" kind="entity">The anterior cruciate ligament (ACL) is one of the four main ligaments of the knee. It resists anterior translation of the tibia relative to the femur.</page></input>
+<output>aliases "ACL"; tag "other".</output>
+<note>The abbreviation is in the excerpt's own first sentence, so it is recalled rather than coined. None of the entity words — product, person, organization, project, event, place — describes an anatomical structure, so the escape hatch is the honest answer, and the reader can override it.</note>
+</example>
+<example>
+<input><page title="PPR" kind="concept">Personalised PageRank scores every node by the probability that a random walk restarted from a seed set lands on it. It is used here to rank pages by their relatedness to the page in view.</page></input>
+<output>aliases "Personalised PageRank", "Personalized PageRank"; tag "method".</output>
+<note>The title is the abbreviation, so the expansion is the alias worth having, and the American spelling is the second because it is what half the reader's sources will use. The page is a procedure for computing something, which is a method rather than a theory or a term.</note>
+</example>
+</examples>
+
+Return one entry per page you were given, in the order you were given them, with the title copied exactly so each proposal can be matched back to its page. Before you return, check that every alias appears in that page's excerpt or is the subject's standard name, that no alias merely restates the title, and that every tag is a word from the list for that page's kind.`;
+
 const ASK_SYSTEM = `You answer a student's question about their own class notes, using numbered evidence taken from those notes. Each piece of evidence is something they highlighted in a lecture PDF or a claim they wrote down themselves, and it carries the note it came from and the page it was highlighted on. Your answer goes into a small sidebar beside their notes, with a link to one or two of those notes underneath it.
 
 Answer in prose, then name the evidence the answer rests on. The reader sees the answer first and the sources under it, so write the answer to stand on its own.
@@ -981,6 +1043,6 @@ Judge the gap from the answer in front of you, not from what a reader like this 
 Before you return, check that your verdict rests on what the evidence states and not on how the answer was phrased, that every fact in your feedback is in the passage, and that the words in quote appear in the evidence exactly as you copied them.`;
 
 /** The digest, Ask, verify and quiz schemas are defined in schemas.ts so tests can bundle them without obsidian; re-exported here so callers have one import. */
-export { DigestOut, AskOut, KeywordsOut, QuizQuestionOut, QuizGradeOut, SuggestOut } from "./schemas";
-export type { DigestDraft, AskDraft, QuizQuestionDraft, QuizGradeDraft, SuggestDraft } from "./schemas";
-export type { SuggestMessageArgs } from "./prompt";
+export { DigestOut, AskOut, KeywordsOut, QuizQuestionOut, QuizGradeOut, SuggestOut, AliasesTagsOut } from "./schemas";
+export type { DigestDraft, AskDraft, QuizQuestionDraft, QuizGradeDraft, SuggestDraft, AliasesTagsDraft } from "./schemas";
+export type { SuggestMessageArgs, AliasesMessageArgs, AliasesPageIn } from "./prompt";

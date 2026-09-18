@@ -259,3 +259,30 @@ export const KeywordsOut = z.object({
       "Five to ten short search terms for the reader's notes: concept names and synonyms a note would use, each one to five words, most specific first. No sentences, no question words.",
     ),
 });
+
+/**
+ * Aliases and a subtype tag for pages that lack them.
+ *
+ * The lint finds pages reachable only under their exact title and pages with
+ * no subtype tag; this is the one model call the fixer makes, a batch of
+ * pages in and one proposal per page out. Nothing here is written: every
+ * proposal becomes a row in the fix plan that the reader ticks or leaves,
+ * which is why the tag is a plain string rather than an enum — a tag outside
+ * the kind's vocabulary is dropped to `other` and shown as such, and an enum
+ * would make the whole batch fail to parse over one bad word.
+ */
+export const AliasesTagsOut = z.object({
+  pages: z.array(
+    z.object({
+      title: z.string().describe("The page title, copied exactly from the input."),
+      aliases: z
+        .array(z.string())
+        .describe(
+          "One or two other names a reader would search for this page under — an abbreviation, the expanded form, a variant spelling — taken from the excerpt or common usage, never coined. Empty when the subject has one name.",
+        ),
+      tag: z.string().describe("The page's subtype, one word from the vocabulary given for its kind; other when none fits."),
+    }),
+  ),
+});
+
+export type AliasesTagsDraft = z.infer<typeof AliasesTagsOut>;
