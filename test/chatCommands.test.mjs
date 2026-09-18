@@ -74,130 +74,94 @@ test("aliases are unique across the table and never collide with another id", ()
   }
 });
 
-// The scorer the panel actually injects (src/chatPanel.ts:411), not a copy of
-// it: a local reimplementation drifted from the shipped one, so the suite
-// passed while the app scored differently. Bound after the bundle loads.
-const fuzzy = (q) => cc.tokenOverlapScorer(q);
+// `table` is bound in `before()`, so the context reads it through a getter
+// rather than capturing an undefined at import time.
+const CTX = {
+  pages: [
+    { path: "classes/HBIO250/Receptors.md", title: "Receptors", aliases: ["Drug Receptors"], classCodes: ["HBIO250"], hasPdfLinks: true },
+    { path: "classes/PHED163/Stages of Change.md", title: "Stages of Change", aliases: [], classCodes: ["PHED163"], hasPdfLinks: false },
+  ],
+  pdfs: [
+    { path: "sources/class notes/HBIO250/HBIO 250 History of Doping and Oversight Fall 2026.pdf", basename: "HBIO 250 History of Doping and Oversight Fall 2026" },
+    { path: "sources/class notes/PSYC360/Ch3.pdf", basename: "Ch3" },
+    { path: "sources/class notes/PSYC360/Ch3 notes.pdf", basename: "Ch3 notes" },
+  ],
+  manifests: ["wikilm-manifests/Ch3.md"],
+  get commands() {
+    return table.COMMAND_TABLE;
+  },
+};
 
-const COMMANDS = () => table.COMMAND_TABLE.map((c) => ({ id: c.id, name: c.name, aliases: c.aliases }));
-
-test("matchCommand: slash lines", () => {
-  const cmds = COMMANDS();
-  assert.deepEqual(cc.matchCommand("/help", cmds, fuzzy), { kind: "help" });
-  assert.deepEqual(cc.matchCommand("/commands", cmds, fuzzy), { kind: "help" });
-  assert.deepEqual(cc.matchCommand("/?", cmds, fuzzy), { kind: "help" });
-  assert.deepEqual(cc.matchCommand("/extract", cmds, fuzzy), { kind: "run", id: "extract-pdf-highlights" });
-  // Fuzzy over names, so the palette name after a slash works with any casing.
-  assert.deepEqual(cc.matchCommand("/Extract PDF highlights", cmds, fuzzy), { kind: "run", id: "extract-pdf-highlights" });
-  assert.deepEqual(cc.matchCommand("/nope", cmds, fuzzy), { kind: "unknown", query: "nope" });
+test("quiz phrases resolve their target: active, page by title or alias, class, or query", () => {
+  assert.deepEqual(cc.matchIntent("quiz me", CTX), { kind: "quiz", target: { kind: "active" } });
+  assert.deepEqual(cc.matchIntent("Quiz me on this note", CTX), { kind: "quiz", target: { kind: "active" } });
+  assert.deepEqual(cc.matchIntent("quiz me on receptors", CTX), { kind: "quiz", target: { kind: "page", path: "classes/HBIO250/Receptors.md", title: "Receptors" } });
+  assert.deepEqual(cc.matchIntent("test me on drug receptors", CTX).target, { kind: "page", path: "classes/HBIO250/Receptors.md", title: "Receptors" });
+  assert.deepEqual(cc.matchIntent("quiz me on hbio250", CTX).target, { kind: "class", code: "HBIO250" });
+  assert.deepEqual(cc.matchIntent("quiz me about affinity and binding", CTX).target, { kind: "query", words: "affinity and binding" });
 });
 
-test("matchCommand: plain text that is exactly a name or an alias runs", () => {
-  const cmds = COMMANDS();
-  assert.deepEqual(cc.matchCommand("Extract PDF highlights to manifest", cmds, fuzzy), { kind: "run", id: "extract-pdf-highlights" });
-  assert.deepEqual(cc.matchCommand("extract", cmds, fuzzy), { kind: "run", id: "extract-pdf-highlights" });
-  // The trailing ellipsis on the palette name is not something anyone types.
-  assert.deepEqual(cc.matchCommand("Digest PDF highlights into topic notes", cmds, fuzzy), { kind: "run", id: "digest-pdf-highlights" });
-});
-
-test("matchCommand: a short command-like sentence is offered, not run", () => {
-  const cmds = COMMANDS();
-  // "extract pdf highlights" is neither a name nor an alias. Against the name
-  // "Extract PDF highlights to manifest" all three query tokens are present,
-  // so the injected scorer computes 3 — at or above OFFER_THRESHOLD, an offer.
-  const scored = fuzzy("extract pdf highlights")("Extract PDF highlights to manifest");
-  assert.equal(scored, 3);
-  assert.equal(cc.OFFER_THRESHOLD, 2);
-  assert.deepEqual(cc.matchCommand("extract pdf highlights", cmds, fuzzy), {
-    kind: "offer",
-    id: "extract-pdf-highlights",
-    score: 3,
+test("digest and highlight phrases resolve a PDF, a manifest, a note with PDF links, or the active file", () => {
+  assert.deepEqual(cc.matchIntent("digest", CTX), { kind: "digest", target: { kind: "active" } });
+  assert.deepEqual(cc.matchIntent("AI digest this", CTX), { kind: "digest", target: { kind: "active" } });
+  assert.deepEqual(cc.matchIntent("digest the doping pdf", CTX).target, {
+    kind: "pdf",
+    path: "sources/class notes/HBIO250/HBIO 250 History of Doping and Oversight Fall 2026.pdf",
+    basename: "HBIO 250 History of Doping and Oversight Fall 2026",
   });
+  assert.deepEqual(cc.matchIntent("digest receptors", CTX).target, { kind: "page", path: "classes/HBIO250/Receptors.md", title: "Receptors" });
+  assert.equal(cc.matchIntent("digest stages of change", CTX).kind, "ambiguous", "a page with no PDF links cannot be digested");
+  assert.deepEqual(cc.matchIntent("highlight ch3 notes", CTX), { kind: "highlight", target: { kind: "pdf", path: "sources/class notes/PSYC360/Ch3 notes.pdf", basename: "Ch3 notes" } });
 });
 
-test("matchCommand: a question mark makes it a question regardless of score", () => {
-  const cmds = COMMANDS();
-  const q = "how do I export?";
-  // Not because it scores badly: it matches the export command's alias.
-  assert.equal(fuzzy(q)("export"), 1);
-  assert.deepEqual(cc.matchCommand(q, cmds, fuzzy), { kind: "question" });
+test("two files that fit equally are offered as candidates, never guessed", () => {
+  const m = cc.matchIntent("digest ch3", CTX);
+  assert.equal(m.kind, "ambiguous");
+  assert.equal(m.verb, "digest");
+  assert.deepEqual(
+    m.candidates.map((c) => c.path),
+    ["sources/class notes/PSYC360/Ch3.pdf", "sources/class notes/PSYC360/Ch3 notes.pdf", "wikilm-manifests/Ch3.md"],
+  );
 });
 
-test("matchCommand: a long sentence is a question because of its length", () => {
-  const cmds = COMMANDS();
-  const long =
-    "I would really like to understand how the export of reviewed cards to Anki actually works behind the scenes here";
-  assert.equal(long.trim().split(/\s+/).length, 20);
-  // It scores well above the threshold; length alone sends it to the model.
-  const hit = fuzzy(long)("Export all reviewed cards to Anki");
-  assert.ok(hit >= cc.OFFER_THRESHOLD, `expected a high score, got ${hit}`);
-  assert.deepEqual(cc.matchCommand(long, cmds, fuzzy), { kind: "question" });
+test("a target nothing matches is ambiguous with no candidates", () => {
+  const m = cc.matchIntent("digest the kinematics deck", CTX);
+  assert.equal(m.kind, "ambiguous");
+  assert.deepEqual(m.candidates, []);
+  assert.equal(m.words, "the kinematics deck");
 });
 
-test("matchCommand: ordinary short questions stay questions", () => {
-  const cmds = COMMANDS();
-  assert.deepEqual(cc.matchCommand("what is a receptor", cmds, fuzzy), { kind: "question" });
-  assert.deepEqual(cc.matchCommand("", cmds, fuzzy), { kind: "question" });
+test("lint, export, inbox and help are phrases", () => {
+  assert.deepEqual(cc.matchIntent("lint the wiki", CTX), { kind: "lint" });
+  assert.deepEqual(cc.matchIntent("check the wiki", CTX), { kind: "lint" });
+  assert.deepEqual(cc.matchIntent("export reviewed cards to anki", CTX), { kind: "export" });
+  assert.deepEqual(cc.matchIntent("open the inbox", CTX), { kind: "inbox" });
+  assert.deepEqual(cc.matchIntent("help", CTX), { kind: "help" });
+  assert.deepEqual(cc.matchIntent("what can you do?", CTX), { kind: "help" });
 });
 
-test("a run-together command word still names its command", () => {
-  // "wikilint" is "wiki" and "lint" typed without the space. Splitting on
-  // non-alphanumerics alone scored it zero against every command, so the Run
-  // chip could never appear for it.
-  assert.equal(fuzzy("wikilint")("wiki"), 1);
-  assert.equal(fuzzy("wiki lint")("lint"), 1);
-  // Not any substring: a command word under three characters cannot match
-  // inside an unrelated query word.
-  assert.equal(fuzzy("something")("me"), null);
+test("a palette name or alias typed exactly still runs that command", () => {
+  assert.deepEqual(cc.matchIntent("Extract PDF highlights to manifest", CTX), { kind: "command", id: "extract-pdf-highlights" });
+  assert.deepEqual(cc.matchIntent("retry", CTX), { kind: "command", id: "retry-failed" });
 });
 
-test("a mistyped slash command is offered, not dead-ended", () => {
-  const cmds = COMMANDS();
-  // The reported case: "/wikilint" answered "No command matches" with the
-  // command one word away.
-  assert.deepEqual(cc.matchCommand("/wikilint", cmds, fuzzy), { kind: "offer", id: "lint-wiki", score: 1 });
-  // A slash line that plainly names its command still runs without asking.
-  assert.deepEqual(cc.matchCommand("/wiki", cmds, fuzzy), { kind: "run", id: "lint-wiki" });
-  // Nothing recognisable is still unknown.
-  assert.deepEqual(cc.matchCommand("/nope", cmds, fuzzy), { kind: "unknown", query: "nope" });
+test("a leading slash is tolerated and means the same thing", () => {
+  assert.deepEqual(cc.matchIntent("/quiz receptors", CTX).target.kind, "page");
+  assert.deepEqual(cc.matchIntent("/digest", CTX), { kind: "digest", target: { kind: "active" } });
+  assert.deepEqual(cc.matchIntent("/help", CTX), { kind: "help" });
 });
 
-test("filler words alone never offer a command", () => {
-  // Filler is what let ordinary questions reach the offer threshold: this
-  // query shares "the", "for" and "and" with the lint command's name and must
-  // score nothing at all.
-  assert.equal(fuzzy("what does the for and")("Check the wiki for gaps and dead links"), null);
+test("everything else is a question, including sentences that mention a verb", () => {
+  assert.deepEqual(cc.matchIntent("what does the wiki say about digestion of drugs?", CTX), { kind: "question" });
+  assert.deepEqual(cc.matchIntent("how do I highlight in PDF++", CTX), { kind: "question" });
+  assert.deepEqual(cc.matchIntent("receptors bind ligands with high affinity", CTX), { kind: "question" });
+  assert.deepEqual(cc.matchIntent("", CTX), { kind: "question" });
 });
 
-test("a prose question that mentions a command word is still answered", () => {
-  const cmds = COMMANDS();
-  // An offer replaces the answer (src/chatPanel.ts:427-443), so a question
-  // that merely says "wiki" must not be turned into a chip. This is why the
-  // prose threshold stays at two while a slash line offers at one.
-  assert.deepEqual(cc.matchCommand("what does the wiki say", cmds, fuzzy), { kind: "question" });
-});
-
-test("a question opening with an interrogative outranks its word overlap", () => {
-  const cmds = COMMANDS();
-  // Renaming lint-wiki to "Lint wiki: find gaps…" put both "lint" and "wiki"
-  // in the name, so this question started scoring 2 — the offer threshold —
-  // and could no longer be asked. Word count cannot separate it from the real
-  // command below; the opening word can.
-  const lint = cmds.find((c) => c.id === "lint-wiki");
-  assert.equal(fuzzy("how do I lint a wiki note")(lint.name), 2);
-  assert.deepEqual(cc.matchCommand("how do I lint a wiki note", cmds, fuzzy), { kind: "question" });
-  // Without the interrogative it is an instruction, and still offered.
-  assert.deepEqual(cc.matchCommand("lint the wiki", cmds, fuzzy), { kind: "offer", id: "lint-wiki", score: 2 });
-  // A question mark is not required for the guard to apply.
-  assert.deepEqual(cc.matchCommand("where is the wiki lint", cmds, fuzzy), { kind: "question" });
-});
-
-test("renderHelp lists one line per command", () => {
-  const lines = cc
-    .renderHelp(table.COMMAND_TABLE.map((c) => ({ id: c.id, name: c.name, aliases: c.aliases, hint: c.hint, available: c.hint === "always" })))
-    .split("\n");
-  assert.equal(lines.length, table.COMMAND_TABLE.length);
-  for (const line of lines) assert.ok(line.startsWith("- **/"), `bad help line: ${line}`);
-  assert.ok(lines.some((l) => l.includes("(available)")));
-  assert.ok(lines.some((l) => l.includes("(not now)")));
+test("renderHelp lists phrases, not slash commands", () => {
+  const help = cc.renderHelp();
+  assert.ok(help.includes("**quiz me**"));
+  assert.ok(help.includes("**digest**"));
+  assert.ok(help.includes("**highlight**"));
+  assert.ok(!help.includes("/quiz"), "no slash grammar is documented");
 });

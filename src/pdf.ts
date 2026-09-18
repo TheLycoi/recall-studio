@@ -35,6 +35,18 @@ export function isPdfFile(file: TFile | null | undefined): file is TFile {
   return !!file && file.extension.toLowerCase() === "pdf";
 }
 
+/** The PDFs a note's PDF++ links and embeds resolve to, distinct, in link order. */
+export function pdfsLinkedFrom(app: App, note: TFile): TFile[] {
+  const cache = app.metadataCache.getFileCache(note);
+  const refs = [...(cache?.links ?? []), ...(cache?.embeds ?? [])];
+  const out: TFile[] = [];
+  for (const r of refs) {
+    const dest = app.metadataCache.getFirstLinkpathDest(r.link.split("#")[0], note.path);
+    if (dest && isPdfFile(dest) && !out.includes(dest)) out.push(dest);
+  }
+  return out;
+}
+
 /**
  * Open a vault PDF with Obsidian's bundled pdf.js and return the
  * PDFDocumentProxy. `loadPdfJs()` is Obsidian's own accessor for the pdf.js

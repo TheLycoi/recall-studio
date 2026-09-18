@@ -146,7 +146,11 @@ export async function writeNotes(
  * verbatim against the page it claims to come from before it is ever offered,
  * and a batch that throws aborts the whole run with nothing written.
  */
-export async function suggestPdfHighlights(plugin: WikiLmPlugin, pdf: TFile): Promise<void> {
+export async function suggestPdfHighlights(
+  plugin: WikiLmPlugin,
+  pdf: TFile,
+  opts: { transcriptGate?: () => Promise<"paste" | "skip" | "cancel"> } = {},
+): Promise<void> {
   let ownsRun = false;
   try {
     const s = plugin.settings;
@@ -178,7 +182,15 @@ export async function suggestPdfHighlights(plugin: WikiLmPlugin, pdf: TFile): Pr
     }
 
     // (3) The lecture transcript, when one was attached to this PDF's path.
-    const transcript = plugin.store.getTranscript(pdf.path)?.text ?? null;
+    let transcript = plugin.store.getTranscript(pdf.path)?.text ?? null;
+    // The chat offers to paste one before the model picks anything: a lecture
+    // transcript or a study guide is what tells the suggester which spans the
+    // class actually cared about. The palette has no gate and runs as before.
+    if (transcript === null && opts.transcriptGate) {
+      const c = await opts.transcriptGate();
+      if (c === "cancel") return;
+      transcript = plugin.store.getTranscript(pdf.path)?.text ?? null;
+    }
 
     // (4) Notes, flashcards, or both — the digest's chooser, reused.
     const options = await askDigestOptions(

@@ -931,3 +931,14 @@ test("a merge skips a mention whose quote the page already holds and adds one it
   assert.ok(added.md.includes(other.mention));
   assert.ok(added.md.indexOf(other.mention) > added.md.indexOf("## Mentions in Source"));
 });
+
+test("parseTopicNote reads a class list and keeps classCode as the first", () => {
+  const one = tn.parseTopicNote("---\nclass: HBIO250\n---\n# T\n");
+  assert.equal(one.classCode, "HBIO250");
+  assert.deepEqual(one.classCodes, ["HBIO250"]);
+  const many = tn.parseTopicNote("---\nclass:\n  - HBIO250\n  - PHED163\n---\n# T\n");
+  assert.deepEqual(many.classCodes, ["HBIO250", "PHED163"]);
+  const inline = tn.parseTopicNote("---\nclass: [HBIO250, PHED163]\n---\n# T\n");
+  assert.deepEqual(inline.classCodes, ["HBIO250", "PHED163"]);
+  assert.equal(inline.classCode, "HBIO250");
+});

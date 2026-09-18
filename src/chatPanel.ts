@@ -16,7 +16,7 @@ import { lintVault, renderVaultLint, WIKI_SCHEMA, type LintPage } from "./vaultL
 import { planLinkFixes, applyFixesToNote, type FixPage, type LinkFix } from "./vaultFix";
 import { LintReportModal } from "./modals";
 import { checkAnswer, emptyIndexAnswer, noEvidenceAnswer, renderGroundingLine, VERIFY_BANNER, type GroundingReport } from "./askCheck";
-import { matchCommand, renderHelp, tokenOverlapScorer } from "./chatCommands";
+import { matchIntent, renderHelp, type Intent, type IntentContext, type IntentPage, type Target } from "./chatCommands";
 import { WIKILM_COMMANDS, type WikiLmCommand } from "./commands";
 import { captureQuizMisses } from "./capture";
 import {
@@ -43,11 +43,37 @@ import {
   disputeGrade,
 } from "./quiz";
 import type { AskHistoryTurn } from "./prompt";
-import { pdfFileName, renderPdfSubpath } from "./pdflink";
+import { pdfFileName, renderPdfSubpath, findAllPdfReferences } from "./pdflink";
+import { parseTopicNote, noteAliases } from "./topicNote";
+import { isPdfFile, pdfsLinkedFrom } from "./pdf";
+import { isManifestNote } from "./pdfHighlights";
+import { digestPdf } from "./digest";
+import type { GateDecision } from "./digestGate";
+import { suggestPdfHighlights } from "./suggest";
+import { askTranscript } from "./modals";
+import { normalizeTranscript, truncateTranscript } from "./util";
 
 /** The linktext that opens a unit's PDF at the page and selection it came from. */
 function pdfLinktext(u: EvidenceUnit): string {
   return u.target && u.pdfBasename ? `${pdfFileName(u.pdfBasename)}#${renderPdfSubpath(u.target)}` : "";
+}
+
+/** What a chip calls a target: the file's own name, so the button says what it opens. */
+function targetLabel(t: Target): string {
+  switch (t.kind) {
+    case "pdf":
+      return t.basename;
+    case "manifest":
+      return (t.path.split("/").pop() ?? t.path).replace(/\.md$/i, "");
+    case "page":
+      return t.title;
+    case "class":
+      return t.code;
+    case "query":
+      return t.words;
+    default:
+      return "the open file";
+  }
 }
 
 /**
@@ -57,9 +83,10 @@ function pdfLinktext(u: EvidenceUnit): string {
  * and the `report` of what the grounding checks did to the draft
  * (src/askCheck.ts:21-29). A system turn is the panel talking about itself —
  * a command running, a command that cannot run, `/help` — and never reaches
- * the model. An `offer` turn is the one-click chip the matcher asks for when a
- * plain sentence merely resembles a command (src/chatCommands.ts:119): it
- * carries the question it was typed as, so "Ask instead" can still ask it.
+ * the model. A `chips` turn is the panel's own follow-up question with buttons
+ * — which of two files was meant, whether to highlight before digesting,
+ * whether to paste a transcript first. It is the shape of "never guess": a
+ * target that fits two files is asked about rather than picked.
  *
  * A `quiz` turn is one of the three shapes a quiz puts in the log — the
  * question, the grade, the closing summary. The marker is what `history()`
@@ -74,7 +101,7 @@ interface ChatTurn {
   evidence?: EvidenceUnit[];
   error?: string;
   report?: GroundingReport;
-  offer?: { id: string; name: string; question: string };
+  chips?: { prompt: string; options: Array<{ label: string; run: () => void }> };
   quiz?: {
     kind: "question" | "grade" | "summary";
     index?: number;
@@ -98,9 +125,10 @@ interface ChatTurn {
  * half-typed question or the conversation so far.
  *
  * A line typed into the box is not assumed to be a question. `ask` routes it
- * through `matchCommand` (src/chatCommands.ts:73) first, so the chat is also
- * the command line: `/help`, `/extract`, an exact command name, or a chip
- * offering to run the command a sentence resembles. Only what is left over
+ * through `matchIntent` (src/chatCommands.ts) first, so the chat is the
+ * studio: a plain phrase with a verb and a target — "quiz me", "digest the
+ * doping pdf", "highlight Ch3" — runs the action, a target that fits two
+ * files is offered as chips rather than guessed, and only what is left over
  * reaches `askQuestion` and the model.
  */
 export class ChatPanel {
@@ -122,9 +150,12 @@ export class ChatPanel {
    */
   session: QuizSession | null = null;
   /** What the last finished quiz was and what was missed, kept for the summary's two chips. */
-  private lastQuiz: { scope: QuizScope; query: string; misses: QuizMiss[] } | null = null;
-  /** Set by the first `/quiz` typed during a quiz; the next one restarts, any other message clears it. */
+  private lastQuiz: { scope: QuizScope; query: string; misses: QuizMiss[]; notePath: string | null; classCode: string | null } | null = null;
+  /** Set by the first quiz phrase typed during a quiz; the next one restarts, any other message clears it. */
   private restartArmed = false;
+  /** The note and class the running quiz was scoped to, so "Quiz again" can repeat it. */
+  private lastQuizNotePath: string | null = null;
+  private lastQuizClassCode: string | null = null;
 
   constructor(
     private plugin: WikiLmPlugin,
@@ -177,12 +208,43 @@ export class ChatPanel {
     // obsidian.d.ts:7543 (getMarkdownFiles), :7420 (cachedRead).
     const files = this.plugin.app.vault.getMarkdownFiles().filter((f: TFile) => f.path.startsWith(prefix));
     files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+    const meta: IntentPage[] = [];
     for (const file of files) {
       const md = await this.plugin.app.vault.cachedRead(file);
       units.push(...indexNote(file.path, md));
+      // The same read serves the intent matcher: what a page is called, what
+      // else it answers to, which class it belongs to, and whether it cites a
+      // PDF at all — enough for "digest receptors" to find a file without a
+      // second pass over the vault.
+      const parsed = parseTopicNote(md);
+      meta.push({
+        path: file.path,
+        title: parsed.title || file.basename,
+        aliases: noteAliases(md),
+        classCodes: parsed.classCodes,
+        hasPdfLinks: findAllPdfReferences(md).length > 0,
+      });
     }
     this.index = units;
+    this.pageMeta = meta;
     return units;
+  }
+
+  /** The pages the intent matcher may name, rebuilt with the index. */
+  private pageMeta: IntentPage[] = [];
+
+  /** Everything in the vault a typed target could name. */
+  private intentContext(): IntentContext {
+    const pdfs = this.plugin.app.vault.getFiles().filter((f) => isPdfFile(f)).map((f) => ({ path: f.path, basename: f.basename }));
+    const manifests = this.plugin.app.vault.getMarkdownFiles().filter((f) => isManifestNote(this.plugin, f)).map((f) => f.path);
+    return { pages: this.pageMeta, pdfs, manifests, commands: WIKILM_COMMANDS };
+  }
+
+  /** The panel's own follow-up with buttons: which file, whether to highlight first, whether to paste a transcript. */
+  private pushChips(prompt: string, options: Array<{ label: string; run: () => void }>): void {
+    this.turns.push({ role: "assistant", text: "", chips: { prompt, options } });
+    this.trim();
+    this.rerender();
   }
 
   /**
@@ -398,7 +460,7 @@ export class ChatPanel {
   /**
    * The last `askMaxTurns` turns, as the prompt wants them (src/prompt.ts:97-106).
    *
-   * System turns are the panel narrating itself and offers have no text at all,
+   * System turns are the panel narrating itself and chips have no text at all,
    * so neither is conversation: sending them would teach the model that
    * "Ran Extract PDF highlights to manifest." is something it said.
    */
@@ -409,7 +471,7 @@ export class ChatPanel {
       // Quiz turns are excluded for the same reason: a question the model was
       // told to write and an answer typed to it are not a conversation about
       // the notes, and replaying them would have the next Ask answer the quiz.
-      .filter((t) => !t.error && !t.offer && !t.quiz && t.text.trim().length > 0)
+      .filter((t) => !t.error && !t.chips && !t.quiz && t.text.trim().length > 0)
       .slice(-keep)
       .map((t) => ({ role: t.role, text: t.text }));
   }
@@ -425,56 +487,27 @@ export class ChatPanel {
   /**
    * What a typed line means, decided before anything is sent anywhere.
    *
-   * The command matcher gets `tokenOverlapScorer` (src/chatCommands.ts): shared
-   * words between the message and a command name or alias, the same scorer the
-   * tests use, so `OFFER_THRESHOLD` means the same thing in the app as in the
-   * tests. Obsidian's `prepareFuzzySearch` score scale is undocumented, which is
-   * why it is not used for this decision.
-   * has been seen in the app.
+   * `matchIntent` (src/chatCommands.ts) reads a verb and a target out of a
+   * plain phrase, so the chat is the studio rather than a command line with a
+   * chat attached. The index is built first because the matcher needs the page
+   * titles, aliases and class codes in it to resolve a target at all.
    */
   async ask(text: string): Promise<void> {
     if (this.busy) return;
     const q = text.trim();
 
-    // `/wiki` is intercepted here as well as being registered as `lint-wiki`,
-    // so the report lands in this log rather than opening a second chat. The
-    // registry entry is what puts it in the palette and in `/help`; both reach
-    // the same `runVaultLint`.
-    if (/^\/wiki\b|^\/lint\b|^\/lint-wiki\b/i.test(q)) {
-      this.draft = "";
-      await this.runVaultLint();
-      return;
-    }
-
-    // The quiz is tried before the command matcher, because `/quiz`, `/hint`,
-    // `/skip`, `/idk` and `/stop` are chat-local and not in the registry
-    // (src/quiz.ts:102-126). `parseQuizCommand` returning null is what lets a
-    // mistyped `/skpi` still reach `matchCommand` and get its ordinary line.
+    // The quiz controls are chat-local and not in the registry
+    // (src/quiz.ts:102-126), and while a session runs they outrank everything
+    // else: "skip" during a quiz is a skipped question, not a search. Starting
+    // one is no longer handled here — a quiz phrase flows through `matchIntent`
+    // like every other verb, so "quiz me on receptors" and "digest" are read
+    // the same way.
     const quizCommand = parseQuizCommand(q, !!this.session);
-    if (quizCommand) {
+    if (quizCommand && quizCommand.kind !== "start") {
       this.draft = "";
-      if (quizCommand.kind === "start") {
-        // What the reader typed goes in the log like any other line of theirs.
-        // Starting a quiz used to be swallowed — the log jumped from nothing to
-        // "Quiz on X: 5 questions", so a reader scrolling back could not see
-        // what they had asked for, and a quiz that came back on the wrong
-        // subject looked like the panel ignoring them rather than a query that
-        // read differently than intended. The other quiz commands are left
-        // alone: `/skip` and `/idk` are echoed by `gradeWithout`, and `/hint`
-        // and `/stop` are answered by the line that follows them.
-        this.turns.push({ role: "user", text: q });
-        if (this.session && !this.restartArmed) {
-          this.restartArmed = true;
-          this.pushSystem("A quiz is running. Type /quiz again to restart it.");
-          return;
-        }
-        this.restartArmed = false;
-        await this.startQuiz(quizCommand.scope, quizCommand.query);
-        return;
-      }
       this.restartArmed = false;
       if (!this.session) {
-        this.pushSystem("No quiz is running. Type /quiz.");
+        this.pushSystem("No quiz is running. Say “quiz me”.");
         return;
       }
       switch (quizCommand.kind) {
@@ -491,14 +524,14 @@ export class ChatPanel {
       }
     }
 
-    this.restartArmed = false;
-
-    // Anything that is not a slash command, while a quiz is running, is an
+    // Anything that is not a quiz control, while a quiz is running, is an
     // answer — including an empty one, which `isDontKnow` (src/quiz.ts:148)
     // reads as "I don't know" so the grader's promise that a blank never
-    // reaches it is kept here rather than in the prompt.
-    if (this.session && !q.startsWith("/")) {
+    // reaches it is kept here rather than in the prompt. A quiz phrase is the
+    // exception: it means restart, and `quizTarget` handles the confirmation.
+    if (this.session && !(quizCommand && quizCommand.kind === "start")) {
       this.draft = "";
+      this.restartArmed = false;
       if (isDontKnow(q)) {
         await this.gradeWithout("skipped", q);
         return;
@@ -509,50 +542,214 @@ export class ChatPanel {
 
     if (!q) return;
 
-    const match = matchCommand(q, WIKILM_COMMANDS, tokenOverlapScorer);
+    await this.buildIndex();
+    const intent = matchIntent(q, this.intentContext());
+    this.draft = "";
+    if (intent.kind === "question") {
+      this.restartArmed = false;
+      await this.askQuestion(q);
+      return;
+    }
+    // What the reader typed goes in the log like any other line of theirs: a
+    // studio action that came back on the wrong subject should look like a
+    // phrase read differently than intended, not like the panel ignoring them.
+    this.turns.push({ role: "user", text: q });
+    await this.runIntent(intent);
+  }
 
-    switch (match.kind) {
+  /** Carry out what a phrase asked for. Every branch either acts or says why it cannot. */
+  private async runIntent(intent: Intent): Promise<void> {
+    switch (intent.kind) {
       case "help":
-        this.draft = "";
-        this.pushSystem(this.helpText());
+        this.pushSystem(renderHelp());
         return;
-      case "run": {
-        this.draft = "";
-        await this.runCommand(match.id);
+      case "lint":
+        await this.runVaultLint();
         return;
-      }
-      case "unknown":
-        this.draft = "";
-        this.pushSystem(`No command matches /${match.query}. Type /help.`);
+      case "export":
+        await this.runCommand("export-reviewed");
         return;
-      case "offer": {
-        const command = WIKILM_COMMANDS.find((c) => c.id === match.id);
-        if (!command) {
-          await this.askQuestion(q);
+      case "inbox":
+        await this.runCommand("open-inbox");
+        return;
+      case "command":
+        await this.runCommand(intent.id);
+        return;
+      case "ambiguous":
+        if (intent.candidates.length === 0) {
+          this.pushSystem(`Nothing called “${intent.words}” to ${intent.verb}. Open the PDF and say “${intent.verb}”, or name it as the file is named.`);
           return;
         }
-        this.draft = "";
-        this.turns.push({ role: "user", text: q });
-        this.turns.push({
-          role: "assistant",
-          text: "",
-          offer: { id: command.id, name: command.name, question: q },
-        });
-        this.trim();
-        this.rerender();
+        this.pushChips(
+          `Which one to ${intent.verb}?`,
+          intent.candidates.map((c) => ({ label: targetLabel(c), run: () => void this.runIntent({ kind: intent.verb, target: c }) })),
+        );
         return;
-      }
-      default:
-        await this.askQuestion(q);
+      case "quiz":
+        await this.quizTarget(intent.target);
+        return;
+      case "digest":
+        await this.digestTarget(intent.target);
+        return;
+      case "highlight":
+        await this.highlightTarget(intent.target);
+        return;
     }
   }
 
-  /** `/help`: every command, its first alias, its hint, and whether it can run right now. */
-  private helpText(): string {
-    return renderHelp(
-      WIKILM_COMMANDS.map((c) => ({ ...c, available: c.available(this.plugin) })),
-      true,
+  /**
+   * Start a quiz on whatever the phrase named.
+   *
+   * A quiz already running is confirmed rather than replaced: the first phrase
+   * says so, the second restarts, which is the same two-step the slash command
+   * had. Losing four graded questions to a misread line is worse than one extra
+   * message.
+   */
+  private async quizTarget(target: Target): Promise<void> {
+    if (this.session && !this.restartArmed) {
+      this.restartArmed = true;
+      this.pushSystem("A quiz is running. Say “quiz me” again to restart it.");
+      return;
+    }
+    this.restartArmed = false;
+    switch (target.kind) {
+      case "active": {
+        const active = this.plugin.app.workspace.getActiveFile();
+        if (active && active.extension === "md") await this.startQuiz("this", "", active.path);
+        else {
+          this.pushSystem("No note is open, so this quiz covers every topic note.");
+          await this.startQuiz("all", "");
+        }
+        return;
+      }
+      case "page":
+        await this.startQuiz("this", "", target.path);
+        return;
+      case "class":
+        await this.startQuiz("all", "", null, target.code);
+        return;
+      case "query":
+        await this.startQuiz(target.words ? "query" : "all", target.words);
+        return;
+      default:
+        this.pushSystem("A quiz needs a note, a class, or a subject.");
+    }
+  }
+
+  /**
+   * Digest whatever the phrase named: a PDF or manifest directly, or the PDFs
+   * a note cites. A note citing several is asked about rather than guessed.
+   */
+  private async digestTarget(target: Target): Promise<void> {
+    const file = this.fileFor(target);
+    if (!file) {
+      this.pushSystem("Open a PDF, a manifest, or a note that holds PDF++ links, then say “digest”.");
+      return;
+    }
+    // A plain boolean rather than `isPdfFile`: that is a `file is TFile` guard,
+    // and testing an already-`TFile` binding with it narrows everything below
+    // to `never`, which is not what "this is not a PDF" should mean here.
+    const digestible = file.extension.toLowerCase() === "pdf" || isManifestNote(this.plugin, file);
+    if (digestible) {
+      await this.narrate(`Digesting ${file.basename}…`, () => digestPdf(this.plugin, file, "model", { gate: (d) => this.gateChips(d) }));
+      return;
+    }
+    const pdfs = pdfsLinkedFrom(this.plugin.app, file);
+    if (pdfs.length === 0) {
+      this.pushSystem(`${file.basename} holds no PDF++ links that resolve to a PDF in this vault.`);
+      return;
+    }
+    if (pdfs.length === 1) {
+      await this.narrate(`Digesting ${pdfs[0].basename}…`, () => digestPdf(this.plugin, pdfs[0], "model", { gate: (d) => this.gateChips(d) }));
+      return;
+    }
+    this.pushChips(
+      `${file.basename} cites ${pdfs.length} PDFs. Which one?`,
+      pdfs.slice(0, 4).map((p) => ({ label: p.basename, run: () => void this.digestTarget({ kind: "pdf", path: p.path, basename: p.basename }) })),
     );
+  }
+
+  /** The file a target names, or null when it names none. */
+  private fileFor(target: Target): TFile | null {
+    if (target.kind === "active") return this.plugin.app.workspace.getActiveFile();
+    if (target.kind === "pdf" || target.kind === "manifest" || target.kind === "page") {
+      const f = this.plugin.app.vault.getAbstractFileByPath(target.path);
+      return f instanceof TFile ? f : null;
+    }
+    return null;
+  }
+
+  /** Run a studio action with a system line that says what happened. */
+  private async narrate(text: string, run: () => Promise<void>): Promise<void> {
+    const turn: ChatTurn = { role: "system", text };
+    this.turns.push(turn);
+    this.trim();
+    this.rerender();
+    try {
+      await run();
+      turn.text = text.replace(/…$/, ": done.");
+    } catch (e) {
+      turn.text = `${text.replace(/…$/, "")} failed: ${describeError(e)}`;
+    } finally {
+      this.rerender();
+    }
+  }
+
+  /**
+   * The digest gate, as chips instead of a Notice: a PDF with no highlights
+   * carrying text has nothing to digest, and the way out is to let the model
+   * suggest some first (src/digest.ts:184-192).
+   */
+  private gateChips(decision: GateDecision): Promise<"highlight" | "cancel"> {
+    return new Promise((resolve) => {
+      this.pushChips(
+        `No highlights with text in this PDF (${decision.total} without). Highlight it in PDF++ first, or let the model suggest highlights.`,
+        [
+          { label: "AI highlight first", run: () => resolve("highlight") },
+          { label: "Cancel", run: () => resolve("cancel") },
+        ],
+      );
+    });
+  }
+
+  /** Suggest highlights in whatever PDF the phrase named, after offering the transcript gate. */
+  private async highlightTarget(target: Target): Promise<void> {
+    const file = this.fileFor(target);
+    if (!file || !isPdfFile(file)) {
+      this.pushSystem("Open a PDF, then say “highlight”.");
+      return;
+    }
+    await this.narrate(`Suggesting highlights in ${file.basename}…`, () =>
+      suggestPdfHighlights(this.plugin, file, { transcriptGate: () => this.transcriptChips(file) }),
+    );
+  }
+
+  /**
+   * The context the suggester asks for before it picks anything: a lecture
+   * transcript or a study guide is what says which spans the class cared about.
+   */
+  private transcriptChips(pdf: TFile): Promise<"paste" | "skip" | "cancel"> {
+    return new Promise((resolve) => {
+      this.pushChips("A lecture transcript or a study guide sharpens the picks. Paste one first?", [
+        {
+          label: "Paste transcript or study guide",
+          run: () => {
+            void askTranscript(this.plugin.app, this.plugin.store.getTranscript(pdf.path)).then((choice) => {
+              if (choice === null || choice.action === "clear") {
+                resolve("skip");
+                return;
+              }
+              const cleaned = normalizeTranscript(choice.text);
+              const { text, truncated } = truncateTranscript(cleaned, this.plugin.settings.transcriptMaxChars);
+              this.plugin.store.setTranscript(pdf.path, { text, origin: choice.origin, sourceFile: choice.sourceFile, addedAt: new Date().toISOString(), truncated });
+              resolve("paste");
+            });
+          },
+        },
+        { label: "Highlight without", run: () => resolve("skip") },
+        { label: "Cancel", run: () => resolve("cancel") },
+      ]);
+    });
   }
 
   /** Push a system turn and redraw. System turns are the panel's own voice. */
@@ -689,7 +886,12 @@ export class ChatPanel {
    * and answers instantly. The line names the scope, because "no evidence" is
    * ambiguous between "this note has none" and "the whole folder has none".
    */
-  private async startQuiz(scope: "all" | "this" | "query", query: string): Promise<void> {
+  private async startQuiz(
+    scope: "all" | "this" | "query",
+    query: string,
+    notePath: string | null = null,
+    classCode: string | null = null,
+  ): Promise<void> {
     if (this.busy) return;
     this.busy = true;
     this.status = "gathering evidence…";
@@ -699,10 +901,15 @@ export class ChatPanel {
     let pool: EvidenceUnit[] = [];
     let label = "";
     try {
-      const units = await this.buildIndex();
-      // obsidian.d.ts:1954 (getActiveFile): null when nothing is open, which
-      // `resolvePool` reads as "this note has no evidence".
-      const activePath = this.plugin.app.workspace.getActiveFile()?.path ?? null;
+      const all = await this.buildIndex();
+      // A phrase can name the note to quiz ("quiz me on Receptors"), so the
+      // pool is not always the file in front of the reader. obsidian.d.ts:1954
+      // (getActiveFile): null when nothing is open, which `resolvePool` reads
+      // as "this note has no evidence".
+      const activePath = notePath ?? this.plugin.app.workspace.getActiveFile()?.path ?? null;
+      // A class scope is the whole vault narrowed to one code, which is what
+      // makes "quiz me on HBIO250" different from "quiz me on everything".
+      const units = classCode ? all.filter((u) => u.classCodes.includes(classCode)) : all;
       const resolved = resolvePool(
         scope,
         query,
@@ -712,7 +919,7 @@ export class ChatPanel {
         this.plugin.settings.quizPoolSize,
       );
       pool = resolved.pool;
-      label = resolved.label;
+      label = classCode || resolved.label;
     } catch (e) {
       this.turns.push({ role: "assistant", text: "", error: describeError(e) });
       this.busy = false;
@@ -731,6 +938,10 @@ export class ChatPanel {
       return;
     }
 
+    // Kept so "Quiz again" repeats the same scope rather than falling back to
+    // whatever file happens to be open when the button is pressed.
+    this.lastQuizNotePath = notePath;
+    this.lastQuizClassCode = classCode;
     const kind: QuizScope["kind"] = scope === "all" ? "all" : scope === "this" ? "note" : "query";
     this.session = startSession({ kind, label }, query, pool, Math.max(1, this.plugin.settings.quizCap));
     this.pushSystem(
@@ -958,7 +1169,7 @@ export class ChatPanel {
     // from it tests that fact and not another one in the same passage.
     const misses = missesForInbox(session);
 
-    this.lastQuiz = { scope: session.scope, query: session.query, misses };
+    this.lastQuiz = { scope: session.scope, query: session.query, misses, notePath: this.lastQuizNotePath, classCode: this.lastQuizClassCode };
     this.turns.push({
       role: "assistant",
       text: renderSummaryMarkdown(session),
@@ -991,11 +1202,11 @@ export class ChatPanel {
   async quizAgain(): Promise<void> {
     const last = this.lastQuiz;
     if (!last) {
-      this.pushSystem("No quiz to repeat. Type /quiz.");
+      this.pushSystem("No quiz to repeat. Say “quiz me”.");
       return;
     }
     const scope = last.scope.kind === "all" ? "all" : last.scope.kind === "note" ? "this" : "query";
-    await this.startQuiz(scope, last.query);
+    await this.startQuiz(scope, last.query, last.notePath, last.classCode);
   }
 
   /** Empty the log. The index survives: nothing about the vault changed. */
@@ -1036,8 +1247,8 @@ export class ChatPanel {
       log.createDiv({
         cls: "wikilm-muted",
         text: hasNotes
-          ? "Ask a question about your topic notes. Answers cite the highlights they came from. Type /help for commands."
-          : `No topic notes under ${prefix} yet. Digest a PDF first, or type /help for commands.`,
+          ? "Ask a question about your topic notes, or say “quiz me”, “digest”, “highlight”. Answers cite the highlights they came from. Say “help” for the rest."
+          : `No topic notes under ${prefix} yet. Open a PDF and say “digest”, or say “help”.`,
       });
     }
 
@@ -1116,8 +1327,8 @@ export class ChatPanel {
       return;
     }
 
-    if (turn.offer) {
-      this.renderOffer(el, turn);
+    if (turn.chips) {
+      this.renderChips(el, turn);
       return;
     }
 
@@ -1211,31 +1422,26 @@ export class ChatPanel {
   }
 
   /**
-   * The chip for a line that resembles a command without being one.
+   * The panel's own question, with a button per answer.
    *
-   * Nothing has been sent anywhere yet at this point: the matcher only guessed,
-   * and the two buttons are the two readings of what was typed. Either way the
-   * offer turn goes, so the log does not keep a chip whose choice was already
-   * made.
+   * This is where "never guess" is kept: a name that fits two PDFs, a PDF with
+   * no highlights to digest, a suggester that would work better with a
+   * transcript. The turn goes when a button is pressed, so the log does not
+   * keep a question whose answer was already given.
    */
-  private renderOffer(el: HTMLElement, turn: ChatTurn): void {
-    const offer = turn.offer;
-    if (!offer) return;
+  private renderChips(el: HTMLElement, turn: ChatTurn): void {
+    const chips = turn.chips;
+    if (!chips) return;
     const row = el.createDiv({ cls: "wikilm-chat-offer" });
-    row.createSpan({ cls: "wikilm-muted", text: "Did you mean to run a command?" });
-
-    const run = row.createEl("button", { cls: "mod-cta", text: `Run “${offer.name}”` });
-    run.disabled = this.busy;
-    run.addEventListener("click", () => {
-      this.dropTurn(turn);
-      void this.runCommand(offer.id);
-    });
-
-    const askInstead = row.createEl("button", { text: "Ask instead" });
-    askInstead.disabled = this.busy;
-    askInstead.addEventListener("click", () => {
-      this.dropTurn(turn);
-      void this.askQuestion(offer.question);
+    row.createSpan({ cls: "wikilm-muted", text: chips.prompt });
+    chips.options.forEach((o, i) => {
+      const b = row.createEl("button", { cls: i === 0 ? "mod-cta" : "", text: o.label });
+      b.disabled = this.busy;
+      b.addEventListener("click", () => {
+        this.dropTurn(turn);
+        this.rerender();
+        o.run();
+      });
     });
   }
 
@@ -1262,7 +1468,7 @@ export class ChatPanel {
     again.addEventListener("click", () => void this.quizAgain());
   }
 
-  /** Remove one turn by identity; the user turn that preceded an offer stays, because it was typed. */
+  /** Remove one turn by identity; the user turn that preceded a chip stays, because it was typed. */
   private dropTurn(turn: ChatTurn): void {
     const i = this.turns.indexOf(turn);
     if (i >= 0) this.turns.splice(i, 1);
@@ -1272,7 +1478,7 @@ export class ChatPanel {
     const box = wrap.createDiv({ cls: "wikilm-chat-input" });
     const ta = box.createEl("textarea", { cls: "wikilm-chat-textarea" });
     ta.rows = 3;
-    ta.placeholder = "Ask your notes, or type /help…";
+    ta.placeholder = "Ask your notes, or say: quiz me · digest · highlight · help";
     ta.value = this.draft;
     ta.disabled = this.busy;
     // The draft lives on the panel, so a store-driven re-render restores it.

@@ -100,7 +100,8 @@ function ask(s, over, verdict, userAnswer = "an answer", extras = {}) {
 // ---- parseQuizCommand --------------------------------------------------------
 
 test("parseQuizCommand covers the chat-local commands", () => {
-  assert.deepEqual(q.parseQuizCommand("/quiz"), { kind: "start", scope: "all", query: "" });
+  assert.deepEqual(q.parseQuizCommand("/quiz"), { kind: "start", scope: "this", query: "" });
+  assert.deepEqual(q.parseQuizCommand("/quiz all"), { kind: "start", scope: "all", query: "" });
   assert.deepEqual(q.parseQuizCommand("/Quiz this"), { kind: "start", scope: "this", query: "" });
   assert.deepEqual(q.parseQuizCommand("/quiz drug receptors"), {
     kind: "start",
@@ -117,7 +118,7 @@ test("parseQuizCommand covers the chat-local commands", () => {
 });
 
 test("an unrecognised slash command falls through", () => {
-  // The panel hands these to matchCommand, so /skpi must not be swallowed.
+  // The panel hands these to matchIntent, so /skpi must not be swallowed.
   assert.equal(q.parseQuizCommand("/skpi"), null);
   assert.equal(q.parseQuizCommand("/help"), null);
 });
@@ -751,11 +752,11 @@ test("summary lists a retried passage once", () => {
 });
 
 test("parseQuizCommand understands plain phrases", () => {
-  assert.deepEqual(q.parseQuizCommand("quiz me"), { kind: "start", scope: "all", query: "" });
+  assert.deepEqual(q.parseQuizCommand("quiz me"), { kind: "start", scope: "this", query: "" });
   assert.deepEqual(q.parseQuizCommand("Quiz me on receptors!"), { kind: "start", scope: "query", query: "receptors" });
   assert.deepEqual(q.parseQuizCommand("test me on this note"), { kind: "start", scope: "this", query: "" });
   assert.deepEqual(q.parseQuizCommand("start a quiz about drug affinity"), { kind: "start", scope: "query", query: "drug affinity" });
-  assert.deepEqual(q.parseQuizCommand("let's do a quick quiz"), { kind: "start", scope: "all", query: "" });
+  assert.deepEqual(q.parseQuizCommand("let's do a quick quiz"), { kind: "start", scope: "this", query: "" });
   assert.equal(q.parseQuizCommand("what is a quiz?"), null);
   assert.equal(q.parseQuizCommand("next"), null);
   assert.deepEqual(q.parseQuizCommand("next", true), { kind: "skip" });

@@ -129,10 +129,9 @@ export type QuizCommand =
 
 /**
  * Recognise the chat-local quiz commands, with or without a slash. These are
- * not registry commands (src/chatCommands.ts), so the panel must try this
- * first and fall through to `matchCommand` on null — which is what makes
- * `/skpi` still get the ordinary "no command matches" line instead of being
- * swallowed by the quiz.
+ * not registry commands (src/chatCommands.ts), so the panel tries this first
+ * while a quiz runs and falls through to `matchIntent` on null — which is what
+ * keeps `/skpi` an ordinary line rather than something the quiz swallows.
  *
  * Plain phrases: "quiz me", "quiz me on receptors", "test me on this note",
  * "start a quiz about affinity" start a quiz whether or not one is running.
@@ -169,10 +168,14 @@ export function parseQuizCommand(text: string, active = false): QuizCommand | nu
   return null;
 }
 
-/** "this" / "this note" / "the active note" mean the active note; anything else is a query; nothing means everything. */
+/**
+ * What a `quiz` line is about. A bare "quiz me" means the note in front of the
+ * reader, which is what they are looking at when they ask; "everything" and
+ * "all" are how the whole vault is asked for, and anything else is a query.
+ */
 function startFor(rest: string): QuizCommand {
   const r = rest.trim();
-  if (!r) return { kind: "start", scope: "all", query: "" };
+  if (!r) return { kind: "start", scope: "this", query: "" };
   if (/^(?:this|this note|the active note|the open note|the current note|everything|all)$/i.test(r)) {
     return /^(?:everything|all)$/i.test(r) ? { kind: "start", scope: "all", query: "" } : { kind: "start", scope: "this", query: "" };
   }

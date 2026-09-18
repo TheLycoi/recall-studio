@@ -206,6 +206,15 @@ test("indexNote carries titles, ids, pages and targets", () => {
   assert.deepEqual(stages[2].target, { page: 2 });
 });
 
+test("indexNote carries the note's class codes, scalar or list, and none when absent", () => {
+  const scalar = rt.indexNote("classes/HBIO250/X.md", "---\nclass: HBIO250\n---\nA sentence of prose here.");
+  assert.deepEqual(scalar[0].classCodes, ["HBIO250"]);
+  const list = rt.indexNote("classes/HBIO250/Y.md", "---\nclass: [HBIO250, PHED163]\n---\nAnother sentence of prose here.");
+  assert.deepEqual(list[0].classCodes, ["HBIO250", "PHED163"]);
+  const none = rt.indexNote("notes/Z.md", "A sentence of prose here.");
+  assert.deepEqual(none[0].classCodes, []);
+});
+
 test("indexNote strips == marks and the source link from claim text", () => {
   const stages = rt.indexNote(STAGES_PATH, STAGES_MD);
   assert.equal(

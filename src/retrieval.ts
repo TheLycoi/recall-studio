@@ -19,6 +19,8 @@ export interface EvidenceUnit {
   page: number | null;
   text: string;
   kind: "highlight" | "claim";
+  /** The note's `class:` codes, so a quiz can be scoped to one class. */
+  classCodes: string[];
 }
 
 /**
@@ -69,6 +71,7 @@ export function indexNote(path: string, md: string): EvidenceUnit[] {
       page: h.page,
       text: h.text,
       kind: "highlight",
+      classCodes: parsed.classCodes,
     });
   });
 
@@ -107,6 +110,7 @@ export function indexNote(path: string, md: string): EvidenceUnit[] {
         page: target ? target.page : null,
         text,
         kind: "claim",
+        classCodes: parsed.classCodes,
       });
       claimIndex += 1;
     }
@@ -119,7 +123,7 @@ export function indexNote(path: string, md: string): EvidenceUnit[] {
   // own prose so its content is reachable; a note that already yielded units
   // keeps exactly the units it had.
   if (units.length === 0) {
-    proseUnits(path, noteTitle, raw(md)).forEach((u) => units.push(u));
+    proseUnits(path, noteTitle, raw(md), parsed.classCodes).forEach((u) => units.push(u));
   }
 
   return units;
@@ -140,7 +144,7 @@ function raw(md: string): string {
  * line's PDF link (when it has one) is kept as the unit's target, which is
  * what lets an answer cite back to the page it came from.
  */
-function proseUnits(path: string, noteTitle: string, body: string): EvidenceUnit[] {
+function proseUnits(path: string, noteTitle: string, body: string, classCodes: string[]): EvidenceUnit[] {
   const out: EvidenceUnit[] = [];
   let fenced = false;
   let i = 0;
@@ -193,6 +197,7 @@ function proseUnits(path: string, noteTitle: string, body: string): EvidenceUnit
       page: target ? target.target.page : null,
       text,
       kind: "claim",
+      classCodes,
     });
     i += 1;
   }

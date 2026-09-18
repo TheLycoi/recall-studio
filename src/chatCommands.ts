@@ -1,10 +1,14 @@
-// Deciding what a line typed into the Ask box means: a command to run, a
-// command to offer, or a question for the model. Pure — no `obsidian` import —
-// so the whole decision table is testable; the fuzzy scorer is injected.
+// Deciding what a line typed into the Ask box means: an action to run, or a
+// question for the notes. Pure — no `obsidian` import — so the whole decision
+// table is testable.
 //
-// Policy (plan decision, 2026-09-10): a slash line or an exact name/alias runs
-// at once; a plain sentence that merely resembles a command shows a one-click
-// Run chip rather than guessing; everything else is a question.
+// Policy (chat-studio design, 2026-09-17): the chat is the studio. A plain
+// phrase with a verb and a target runs the action; a target that fits two
+// files is offered as chips rather than guessed; everything else is a
+// question. A leading slash is tolerated and means the same thing, so older
+// habits keep working, but no slash grammar is documented.
+
+import { parseQuizCommand } from "./quiz";
 
 export interface CommandLike {
   id: string;
@@ -12,262 +16,202 @@ export interface CommandLike {
   aliases: string[];
 }
 
-export type CommandMatch =
+/** What an action is about: the open file, a page, a class, a PDF, a manifest, or words. */
+export type Target =
+  | { kind: "active" }
+  | { kind: "page"; path: string; title: string }
+  | { kind: "class"; code: string }
+  | { kind: "pdf"; path: string; basename: string }
+  | { kind: "manifest"; path: string }
+  | { kind: "query"; words: string };
+
+/** What a typed line means. `ambiguous` is the panel's cue to ask rather than guess. */
+export type Intent =
+  | { kind: "quiz"; target: Target }
+  | { kind: "digest"; target: Target }
+  | { kind: "highlight"; target: Target }
+  | { kind: "lint" }
+  | { kind: "export" }
+  | { kind: "inbox" }
   | { kind: "help" }
-  | { kind: "run"; id: string }
-  | { kind: "offer"; id: string; score: number }
-  | { kind: "unknown"; query: string }
+  | { kind: "command"; id: string }
+  | { kind: "ambiguous"; verb: "digest" | "highlight"; words: string; candidates: Target[] }
   | { kind: "question" };
 
-/** A scorer built from a query: higher is a better match, null is no match. */
-export type FuzzyScorer = (query: string) => (text: string) => number | null;
-
-// How good a plain sentence's resemblance to a command must be before the chat
-// offers a Run chip, counted in shared content words: the panel injects
-// `tokenOverlapScorer` (src/chatPanel.ts:411), the same scorer the tests use,
-// so this constant means the same thing in both.
-//
-// Two, and it stays two, because an offer *replaces* the answer rather than
-// sitting beside it (src/chatPanel.ts:427-443). At one, "what does the wiki
-// say about hallucination" shares the word "wiki" with a command and would get
-// a chip instead of an answer — swallowing a real question, which is worse
-// than missing a chip. Filler no longer counts toward it (COMMAND_STOPWORDS),
-// so the two words that reach this bar are two words that mean something.
-export const OFFER_THRESHOLD = 2;
-
-/**
- * Shared content words before a slash line runs its best match outright.
- *
- * Running the wrong command unasked is worse than one extra click, and at one
- * shared word "/wikilint" and "/wiki notes about lint" are indistinguishable.
- */
-const SLASH_RUN_SCORE = 2;
-
-/**
- * Shared content words before a slash line offers its best match.
- *
- * Lower than `OFFER_THRESHOLD` because a slash cannot swallow a question: the
- * reader has already said they want to run something, so the only choice is
- * which command — or the dead end this replaced.
- */
-const SLASH_OFFER_SCORE = 1;
-
-/**
- * Tie-break weight for an alias hit over a name hit of the same size.
- *
- * A fraction rather than a whole point: it settles which command a score of 1
- * belongs to without ever pushing that score up to `SLASH_RUN_SCORE`, so
- * breaking a tie can never turn an offer into something that runs unasked.
- */
-const ALIAS_BONUS = 0.5;
-
-/**
- * Words that open a question rather than an instruction.
- *
- * Deliberately only the opening word: "lint the wiki" is a command and "how do
- * I lint the wiki" is not, and the difference is entirely at the front. A
- * command phrased as a request ("show me the inbox") does not start with one
- * of these, so it can still be offered.
- */
-const QUESTION_OPENERS = new Set("what which who whom whose when where why how is are was were do does did can could should would will am".split(" "));
-
-/** Whether a line opens with an interrogative, so it reads as a question even without a "?". */
-function opensLikeQuestion(s: string): boolean {
-  const first = s.trim().toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean)[0];
-  return first !== undefined && QUESTION_OPENERS.has(first);
+/** One page of the retrieval index, as the matcher needs to see it. */
+export interface IntentPage {
+  path: string;
+  title: string;
+  aliases: string[];
+  classCodes: string[];
+  hasPdfLinks: boolean;
 }
 
-/** Only short lines are considered command-like; longer ones read as prose. */
-const MAX_OFFER_WORDS = 8;
-
-function norm(s: string): string {
-  return s.trim().toLowerCase();
+/** Everything in the vault a target could name, plus the palette. */
+export interface IntentContext {
+  pages: IntentPage[];
+  pdfs: Array<{ path: string; basename: string }>;
+  manifests: string[];
+  commands: CommandLike[];
 }
 
-/** Fold the trailing ellipsis and punctuation the palette names carry. */
-function normName(s: string): string {
-  return norm(s)
-    .replace(/[…\s]+$/, "")
-    .replace(/[.!?,;:]+$/, "")
+const POLITENESS = /^(?:please |ok |okay |hey |can you |could you |would you |will you )+/;
+const TARGET_LEAD = /^(?:on|about|from|over|in|for|of)\s+/;
+const THIS = /^(?:this|this note|this pdf|this file|the active note|the open note|the current note|here)$/;
+
+function normalize(text: string): string {
+  return text
+    .trim()
+    .replace(/^\/+/, "")
+    .toLowerCase()
+    .replace(/[.!?,;:]+$/g, "")
+    .replace(/\s+/g, " ")
+    .replace(POLITENESS, "")
     .trim();
 }
 
-function wordCount(s: string): number {
-  const t = s.trim();
-  return t ? t.split(/\s+/).length : 0;
+function fold(s: string): string {
+  return s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 }
 
-/** Best-scoring command under `score`, or null when nothing scores above zero. */
-function best<T>(items: T[], score: (item: T) => number | null): { item: T; score: number } | null {
-  let winner: { item: T; score: number } | null = null;
-  for (const item of items) {
-    const s = score(item);
-    if (s === null || s <= 0) continue;
-    if (!winner || s > winner.score) winner = { item, score: s };
-  }
-  return winner;
+function stripArticles(s: string): string {
+  return s.replace(/^(?:the|a|an|my)\s+/, "").replace(/\s+(?:pdf|deck|file|note|notes|page|lecture)$/, "").trim();
 }
 
-export function matchCommand(input: string, commands: CommandLike[], fuzzy: FuzzyScorer): CommandMatch {
-  const trimmed = input.trim();
-  if (!trimmed) return { kind: "question" };
+/** Words of the target, folded, two characters or longer. */
+function tokens(s: string): string[] {
+  return fold(s).split(" ").filter((w) => w.length >= 2);
+}
 
-  if (trimmed.startsWith("/")) {
-    const rest = trimmed.slice(1).trim();
-    const key = normName(rest);
-    if (key === "help" || key === "commands" || key === "?" || rest === "?") return { kind: "help" };
+function pageFor(words: string, ctx: IntentContext): IntentPage | null {
+  const k = fold(words);
+  if (!k) return null;
+  return ctx.pages.find((p) => fold(p.title) === k || p.aliases.some((a) => fold(a) === k)) ?? null;
+}
 
-    // Exact id or alias first: "/extract" must never depend on fuzzy scores.
-    for (const c of commands) {
-      if (key === norm(c.id) || c.aliases.some((a) => key === norm(a))) return { kind: "run", id: c.id };
-    }
-    // Then the palette name, exactly or fuzzily: "/Extract PDF highlights".
-    for (const c of commands) {
-      if (key === normName(c.name)) return { kind: "run", id: c.id };
-    }
-    // Aliases count here as well as names: "/wikilint" resembles the alias
-    // "wiki" and nothing in any palette name, and scoring names alone sent it
-    // to the dead end below with the command one step away.
-    // An alias hit outweighs a name hit of the same size: an alias is the
-    // command's short name, while a palette name is a sentence that can share
-    // a word by coincidence. Without this "/wikilint" matched "Read this
-    // markdown source into the wiki" as readily as the alias "wiki".
-    const score = fuzzy(rest);
-    const hit = best(commands, (c) => {
-      let top = score(c.name);
-      for (const a of c.aliases) {
-        const s = score(a);
-        if (s === null) continue;
-        const weighted = s + ALIAS_BONUS;
-        if (top === null || weighted > top) top = weighted;
-      }
-      return top;
-    });
-    // A slash line that clearly names its command still runs at once, which is
-    // the policy this file opened with: two or more shared content words is a
-    // name being typed, not a guess. A single shared word is the new case —
-    // "/wikilint" used to dead-end at "No command matches" with the command one
-    // step away — and is offered rather than run, so a typo that lands on the
-    // wrong command can be declined instead of firing.
-    if (hit && hit.score >= SLASH_RUN_SCORE) return { kind: "run", id: hit.item.id };
-    // The alias tie-break is an ordering device, not a count; the score that
-    // leaves here is the shared-word count it came from.
-    if (hit && hit.score >= SLASH_OFFER_SCORE) return { kind: "offer", id: hit.item.id, score: Math.floor(hit.score) };
-    return { kind: "unknown", query: rest };
+function classFor(words: string, ctx: IntentContext): string | null {
+  const k = fold(words).replace(/\s+/g, "");
+  for (const p of ctx.pages) for (const c of p.classCodes) if (fold(c).replace(/\s+/g, "") === k) return c;
+  return null;
+}
+
+/** Files whose name holds every word of the target. */
+function matchingFiles(words: string, ctx: IntentContext, allowNotes: boolean): Target[] {
+  const ws = tokens(words);
+  if (ws.length === 0) return [];
+  const has = (name: string) => {
+    const f = ` ${fold(name)} `;
+    return ws.every((w) => f.includes(w));
+  };
+  const out: Target[] = [];
+  for (const pdf of ctx.pdfs) if (has(pdf.basename)) out.push({ kind: "pdf", path: pdf.path, basename: pdf.basename });
+  if (allowNotes) for (const p of ctx.pages) if (p.hasPdfLinks && (has(p.title) || p.aliases.some(has))) out.push({ kind: "page", path: p.path, title: p.title });
+  for (const m of ctx.manifests) if (has(m.split("/").pop()?.replace(/\.md$/i, "") ?? m)) out.push({ kind: "manifest", path: m });
+  return out;
+}
+
+/**
+ * Files fitting the target, words as typed first.
+ *
+ * `stripArticles` drops a trailing "notes", "pdf", "deck" so "the doping pdf"
+ * finds a PDF that never says "pdf" in its name. That same strip turns
+ * "ch3 notes" — the exact name of a file — into "ch3", which fits three files
+ * and would be handed back as a question to answer. So the words as typed are
+ * tried first, and the stripped form only when they fit nothing: naming a file
+ * exactly can never be made ambiguous by a word another file happens to share.
+ */
+function filesFor(words: string, ctx: IntentContext, allowNotes: boolean): Target[] {
+  const literal = matchingFiles(words, ctx, allowNotes);
+  if (literal.length > 0) return literal;
+  return matchingFiles(stripArticles(words), ctx, allowNotes);
+}
+
+function quizTarget(words: string, ctx: IntentContext): Target {
+  const w = words.trim().replace(TARGET_LEAD, "").trim();
+  if (!w || THIS.test(w)) return { kind: "active" };
+  const page = pageFor(w, ctx) ?? pageFor(stripArticles(w), ctx);
+  if (page) return { kind: "page", path: page.path, title: page.title };
+  const code = classFor(w, ctx);
+  if (code) return { kind: "class", code };
+  return { kind: "query", words: w };
+}
+
+/**
+ * A digest or highlight target, which must be a real file: a quiz can fall
+ * back to searching the index for words, but nothing can be digested that is
+ * not a PDF, a manifest, or a note citing one. A name that fits two files, or
+ * none, is returned as `ambiguous` for the panel to ask about.
+ */
+function fileIntent(verb: "digest" | "highlight", words: string, ctx: IntentContext): Intent {
+  const w = words.trim().replace(TARGET_LEAD, "").trim();
+  if (!w || THIS.test(w)) return { kind: verb, target: { kind: "active" } };
+  if (verb === "digest") {
+    const page = pageFor(w, ctx) ?? pageFor(stripArticles(w), ctx);
+    if (page) return page.hasPdfLinks ? { kind: verb, target: { kind: "page", path: page.path, title: page.title } } : { kind: "ambiguous", verb, words: w, candidates: [] };
+  }
+  const found = filesFor(w, ctx, verb === "digest");
+  if (found.length === 1) return { kind: verb, target: found[0] };
+  return { kind: "ambiguous", verb, words: w, candidates: found.slice(0, 3) };
+}
+
+export function matchIntent(text: string, ctx: IntentContext): Intent {
+  const t = normalize(text);
+  if (!t) return { kind: "question" };
+
+  if (/^(?:help|what can you do|what can i say|commands)$/.test(t)) return { kind: "help" };
+
+  // `parseQuizCommand` reads "quiz me on X" and "quiz on X" but not the bare
+  // "quiz X" that a stripped "/quiz receptors" leaves behind. Rewriting that
+  // one shape into a form it already knows keeps the old slash habit working.
+  //
+  // Only the verb "quiz" opens it: "test" and "drill" lead ordinary sentences
+  // ("test the hypothesis", "drill down into receptors") that must stay
+  // questions, and they are reachable as "test me on X" either way. The target
+  // has to be a page, an alias or a class code as well — a bare "quiz" plus
+  // loose words is prose ("quiz results are in"), and the reader who means a
+  // subject can say "quiz me about it".
+  const bare = /^quiz\s+(?!me\b|all\b|everything\b|on\b|about\b|from\b|over\b)(.+)$/.exec(t);
+  if (bare) {
+    const named = quizTarget(bare[1], ctx);
+    if (named.kind === "page" || named.kind === "class") return { kind: "quiz", target: named };
+  }
+  const quiz = parseQuizCommand(t, false);
+  if (quiz && quiz.kind === "start") {
+    if (quiz.scope === "this") return { kind: "quiz", target: { kind: "active" } };
+    if (quiz.scope === "all") return { kind: "quiz", target: { kind: "query", words: "" } };
+    return { kind: "quiz", target: quizTarget(quiz.query, ctx) };
   }
 
-  // Plain text. An exact name or alias is unambiguous enough to just run.
-  const key = normName(trimmed);
-  for (const c of commands) {
-    if (key === normName(c.name) || key === norm(c.id) || c.aliases.some((a) => key === norm(a))) {
-      return { kind: "run", id: c.id };
+  const digest = /^(?:ai[- ])?digest(?:\s+(.*))?$/.exec(t);
+  if (digest) return fileIntent("digest", digest[1] ?? "", ctx);
+  const highlight = /^(?:(?:ai[- ])?highlight|suggest highlights?|ai[- ]suggest)(?:\s+(.*))?$/.exec(t);
+  if (highlight) return fileIntent("highlight", highlight[1] ?? "", ctx);
+
+  if (/^(?:lint(?: the)?(?: wiki)?|check the wiki|wiki check|check my wiki)$/.test(t)) return { kind: "lint" };
+  if (/^export(?: (?:all|reviewed|cards|the cards|to anki|reviewed cards to anki|reviewed cards|cards to anki))*$/.test(t)) return { kind: "export" };
+  if (/^(?:open (?:the )?inbox|show (?:the )?inbox|inbox)$/.test(t)) return { kind: "inbox" };
+
+  // A palette name or alias typed exactly: unambiguous enough to run.
+  const key = t.replace(/[…\s]+$/, "");
+  for (const c of ctx.commands) {
+    if (key === c.id.toLowerCase() || key === c.name.toLowerCase().replace(/[…\s]+$/, "") || c.aliases.some((a) => key === a.toLowerCase())) {
+      return { kind: "command", id: c.id };
     }
   }
-
-  // A question mark or a long sentence is prose, whatever it scores.
-  if (trimmed.endsWith("?")) return { kind: "question" };
-  if (wordCount(trimmed) > MAX_OFFER_WORDS) return { kind: "question" };
-  // So is anything that opens like a question, mark or no mark. Word overlap
-  // cannot separate "lint the wiki" from "how do I lint a wiki note" — both
-  // share two words with the lint command — but the opening word can, and
-  // plenty of readers never type the "?". This matters because an offer
-  // replaces the answer (src/chatPanel.ts:427-443): a question read as a
-  // command cannot be asked at all, while a command read as a question costs
-  // one retype.
-  if (opensLikeQuestion(trimmed)) return { kind: "question" };
-
-  const score = fuzzy(trimmed);
-  const byName = best(commands, (c) => score(c.name));
-  const byAlias = best(commands, (c) => {
-    let top: number | null = null;
-    for (const a of c.aliases) {
-      const s = score(a);
-      if (s !== null && (top === null || s > top)) top = s;
-    }
-    return top;
-  });
-  const hit = !byName ? byAlias : !byAlias ? byName : byAlias.score > byName.score ? byAlias : byName;
-  if (hit && hit.score >= OFFER_THRESHOLD) return { kind: "offer", id: hit.item.id, score: hit.score };
   return { kind: "question" };
 }
 
-/**
- * The chat-local quiz commands, which are not in the registry (src/quiz.ts:102)
- * and so have no `available` state to report — they are available exactly when
- * a quiz is running, which the lines themselves say.
- *
- * `/wiki` used to be listed here. It is a registry command now (`lint-wiki`),
- * so `renderHelp` prints it with the rest and a line here would duplicate it.
- */
-export const QUIZ_HELP = [
-  "- **/quiz** [this | words] — quiz all topic notes, the active note, or matching passages; runs until it finds the edge of what you know",
-  "- **/hint** — one clue for the current question",
-  "- **/skip** — skip the current question: shows the answer, and counts as a passage you could not produce",
-  "- **/idk** — the same as /skip",
-  "- **/stop** — end the quiz early and show the score",
-].join("\n");
-
-/**
- * Markdown for `/help`: one line per command, with its first alias and
- * availability. `quiz` appends the chat-local block below the registry lines;
- * it is a parameter rather than unconditional so the command lines can still
- * be counted on their own.
- */
-export function renderHelp(
-  commands: Array<CommandLike & { hint: string; available: boolean }>,
-  quiz = false,
-): string {
-  const lines = commands
-    .map((c) => `- **/${c.aliases[0] ?? c.id}** ${c.name} — ${c.hint} (${c.available ? "available" : "not now"})`)
-    .join("\n");
-  return quiz ? `${lines}\n${QUIZ_HELP}` : lines;
-}
-
-/**
- * Deterministic scorer for the offer decision: how many distinct words of the
- * query appear in the text (lowercased, split on non-alphanumerics; hyphenated
- * names such as "AI-highlight" split into their parts), counting a query word
- * that contains a command word as a hit. Null when none do. The
- * chat panel injects this rather than Obsidian's `prepareFuzzySearch`, whose
- * score scale is undocumented (obsidian.d.ts:5244-5252), so `OFFER_THRESHOLD`
- * means "at least this many shared words" in tests and in the app alike.
- */
-/**
- * Words that carry no signal about which command was meant.
- *
- * Every palette name is an English phrase, so a question that shares only
- * "the" and "for" with one was scoring as high as a query that actually named
- * it: "what does the wiki say about hallucination" reached the offer threshold
- * against "Check the wiki for gaps and dead links" on its filler alone.
- */
-const COMMAND_STOPWORDS = new Set(
-  "a an and are as at be by do does for from how in into is it its of on or that the this to what when where which who why with your".split(" "),
-);
-
-export function tokenOverlapScorer(query: string): (text: string) => number | null {
-  const tokens = (v: string) =>
-    new Set(v.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 0 && !COMMAND_STOPWORDS.has(w)));
-  const q = tokens(query);
-  return (text) => {
-    const t = tokens(text);
-    let n = 0;
-    for (const w of q) {
-      if (t.has(w)) {
-        n++;
-        continue;
-      }
-      // A run-together word still names the command: "wikilint" is "wiki" and
-      // "lint" typed without the space, and scoring that zero is what made the
-      // Run chip unreachable for the phrasing readers actually use. Only
-      // command words of three characters or more count, so a short one cannot
-      // match inside an unrelated query word.
-      for (const word of t) {
-        if (word.length >= 3 && w.includes(word)) {
-          n++;
-          break;
-        }
-      }
-    }
-    return n > 0 ? n : null;
-  };
+/** What the box understands, one phrase per line. Shown for "help". */
+export function renderHelp(): string {
+  return [
+    "- **quiz me** — questions on the open note until the edge of what you know shows; **quiz me on Receptors**, **quiz me on HBIO250**, **quiz me on everything**",
+    "- **digest** — group the open PDF's highlights into concept and entity pages; **digest Doping** names a PDF or a note with PDF++ links",
+    "- **highlight** — let the model pick spans in the open PDF, each checked against the text layer; **highlight Ch3**",
+    "- **lint** — check the wiki for wrong quotes, dead links and duplicate pages",
+    "- **export** — send every reviewed card to Anki",
+    "- **inbox** — open the inbox",
+    "- while a quiz runs: **hint**, **skip**, **stop**",
+    "",
+    "Anything else is a question for your notes.",
+  ].join("\n");
 }

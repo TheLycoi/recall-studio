@@ -117,6 +117,17 @@ export function noteAliases(md: string): string[] {
   return [];
 }
 
+/** A frontmatter key's values: a scalar, an inline `[a, b]` list, or a block list. Empty when absent. */
+export function fmList(fm: string, key: string): string[] {
+  const unquote = (s: string) => s.trim().replace(/^["']|["']$/g, "").trim();
+  const inline = new RegExp(`^${key}:\\s*\\[(.*)\\]\\s*$`, "m").exec(fm);
+  if (inline) return inline[1].split(",").map(unquote).filter(Boolean);
+  const block = new RegExp(`^${key}:\\s*\\n((?:[ \\t]*-[^\\n]*\\n?)*)`, "m").exec(fm);
+  if (block) return block[1].split("\n").map((l) => unquote(l.replace(/^[ \t]*-\s*/, ""))).filter(Boolean);
+  const scalar = new RegExp(`^${key}:\\s*(.+)$`, "m").exec(fm);
+  return scalar ? [unquote(scalar[1])].filter(Boolean) : [];
+}
+
 export interface RenderTopicNoteArgs {
   title: string;
   classCode: string;
@@ -188,6 +199,8 @@ export interface ParsedTopicHighlight {
 export interface ParsedTopicNote {
   title: string;
   classCode: string;
+  /** Every code in `class:`, in order; `classCode` is the first. */
+  classCodes: string[];
   sourceBasename: string;
   summary: string;
   highlights: ParsedTopicHighlight[];
@@ -209,8 +222,8 @@ export function parseTopicNote(md: string): ParsedTopicNote {
   const fmMatch = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(md);
   const frontmatter = fmMatch ? fmMatch[1] : "";
 
-  const classMatch = /^class:\s*(.*)$/m.exec(frontmatter);
-  const classCode = classMatch ? classMatch[1].trim() : "";
+  const classCodes = fmList(frontmatter, "class");
+  const classCode = classCodes[0] ?? "";
 
   const sourceMatch = /^source_file:\s*"?\[\[(.+?)\.pdf\]\]"?\s*$/m.exec(frontmatter);
   const sourceBasename = sourceMatch ? sourceMatch[1] : "";
@@ -244,7 +257,7 @@ export function parseTopicNote(md: string): ParsedTopicNote {
     }
   }
 
-  return { title, classCode, sourceBasename, summary, highlights };
+  return { title, classCode, classCodes, sourceBasename, summary, highlights };
 }
 
 export interface MergeResult {
