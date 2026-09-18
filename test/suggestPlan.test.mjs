@@ -589,3 +589,53 @@ test("a new karpathy page takes its aliases and tag from the proposal", () => {
   assert.ok(out.notes[0].content.includes("tags: [term]"));
   assert.ok(out.notes[0].content.includes('- "Self-efficacy belief"'));
 });
+
+function seededRng(seed) {
+  let s = seed >>> 0;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
+const WIKI4 = [
+  { title: "pharmacology", kind: "concept", path: "wiki/concepts/pharmacology.md", md: "---\ntype: concept\naliases:\n  - \"Drug Action\"\n---\n\n# Pharmacology\n\nSee [[receptors]], [[dosing]] and [[wada]].\n" },
+  { title: "receptors", kind: "concept", path: "wiki/concepts/receptors.md", md: "---\ntype: concept\n---\n\n# Receptors\n\nBack to [[pharmacology]] and [[dosing]].\n" },
+  { title: "dosing", kind: "concept", path: "wiki/concepts/dosing.md", md: "---\ntype: concept\n---\n\n# Dosing\n\nSee [[pharmacology]] and [[receptors]].\n" },
+  { title: "wada", kind: "entity", path: "wiki/entities/wada.md", md: "---\ntype: entity\n---\n\n# WADA\n\nPolices [[pharmacology]].\n" },
+];
+const PLAN_OPTS = { classCode: "", pdfBasename: "P", conceptsFolder: "wiki/concepts", entitiesFolder: "wiki/entities", schema: "karpathy", ppr: { rng: seededRng(7) } };
+
+test("relatedLinksFor names the pages the summary mentions, in full-path form with the page's own heading", () => {
+  const r = sp.relatedLinksFor("Half-Life", "How long a drug persists; a term from drug action.", WIKI4, PLAN_OPTS);
+  assert.deepEqual(r.concepts[0], { path: "concepts/pharmacology", display: "Pharmacology" }, "named by its alias “Drug Action”");
+});
+
+test("relatedLinksFor walks the graph from what was named and never links the page itself", () => {
+  const r = sp.relatedLinksFor("Pharmacology", "About pharmacology and receptors.", WIKI4, PLAN_OPTS);
+  const paths = r.concepts.map((l) => l.path);
+  assert.ok(!paths.includes("concepts/pharmacology"), "a page does not relate to itself");
+  assert.ok(paths.includes("concepts/receptors"), "the named neighbour is there");
+  assert.ok(paths.includes("concepts/dosing"), "and the one reached by walking the links");
+  assert.deepEqual(r.entities.map((l) => l.path), ["entities/wada"]);
+});
+
+test("relatedLinksFor with nothing named links nothing rather than guessing", () => {
+  const r = sp.relatedLinksFor("Something Else", "Unrelated prose.", WIKI4, PLAN_OPTS);
+  assert.deepEqual(r, { concepts: [], entities: [] });
+});
+
+test("a new karpathy page renders its related sections from the planner, not the model", () => {
+  const maps = new Map([[3, pm.buildPageMap([item("Half-life is the time for the concentration to halve.")])]]);
+  const spans = sp.verifySpans(
+    draftOf([span(3, "Half-life is the time for the concentration to halve.", "Half-Life", "concept")]),
+    maps,
+    { perPage: 3, remaining: 10, existingKeys: new Set(), batch: { from: 3, to: 3 } },
+  ).spans;
+  const rows = sp.toManifestHighlights(spans, maps);
+  const proposed = [newNote("Half-Life", { summary: "A term from drug action about receptors.", tag: "term" })];
+  const out = sp.planWikiNotes(spans, rows, proposed, WIKI4, PLAN_OPTS);
+  const md = out.notes[0].content;
+  assert.ok(md.includes("## Related Concepts\n- [[concepts/pharmacology|Pharmacology]]"), md);
+  assert.ok(md.includes("- [[concepts/receptors|Receptors]]"));
+});

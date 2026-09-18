@@ -557,6 +557,9 @@ export interface RenderWikiNoteArgs {
   aliases?: string[];
   /** The subtype tag; falls back to `other` when not in the kind's vocabulary. Karpathy schema only. */
   tag?: string;
+  /** Links the planner resolved to real pages. Karpathy schema only; rendered by code, never by the model. */
+  relatedConcepts?: RelatedLink[];
+  relatedEntities?: RelatedLink[];
   /** Today, so a caller can render a fixed date in a test. */
   today?: string;
 }
@@ -706,8 +709,8 @@ export function renderWikiNote(a: RenderWikiNoteArgs): string {
       definition: a.summary,
       keyCharacteristics: [],
       applications: [],
-      relatedConcepts: [],
-      relatedEntities: [],
+      relatedConcepts: a.relatedConcepts ?? [],
+      relatedEntities: a.relatedEntities ?? [],
       highlights: a.highlights,
       pdfBasename: a.pdfBasename,
     });

@@ -13,6 +13,7 @@ import {
   safeHeading,
   safeTitle,
   type PreparedNote,
+  type RelatedLink,
   type WikiSchema,
 } from "./topicNote";
 import type { SuggestDraft } from "./schemas";
@@ -20,7 +21,8 @@ import { MANIFEST_CONTEXT_CHARS, sortAndAssignIds, type ManifestHighlight } from
 import { highlightKey, type PdfTarget } from "./pdflink";
 import { significantTokens } from "./retrieval";
 import { contextFor, pageText, selectionText, type SelectionRange } from "./pdftext";
-import { normalizeWs } from "./util";
+import { buildGraph, isGraphUsable, pprFromSeeds, type PPROptions } from "./graph";
+import { escapeRegExp, normalizeWs } from "./util";
 
 /**
  * 1-based inclusive page ranges of at most `perBatch` pages. A `perBatch`
@@ -207,6 +209,8 @@ export interface PlanWikiOptions {
    * note" choice; empty on the first plan.
    */
   keepAsNew?: string[];
+  /** Random source for the related-links walk; tests seed it. */
+  ppr?: PPROptions;
 }
 
 /** A proposed note filed into an existing one instead of being created. */
@@ -497,6 +501,7 @@ export function planWikiNotes(
     const kind = proposed?.kind ?? group.kind;
     const summary = proposed?.summary ?? "";
     const folder = kind === "entity" ? opts.entitiesFolder : opts.conceptsFolder;
+    const related = opts.schema === "karpathy" ? relatedLinksFor(group.title, summary, wiki ?? [], opts) : { concepts: [], entities: [] };
     const content = renderWikiNote({
       classCode: opts.classCode,
       pdfBasename: opts.pdfBasename,
@@ -507,6 +512,8 @@ export function planWikiNotes(
       kind,
       aliases: proposed?.aliases ?? [],
       tag: proposed?.tag,
+      relatedConcepts: related.concepts,
+      relatedEntities: related.entities,
     });
     notes.push({
       title: group.title,
@@ -522,6 +529,71 @@ export function planWikiNotes(
   }
 
   return { notes, orphanTitles, routed };
+}
+
+/**
+ * The pages a new page should point at, chosen by code from the vault.
+ *
+ * Two sources, in order. First, pages the title or summary names outright —
+ * by title or by alias, as whole words — because a page the prose mentions
+ * is the page a reader will want next. Then, when the graph is dense enough
+ * to walk (`isGraphUsable`), the neighbours Personalized PageRank reaches
+ * from those pages. A page names nothing → it links nothing; an invented
+ * link is exactly the dead link the lint exists to catch.
+ *
+ * Links are written in the schema's full-path form, `[[concepts/page|Title]]`,
+ * with the target's own `# Heading` as display text, and only ever to a page
+ * in `wiki`, so every link here resolves on the day it is written.
+ */
+export function relatedLinksFor(
+  title: string,
+  summary: string,
+  wiki: WikiNoteIn[],
+  opts: PlanWikiOptions,
+): { concepts: RelatedLink[]; entities: RelatedLink[] } {
+  if (wiki.length === 0) return { concepts: [], entities: [] };
+  const self = safeTitle(title).toLowerCase();
+  const haystack = normalizeWs(`${title} ${summary}`).toLowerCase();
+  const mentions = (name: string): boolean => {
+    const k = normalizeWs(name).toLowerCase();
+    if (k.length < 4) return false;
+    return new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRegExp(k)}([^\\p{L}\\p{N}]|$)`, "u").test(haystack);
+  };
+  const others = wiki.filter((w) => safeTitle(w.title).toLowerCase() !== self && displayTitle(w).toLowerCase() !== self);
+  const seeds = others.filter((w) => [w.title, displayTitle(w), ...noteAliases(w.md)].some(mentions));
+  if (seeds.length === 0) return { concepts: [], entities: [] };
+
+  // Named pages outrank walked ones, in the order they were named.
+  const score = new Map<string, number>();
+  seeds.forEach((w, i) => score.set(w.path, 2 + (seeds.length - i) / (seeds.length + 1)));
+  const graph = buildGraph(wiki.map((w) => ({ path: w.path, content: w.md })));
+  if (isGraphUsable(graph)) {
+    for (const [p, s] of pprFromSeeds(graph, seeds.map((w) => w.path), opts.ppr)) {
+      if (!score.has(p)) score.set(p, s);
+    }
+  }
+  const byPath = new Map(others.map((w) => [w.path, w]));
+  const ranked = [...score.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([p]) => byPath.get(p))
+    .filter((w): w is WikiNoteIn => w !== undefined);
+  const link = (w: WikiNoteIn): RelatedLink => ({ path: relatedPath(w.path, opts), display: displayTitle(w) });
+  return {
+    concepts: ranked.filter((w) => w.kind === "concept").slice(0, 3).map(link),
+    entities: ranked.filter((w) => w.kind === "entity").slice(0, 2).map(link),
+  };
+}
+
+/** `wiki/concepts/x.md` → `concepts/x`: the path relative to the wiki root, which is the parent of the concepts folder. */
+function relatedPath(path: string, opts: PlanWikiOptions): string {
+  const root = opts.conceptsFolder.replace(/\/+$/, "").split("/").slice(0, -1).join("/");
+  const rel = root && path.startsWith(`${root}/`) ? path.slice(root.length + 1) : path;
+  return rel.replace(/\.md$/i, "");
+}
+
+/** A page's own `# Heading`, else its filename. */
+function displayTitle(w: WikiNoteIn): string {
+  return /^#\s+(.+?)\s*$/m.exec(w.md)?.[1]?.trim() || w.title;
 }
 
 /**
