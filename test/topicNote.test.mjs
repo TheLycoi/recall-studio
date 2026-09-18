@@ -363,6 +363,40 @@ test("planTopicNotes files a new title that names a home into that page under a 
   assert.ok(created.content.includes("tags: [term]"));
 });
 
+test("planTopicNotes gives one row per page when two proposals are filed into the same home", () => {
+  const home = {
+    path: "classes/HBIO250/Pharmacology.md",
+    title: "Pharmacology",
+    kind: "concept",
+    aliases: [],
+    classCodes: ["HBIO250"],
+    md: "---\ntype: concept\nclass: HBIO250\n---\n\n# Pharmacology\n\n## Summary\nS.\n\n## Highlights\n\n## Related topics\n",
+  };
+  const manifest = {
+    pdfPath: "sources/class notes/HBIO250/Deck.pdf",
+    pdfBasename: "Deck",
+    classCode: "HBIO250",
+    extracted: "",
+    sources: [],
+    highlights: [SELECTION_HIGHLIGHT, { ...RECT_HIGHLIGHT, text: "Aspirin inhibits COX." }],
+  };
+  const draft = {
+    notes: [
+      { title: "COX Inhibitors", kind: "concept", aliases: [], tag: "term", closest_existing: "Pharmacology", why_new: "part of pharmacology", summary: "S.", highlight_ids: ["H05"], related: [] },
+      { title: "Beta Blockers", kind: "concept", aliases: [], tag: "term", closest_existing: "Pharmacology", why_new: "part of pharmacology", summary: "B.", highlight_ids: ["H04"], related: [] },
+    ],
+    unused_ids: [],
+  };
+  const out = tn.planTopicNotes(draft, manifest, { classCode: "HBIO250", topicFolder: "classes", created: "2026-09-17", pages: [home] });
+  const rows = out.notes.filter((n) => n.path === home.path);
+  assert.equal(rows.length, 1, "one page, one row");
+  assert.equal(rows[0].added, 2, "both proposals' highlights counted");
+  assert.deepEqual(rows[0].routed.map((r) => r.from), ["COX Inhibitors", "Beta Blockers"]);
+  assert.ok(rows[0].content.includes("## COX Inhibitors"), rows[0].content);
+  assert.ok(rows[0].content.includes("## Beta Blockers"), rows[0].content);
+  assert.equal(rows[0].highlights.length, 2, "the union of both groups' highlights");
+});
+
 test("safeTitle strips illegal characters and falls back to Untitled", () => {
   assert.equal(tn.safeTitle('Foo/Bar:Baz*?"<>|#^[]'), "FooBarBaz");
   assert.equal(tn.safeTitle("   "), "Untitled");

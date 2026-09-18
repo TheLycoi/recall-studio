@@ -109,7 +109,11 @@ async function existingPages(plugin: WikiLmPlugin, topicFolder: string): Promise
     const md = await plugin.app.vault.cachedRead(file);
     const parsed = parseTopicNote(md);
     const type = /^type:\s*(.+)$/m.exec(/^---\r?\n([\s\S]*?)\r?\n---/.exec(md)?.[1] ?? "")?.[1]?.trim() ?? "";
-    if (type === "topic-index") continue;
+    // A hub says so in its frontmatter, or says it by name: the class index is
+    // the page carrying its own folder's name (classes/HBIO250/HBIO250.md),
+    // which is how the old title list kept it out. A hub is a table of
+    // contents, never somewhere a highlight belongs.
+    if (type === "topic-index" || file.basename === file.parent?.name) continue;
     out.push({
       path: file.path,
       title: parsed.title || file.basename,
@@ -284,7 +288,7 @@ export async function digestPdf(
     // flip a note between "create" and "merge into an existing note" — and the
     // content of a merge is built from the file it merges into. Rather than
     // patch the rendered content, substitute the chosen titles back into the
-    // draft and re-plan once against a freshly read `existing`.
+    // draft and re-plan against the pages read once before the preview.
     // `previewDigest` returns the chosen notes with `title` overwritten by the
     // edit box but `path` still the original, so the original title is the
     // path's basename and the pair is unambiguous.

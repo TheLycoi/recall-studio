@@ -511,7 +511,7 @@ export function planTopicNotes(draft: DigestDraft, manifest: Manifest, opts: Pla
   }
 
   // Titles available for `related` filtering: other notes in this draft (by
-  // group title) and existing notes (by basename of the `existing` keys).
+  // group title) and the titles of the pages in `opts.pages`.
   const draftTitles = new Set(groupOrder.map((k) => groups.get(k)!.title));
   const existingTitles = new Set(opts.pages.map((p) => p.title));
 
@@ -639,7 +639,37 @@ export function planTopicNotes(draft: DigestDraft, manifest: Manifest, opts: Pla
     });
   }
 
-  return { notes, unknownIds, unassignedIds, droppedNotes };
+  // Two proposals can land in one page — two names for it, or two topics filed
+  // under it — and each pass through the loop pushed a row. Two rows for one
+  // path would give the preview two checkboxes over the same file, where
+  // unticking either still wrote the other's text (the merges are sequential,
+  // so the later row's content already contains the earlier one's). Fold them
+  // into the one row the page deserves: the last content is the full text, and
+  // the counts, highlights, sections and filings are the sum of the parts.
+  const byPath = new Map<string, PreparedNote>();
+  const coalesced: PreparedNote[] = [];
+  for (const note of notes) {
+    const seen = byPath.get(note.path);
+    if (!seen) {
+      byPath.set(note.path, note);
+      coalesced.push(note);
+      continue;
+    }
+    const keys = new Set(seen.highlights.map((h) => h.key));
+    for (const h of note.highlights) {
+      if (keys.has(h.key)) continue;
+      keys.add(h.key);
+      seen.highlights.push(h);
+    }
+    seen.content = note.content;
+    seen.added += note.added;
+    seen.skipped += note.skipped;
+    if (note.sections?.length) seen.sections = [...(seen.sections ?? []), ...note.sections];
+    if (note.routed?.length) seen.routed = [...(seen.routed ?? []), ...note.routed];
+    for (const r of note.related) if (!seen.related.includes(r)) seen.related.push(r);
+  }
+
+  return { notes: coalesced, unknownIds, unassignedIds, droppedNotes };
 }
 
 // ---- wiki notes
