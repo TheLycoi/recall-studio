@@ -538,8 +538,22 @@ else is a question for your notes. Three buttons above the box — **Quiz me**,
 | **quiz me on Receptors** / **on HBIO250** / **on everything** | a page by title or alias, a class, or every topic note |
 | **digest** / **digest Doping** | group the PDF++ highlights of the open file — or the PDF or note you name — into concept and entity pages, filing into pages you already have first |
 | **highlight** / **highlight Ch3** | the model picks spans in a PDF, each checked against the text layer; you can paste a transcript or study guide first |
-| **lint** | check the wiki for wrong quotes, dead links and duplicate pages |
+| **lint** | check the wiki for wrong quotes, dead links and duplicate pages; **Suggest fixes** proposes a repair per finding |
 | **export**, **inbox**, **help** | send reviewed cards to Anki, open the inbox, list these phrases |
+
+**Suggest fixes.** The Wiki check modal offers a plan when any finding can be
+repaired: one row per proposed edit, each with a checkbox and a one-line
+description, in the order upstream's Smart Fix All uses — aliases and tags,
+cross-links between duplicate pages, link rewrites, repointed dead links,
+hub or neighbour links for unlinked pages, PDF++ callouts for notes that hold
+only rectangle embeds, and citations for quotes found verbatim in exactly one
+source. Nothing is written until you click **Apply**, and only the rows left
+ticked are written, each note once. Aliases and tags come from the model, and
+only when you click **Ask the model for aliases and tags** inside the plan. A
+dead link whose page does not exist is repointed at a note you pick with
+**Point at…**; the fixer never creates a stub page, never merges two pages,
+and never drops a link. After Apply the lint runs again so you see what
+changed.
 
 A name that fits two files is offered as buttons, never guessed. A palette
 command typed exactly by name still runs.
