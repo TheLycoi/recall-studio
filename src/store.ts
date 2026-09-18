@@ -148,4 +148,14 @@ export class InboxStore {
     this.touch();
     return true;
   }
+
+  ingestedHash(sourcePath: string): string | undefined {
+    return this.data.ingested?.[sourcePath];
+  }
+
+  markIngested(sourcePath: string, hash: string): void {
+    this.data.ingested ??= {};
+    this.data.ingested[sourcePath] = hash;
+    this.touch();
+  }
 }

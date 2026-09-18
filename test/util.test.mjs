@@ -200,3 +200,10 @@ test("truncateTranscript hard-cuts when there is no boundary", () => {
   assert.equal(r.text, "x".repeat(10));
   assert.equal(r.truncated, true);
 });
+
+test("contentHash is stable, distinct for different text, and eight hex characters", () => {
+  assert.equal(u.contentHash("abc"), u.contentHash("abc"));
+  assert.notEqual(u.contentHash("abc"), u.contentHash("abd"));
+  assert.match(u.contentHash(""), /^[0-9a-f]{8}$/);
+  assert.match(u.contentHash("a much longer note body\nwith lines"), /^[0-9a-f]{8}$/);
+});

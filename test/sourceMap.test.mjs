@@ -326,3 +326,25 @@ test("renderMarkdownMention falls back to the note when there is no heading", ()
   const line = sm.renderMarkdownMention(r.spans[0], "sources/n", "Note");
   assert.ok(line.includes("[[sources/n|Note]]"));
 });
+
+test("toMarkdownRows turns verified spans into rows that cite the note, not a PDF", () => {
+  const md = "# Prompts\n\n## Why it works\n\nRetrieval practice strengthens memory. Spacing beats massing.\n";
+  const map = sm.buildSourceMap(md);
+  const r = sm.verifyMarkdownSpans(
+    [{ page: 1, quote: "Retrieval practice strengthens memory.", label: "RP", note_title: "Retrieval Practice", note_kind: "concept" }],
+    map,
+    "sources/clippings/prompts.md",
+    { perSegment: 2, remaining: 10, existingKeys: new Set(), batch: [1] },
+  );
+  const rows = sm.toMarkdownRows(r.spans, "sources/clippings/prompts.md", "How to write good prompts");
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, "M01");
+  assert.equal(rows[0].key, r.spans[0].key);
+  assert.equal(rows[0].text, "Retrieval practice strengthens memory.");
+  assert.equal(rows[0].page, 0);
+  assert.deepEqual(rows[0].origins, ["sources/clippings/prompts.md"]);
+  assert.equal(
+    rows[0].mention,
+    '- "Retrieval practice strengthens memory." — [[sources/clippings/prompts.md#Why it works|How to write good prompts › Prompts › Why it works]]',
+  );
+});

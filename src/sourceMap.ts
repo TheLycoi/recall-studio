@@ -14,6 +14,7 @@
 // No `obsidian` import (see src/pageMap.ts:1-8): bundled standalone and
 // exercised with node --test (test/sourceMap.test.mjs).
 import { locateQuote, normalizeWs, splitFrontmatter } from "./util";
+import type { ManifestHighlight } from "./manifest";
 
 /**
  * One addressable chunk of a markdown note: a paragraph, list block, or fenced
@@ -474,4 +475,29 @@ export function renderMarkdownMention(span: VerifiedMarkdownSpan, notePath: stri
   const heading = span.anchor.trail.filter((t) => t.length > 0).join(" › ");
   const link = heading ? `[[${notePath}#${span.anchor.trail[span.anchor.trail.length - 1]}|${noteTitle} › ${heading}]]` : `[[${notePath}|${noteTitle}]]`;
   return `- "${span.quote.replace(/\s+/g, " ").trim()}" — ${link}`;
+}
+
+/**
+ * Verified markdown spans as highlight rows the wiki planner and renderers
+ * understand. A PDF span becomes a PDF++ callout through
+ * `toManifestHighlights` (src/suggestPlan.ts); a markdown span has no page
+ * and no selection, so its row carries a pre-rendered `mention` — the
+ * note-and-heading citation `renderMarkdownMention` writes — and the
+ * renderers print that instead. `page: 0` and an empty target mark the row
+ * as note-sourced; nothing reads them as a PDF location.
+ */
+export function toMarkdownRows(spans: VerifiedMarkdownSpan[], notePath: string, noteTitle: string): ManifestHighlight[] {
+  return spans.map((s, i) => ({
+    id: `M${String(i + 1).padStart(2, "0")}`,
+    key: s.key,
+    page: 0,
+    kind: "selection" as const,
+    color: null,
+    target: { page: 0 },
+    text: s.quote,
+    before: s.anchor.before,
+    after: s.anchor.after,
+    origins: [notePath],
+    mention: renderMarkdownMention(s, notePath, noteTitle),
+  }));
 }

@@ -19,8 +19,8 @@ import { collectPdfHighlights, writeManifest } from "./pdfHighlights";
 import type { SuggestDraft } from "./schemas";
 import type { SuggestExistingNote } from "./prompt";
 import { SUGGEST_PER_PAGE } from "./settings";
-import { batchPages, planWikiNotes, toManifestHighlights, verifySpans, type VerifiedSpan, type WikiNoteIn } from "./suggestPlan";
-import { noteSections, safeTitle } from "./topicNote";
+import { applyPreviewChoices, batchPages, planWikiNotes, toManifestHighlights, verifySpans, type VerifiedSpan, type WikiNoteIn } from "./suggestPlan";
+import { noteSections, safeTitle, type PreparedNote } from "./topicNote";
 
 /** How much of an already-selected passage the prompt shows (src/prompt.ts:267). */
 const ALREADY_SELECTED_CHARS = 80;
@@ -44,7 +44,7 @@ function frontmatterClass(plugin: WikiLmPlugin, path: string): string {
  * test catches the hand-written notes that have no frontmatter at all, which
  * secondbrain has plenty of.
  */
-async function wikiNotes(plugin: WikiLmPlugin, classCode: string, sources: string[]): Promise<WikiNoteIn[]> {
+export async function wikiNotes(plugin: WikiLmPlugin, classCode: string, sources: string[]): Promise<WikiNoteIn[]> {
   const s = plugin.settings;
   const folders: Array<{ folder: string; kind: "concept" | "entity" }> = [
     { folder: s.wikiConceptsFolder, kind: "concept" },
@@ -80,7 +80,7 @@ async function wikiNotes(plugin: WikiLmPlugin, classCode: string, sources: strin
  * beside it; a note proposed earlier in this run has no page yet and so no
  * sections.
  */
-function existingNotesFor(wiki: WikiNoteIn[], newNotes: SuggestDraft["new_notes"]): SuggestExistingNote[] {
+export function existingNotesFor(wiki: WikiNoteIn[], newNotes: SuggestDraft["new_notes"]): SuggestExistingNote[] {
   const out: SuggestExistingNote[] = [];
   const seen = new Set<string>();
   for (const n of wiki) {
@@ -96,6 +96,48 @@ function existingNotesFor(wiki: WikiNoteIn[], newNotes: SuggestDraft["new_notes"
     out.push({ title: n.title, kind: n.kind, sections: [] });
   }
   return out;
+}
+
+export interface WriteNotesResult {
+  written: number;
+  newCount: number;
+  spansWritten: number;
+  refused: number;
+}
+
+/**
+ * Write planned pages into the vault, creating folders on first use. Same
+ * vault idiom as the digest (src/digest.ts). `refuse` is the caller's last
+ * check before a write — a page named after the source PDF, or aimed at the
+ * folder the sources live in, is refused rather than trusted.
+ */
+export async function writeNotes(
+  plugin: WikiLmPlugin,
+  notes: PreparedNote[],
+  refuse: (note: PreparedNote) => boolean,
+): Promise<WriteNotesResult> {
+  const result: WriteNotesResult = { written: 0, newCount: 0, spansWritten: 0, refused: 0 };
+  for (const note of notes) {
+    if (refuse(note)) {
+      result.refused++;
+      continue;
+    }
+    const path = normalizePath(note.path);
+    const file = plugin.app.vault.getAbstractFileByPath(path); // obsidian.d.ts:7369
+    if (file instanceof TFile) {
+      await plugin.app.vault.modify(file, note.content); // obsidian.d.ts:7467
+    } else {
+      const folder = path.split("/").slice(0, -1).join("/");
+      if (folder && !(await plugin.app.vault.adapter.exists(folder))) {
+        await plugin.app.vault.createFolder(folder); // obsidian.d.ts:7404
+      }
+      await plugin.app.vault.create(path, note.content); // obsidian.d.ts:7386
+    }
+    result.written++;
+    result.spansWritten += note.added;
+    if (!note.exists) result.newCount++;
+  }
+  return result;
 }
 
 /**
@@ -224,94 +266,37 @@ export async function suggestPdfHighlights(plugin: WikiLmPlugin, pdf: TFile): Pr
     );
     if (choices === null) return;
 
-    // A choice titled with a proposed note the planner had filed into an
-    // existing one is the reader overruling that filing: the title goes back
-    // to being a note of its own, and the re-plan below is told to leave it.
-    const routedFrom = new Set(plan.routed.map((r) => r.from.toLowerCase()));
-    const keepAsNew = [...new Set(choices.map((c) => safeTitle(c.title)).filter((t) => routedFrom.has(t.toLowerCase())))];
-
-    // (8) Re-plan against the user's edits. The planner is pure, so rather than
-    // patch rendered content — which for an existing note is built from the file
-    // it merges into — the kept spans are re-pointed at the (possibly renamed)
-    // titles and the whole plan is built again.
-    const titleByKey = new Map<string, string>();
-    for (const choice of choices) {
-      const title = safeTitle(choice.title);
-      for (const h of choice.highlights) titleByKey.set(h.key, title);
-    }
-
-    const wikiTitles = new Set(wiki.map((w) => w.title.toLowerCase()));
-    let newNotesEdited = newNotes.slice();
-    const keptSpans: VerifiedSpan[] = [];
-    for (const sp of accepted) {
-      const title = titleByKey.get(sp.key);
-      if (title === undefined) continue; // unchecked in the preview
-      keptSpans.push(title === sp.noteTitle ? sp : { ...sp, noteTitle: title });
-
-      // A title the user typed over a proposed one is announced as a new note
-      // so it keeps the kind and summary the model gave the group it replaced.
-      const key = title.toLowerCase();
-      if (wikiTitles.has(key)) continue;
-      if (newNotesEdited.some((n) => safeTitle(n.title).toLowerCase() === key)) continue;
-      const original = newNotes.find((n) => safeTitle(n.title).toLowerCase() === sp.noteTitle.toLowerCase());
-      newNotesEdited.push(original ? { ...original, title } : { title, kind: sp.noteKind, summary: "", closest_existing: "", why_new: "", aliases: [], tag: "other" });
-    }
-    // A note the reader kept as its own no longer names a home, or the planner
-    // would file it again on the model's say-so.
-    const keep = new Set(keepAsNew.map((t) => t.toLowerCase()));
-    newNotesEdited = newNotesEdited.map((n) => (keep.has(safeTitle(n.title).toLowerCase()) ? { ...n, closest_existing: "" } : n));
-
-    if (keptSpans.length === 0) {
+    const applied = applyPreviewChoices(accepted, choices, newNotes, wiki, plan.routed);
+    if (applied.spans.length === 0) {
       new Notice("WikiLM: nothing selected; nothing written.");
       return;
     }
+    const final = planWikiNotes(applied.spans, highlights, applied.newNotes, wiki, { ...planOpts, keepAsNew: applied.keepAsNew });
 
-    const final = planWikiNotes(keptSpans, highlights, newNotesEdited, wiki, { ...planOpts, keepAsNew });
-
-    // (9) Write. Same vault idiom as the digest (src/digest.ts:278-294).
-    let spansWritten = 0;
-    let newCount = 0;
+    // (9) Write, then queue cards. A source is never a note: a page named
+    // after the PDF, or written into the folder the PDF lives in, would put
+    // generated prose where the reader keeps their originals.
+    const refuse = (note: PreparedNote) =>
+      note.path.split("/").includes("sources") || safeTitle(note.title) === safeTitle(manifest.pdfBasename);
+    const result =
+      options.product === "flashcards"
+        ? { written: 0, newCount: 0, spansWritten: 0, refused: 0 }
+        : await writeNotes(plugin, final.notes, refuse);
     let queued = 0;
-    let refused = 0;
-    for (const note of final.notes) {
-      // The topic note this note's highlights were digested into, so an
-      // exported card links to the concept and not only to the source PDF.
-      // A flashcards-only run writes no note, so there is no topic to link.
-      const topicPath = options.product === "flashcards" ? null : normalizePath(note.path);
-      if (topicPath !== null) {
-        const path = topicPath;
-        // A source is never a note. The planner cannot produce either of these
-        // today, but a note named after the PDF, or written into the folder the
-        // PDF itself lives in, would put generated prose where the reader keeps
-        // their originals — so refuse rather than trust the caller.
-        if (path.split("/").includes("sources") || safeTitle(note.title) === safeTitle(manifest.pdfBasename)) {
-          refused++;
-          continue;
-        }
-        const file = plugin.app.vault.getAbstractFileByPath(path); // obsidian.d.ts:7369
-        if (file instanceof TFile) {
-          await plugin.app.vault.modify(file, note.content); // obsidian.d.ts:7467
-        } else {
-          const folder = path.split("/").slice(0, -1).join("/");
-          // Same folder-creation pattern as the Anki export in src/main.ts.
-          if (folder && !(await plugin.app.vault.adapter.exists(folder))) {
-            await plugin.app.vault.createFolder(folder); // obsidian.d.ts:7404
-          }
-          await plugin.app.vault.create(path, note.content); // obsidian.d.ts:7386
-        }
-      }
-      spansWritten += note.added;
-      if (!note.exists) newCount++;
-      if (options.product !== "notes") {
+    if (options.product !== "notes") {
+      for (const note of final.notes) {
+        if (refuse(note)) continue;
+        const topicPath = options.product === "flashcards" ? null : normalizePath(note.path);
         queued += captureManifestHighlights(plugin, manifest, note.highlights, note.title, topicPath).added;
       }
     }
+    const { spansWritten, newCount, refused } = result;
 
     if (options.product === "flashcards") {
       new Notice(`WikiLM: ${queued} highlight${queued === 1 ? "" : "s"} queued as flashcards.`, 8000);
       return;
     }
-    const written = final.notes.length - refused;
+    const written = result.written;
     const tail = queued > 0 ? `, ${queued} queued as flashcards` : "";
     const refusedTail = refused > 0 ? `, ${refused} refused (a source is never a note)` : "";
     const filed = final.routed.length;

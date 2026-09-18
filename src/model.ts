@@ -103,6 +103,8 @@ export interface InboxData {
   version: 1;
   highlights: Highlight[];
   transcripts?: Record<string, TranscriptRecord>;
+  /** Content hash of each markdown note the wiki has read, by path, so a folder run skips what it already ingested. */
+  ingested?: Record<string, string>;
 }
 
 export function makeHighlight(

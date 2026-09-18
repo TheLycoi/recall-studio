@@ -49,6 +49,15 @@ export interface VerifiedSpan {
   sel: SelectionRange;
 }
 
+/** What the planner needs from a span: where it goes. A PDF `VerifiedSpan` satisfies it; a markdown span is mapped to it. */
+export type PlannedSpan = Pick<VerifiedSpan, "key" | "noteTitle" | "noteKind" | "noteSection">;
+
+/** One row of the preview the reader accepted: the title as typed, and the highlights left ticked. */
+export interface PreviewChoice {
+  title: string;
+  highlights: Array<{ key: string }>;
+}
+
 export interface VerifyOptions {
   perPage: number;
   remaining: number;
@@ -357,7 +366,7 @@ const GENERIC_HEADINGS: ReadonlySet<string> = new Set(
  * named on one of those is set aside.
  */
 export function planWikiNotes(
-  spans: VerifiedSpan[],
+  spans: PlannedSpan[],
   highlights: ManifestHighlight[],
   newNotes: SuggestDraft["new_notes"],
   wiki: WikiNoteIn[],
@@ -513,4 +522,56 @@ export function planWikiNotes(
   }
 
   return { notes, orphanTitles, routed };
+}
+
+/**
+ * Re-aim the spans at what the reader accepted in the preview.
+ *
+ * The planner is pure, so rather than patch rendered content — which for an
+ * existing note is built from the file it merges into — the kept spans are
+ * re-pointed at the (possibly renamed) titles and the plan is built again by
+ * the caller. Three things happen here: an unticked span is dropped; a title
+ * the reader typed over a proposed one is announced as a new note so it keeps
+ * the kind and summary the model gave the group it replaced; and a title the
+ * planner had filed into an existing note that the reader chose to keep goes
+ * back to being a note of its own, with its `closest_existing` cleared so the
+ * re-plan does not file it again on the model's say-so.
+ */
+export function applyPreviewChoices(
+  spans: PlannedSpan[],
+  choices: PreviewChoice[],
+  newNotes: SuggestDraft["new_notes"],
+  wiki: WikiNoteIn[],
+  routed: RoutedNote[],
+): { spans: PlannedSpan[]; newNotes: SuggestDraft["new_notes"]; keepAsNew: string[] } {
+  const routedFrom = new Set(routed.map((r) => r.from.toLowerCase()));
+  const keepAsNew = [...new Set(choices.map((c) => safeTitle(c.title)).filter((t) => routedFrom.has(t.toLowerCase())))];
+
+  const titleByKey = new Map<string, string>();
+  for (const choice of choices) {
+    const title = safeTitle(choice.title);
+    for (const h of choice.highlights) titleByKey.set(h.key, title);
+  }
+
+  const wikiTitles = new Set(wiki.map((w) => w.title.toLowerCase()));
+  let edited = newNotes.slice();
+  const kept: PlannedSpan[] = [];
+  for (const sp of spans) {
+    const title = titleByKey.get(sp.key);
+    if (title === undefined) continue;
+    kept.push(title === sp.noteTitle ? sp : { ...sp, noteTitle: title });
+
+    const key = title.toLowerCase();
+    if (wikiTitles.has(key)) continue;
+    if (edited.some((n) => safeTitle(n.title).toLowerCase() === key)) continue;
+    const original = newNotes.find((n) => safeTitle(n.title).toLowerCase() === sp.noteTitle.toLowerCase());
+    edited.push(
+      original
+        ? { ...original, title }
+        : { title, kind: sp.noteKind, summary: "", closest_existing: "", why_new: "", aliases: [], tag: "other" },
+    );
+  }
+  const keep = new Set(keepAsNew.map((t) => t.toLowerCase()));
+  edited = edited.map((n) => (keep.has(safeTitle(n.title).toLowerCase()) ? { ...n, closest_existing: "" } : n));
+  return { spans: kept, newNotes: edited, keepAsNew };
 }

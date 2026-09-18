@@ -306,3 +306,17 @@ export function truncateTranscript(text: string, maxChars: number): { text: stri
 
   return { text: window.trim(), truncated: true };
 }
+
+/**
+ * FNV-1a over the text, 32 bits, as eight hex characters. Enough to tell
+ * "this note changed since we read it" from "it did not", which is all the
+ * folder ingest needs; not a cryptographic digest and not meant as one.
+ */
+export function contentHash(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}

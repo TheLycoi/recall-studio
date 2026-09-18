@@ -540,6 +540,35 @@ test("a title the reader kept as its own note is not routed, whatever it names",
   assert.deepEqual(out.routed, []);
 });
 
+test("applyPreviewChoices keeps only chosen spans, renames, and honours a title kept as its own note", () => {
+  const spans = [
+    { key: "k1", noteTitle: "Pharmacology", noteKind: "concept", noteSection: "" },
+    { key: "k2", noteTitle: "COX Inhibitors", noteKind: "concept", noteSection: "" },
+    { key: "k3", noteTitle: "Dropped", noteKind: "concept", noteSection: "" },
+  ];
+  const proposed = [newNote("COX Inhibitors", { closest_existing: "Pharmacology", why_new: "part of pharmacology" })];
+  const routed = [{ from: "COX Inhibitors", to: "Pharmacology", heading: "COX Inhibitors", why: "part of pharmacology" }];
+  const choices = [
+    { title: "Pharmacology", highlights: [{ key: "k1" }] },
+    { title: "COX Inhibitors", highlights: [{ key: "k2" }] },
+  ];
+  const out = sp.applyPreviewChoices(spans, choices, proposed, [PHARMACOLOGY], routed);
+  assert.deepEqual(out.spans.map((s) => s.key), ["k1", "k2"], "an unchecked span is gone");
+  assert.deepEqual(out.keepAsNew, ["COX Inhibitors"], "choosing a routed title keeps it as its own note");
+  assert.equal(out.newNotes.find((n) => n.title === "COX Inhibitors").closest_existing, "", "and it no longer names a home");
+});
+
+test("applyPreviewChoices announces a title the reader typed over as a new note with the group's kind", () => {
+  const spans = [{ key: "k1", noteTitle: "Self-Efficacy", noteKind: "concept", noteSection: "" }];
+  const out = sp.applyPreviewChoices(spans, [{ title: "Self Efficacy Beliefs", highlights: [{ key: "k1" }] }], [], [PHARMACOLOGY], []);
+  assert.equal(out.spans[0].noteTitle, "Self Efficacy Beliefs");
+  const announced = out.newNotes.find((n) => n.title === "Self Efficacy Beliefs");
+  assert.ok(announced, "the typed title is announced");
+  assert.equal(announced.kind, "concept");
+  assert.deepEqual(announced.aliases, []);
+  assert.equal(announced.tag, "other");
+});
+
 test("a new karpathy page takes its aliases and tag from the proposal", () => {
   const maps = new Map([[3, pm.buildPageMap([item("Self-efficacy is a belief in one's capacity to act.")])]]);
   const spans = sp.verifySpans(
