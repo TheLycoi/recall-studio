@@ -498,6 +498,13 @@ export const ENTITY_TAGS = ["product", "person", "organization", "project", "eve
 export type ConceptTag = (typeof CONCEPT_TAGS)[number];
 export type EntityTag = (typeof ENTITY_TAGS)[number];
 
+/** The tag as the page will carry it: the model's when it is in the kind's vocabulary, `other` when it is not. The lint reports the fallback, which is the reader's cue to set it. */
+export function validTag(kind: WikiKind, tag: string | undefined): string {
+  const t = (tag ?? "").trim().toLowerCase();
+  const allowed: readonly string[] = kind === "entity" ? ENTITY_TAGS : CONCEPT_TAGS;
+  return allowed.includes(t) ? t : "other";
+}
+
 /** A link the planner resolved, rendered by code and never by the model. */
 export interface RelatedLink {
   /** Full-path target, e.g. "concepts/chunking". */
@@ -531,6 +538,10 @@ export interface RenderWikiNoteArgs {
   /** Needed by the karpathy schema, which puts the page's own name in an H1. */
   title?: string;
   kind?: WikiKind;
+  /** Other names the page answers to; quoted into `aliases:`. Karpathy schema only. */
+  aliases?: string[];
+  /** The subtype tag; falls back to `other` when not in the kind's vocabulary. Karpathy schema only. */
+  tag?: string;
   /** Today, so a caller can render a fixed date in a test. */
   today?: string;
 }
@@ -675,11 +686,8 @@ export function renderWikiNote(a: RenderWikiNoteArgs): string {
     return renderKarpathyNote({
       title: a.title ?? "Untitled",
       kind,
-      // A tag is the model's to choose, and nothing has asked it yet, so the
-      // vocabulary's own escape hatch is the honest default. The lint reports
-      // it as off-schema, which is the reader's cue to set it.
-      tag: "other",
-      aliases: [],
+      tag: validTag(kind, a.tag),
+      aliases: (a.aliases ?? []).map((s) => s.trim()).filter(Boolean),
       created: day,
       updated: day,
       definition: a.summary,

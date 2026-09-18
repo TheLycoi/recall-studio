@@ -496,6 +496,8 @@ export function planWikiNotes(
       schema: opts.schema,
       title: group.title,
       kind,
+      aliases: proposed?.aliases ?? [],
+      tag: proposed?.tag,
     });
     notes.push({
       title: group.title,

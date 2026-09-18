@@ -201,6 +201,16 @@ export const SuggestOut = z.object({
         .describe(
           "One sentence on the decision: when closest_existing is empty, why no listed note can hold this subject; when it is set, what makes the subject part of that note.",
         ),
+      aliases: z
+        .array(z.string())
+        .describe(
+          "One or two other names a reader would search for this note under: an abbreviation, the expanded form, a variant spelling. Empty only when the subject has one name.",
+        ),
+      tag: z
+        .string()
+        .describe(
+          "The note's subtype, one word. For a concept: method, theory, term, phenomenon, standard, field, or other. For an entity: product, person, organization, project, event, place, or other.",
+        ),
     }),
   ),
 });

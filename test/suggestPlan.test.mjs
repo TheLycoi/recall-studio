@@ -434,7 +434,7 @@ const PHARMACOLOGY = {
   md: `---\nclass: ${CLASS_CODE}\naliases:\n  - "Drug Action"\n---\n\n## Receptors\n\nA receptor binds and transduces.\n\n## Highlights\n\n`,
 };
 
-const newNote = (title, over = {}) => ({ title, kind: "concept", summary: "S.", closest_existing: "", why_new: "", ...over });
+const newNote = (title, over = {}) => ({ title, kind: "concept", summary: "S.", closest_existing: "", why_new: "", aliases: [], tag: "other", ...over });
 
 test("a proposed note that names a closest existing note is filed there as a new heading", () => {
   const m = maps();
@@ -538,4 +538,25 @@ test("a title the reader kept as its own note is not routed, whatever it names",
   assert.equal(out.notes[0].exists, false);
   assert.equal(out.notes[0].title, "COX Inhibitors");
   assert.deepEqual(out.routed, []);
+});
+
+test("a new karpathy page takes its aliases and tag from the proposal", () => {
+  const maps = new Map([[3, pm.buildPageMap([item("Self-efficacy is a belief in one's capacity to act.")])]]);
+  const spans = sp.verifySpans(
+    draftOf([span(3, "Self-efficacy is a belief in one's capacity to act.", "Self-Efficacy", "concept")]),
+    maps,
+    { perPage: 3, remaining: 10, existingKeys: new Set(), batch: { from: 3, to: 3 } },
+  ).spans;
+  const rows = sp.toManifestHighlights(spans, maps);
+  const proposed = [newNote("Self-Efficacy", { aliases: ["Self-efficacy belief"], tag: "term" })];
+  const out = sp.planWikiNotes(spans, rows, proposed, [], {
+    classCode: CLASS_CODE,
+    pdfBasename: PDF_BASENAME,
+    conceptsFolder: "wiki/concepts",
+    entitiesFolder: "wiki/entities",
+    schema: "karpathy",
+  });
+  assert.equal(out.notes.length, 1);
+  assert.ok(out.notes[0].content.includes("tags: [term]"));
+  assert.ok(out.notes[0].content.includes('- "Self-efficacy belief"'));
 });

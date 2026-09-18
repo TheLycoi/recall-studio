@@ -872,3 +872,28 @@ class: HBIO250
   assert.equal(r.md, existing);
   assert.equal(r.section, undefined);
 });
+
+test("a karpathy page carries the aliases and tag it was given", () => {
+  const md = tn.renderWikiNote({
+    classCode: "",
+    pdfBasename: "P",
+    summary: "What it means.",
+    highlights: [],
+    schema: "karpathy",
+    title: "Chunking",
+    kind: "concept",
+    aliases: ["Chunk Size", " Perceptual Chunking "],
+    tag: "theory",
+    today: "2026-09-17",
+  });
+  assert.ok(md.includes("tags: [theory]"), "the tag reaches the page");
+  assert.ok(md.includes('aliases:\n  - "Chunk Size"\n  - "Perceptual Chunking"'), "aliases are quoted and trimmed");
+});
+
+test("an off-vocabulary tag falls back to other, and the lint will say so", () => {
+  const md = tn.renderWikiNote({ classCode: "", pdfBasename: "P", summary: "S.", highlights: [], schema: "karpathy", title: "T", kind: "entity", tag: "theory", today: "2026-09-17" });
+  assert.ok(md.includes("tags: [other]"), "theory is a concept tag, not an entity tag");
+  assert.equal(tn.validTag("concept", "method"), "method");
+  assert.equal(tn.validTag("concept", "nonsense"), "other");
+  assert.equal(tn.validTag("entity", undefined), "other");
+});

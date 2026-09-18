@@ -254,7 +254,7 @@ export async function suggestPdfHighlights(plugin: WikiLmPlugin, pdf: TFile): Pr
       if (wikiTitles.has(key)) continue;
       if (newNotesEdited.some((n) => safeTitle(n.title).toLowerCase() === key)) continue;
       const original = newNotes.find((n) => safeTitle(n.title).toLowerCase() === sp.noteTitle.toLowerCase());
-      newNotesEdited.push(original ? { ...original, title } : { title, kind: sp.noteKind, summary: "", closest_existing: "", why_new: "" });
+      newNotesEdited.push(original ? { ...original, title } : { title, kind: sp.noteKind, summary: "", closest_existing: "", why_new: "", aliases: [], tag: "other" });
     }
     // A note the reader kept as its own no longer names a home, or the planner
     // would file it again on the model's say-so.
