@@ -74,6 +74,8 @@ export type AskedQuestion = QuizQuestion & {
   gap: Gap;
   /** The specific belief or missing piece behind `gap`; "" when there is none. */
   gapNote: string;
+  /** The answer came on the second attempt, after the hint. Never a miss when correct; never starts a streak. */
+  hinted: boolean;
 };
 
 /**
@@ -116,6 +118,8 @@ export interface QuizSession {
   /** The question that unit was already asked, so the next one can differ from it. */
   retryAngle: string;
   hintShown: boolean;
+  /** 1 on a fresh question; 2 after the hint bought one more try. */
+  attempt: 1 | 2;
   finished: boolean;
 }
 
@@ -351,6 +355,7 @@ export function startSession(scope: QuizScope, query: string, pool: EvidenceUnit
     retryOf: null,
     retryAngle: "",
     hintShown: false,
+    attempt: 1,
     finished: false,
   };
 }
@@ -536,7 +541,24 @@ export function acceptQuestion(session: QuizSession, q: Omit<QuizQuestion, "n" |
     ...session,
     current: { ...q, n: session.asked.length + 1, difficulty: session.difficulty },
     hintShown: false,
+    attempt: 1,
   };
+}
+
+/**
+ * The reader's rule, layered on learn's probe: a first wrong or partial
+ * answer buys the question's hint and one more attempt before anything is
+ * recorded. Nothing about the tier or the score moves here; the second
+ * answer decides.
+ */
+export function armRetry(session: QuizSession): QuizSession {
+  return { ...session, attempt: 2, hintShown: true };
+}
+
+/** What the panel says between the first miss and the second attempt. */
+export function retryLine(q: QuizQuestion): string {
+  const hint = q.hint.trim();
+  return hint ? `Not quite. Hint: ${hint} — try once more, or say skip.` : "Not quite. Try once more, or say skip.";
 }
 
 /**
@@ -608,7 +630,7 @@ function bracketed(asked: AskedQuestion[]): boolean {
 function correctStreak(asked: AskedQuestion[]): number {
   let n = 0;
   for (let i = asked.length - 1; i >= 0; i--) {
-    if (asked[i].verdict !== "correct") break;
+    if (asked[i].verdict !== "correct" || asked[i].hinted) break;
     n++;
   }
   return n;
@@ -644,6 +666,7 @@ export function applyGrade(
       dispute: extras.dispute ?? "",
       gap: extras.gap ?? "none",
       gapNote: extras.gapNote ?? "",
+      hinted: session.attempt === 2,
     },
   ];
 
@@ -652,13 +675,19 @@ export function applyGrade(
   let retryAngle = "";
 
   if (verdict === "correct") {
-    // Jump, don't inch. A right answer proves only a floor — that the reader
-    // knows *at least* this much — and asking one notch up learns almost
-    // nothing new. Going straight to the top tier after two in a row finds the
-    // ceiling in the few questions a quiz has, which is the whole point of the
-    // escalation: a quiz that never misses never found the edge.
-    const streak = correctStreak(session.asked) + 1;
-    difficulty = (streak >= 2 ? 3 : Math.min(3, session.difficulty + 1)) as 1 | 2 | 3;
+    if (session.attempt === 2) {
+      // Right with the hint proves the floor is somewhere near, not that the
+      // tier is cleared: hold it, and let the next question say more.
+      difficulty = session.difficulty;
+    } else {
+      // Jump, don't inch. A right answer proves only a floor — that the reader
+      // knows *at least* this much — and asking one notch up learns almost
+      // nothing new. Going straight to the top tier after two in a row finds the
+      // ceiling in the few questions a quiz has, which is the whole point of the
+      // escalation: a quiz that never misses never found the edge.
+      const streak = correctStreak(session.asked) + 1;
+      difficulty = (streak >= 2 ? 3 : Math.min(3, session.difficulty + 1)) as 1 | 2 | 3;
+    }
   } else if (verdict === "incorrect") {
     // The ceiling is now bracketed: something below the tier that just failed
     // is where the edge actually sits, so narrow back toward it instead of
@@ -698,6 +727,7 @@ export function applyGrade(
     retryOf,
     retryAngle,
     hintShown: false,
+    attempt: 1,
     // The edge being located is the reason to stop; the cap only catches a
     // session that would otherwise never bracket.
     finished: bracketed(asked) || asked.length >= session.cap,
@@ -884,7 +914,7 @@ const VERDICT_LINE: Record<Verdict, string> = {
  * grade they disagree with.
  */
 export function renderGradeMarkdown(asked: AskedQuestion, unit: EvidenceUnit): string {
-  const parts = [VERDICT_LINE[asked.verdict]];
+  const parts = [`${VERDICT_LINE[asked.verdict]}${asked.hinted && asked.verdict === "correct" ? " *(after a hint)*" : ""}`];
   if (asked.dispute) parts.push(`*${asked.dispute}*`);
   const feedback = asked.feedback.trim();
   if (feedback) parts.push(feedback);

@@ -688,6 +688,17 @@ body.wikilm-highlighter-active .textLayer ::selection {
   margin-top: var(--size-4-2);
 }
 
+/* The studio row: the three things the chat can do besides answer. */
+.wikilm-chat-studio {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+  margin-bottom: var(--size-4-2);
+}
+.wikilm-chat-studio button {
+  font-size: var(--font-ui-smaller);
+}
+
 /* Commands and grounding in the chat ------------------------------------- */
 /* The panel's own voice: a command running, a hint, /help. Never the model. */
 .wikilm-chat-turn.is-system {

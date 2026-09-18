@@ -22,6 +22,7 @@ import { captureQuizMisses } from "./capture";
 import {
   acceptQuestion,
   applyGrade,
+  armRetry,
   checkQuestion,
   dropUnit,
   isDontKnow,
@@ -30,6 +31,7 @@ import {
   renderGradeMarkdown,
   renderQuestionMarkdown,
   renderSummaryMarkdown,
+  retryLine,
   resolvePool,
   startSession,
   missesForInbox,
@@ -103,7 +105,7 @@ interface ChatTurn {
   report?: GroundingReport;
   chips?: { prompt: string; options: Array<{ label: string; run: () => void }> };
   quiz?: {
-    kind: "question" | "grade" | "summary";
+    kind: "question" | "grade" | "retry" | "summary";
     index?: number;
     verdict?: Verdict;
     misses?: QuizMiss[];
@@ -1074,6 +1076,15 @@ export class ChatPanel {
         expected: current.answer,
         userAnswer: text,
       });
+      if (session.attempt === 1 && (grade.verdict === "incorrect" || grade.verdict === "partial")) {
+        this.session = armRetry(session);
+        this.turns.push({ role: "assistant", text: retryLine(current), quiz: { kind: "retry", verdict: grade.verdict } });
+        this.busy = false;
+        this.status = "";
+        this.trim();
+        this.rerender();
+        return;
+      }
       // A grade quoting words the passage does not contain is exactly what the
       // reader needs to spot, so an unverified quote is dropped rather than shown.
       const gradeQuote = verifyGradeQuote(grade.quote, evidence.text);
@@ -1312,7 +1323,9 @@ export class ChatPanel {
           ? " wikilm-quiz-question"
           : turn.quiz.kind === "grade"
             ? ` wikilm-quiz-grade is-${turn.quiz.verdict ?? "skipped"}${turn.quiz.unverified ? " is-unverified" : ""}`
-            : " wikilm-quiz-summary"
+            : turn.quiz.kind === "retry"
+              ? ` wikilm-quiz-grade is-${turn.quiz.verdict ?? "skipped"}`
+              : " wikilm-quiz-summary"
         : "";
     const el = log.createDiv({ cls: `wikilm-chat-turn ${cls}${quizCls}` });
     if (turn.role === "user") {
@@ -1477,6 +1490,26 @@ export class ChatPanel {
 
   private renderInput(wrap: HTMLElement): void {
     const box = wrap.createDiv({ cls: "wikilm-chat-input" });
+    const studio = box.createDiv({ cls: "wikilm-chat-studio" });
+    const active = this.plugin.app.workspace.getActiveFile();
+    const isNote = !!active && active.extension === "md";
+    const isPdf = isPdfFile(active);
+    const canDigest =
+      isPdf ||
+      (!!active && (isManifestNote(this.plugin, active) || (isNote && pdfsLinkedFrom(this.plugin.app, active).length > 0)));
+    const studioButton = (label: string, enabled: boolean, why: string, run: () => void) => {
+      const b = studio.createEl("button", { text: label });
+      b.disabled = this.busy || !enabled;
+      b.title = enabled ? label : why;
+      b.addEventListener("click", run);
+    };
+    studioButton("Quiz me", true, "", () => void this.runIntent({ kind: "quiz", target: { kind: "active" } }));
+    studioButton("AI digest", canDigest, "Open a PDF, a manifest, or a note with PDF++ links", () =>
+      void this.runIntent({ kind: "digest", target: { kind: "active" } }),
+    );
+    studioButton("AI highlight", isPdf, "Open a PDF", () =>
+      void this.runIntent({ kind: "highlight", target: { kind: "active" } }),
+    );
     const ta = box.createEl("textarea", { cls: "wikilm-chat-textarea" });
     ta.rows = 3;
     ta.placeholder = "Ask your notes, or say: quiz me · digest · highlight · help";

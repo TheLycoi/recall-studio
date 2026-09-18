@@ -931,3 +931,55 @@ test("missTitle is the question, shortened to a label", () => {
   assert.ok(title.endsWith("…"), "a cut title says it was cut");
   assert.ok(!/\s…$/.test(title), "no trailing space before the ellipsis");
 });
+
+// ---- second chance -----------------------------------------------------------
+
+test("armRetry gives the question a second attempt with its hint", () => {
+  let s = session();
+  s = q.acceptQuestion(s, draft());
+  assert.equal(s.attempt, 1);
+  s = q.armRetry(s);
+  assert.equal(s.attempt, 2);
+  assert.equal(s.hintShown, true);
+  assert.equal(s.asked.length, 0, "nothing is recorded by the first miss");
+  assert.match(q.retryLine(s.current), /Not quite\. Hint: Think about what the macromolecule attaches to/);
+});
+
+test("a correct answer after the hint is recorded as hinted, holds the tier, and is not a miss", () => {
+  let s = session();
+  s = q.acceptQuestion(s, draft());
+  s = q.armRetry(s);
+  s = q.applyGrade(s, "correct", "Right.", "binds a drug with high affinity", "a drug");
+  assert.equal(s.asked[0].hinted, true);
+  assert.equal(s.asked[0].verdict, "correct");
+  assert.equal(s.difficulty, 1, "no jump after a hint");
+  assert.equal(s.attempt, 1, "the next question starts fresh");
+  assert.deepEqual(q.summary(s).misses, []);
+  // A hinted correct does not start a streak: the next correct steps, it does not jump.
+  s = q.acceptQuestion(s, draft({ evidence_n: 2, quote: "Affinity is the strength", answer: "binding strength" }));
+  s = q.applyGrade(s, "correct", "", "", "binding strength");
+  assert.equal(s.difficulty, 2);
+});
+
+test("a second miss after the hint is recorded with its diagnosis and drops the tier as before", () => {
+  let s = session();
+  s = q.acceptQuestion(s, draft());
+  s = q.applyGrade(s, "correct", "", "", "a drug");
+  assert.equal(s.difficulty, 2);
+  s = q.acceptQuestion(s, draft({ evidence_n: 2, quote: "Affinity is the strength", answer: "binding strength" }));
+  s = q.armRetry(s);
+  s = q.applyGrade(s, "incorrect", "Not it.", "", "speed", { gap: "detail", gapNote: "confused strength with rate" });
+  assert.equal(s.asked[1].hinted, true);
+  assert.equal(s.asked[1].verdict, "incorrect");
+  assert.equal(s.difficulty, 1);
+  assert.equal(q.summary(s).misses.length, 1);
+});
+
+test("renderGradeMarkdown says when a correct answer needed the hint", () => {
+  let s = session();
+  s = q.acceptQuestion(s, draft());
+  s = q.armRetry(s);
+  s = q.applyGrade(s, "correct", "", "", "a drug");
+  const md = q.renderGradeMarkdown(s.asked[0], s.pool[0]);
+  assert.ok(md.startsWith("✓ Correct *(after a hint)*"), md);
+});
