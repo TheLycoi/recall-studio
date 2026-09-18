@@ -249,3 +249,12 @@ test("two pages citing the same PDF span are reported as duplicate pages", () =>
   assert.equal(dup[0].path, "wiki/a.md");
   assert.equal(dup[0].target, "wiki/b.md");
 });
+
+test("two pages citing the same PDF page, with no span, are not duplicates", () => {
+  const claim = (text) => `## Key claims\n- ${text} — [[Deck.pdf#page=1|p.1]]`;
+  const r = vl.lintVault([
+    page("wiki/a.md", "type: concept", claim("Coaches support client-led change.")),
+    page("wiki/b.md", "type: concept", claim("Referral networks widen what a coach can offer.")),
+  ]);
+  assert.deepEqual(r.issues.filter((i) => i.id === "duplicate-pages"), []);
+});

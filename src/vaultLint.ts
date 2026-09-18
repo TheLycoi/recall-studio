@@ -105,6 +105,11 @@ function titleOf(path: string): string {
   return (path.split("/").pop() ?? path).replace(/\.md$/i, "");
 }
 
+/** A PDF target that names a span — a selection, an annotation or a rectangle — rather than a page alone. Two pages citing one page are not about one thing; two pages citing one span are. */
+function spanTarget(t: NonNullable<EvidenceUnit["target"]>): boolean {
+  return t.selection !== undefined || t.annotation !== undefined || t.rect !== undefined;
+}
+
 /**
  * Every note link in a body, resolved against the known notes; unresolved ones
  * come back as null.
@@ -282,7 +287,7 @@ export function lintVault(pages: LintPage[], options: LintOptions = {}): VaultLi
       title,
       aliases: noteAliases(page.content),
       evidence: indexed
-        .filter((u) => u.target !== null && u.pdfBasename !== null)
+        .filter((u) => u.target !== null && u.pdfBasename !== null && spanTarget(u.target))
         .map((u) => `${u.pdfBasename}#${highlightKey(u.target as NonNullable<EvidenceUnit["target"]>)}`),
     });
 
