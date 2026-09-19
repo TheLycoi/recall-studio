@@ -99,12 +99,42 @@ export interface TranscriptRecord {
   truncated: boolean;
 }
 
+/** The five fields a rewrite or a hand edit can change, frozen at one moment. */
+export interface CardSnapshot {
+  kind: CardKind;
+  front: string;
+  back: string;
+  text: string;
+  extra: string;
+}
+
+/**
+ * One change the reader made to one card: what it said before, what it says
+ * now, and how the change was asked for. Kept vault-wide in
+ * `InboxData.revisions` rather than on the card, so it survives
+ * `clearExported` and the cap is a single number. This is what the schema
+ * note learns from (src/preferences.ts).
+ */
+export interface CardRevision {
+  cardId: string;
+  /** ISO timestamp of the edit. */
+  at: string;
+  /** "rewrite" = the model rewrote it from an instruction; "edit" = typed by hand. */
+  via: "rewrite" | "edit";
+  /** The rewrite instruction, or "" for a hand edit. */
+  instruction: string;
+  before: CardSnapshot;
+  after: CardSnapshot;
+}
+
 export interface InboxData {
   version: 1;
   highlights: Highlight[];
   transcripts?: Record<string, TranscriptRecord>;
   /** Content hash of each markdown note the wiki has read, by path, so a folder run skips what it already ingested. */
   ingested?: Record<string, string>;
+  /** Recent card edits, oldest first, capped by the store (src/inboxData.ts). */
+  revisions?: CardRevision[];
 }
 
 export function makeHighlight(
