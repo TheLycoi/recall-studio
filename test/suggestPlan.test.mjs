@@ -558,6 +558,24 @@ test("applyPreviewChoices keeps only chosen spans, renames, and honours a title 
   assert.equal(out.newNotes.find((n) => n.title === "COX Inhibitors").closest_existing, "", "and it no longer names a home");
 });
 
+test("applyPreviewChoices keeps a renamed new row as new so the re-plan cannot merge it", () => {
+  // The preview offered to create "Brand New Topic"; the reader renamed it to
+  // a title that contains every word of the existing page "Receptors".
+  const spans = [{ key: "k1", noteTitle: "Brand New Topic", noteKind: "concept", noteSection: "" }];
+  const planned = { title: "Brand New Topic", path: "wiki/concepts/Brand New Topic.md", exists: false };
+  const choices = [{ note: planned, title: "Receptors Subtypes", highlights: [{ key: "k1" }] }];
+  const out = sp.applyPreviewChoices(spans, choices, [], [PHARMACOLOGY], []);
+  assert.deepEqual(out.keepAsNew, ["Receptors Subtypes"], "a row the reader accepted as new stays new");
+});
+
+test("applyPreviewChoices does not pin a row the preview showed as an existing page", () => {
+  const spans = [{ key: "k1", noteTitle: "Pharmacology", noteKind: "concept", noteSection: "" }];
+  const planned = { title: "Pharmacology", path: PHARMACOLOGY.path, exists: true };
+  const choices = [{ note: planned, title: "Pharmacology", highlights: [{ key: "k1" }] }];
+  const out = sp.applyPreviewChoices(spans, choices, [], [PHARMACOLOGY], []);
+  assert.deepEqual(out.keepAsNew, [], "a merge row is not pinned as new");
+});
+
 test("applyPreviewChoices announces a title the reader typed over as a new note with the group's kind", () => {
   const spans = [{ key: "k1", noteTitle: "Self-Efficacy", noteKind: "concept", noteSection: "" }];
   const out = sp.applyPreviewChoices(spans, [{ title: "Self Efficacy Beliefs", highlights: [{ key: "k1" }] }], [], [PHARMACOLOGY], []);

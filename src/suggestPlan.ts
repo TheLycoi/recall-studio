@@ -58,6 +58,12 @@ export type PlannedSpan = Pick<VerifiedSpan, "key" | "noteTitle" | "noteKind" | 
 export interface PreviewChoice {
   title: string;
   highlights: Array<{ key: string }>;
+  /**
+   * The planned row this choice came from, when the preview supplied it.
+   * `exists === false` means the reader was shown "create this page", so the
+   * title they left in the box must not be routed into an existing note.
+   */
+  note?: { exists: boolean };
 }
 
 export interface VerifyOptions {
@@ -621,7 +627,18 @@ export function applyPreviewChoices(
   routed: RoutedNote[],
 ): { spans: PlannedSpan[]; newNotes: SuggestDraft["new_notes"]; keepAsNew: string[] } {
   const routedFrom = new Set(routed.map((r) => r.from.toLowerCase()));
-  const keepAsNew = [...new Set(choices.map((c) => safeTitle(c.title)).filter((t) => routedFrom.has(t.toLowerCase())))];
+  // Two ways a title stays its own note: the reader took a routed group back
+  // out of its home, or the preview showed the row as a page to create and the
+  // reader kept it — under whatever title they typed. Without the second, a
+  // rename like "Receptors" over "Brand New Topic" would let the re-plan file
+  // the write into a page the reader was never shown.
+  const keepAsNew = [
+    ...new Set(
+      choices
+        .filter((c) => routedFrom.has(safeTitle(c.title).toLowerCase()) || c.note?.exists === false)
+        .map((c) => safeTitle(c.title)),
+    ),
+  ];
 
   const titleByKey = new Map<string, string>();
   for (const choice of choices) {

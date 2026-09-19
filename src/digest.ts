@@ -267,7 +267,8 @@ export async function digestPdf(
     if (!draft) return;
 
     const created = today();
-    const plan = async (d: DigestDraft) => planTopicNotes(d, manifest, { classCode, topicFolder, created, pages });
+    const plan = async (d: DigestDraft, keepAsNew: string[] = []) =>
+      planTopicNotes(d, manifest, { classCode, topicFolder, created, pages, keepAsNew });
 
     const planned = await plan(draft);
     if (planned.notes.length === 0) {
@@ -295,8 +296,10 @@ export async function digestPdf(
     // so the row is found by path and the pair is unambiguous. Re-planning
     // always: it is pure and cheap, and one code path has one behaviour.
     const chosenRows = chosen.map((n) => ({ path: n.path, title: n.title }));
-    const narrowed = applyDigestChoices(draft, planned.notes, chosenRows);
-    const finalPlan = await plan(narrowed);
+    const { draft: narrowed, keepAsNew } = applyDigestChoices(draft, planned.notes, chosenRows);
+    // A row ticked as "create this page" stays a creation through the re-plan,
+    // even if its new title reads like a part of a page that already exists.
+    const finalPlan = await plan(narrowed, keepAsNew);
     const toWrite = finalPlan.notes;
 
     // Write.

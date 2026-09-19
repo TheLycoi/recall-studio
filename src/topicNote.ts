@@ -410,6 +410,12 @@ export interface PlanTopicNotesOptions {
   created: string;
   /** Every page the draft may merge into or be filed under, across every class. */
   pages: ExistingPage[];
+  /**
+   * Titles the reader accepted as new pages in the preview. Routing skips
+   * them: a row shown as "create this page" and ticked must not come back from
+   * the re-plan as an append to a page the reader was never shown.
+   */
+  keepAsNew?: string[];
 }
 
 export interface PreparedNote {
@@ -543,6 +549,10 @@ export function planTopicNotes(draft: DigestDraft, manifest: Manifest, opts: Pla
   }
   const wiki: WikiNoteIn[] = opts.pages.map((p) => ({ title: p.title, kind: p.kind, path: p.path, md: p.md }));
   const wikiByTitle = new Map(wiki.map((w) => [w.title.toLowerCase(), w]));
+  // Titles the reader ticked as new pages. `routeProposed` skips them, so a
+  // rename that happens to specialize an existing title ("Receptor Subtypes"
+  // over "Receptors") cannot turn an accepted creation into an append.
+  const keepAsNew = new Set((opts.keepAsNew ?? []).map((t) => safeTitle(t).toLowerCase()));
 
   // Two groups routed into the same page must each see the previous one's
   // work, or the second merge would be computed against the file on disk and
@@ -601,7 +611,7 @@ export function planTopicNotes(draft: DigestDraft, manifest: Manifest, opts: Pla
         : undefined,
       wiki,
       wikiByTitle,
-      new Set(),
+      keepAsNew,
     );
     if (route) {
       const target = opts.pages.find((p) => p.path === route.to.path)!;
@@ -711,14 +721,23 @@ export interface DigestChoice {
  * coalescing makes `path` the unique key of a row, so two groups can share a
  * title or a path, and only the group says which proposal a reader unticked.
  */
-export function applyDigestChoices(draft: DigestDraft, planned: PreparedNote[], chosen: DigestChoice[]): DigestDraft {
+export function applyDigestChoices(
+  draft: DigestDraft,
+  planned: PreparedNote[],
+  chosen: DigestChoice[],
+): { draft: DigestDraft; keepAsNew: string[] } {
   const byPath = new Map(planned.map((n) => [n.path, n]));
   const keptGroups = new Set<string>();
   const renamed = new Map<string, string>();
+  // Every row the reader ticked that the preview showed as a page to create,
+  // under whatever title they left in the box. The re-plan is told to keep
+  // these new: the reader agreed to a new page, so a new page is what they get.
+  const keepAsNew: string[] = [];
   for (const choice of chosen) {
     const row = byPath.get(choice.path);
     const groups = row ? row.groups : [safeTitle(choice.title)];
     for (const g of groups) keptGroups.add(g.toLowerCase());
+    if (!row || row.exists === false) keepAsNew.push(safeTitle(choice.title));
     // Only a new page can be renamed, and only when the row stands for exactly
     // one group — otherwise there is no one proposal the new name belongs to.
     if (row && row.exists === false && groups.length === 1) {
@@ -728,13 +747,16 @@ export function applyDigestChoices(draft: DigestDraft, planned: PreparedNote[], 
   }
 
   return {
-    ...draft,
-    notes: draft.notes
-      .filter((n) => keptGroups.has(safeTitle(n.title).toLowerCase()))
-      .map((n) => {
-        const key = safeTitle(n.title).toLowerCase();
-        return renamed.has(key) ? { ...n, title: renamed.get(key)! } : n;
-      }),
+    draft: {
+      ...draft,
+      notes: draft.notes
+        .filter((n) => keptGroups.has(safeTitle(n.title).toLowerCase()))
+        .map((n) => {
+          const key = safeTitle(n.title).toLowerCase();
+          return renamed.has(key) ? { ...n, title: renamed.get(key)! } : n;
+        }),
+    },
+    keepAsNew: [...new Set(keepAsNew)],
   };
 }
 
