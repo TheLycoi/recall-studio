@@ -414,6 +414,13 @@ test("checkQuestion rejects an unverified quote", () => {
   assert.equal(empty.reason, "empty quote");
 });
 
+test("checkQuestion rejects a quote that is a single stopword", () => {
+  const r = q.checkQuestion(draft({ quote: "a" }), session());
+  assert.equal(r.ok, false);
+  const the = q.checkQuestion(draft({ quote: "that" }), session());
+  assert.equal(the.ok, false);
+});
+
 test("checkQuestion tolerates punctuation and case in the quote", () => {
   // Mirrors checkAnswer's normalised substring check, not a literal one.
   const r = q.checkQuestion(draft({ quote: "Binds a DRUG, with high affinity!" }), session());
@@ -468,6 +475,16 @@ test("verifyGradeQuote keeps a verified quote and drops the rest", () => {
   assert.equal(q.verifyGradeQuote("binds a drug with high affinity", text), "binds a drug with high affinity");
   assert.equal(q.verifyGradeQuote("binds a hormone", text), "");
   assert.equal(q.verifyGradeQuote("   ", text), "");
+});
+
+test("verifyGradeQuote rejects a quote with no significant word", () => {
+  const text = units()[0].text;
+  // Each of these is a real substring of the evidence, and each proves nothing.
+  assert.equal(q.verifyGradeQuote("a", text), "");
+  assert.equal(q.verifyGradeQuote("is", text), "");
+  assert.equal(q.verifyGradeQuote(" the ", text), "");
+  // A real quote still verifies.
+  assert.equal(q.verifyGradeQuote("high affinity", text), "high affinity");
 });
 
 // ---- acceptQuestion ----------------------------------------------------------
@@ -815,6 +832,17 @@ test("disputeGrade flags a strict incorrect and an unbacked correct", () => {
   assert.equal(q.disputeGrade("the mitochondria", "Active brain regions pull more blood.", "correct", false), "The grade is not backed by a verified quote.");
   assert.equal(q.disputeGrade("the mitochondria", "Active brain regions pull more blood.", "incorrect", true), "");
   assert.equal(q.disputeGrade("active regions pull more blood", "Active brain regions pull more blood.", "correct", true), "");
+});
+
+test("disputeGrade warns when the grade's only quote was a stopword", () => {
+  // The grader cited "a", which verifyGradeQuote now refuses to verify, so the
+  // correct-with-no-overlap grade is unbacked and must still be flagged.
+  const verified = q.verifyGradeQuote("a", units()[0].text);
+  assert.equal(verified, "");
+  assert.equal(
+    q.disputeGrade("the mitochondria", "Active brain regions pull more blood.", "correct", Boolean(verified)),
+    "The grade is not backed by a verified quote.",
+  );
 });
 
 test("resolvePool caps the all scope evenly across the ordered pool", () => {

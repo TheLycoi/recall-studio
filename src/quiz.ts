@@ -506,6 +506,12 @@ export function checkQuestion(draft: QuizQuestionDraft, session: QuizSession): Q
 
   const needle = normalizePlain(draft.quote);
   if (!needle) return { ok: false, reason: "empty quote" };
+  // A quote made only of stopwords ("a", "is", "the") is a substring of nearly
+  // any passage, so it would verify without showing anything. It has to carry
+  // at least one word that means something.
+  if (significantTokens(draft.quote).length === 0) {
+    return { ok: false, reason: "the quote carries no significant word; quote the wording that answers the question" };
+  }
   if (!normalizePlain(unit.text).includes(needle)) {
     return { ok: false, reason: `the quote is not in evidence [${n}] word for word` };
   }
@@ -532,6 +538,9 @@ export function checkQuestion(draft: QuizQuestionDraft, session: QuizSession): Q
 export function verifyGradeQuote(quote: string, evidenceText: string): string {
   const needle = normalizePlain(quote);
   if (!needle) return "";
+  // Same rule as checkQuestion: stopwords alone match everything and prove
+  // nothing, so they do not count as a verified quote.
+  if (significantTokens(quote).length === 0) return "";
   return normalizePlain(evidenceText).includes(needle) ? quote.trim() : "";
 }
 
