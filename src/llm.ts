@@ -427,7 +427,11 @@ export class LlmClient {
       label: "cards",
       maxTokens: 8000,
     });
-    return parsed.cards.filter((c) => (c.kind === "qa" ? c.front.trim() && c.back.trim() : /\{\{c\d+::/.test(c.text)));
+    return parsed.cards.filter((c) =>
+      c.kind === "qa"
+        ? c.front.trim() && c.back.trim()
+        : [...c.text.matchAll(/\{\{c\d+::([\s\S]*?)(?:::[^}]*)?\}\}/g)].some((m) => m[1].trim()),
+    );
   }
 
   /**

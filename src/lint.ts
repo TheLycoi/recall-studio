@@ -76,8 +76,11 @@ export function lintCard(card: Card, highlight: Highlight, siblings: Card[]): Li
     }
     if (!framingOk) failures.push("cloze-framing");
 
-    // qa-empty (cloze variant): text must contain at least one {{cN:: marker.
-    if (deletions.length === 0) failures.push("qa-empty");
+    // qa-empty (cloze variant): text must contain at least one {{cN:: marker,
+    // and every deletion must actually hide something. `{{c1::}}` renders as a
+    // blank with no answer behind it, which is an empty card wearing cloze
+    // syntax, not a card the reader can be graded on.
+    if (deletions.length === 0 || deletions.some((d) => !d.body.trim())) failures.push("qa-empty");
   } else {
     // qa-empty (qa variant): front and back both non-empty after trim.
     if (card.front.trim().length === 0 || card.back.trim().length === 0) {

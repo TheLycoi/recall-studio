@@ -176,6 +176,30 @@ test("qa-empty: passes a qa card with non-empty front and back", () => {
   assert.ok(!r.failures.includes("qa-empty"), "should not fail qa-empty");
 });
 
+test("qa-empty: fails a cloze whose deletions are all empty", () => {
+  const card = clozeCard("The stages are {{c1::}}, {{c2::}}, and {{c3::}}.");
+  const r = l.lintCard(card, highlight, []);
+  assert.ok(r.failures.includes("qa-empty"), "expected qa-empty when every deletion body is empty");
+});
+
+test("qa-empty: fails a cloze with one empty deletion among three", () => {
+  const card = clozeCard("Contemplation: the client {{c1::intends to change}} within the {{c2::}} months and weighs {{c3::pros and cons}}.");
+  const r = l.lintCard(card, highlight, []);
+  assert.ok(r.failures.includes("qa-empty"), "expected qa-empty when any deletion body is empty");
+});
+
+test("qa-empty: fails a cloze whose deletion body is whitespace only", () => {
+  const card = clozeCard("Contemplation: the client intends to change within {{c1::   }}.");
+  const r = l.lintCard(card, highlight, []);
+  assert.ok(r.failures.includes("qa-empty"), "expected qa-empty for a whitespace-only deletion");
+});
+
+test("qa-empty: passes a correct cloze with filled deletions", () => {
+  const card = clozeCard("Contemplation: the client {{c1::intends to change}} within the next {{c2::six months}}.");
+  const r = l.lintCard(card, highlight, []);
+  assert.ok(!r.failures.includes("qa-empty"), "a correct cloze should not fail qa-empty");
+});
+
 // ---- qa-answer-long
 
 test("qa-answer-long: fails when the back is more than 12 words", () => {
