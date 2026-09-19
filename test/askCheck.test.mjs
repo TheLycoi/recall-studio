@@ -71,6 +71,31 @@ test("checkAnswer ignores a repeated citation without counting it as bad", () =>
   assert.equal(report.dropped, 0);
 });
 
+test("checkAnswer reports no coverage when every citation was dropped", () => {
+  const draft = { coverage: "full", from_general_knowledge: false, answer: "An answer.", used: [{ n: 9, why: "invented" }] };
+  const { answer, report } = ac.checkAnswer(draft, EVIDENCE);
+  assert.equal(report.coverage, "none", "nothing survived verification, so the notes did not answer it");
+  assert.deepEqual(report.sources, []);
+  assert.equal(report.dropped, 1);
+  assert.equal(answer, "An answer.", "the answer text is untouched");
+  assert.equal(ac.renderGroundingLine(report), "Not in your notes · 1 bad citation dropped");
+});
+
+test("checkAnswer keeps coverage when some citations survive the drop", () => {
+  const draft = { coverage: "partial", from_general_knowledge: false, answer: "An answer.", used: [{ n: 9, why: "invented" }, { n: 2, why: "real" }] };
+  const { report } = ac.checkAnswer(draft, EVIDENCE);
+  assert.equal(report.coverage, "partial");
+  assert.deepEqual(report.sources, [{ n: 2, why: "real" }]);
+  assert.equal(report.dropped, 1);
+});
+
+test("checkAnswer leaves a clean answer's coverage alone", () => {
+  const draft = { coverage: "full", from_general_knowledge: false, answer: "An answer.", used: [{ n: 1, why: "real" }] };
+  const { report } = ac.checkAnswer(draft, EVIDENCE);
+  assert.equal(report.coverage, "full");
+  assert.equal(report.dropped, 0);
+});
+
 test("checkAnswer keeps a none-coverage answer and its empty source list", () => {
   const draft = { coverage: "none", from_general_knowledge: false, answer: "Your notes do not cover this.", used: [] };
   const { answer, report } = ac.checkAnswer(draft, EVIDENCE);

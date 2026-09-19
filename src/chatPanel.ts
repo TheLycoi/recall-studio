@@ -1434,7 +1434,14 @@ export class ChatPanel {
    */
   private renderSources(el: HTMLElement, evidence: EvidenceUnit[], report: GroundingReport): void {
     const picked = report.sources.map((s) => ({ unit: evidence[s.n - 1], why: s.why })).filter((p) => !!p.unit);
-    if (picked.length === 0 && report.coverage !== "none") picked.push({ unit: evidence[0], why: "" });
+    // The best-ranked passage stands in when the model named nothing. It must
+    // not stand in when the model named sources that all failed verification:
+    // there is no honest source to show, and showing one would dress an
+    // unsupported answer in a citation the model never made.
+    const allCitationsDropped = report.dropped > 0 && report.sources.length === 0;
+    if (picked.length === 0 && report.coverage !== "none" && !allCitationsDropped) {
+      picked.push({ unit: evidence[0], why: "" });
+    }
     if (picked.length === 0) return;
 
     el.createDiv({ cls: "wikilm-chat-sources-head", text: picked.length === 1 ? "Source" : "Sources" });

@@ -86,10 +86,15 @@ export function checkAnswer(draft: AskDraft, evidence: AskEvidenceIn[]): { answe
   // and disclaim it, and the reader would see a source under a warning.
   const fromGeneralKnowledge = draft.from_general_knowledge && sources.length === 0;
 
+  // The model claimed sources and not one of them checked out. Whatever it
+  // says about its own coverage, nothing in the notes stands behind this
+  // answer, so it must not be labelled as answered from them.
+  const allCitationsDropped = draft.used.length > 0 && sources.length === 0;
+
   return {
     answer: answer.length > 0 ? answer : NOTHING_SAID,
     report: {
-      coverage: answer.length > 0 ? draft.coverage : "none",
+      coverage: answer.length > 0 && !allCitationsDropped ? draft.coverage : "none",
       sources,
       dropped,
       fromGeneralKnowledge,
