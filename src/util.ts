@@ -179,6 +179,7 @@ export function basenameNoExt(path: string): string {
 /** Lower-case, punctuation-free text for substring comparisons. */
 export function normalizePlain(s: string): string {
   return s
+    .normalize("NFD")
     .toLowerCase()
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^\p{L}\p{N}]+/gu, " ")

@@ -94,6 +94,17 @@ test("ungroundedClozes flags deletions missing from the highlight", () => {
   assert.deepEqual(u.ungroundedClozes("{{c1::Catholic Church::hint}}", hl), []);
 });
 
+test("ungroundedClozes ignores unicode normalization form differences", () => {
+  const word = "r\u00e9plication";           // NFC: e-acute as one glyph
+  const decomposed = "re\u0301plication";    // NFD: e + combining acute
+  const hlNfd = `DNA ${decomposed} is semiconservative.`;
+  const hlNfc = `DNA ${word} is semiconservative.`;
+  assert.deepEqual(u.ungroundedClozes(`DNA {{c1::${word}}} is semiconservative.`, hlNfd), []);
+  assert.deepEqual(u.ungroundedClozes(`DNA {{c1::${decomposed}}} is semiconservative.`, hlNfc), []);
+  // a genuinely invented deletion is still flagged
+  assert.deepEqual(u.ungroundedClozes(`DNA {{c1::transcription}} is semiconservative.`, hlNfc), ["transcription"]);
+});
+
 test("canWrapAsHighlight refuses nested or multi-paragraph spans", () => {
   assert.equal(u.canWrapAsHighlight("plain text"), true);
   assert.equal(u.canWrapAsHighlight("==already=="), false);
