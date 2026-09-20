@@ -63,6 +63,8 @@ export interface WikiLmSettings {
   // PDF digest
   manifestFolder: string;
   topicFolder: string;
+  /** Vault folder holding `wikilm.md`, the reader's house rules, and `wikilm-suggestions.md`. */
+  schemaFolder: string;
   digestMaxNotes: number;
   digestInstructions: string;
   paperTextMaxChars: number;
@@ -112,6 +114,8 @@ export interface WikiLmSettings {
   lintMode: LintMode;
   /** Show the card writer examples from cards you kept, edited, or deleted, drawn from the local inbox. */
   historyExamples: boolean;
+  /** Propose a schema rule when the same correction turns up in three or four card edits. */
+  schemaLearning: boolean;
 }
 
 export const DEFAULT_SETTINGS: WikiLmSettings = {
@@ -155,6 +159,7 @@ export const DEFAULT_SETTINGS: WikiLmSettings = {
 
   manifestFolder: "wikilm-manifests",
   topicFolder: "classes",
+  schemaFolder: "schema",
   digestMaxNotes: 6,
   digestInstructions: "",
   paperTextMaxChars: 60000,
@@ -182,6 +187,7 @@ export const DEFAULT_SETTINGS: WikiLmSettings = {
   critiquePass: true,
   lintMode: "badge",
   historyExamples: true,
+  schemaLearning: true,
 };
 
 export class WikiLmSettingTab extends PluginSettingTab {
@@ -428,6 +434,18 @@ export class WikiLmSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName("Propose schema rules from my edits")
+      .setDesc(
+        "When the same correction shows up in three or four of your card edits, WikiLM writes a proposed rule to `wikilm-suggestions.md` and shows a chip in the inbox. Nothing enters the schema until you accept it.",
+      )
+      .addToggle((t) =>
+        t.setValue(s.schemaLearning).onChange((v) => {
+          s.schemaLearning = v;
+          save();
+        }),
+      );
+
+    new Setting(containerEl)
       .setName("Max AI highlights per note")
       .addSlider((sl) =>
         sl
@@ -548,6 +566,18 @@ export class WikiLmSettingTab extends PluginSettingTab {
       .addText((t) =>
         t.setValue(s.topicFolder).onChange((v) => {
           s.topicFolder = v.trim() || DEFAULT_SETTINGS.topicFolder;
+          save();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Schema folder")
+      .setDesc(
+        "Where WikiLM keeps `wikilm.md`, the note that holds your house rules for pages and cards, and `wikilm-suggestions.md`.",
+      )
+      .addText((t) =>
+        t.setValue(s.schemaFolder).onChange((v) => {
+          s.schemaFolder = v.trim() || DEFAULT_SETTINGS.schemaFolder;
           save();
         }),
       );

@@ -347,6 +347,18 @@ The limit you are given is a ceiling, not a target. Over-highlighting fills the 
 Give each span a label of at most six words that names the fact it carries.`;
 
 /**
+ * Append the reader's house rules to a user message a pure builder produced.
+ *
+ * The wiki messages are assembled in `src/prompt.ts`, which knows nothing
+ * about the vault and so cannot be handed the schema note; adding the block
+ * here keeps that module pure and puts the rules where the card prompts put
+ * them, after the standing instructions and last in the message.
+ */
+function withRules(message: string, rules: string): string {
+  return rules ? `${message}\n\n${rules}` : message;
+}
+
+/**
  * Prompts and schemas live here; the provider chosen in settings does the
  * actual call. The backend is picked per request so switching providers in
  * the settings tab takes effect immediately.
@@ -366,6 +378,7 @@ export class LlmClient {
   constructor(
     private getSettings: () => WikiLmSettings,
     private getHighlights: () => Highlight[] = () => [],
+    private getSchema: () => Promise<{ cards: string; wiki: string } | null> = async () => null,
   ) {
     this.anthropic = new AnthropicBackend(getSettings);
     this.codex = new CodexBackend(getSettings);
@@ -380,6 +393,22 @@ export class LlmClient {
   private examplesBlock(): string {
     if (!this.getSettings().historyExamples) return "";
     return buildExamplesBlock(this.getHighlights());
+  }
+
+  /**
+   * The reader's house rules from their schema note (src/schemaFile.ts), for
+   * the half of the prompts this call belongs to. "" when there is no schema,
+   * when the sections that would feed this call are empty, or when the note
+   * could not be read — a call without house rules is the prompt as it was
+   * before the schema existed, which is a working prompt.
+   */
+  private async rulesBlock(kind: "cards" | "wiki"): Promise<string> {
+    try {
+      const blocks = await this.getSchema();
+      return blocks?.[kind]?.trim() ? blocks[kind] : "";
+    } catch {
+      return "";
+    }
   }
 
   private backend(): LlmBackend {
@@ -413,6 +442,11 @@ export class LlmClient {
     if (s.writerInstructions.trim()) parts.push(`Standing instructions: ${s.writerInstructions.trim()}`);
     const writerExamples = this.examplesBlock();
     if (writerExamples) parts.push(writerExamples);
+    // The reader's own rules sit after the examples and before this
+    // highlight's instruction: they are standing rules, so they read with the
+    // other standing material, and the one-off instruction still reads last.
+    const writerRules = await this.rulesBlock("cards");
+    if (writerRules) parts.push(writerRules);
     if (h.instruction.trim()) parts.push(`Instructions for this highlight: ${h.instruction.trim()}`);
     if (existing.length) {
       parts.push(
@@ -460,6 +494,10 @@ export class LlmClient {
     }
     const criticExamples = this.examplesBlock();
     if (criticExamples) parts.push(criticExamples);
+    // Same place as in writeCards: the critic holds cards to the rules the
+    // writer was given, or it grades them against a standard nobody set.
+    const criticRules = await this.rulesBlock("cards");
+    if (criticRules) parts.push(criticRules);
     if (h.instruction.trim()) parts.push(`Instructions for this highlight: ${h.instruction.trim()}`);
     if (existing.length) {
       parts.push(
@@ -506,6 +544,11 @@ export class LlmClient {
     }
     if (s.language) parts.push(`Write in ${s.language}.`);
     if (s.writerInstructions.trim()) parts.push(`Standing instructions: ${s.writerInstructions.trim()}`);
+    // A rewrite is held to the writer's rules (see the framing above), and the
+    // house rules are part of them — often the very rules the rewrite exists
+    // to apply, since `## Learned` is promoted from edits like this one.
+    const rewriteRules = await this.rulesBlock("cards");
+    if (rewriteRules) parts.push(rewriteRules);
     if (h.instruction.trim()) parts.push(`Instructions for this highlight: ${h.instruction.trim()}`);
     return this.backend().complete({ system: WRITER_SYSTEM, user: parts.join("\n\n"), schema: CardOut, label: "card", maxTokens: 4000 });
   }
@@ -540,7 +583,10 @@ export class LlmClient {
   async digest(args: DigestMessageArgs): Promise<DigestDraft> {
     return this.backend().complete({
       system: DIGEST_SYSTEM,
-      user: buildDigestMessage(args),
+      // `buildDigestMessage` is pure and ends with the standing instructions
+      // and this PDF's instruction; the house rules are appended after it, in
+      // the same last-read position the card prompts give them.
+      user: withRules(buildDigestMessage(args), await this.rulesBlock("wiki")),
       schema: DigestOutSchema,
       label: "topic notes",
       maxTokens: 16000,
@@ -551,7 +597,7 @@ export class LlmClient {
   async suggest(args: SuggestMessageArgs): Promise<SuggestDraft> {
     return this.backend().complete({
       system: SUGGEST_SYSTEM,
-      user: buildSuggestMessage(args),
+      user: withRules(buildSuggestMessage(args), await this.rulesBlock("wiki")),
       schema: SuggestOutSchema,
       label: "highlight suggestions",
       maxTokens: 16000,

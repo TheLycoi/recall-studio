@@ -309,10 +309,16 @@ export interface Proposal {
   count: number;
 }
 
-export function renderEmptySuggestions(): string {
+/**
+ * The path is a parameter because the reader can move the schema folder in the
+ * settings: the sentence below tells them where to accept a rule by hand, and a
+ * hardcoded path would send them to a file their vault does not have. The
+ * default is the default setting's path, for a caller with nothing better.
+ */
+export function renderEmptySuggestions(schemaPath = "schema/wikilm.md"): string {
   return `# WikiLM Schema Suggestions
 
-> These are rules WikiLM noticed in your own edits to its cards. None of them is in force. Accept one by copying its rule into a section of \`schema/wikilm.md\`, or dismiss it; either way the entry stays here so the same observation is not proposed to you twice.
+> These are rules WikiLM noticed in your own edits to its cards. None of them is in force. Accept one by copying its rule into a section of \`${schemaPath}\`, or dismiss it; either way the entry stays here so the same observation is not proposed to you twice.
 
 ---
 `;

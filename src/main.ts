@@ -11,6 +11,7 @@ import { LlmClient } from "./llm";
 import { askInstruction, pickDeck } from "./modals";
 import type { Card, Highlight } from "./model";
 import { DEFAULT_SETTINGS, WikiLmSettingTab, type WikiLmSettings } from "./settings";
+import { SchemaFile } from "./schemaFile";
 import { InboxStore } from "./store";
 import { buildAnkiTextImport } from "./util";
 
@@ -19,6 +20,7 @@ export default class WikiLmPlugin extends Plugin {
   store!: InboxStore;
   generator!: Generator;
   llm!: LlmClient;
+  schema!: SchemaFile;
   anki!: AnkiClient;
   highlighter!: Highlighter;
   cancel = new CancelToken();
@@ -29,10 +31,17 @@ export default class WikiLmPlugin extends Plugin {
     registerWikiLmIcon();
     this.store = new InboxStore(this.app, this.manifest.dir ?? `${this.app.vault.configDir}/plugins/wikilm`);
     await this.store.load();
+    // Before the client, which holds a callback into it: the reader's house
+    // rules are read on the way to every model call (src/schemaFile.ts).
+    this.schema = new SchemaFile(this);
     this.llm = new LlmClient(
       () => this.settings,
       () => this.store.all(),
+      () => this.schema.blocks(),
     );
+    // Not awaited: the inbox header wants a count of waiting proposals, and
+    // nothing else on load depends on having one.
+    void this.schema.refresh();
     this.anki = new AnkiClient(() => this.settings.ankiConnectUrl);
     this.generator = new Generator(this);
 
