@@ -1,7 +1,7 @@
 import type { App } from "obsidian";
 import { Notice, normalizePath } from "obsidian";
-import type { Highlight, InboxData, Card, TranscriptRecord } from "./model";
-import { emptyInbox, parseInboxJson } from "./inboxData";
+import type { Highlight, InboxData, Card, CardRevision, TranscriptRecord } from "./model";
+import { emptyInbox, parseInboxJson, pushRevision } from "./inboxData";
 
 /** `YYYYMMDD-HHMMSS` in local time, for a moved-aside file's suffix. */
 function timestamp(d: Date): string {
@@ -195,5 +195,15 @@ export class InboxStore {
     this.data.ingested ??= {};
     this.data.ingested[sourcePath] = hash;
     this.touch();
+  }
+
+  /** Record one card edit for the schema-learning feature (src/preferences.ts). */
+  recordRevision(rev: CardRevision): void {
+    pushRevision(this.data, rev);
+    this.touch();
+  }
+
+  revisions(): CardRevision[] {
+    return this.data.revisions ?? [];
   }
 }
