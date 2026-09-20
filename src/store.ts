@@ -1,6 +1,13 @@
 import type { App } from "obsidian";
-import { normalizePath } from "obsidian";
+import { Notice, normalizePath } from "obsidian";
 import type { Highlight, InboxData, Card, TranscriptRecord } from "./model";
+import { emptyInbox, parseInboxJson } from "./inboxData";
+
+/** `YYYYMMDD-HHMMSS` in local time, for a moved-aside file's suffix. */
+function timestamp(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
 
 type Listener = () => void;
 
@@ -9,10 +16,17 @@ type Listener = () => void;
  * notes stay untouched. Writes are debounced.
  */
 export class InboxStore {
-  private data: InboxData = { version: 1, highlights: [] };
+  private data: InboxData = emptyInbox();
   private listeners = new Set<Listener>();
   private saveTimer: number | null = null;
   private path: string;
+  /**
+   * Set when inbox.json was unreadable and could not even be moved aside.
+   * Writing in that state would still destroy whatever the reader has —
+   * only now there is no copy at all, not even the renamed original — so
+   * every save is a no-op until the plugin is reloaded.
+   */
+  private readOnly = false;
 
   constructor(
     private app: App,
@@ -25,8 +39,30 @@ export class InboxStore {
     try {
       if (await this.app.vault.adapter.exists(this.path)) {
         const raw = await this.app.vault.adapter.read(this.path);
-        const parsed = JSON.parse(raw) as InboxData;
-        if (parsed && Array.isArray(parsed.highlights)) this.data = parsed;
+        const parsed = parseInboxJson(raw);
+        if (parsed.ok) {
+          this.data = parsed.data;
+        } else {
+          // A corrupt or truncated file must never be silently overwritten
+          // by the next scheduled save — move it aside first, so the
+          // reader's inbox is only ever renamed, not lost.
+          const moved = `${this.path}.corrupt-${timestamp(new Date())}`;
+          try {
+            await this.app.vault.adapter.rename(this.path, moved);
+            console.error(`WikiLM: inbox.json could not be read; moved to ${moved}`, parsed.detail);
+            const basename = moved.split("/").pop() ?? moved;
+            new Notice(
+              `WikiLM: inbox.json was unreadable and has been moved to ${basename}. The inbox starts empty; the old file is kept.`,
+              0,
+            );
+          } catch (renameError) {
+            // Couldn't even move it aside — leave it in place, untouched,
+            // and never schedule a write, or the next save would clobber
+            // the one copy of the reader's inbox that still exists on disk.
+            console.error("WikiLM: inbox.json is unreadable and could not be moved aside", renameError);
+            this.readOnly = true;
+          }
+        }
       }
     } catch (e) {
       console.error("WikiLM: failed to read inbox.json", e);
@@ -36,11 +72,13 @@ export class InboxStore {
   }
 
   private scheduleSave() {
+    if (this.readOnly) return;
     if (this.saveTimer !== null) window.clearTimeout(this.saveTimer);
     this.saveTimer = window.setTimeout(() => void this.flush(), 400);
   }
 
   async flush(): Promise<void> {
+    if (this.readOnly) return;
     if (this.saveTimer !== null) {
       window.clearTimeout(this.saveTimer);
       this.saveTimer = null;
