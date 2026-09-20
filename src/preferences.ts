@@ -1,5 +1,4 @@
 import type { CardRevision, CardSnapshot } from "./model";
-import { significantTokens } from "./retrieval";
 
 /**
  * What the reader keeps correcting, read back out of their own edits.
@@ -27,9 +26,8 @@ import { significantTokens } from "./retrieval";
  *
  * Obsidian-free like `examples.ts` and for the same reason: `test/*.test.mjs`
  * bundles it standalone with esbuild (see the harness in
- * `test/prompt.test.mjs:10-16`). Its imports are a type from `./model` and
- * `significantTokens` from `./retrieval`, neither of whose closures resolve
- * `obsidian`.
+ * `test/prompt.test.mjs:10-16`). Its only import is a type from `./model`,
+ * whose closures do not resolve `obsidian`.
  */
 
 export type PatternId = "shorter-answers" | "prefer-kind" | "drop-opening" | "extra-field" | "instruction";
@@ -80,14 +78,20 @@ function renderEdit(r: CardRevision): string {
 }
 
 /**
- * Word count as the rule means it. `significantTokens` (src/retrieval.ts:354)
- * drops stopwords, punctuation and words under three letters, so "Signed at
- * Ghent, in 1814." counts as the two words that carry the answer rather than
- * the six that fill it out. A cap counted on raw words would drift upward
- * every time an answer happened to contain "of the".
+ * Word count as the rule means it: visible words, split on whitespace.
+ *
+ * The rule this feeds — `Keep answers to at most N words.` — is read by a
+ * person and applied by a model exactly as written, and both of them count
+ * "words" the way anyone counts words: split on whitespace, nothing dropped.
+ * A count that stemmed and dropped stopwords and short words, as
+ * `significantTokens` (src/retrieval.ts:354) does for scoring evidence,
+ * would silently disagree with that reading. "in the cell membrane" is four
+ * words to a reader and to a model; counted as significant tokens it is two
+ * ("cell", "membrane"), so the rule would say "at most 2 words" and push the
+ * writer to cut "in the" from an answer the reader was already keeping whole.
  */
 function wordCount(text: string): number {
-  return significantTokens(text).length;
+  return text.trim().split(/\s+/).filter(Boolean).length;
 }
 
 function changed(r: CardRevision): boolean {

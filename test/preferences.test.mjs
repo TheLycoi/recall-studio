@@ -104,14 +104,34 @@ test("emptying an answer is a deletion, not a shortening", () => {
   assert.equal(find(obs, "shorter-answers"), undefined);
 });
 
-test("stopwords and punctuation do not inflate the word cap", () => {
+test("the word cap counts visible words, not significant tokens", () => {
   const long = "The treaty was signed in a city on the coast of the sea and it was very important indeed";
-  const trimmed = "Signed at Ghent."; // one significant token after stopwords and stemming
+  const trimmed = "Signed at Ghent."; // 3 visible words, though only "signed" and "ghent" are significant tokens
   const r = (f) => rev({ kind: "qa", front: f, back: long }, { kind: "qa", front: f, back: trimmed });
   const obs = p.observe([r("Q1?"), r("Q2?"), r("Q3?"), r("Q4?")]);
   const o = find(obs, "shorter-answers");
   assert.ok(o);
-  assert.equal(o.rule, "Keep answers to at most 2 words.");
+  assert.equal(o.rule, "Keep answers to at most 3 words.");
+});
+
+test("articles and prepositions count toward the cap, so a rule never asks for fewer words than the reader kept", () => {
+  // Each kept answer reads naturally with function words a reader would never drop:
+  // "in the cell membrane" is 4 visible words but only 2 significant tokens
+  // ("cell", "membrane") once stopwords and short words are stripped. The rule
+  // must say 4, or a person or model reading "at most 2 words" would cut
+  // "in the" and produce "cell membrane" -- an answer the reader never wrote.
+  const long = "This happens across many different locations throughout the entire structure of the organism";
+  const cases = [
+    "in the cell membrane", // 4 visible words, 2 significant tokens
+    "at the base of the skull", // 6 visible words, 3 significant tokens
+    "on the surface of the leaf", // 6 visible words, 3 significant tokens
+    "by the end of the war", // 6 visible words, 2 significant tokens
+  ];
+  const obs = p.observe(cases.map((after, i) => rev({ kind: "qa", front: `Q${i}?`, back: long }, { kind: "qa", front: `Q${i}?`, back: after })));
+  const o = find(obs, "shorter-answers");
+  assert.ok(o);
+  // The largest visible count among the kept answers is 6, not the largest significant-token count (3).
+  assert.equal(o.rule, "Keep answers to at most 6 words.");
 });
 
 // ---- 2. prefer-kind ----------------------------------------------------------
