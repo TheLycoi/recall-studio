@@ -16,8 +16,8 @@ import {
   WIKILM_SPARK_ICON,
   WIKILM_STACK_ICON,
 } from "./icon";
-import { isPdfHighlight, liveCards, makeCard, pendingCards, type Card, type Highlight } from "./model";
-import { askInstruction } from "./modals";
+import { isPdfHighlight, liveCards, makeCard, pendingCards, type Card, type CardSnapshot, type Highlight } from "./model";
+import { askInstruction, SchemaSuggestionsModal } from "./modals";
 import { countClozes, fmtDate, locateQuote, splitFrontmatter } from "./util";
 import { describeError } from "./llm";
 import { findCrossInterference, lintCard, LINT_FIX_INSTRUCTIONS, LINT_LABELS } from "./lint";
@@ -272,6 +272,18 @@ export class InboxView extends ItemView {
         this.render();
       }
     });
+
+    const suggestions = this.plugin.schema.openCount();
+    if (suggestions > 0) {
+      const chip = right.createEl("button", {
+        cls: "wikilm-schema-chip",
+        text: `${suggestions} schema suggestion${suggestions === 1 ? "" : "s"}`,
+      });
+      chip.title = "Rules WikiLM noticed in your own edits, waiting for your decision";
+      chip.addEventListener("click", () => {
+        new SchemaSuggestionsModal(this.plugin.app, this.plugin.schema, () => this.scheduleRender()).open();
+      });
+    }
 
     const exportAll = right.createEl("button", { cls: "mod-cta", text: "Export all reviewed" });
     exportAll.title = "Send every pending card in the inbox to Anki (⌘⏎)";
@@ -710,6 +722,8 @@ export class InboxView extends ItemView {
 
     const save = async () => {
       const ask = instruction.value.trim();
+      const was = snapshot(c);
+      let edited = false;
       const before = JSON.stringify([c.kind, c.front, c.back, c.text, c.extra]);
       c.kind = kindSel.value as Card["kind"];
       c.front = front.value.trim();
@@ -722,6 +736,7 @@ export class InboxView extends ItemView {
         c.status = "deleted";
       } else if (JSON.stringify([c.kind, c.front, c.back, c.text, c.extra]) !== before) {
         c.edited = true;
+        edited = true;
         // Same reasoning as rewrite(): a manual edit invalidates whatever the
         // linter/critique recorded about the previous wording, and lifts a
         // flagged card back to pending so it can be exported again.
@@ -731,10 +746,26 @@ export class InboxView extends ItemView {
         delete c.critiqueReason;
       }
       this.editing = null;
+      if (edited) {
+        // What the reader typed, as one revision. Recorded before the
+        // instruction runs, and with the saved text as its `after`, so a hand
+        // edit followed by "now shorten it" is two corrections in the history
+        // rather than one blurred into the other — `rewrite()` records its own
+        // pass from the text this one left behind.
+        this.plugin.store.recordRevision({
+          cardId: c.id,
+          at: new Date().toISOString(),
+          via: "edit",
+          instruction: "",
+          before: was,
+          after: snapshot(c),
+        });
+      }
       this.plugin.store.touch();
       // The instruction runs against the just-saved text, so a hand edit and a
       // "now shorten it" land in one pass rather than fighting each other.
       if (ask && c.status !== "deleted") await this.rewrite(h, c, ask);
+      else if (edited) await this.learnFromEdits();
     };
     const cancel = () => {
       const empty = c.kind === "qa" ? !c.front || !c.back : !c.text;
@@ -809,6 +840,7 @@ export class InboxView extends ItemView {
     const instruction = preset ?? (await askInstruction(this.plugin.app, "Rewrite card", "e.g. make the answer shorter, ask about the date instead"));
     if (!instruction) return;
     const notice = new Notice("WikiLM: rewriting…", 0);
+    const was = snapshot(c);
     try {
       const d = await this.plugin.llm.rewriteCard(h, c, instruction);
       c.kind = d.kind;
@@ -825,10 +857,46 @@ export class InboxView extends ItemView {
       delete c.lintWarnings;
       delete c.critiqueReason;
       this.plugin.store.touch();
+      // A rewrite the model answered with the card it was given says nothing
+      // about how the reader wants cards written, so it is not evidence.
+      const now = snapshot(c);
+      if (differs(was, now)) {
+        this.plugin.store.recordRevision({
+          cardId: c.id,
+          at: new Date().toISOString(),
+          via: "rewrite",
+          instruction,
+          before: was,
+          after: now,
+        });
+        await this.learnFromEdits();
+      }
     } catch (e) {
       new Notice(`WikiLM: ${describeError(e)}`);
     } finally {
       notice.hide();
+    }
+  }
+
+  /**
+   * Look at the edits so far and propose any rule they now imply.
+   *
+   * Runs after a recorded revision and only with the setting on. The notice is
+   * the only announcement: a proposal is a question, and the chip in the header
+   * is where it waits until the reader has time for it.
+   */
+  private async learnFromEdits(): Promise<void> {
+    if (!this.plugin.settings.schemaLearning) return;
+    try {
+      const n = await this.plugin.schema.learn(new Date().toISOString().slice(0, 10));
+      if (n > 0) {
+        new Notice(`WikiLM: ${n} new schema suggestion${n === 1 ? "" : "s"} — see the inbox header.`);
+        this.render();
+      }
+    } catch (e) {
+      // Learning is a nicety on top of an edit that already succeeded; a
+      // failure here must not look to the reader like the edit failed.
+      console.error("WikiLM: could not write a schema suggestion", e);
     }
   }
 
@@ -965,4 +1033,17 @@ export class InboxView extends ItemView {
         break;
     }
   }
+}
+
+/**
+ * The five fields a revision compares, copied out of the card. A copy, not a
+ * reference: the card is mutated in place a line later, and a reference would
+ * record the edit's result as its own starting point.
+ */
+function snapshot(c: Card): CardSnapshot {
+  return { kind: c.kind, front: c.front, back: c.back, text: c.text, extra: c.extra };
+}
+
+function differs(a: CardSnapshot, b: CardSnapshot): boolean {
+  return a.kind !== b.kind || a.front !== b.front || a.back !== b.back || a.text !== b.text || a.extra !== b.extra;
 }

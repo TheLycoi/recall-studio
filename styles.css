@@ -100,6 +100,17 @@
   height: var(--wikilm-icon-sm);
   flex-shrink: 0;
 }
+/* The suggestions chip. Sized and spaced like the deck button beside it, and
+   accented rather than a CTA: it is an invitation to decide something, not the
+   action the header is for. */
+.wikilm-schema-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-accent);
+  white-space: nowrap;
+}
 .wikilm-icon-btn {
   padding: 4px;
   border-radius: var(--radius-s);
@@ -487,6 +498,29 @@
   overflow-y: auto;
   font-size: var(--font-ui-smaller);
   padding-left: var(--size-4-4);
+}
+
+/* One proposal per block, separated by a rule: each is its own decision and
+   two of them running together read as one. */
+.wikilm-schema-proposal {
+  padding-bottom: var(--size-4-2);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.wikilm-schema-proposal h4 {
+  margin: var(--size-4-3) 0 var(--size-4-1);
+}
+.wikilm-schema-rule {
+  width: 100%;
+}
+/* Monospace because these are card fields shown before and after, and a
+   proportional font hides exactly the whitespace and punctuation the reader is
+   comparing. */
+.wikilm-schema-evidence {
+  margin: var(--size-4-1) 0 var(--size-4-2) var(--size-4-4);
+  padding-left: var(--size-4-2);
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
 }
 
 /* Fix plan ------------------------------------------------------------- */

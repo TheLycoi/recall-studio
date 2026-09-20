@@ -1205,3 +1205,136 @@ class NoteSuggestModal extends SuggestModal<FixPage> {
 export function pickNote(app: App, pages: FixPage[]): Promise<FixPage | null> {
   return new Promise((resolve) => new NoteSuggestModal(app, pages, resolve).open());
 }
+
+/**
+ * The proposals waiting in `wikilm-suggestions.md`, one decision each.
+ *
+ * Nothing here writes until a button is pressed, and the two buttons are the
+ * only writes there are: Accept appends the rule under `## Learned` in the
+ * schema note, Dismiss marks the proposal answered and silences the pattern
+ * for a month. Opening this modal, reading it and closing it leaves both files
+ * exactly as they were.
+ *
+ * The rule is a text input rather than a line of prose because the wording
+ * matters: it goes to the model verbatim on every call from then on, and the
+ * reader is the one who knows whether "six words" should have been "eight".
+ * The evidence is listed under it so the rule is a claim they can check
+ * against the edits that produced it.
+ */
+export class SchemaSuggestionsModal extends Modal {
+  constructor(
+    app: App,
+    private schema: SchemaFileLike,
+    private onChange?: () => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.addClass("wikilm-modal");
+    contentEl.createEl("h3", { text: "Schema suggestions" });
+    void this.renderList();
+  }
+
+  /** Re-read and redraw in place, so accepting the first of four leaves the other three on screen. */
+  private async renderList(): Promise<void> {
+    const { contentEl } = this;
+    const old = contentEl.querySelector(".wikilm-schema-list");
+    old?.remove();
+    const list = contentEl.createDiv({ cls: "wikilm-schema-list" });
+
+    const open = (await this.schema.proposals()).filter((p) => p.status === "open");
+    this.onChange?.();
+
+    const link = list.createEl("p", { cls: "wikilm-muted" });
+    const a = link.createEl("a", { text: "Open schema note", href: "#" });
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      this.close();
+      void this.openSchemaNote();
+    });
+
+    if (open.length === 0) {
+      list.createEl("p", {
+        text: "No suggestions yet. WikiLM proposes a rule once it sees the same correction three or four times.",
+      });
+      return;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    for (const p of open) {
+      const box = list.createDiv({ cls: "wikilm-schema-proposal" });
+      box.createEl("h4", { text: p.summary });
+
+      const input = box.createEl("input", { type: "text", cls: "wikilm-schema-rule" });
+      input.value = p.rule;
+      input.placeholder = "The rule as it will be written into the schema";
+
+      if (p.evidence.length) {
+        box.createEl("p", { cls: "wikilm-muted", text: `From ${p.count} edit${p.count === 1 ? "" : "s"}:` });
+        const ul = box.createEl("ul", { cls: "wikilm-schema-evidence" });
+        for (const e of p.evidence) ul.createEl("li", { text: e });
+      }
+
+      const row = new Setting(box);
+      let accept: ButtonComponent | null = null;
+      row.addButton((b) => {
+        accept = b;
+        return b
+          .setCta()
+          .setButtonText("Accept")
+          .setTooltip("Write this rule into the schema note's Learned section")
+          .onClick(() => {
+            b.setDisabled(true);
+            void this.schema.accept(p.id, input.value.trim(), today).then(() => this.renderList());
+          });
+      });
+      row.addButton((b) =>
+        b
+          .setButtonText("Dismiss")
+          .setTooltip("Not a rule you want. WikiLM stays quiet about this pattern for a month.")
+          .onClick(() => {
+            b.setDisabled(true);
+            void this.schema.dismiss(p.id, today).then(() => this.renderList());
+          }),
+      );
+      // An empty rule would append a bullet with no rule in it, so Accept is
+      // only live while there is something to write.
+      const sync = () => accept?.setDisabled(input.value.trim() === "");
+      input.addEventListener("input", sync);
+      sync();
+    }
+  }
+
+  private async openSchemaNote(): Promise<void> {
+    try {
+      const file = await this.schema.ensure();
+      await this.app.workspace.getLeaf(false).openFile(file);
+    } catch (e) {
+      new Notice(`WikiLM: ${describeError(e)}`);
+    }
+  }
+}
+
+/**
+ * What the modal needs of `SchemaFile` (src/schemaFile.ts), named structurally
+ * rather than imported: modals.ts is reached from the settings tab and the
+ * chat, and importing the class would pull the plugin's whole graph in behind
+ * it for the sake of four methods.
+ */
+export interface SchemaFileLike {
+  proposals(): Promise<SchemaProposal[]>;
+  accept(id: string, rule: string, today: string): Promise<void>;
+  dismiss(id: string, today: string): Promise<void>;
+  ensure(): Promise<TFile>;
+}
+
+type SchemaProposal = {
+  id: string;
+  status: "open" | "applied" | "dismissed";
+  summary: string;
+  rule: string;
+  evidence: string[];
+  count: number;
+};
