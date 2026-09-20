@@ -1,6 +1,6 @@
-# Recall — highlight-centric flashcards for Obsidian
+# WikiLM — a wiki you can question, grounded in your own highlights
 
-Recall turns the sparse things you actually want to remember into Anki cards
+WikiLM turns the sparse things you actually want to remember into Anki cards
 without making you wait for the AI. It is built around three ideas:
 
 1. **Highlights, not documents.** Every card belongs to a highlight: a span
@@ -38,27 +38,59 @@ length (setting, default 12 characters) are ignored, already-highlighted
 spans are captured without being re-wrapped, and the same passage is never
 captured twice in a row.
 
-Commands, for when the mode is off:
+Every command WikiLM registers. Each one runs from the command palette under
+its name, and from the chat box by any of its aliases, with or without a
+leading slash; the whole table is `COMMAND_TABLE` in `src/commandTable.ts`,
+and `/help` in the chat prints it.
 
-| Command | What it does |
-| --- | --- |
-| **Send selection to inbox** | Captures the selection (or the paragraph under the cursor; in reading view, the selected text) and queues card writing. Your note is not modified. Also in the editor right-click menu. |
-| **Send PDF selection to inbox** (also *…with instructions…*) | Captures the text selected in the PDF viewer with its page number and the page's text as context. |
-| **Send selection to inbox with instructions…** | Same, plus a one-line instruction for the writer ("one cloze on the number", "cards in Dutch"). |
-| **Send all ==highlights== in this note to inbox** | Sweeps a note you highlighted while reading and queues every span not already in the inbox. |
-| **AI-highlight this note and write cards** | The "highlight" operation: the model picks spans worth remembering, each is verified verbatim against the note, then queued. Use this for dense material. Your note is not modified. |
-| **AI-highlight this note with instructions…** | Same, with guidance for the highlighter ("only definitions and numbers"). |
-| **AI-highlight this PDF into the wiki…** | On an open PDF: the model suggests spans page by page, each verified verbatim and mapped to a PDF++ selection, assigned to a same-class wiki note — under one of its own `##` headings when the span is a subtopic of it — or a proposed new one, previewed per span, then written as callouts. |
+| Palette name | Chat aliases | When available |
+| --- | --- | --- |
+| **Send selection to inbox** | `capture`, `send` | needs an open note |
+| **Send PDF selection to inbox** | `pdf` | needs an open PDF |
+| **Send PDF selection to inbox with instructions…** | `pdf-instruct` | needs an open PDF |
+| **Send selection to inbox with instructions…** | `capture-instruct` | needs an open note |
+| **Send all ==highlights== in this note to inbox** | `highlights`, `sweep` | needs an open note |
+| **AI-highlight this note and write cards** | `ai` | needs an open note |
+| **AI-highlight this note with instructions…** | `ai-instruct` | needs an open note |
+| **Ingest source: read this markdown into the wiki** | `ingest`, `read-source` | needs an open note |
+| **Ingest folder: read every note in a folder into the wiki** | `ingest-folder`, `read-folder` | always |
+| **Cancel the running AI highlight or ingest** | `cancel`, `stop-run` | while a run is in progress |
+| **Add transcript for document highlighting** | `transcript` | needs an open note |
+| **Extract PDF highlights to manifest** | `extract` | needs an open PDF |
+| **Digest PDF highlights into topic notes…** | `digest` | needs an open PDF, a manifest note, or a note with PDF++ links |
+| **Digest PDF highlights from pasted model output…** | `digest-json`, `paste` | needs an open PDF or manifest note |
+| **AI-highlight this PDF into the wiki…** | `suggest` | needs an open PDF |
+| **Open chat: ask the notes** | `chat`, `ask` | always |
+| **Lint wiki: find gaps, dead links and ungrounded quotes** | `wiki`, `lint` | always available |
+| **Open inbox** | `inbox` | always |
+| **Export all reviewed cards to Anki** | `export` | always |
+| **Retry failed highlights** | `retry` | always |
 
-**Capture does not edit your notes.** Recall sends the passage to the inbox and
+What the capture commands do: **Send selection to inbox** takes the selection
+(or the paragraph under the cursor; in reading view, the selected text) and
+queues card writing, and is in the editor right-click menu too. The PDF
+variants take the text selected in the PDF viewer with its page number and
+the page's text as context. The two *…with instructions…* forms add a
+one-line instruction for the writer ("one cloze on the number", "cards in
+Dutch"). **Send all ==highlights== in this note to inbox** sweeps a note you
+highlighted while reading and queues every span not already in the inbox.
+**AI-highlight this note and write cards** has the model pick the spans worth
+remembering, each verified verbatim against the note before it is queued; use
+it for dense material. **AI-highlight this PDF into the wiki…** does the same
+for a PDF, mapping each verified span to a PDF++ selection and assigning it to
+a same-class wiki note — under one of that note's own `##` headings when the
+span is a subtopic of it — or to a proposed new one, previewed span by span,
+then written as callouts.
+
+**Capture does not edit your notes.** WikiLM sends the passage to the inbox and
 leaves the file alone. Writing `==…==` into a note is available as an opt-in
 setting ("Mark captured text in the note"), but it is off by default: a passage
 that spans a heading or a list item cannot be wrapped in `==…==` without
-breaking the formatting, and Recall now refuses to mark those spans even when
+breaking the formatting, and WikiLM now refuses to mark those spans even when
 marking is on.
 
 Every highlight remembers its note, line, nearest heading and (optionally) a
-`^recall-…` block ID, so the inbox can jump straight back to the source. With
+`^wikilm-…` block ID, so the inbox can jump straight back to the source. With
 marking off, clicking a highlight in the inbox re-locates it by its text, so the
 jump survives edits made elsewhere in the note. PDF highlights remember the page
 and open the PDF at that page.
@@ -110,7 +142,7 @@ qa | What is the usual diagnosis for a leech card?
 
 The fourth card drafted from this note asked what the principle *is* and
 answered by restating its definition — the near-tautology case the critique
-pass looks for (`src/llm.ts:174-193`). It came back `drop`, so it sits in
+pass looks for (`src/llm.ts`). It came back `drop`, so it sits in
 the inbox flagged with its reason rather than being deleted, and cannot be
 exported until it's fixed or kept deliberately.
 
@@ -166,7 +198,7 @@ Limitations:
 
 If you take class notes by highlighting lecture PDFs with PDF++ — a callout
 like `[[file.pdf#page=4&selection=2,0,33,19&color=yellow|…, p.4]]` or
-`[[file.pdf#page=2&annotation=846R|…]]` plus its quoted text — Recall can
+`[[file.pdf#page=2&annotation=846R|…]]` plus its quoted text — WikiLM can
 group those highlights by topic, write a short summary for each topic from
 the whole paper, and lay out every highlight underneath it as the same
 PDF++ callout, so clicking it still opens the PDF at that highlight.
@@ -178,7 +210,7 @@ Four commands, active on a PDF (or, for the last two, on a manifest note):
 | **Extract PDF highlights to manifest** | Collects every highlight of the active PDF — PDF++ links in notes that back-link to it, plus annotations embedded in the file itself — and writes a manifest, then opens it. |
 | **Digest PDF highlights into topic notes…** | Asks the configured model to group the manifest's highlights into topic notes and write each one's summary, then shows a preview before writing anything. |
 | **Digest PDF highlights from pasted model output…** | Same, but the draft comes from JSON you paste in rather than a live model call — see "Interim: digesting by hand" below. |
-| **Ask the notes** | Opens the Recall sidebar in Chat mode (`src/main.ts:172-201`). |
+| **Open chat: ask the notes** | Opens the WikiLM sidebar in Chat mode (`src/main.ts`). |
 
 **Pages are concept or entity pages.** A new page carries `type: concept` or
 `type: entity`, a tag from the closed vocabulary, one or two `aliases:`, and
@@ -191,14 +223,14 @@ the preview says why. The command also runs on a class note that holds PDF++
 links, digesting the PDFs it cites.
 
 **The manifest.** One file per PDF, in the folder set by **Manifest folder**
-(default `recall-manifests/`), named after the PDF
+(default `wikilm-manifests/`), named after the PDF
 (`<manifestFolder>/<pdf basename>.md`). It lists every highlight in page
 order as a PDF++ callout carrying the same link the note would, plus
 hand-readable fields (`id::`, `page::`, `kind::`, `color::`, `origin::`,
 `before::`, `after::`) that the digest and the pasted-JSON path use to refer
 to a highlight by its `id`. Re-running **Extract PDF highlights to
 manifest** overwrites the manifest; it never touches a topic note
-(`src/manifest.ts:173-187`, `src/pdfHighlights.ts`).
+(`src/manifest.ts`, `src/pdfHighlights.ts`).
 
 **The topic note.** Written to `<topicFolder>/<class code>/<title>.md`
 (default topic folder `classes`; the class code comes from
@@ -208,7 +240,7 @@ assigned to that topic as a callout in page order — subdivided by `### Page
 N` when the note spans more than one page. Nothing but the summary and
 title comes from the model; every link and callout is rendered by code
 straight from the manifest. Two highlights on one page render exactly like
-this (`src/topicNote.ts:47-73`):
+this (`src/topicNote.ts`):
 
 ````markdown
 ---
@@ -242,7 +274,7 @@ to build (default **Notes**). **Flashcards** skips the model call entirely
 and queues every highlight with text straight into the inbox, where the
 usual writer, critique, and lint chain handles cards. **Both** writes the
 topic notes and also queues each written note's highlights into the inbox.
-`(src/digest.ts:187-307`, `src/capture.ts` — `captureManifestHighlights`.)
+(`src/digest.ts`, `src/capture.ts` — `captureManifestHighlights`.)
 
 **Never overwritten.** Writing into a topic note that already exists only
 appends: a highlight already present — identified by its link's
@@ -251,7 +283,7 @@ appends: a highlight already present — identified by its link's
 they are. A note with no `## Highlights` heading gets one inserted before
 `## Related topics` (or at the end, if there is no such heading), so a
 manually written note gains a highlights section without disturbing what's
-already in it (`src/topicNote.ts:152-212`).
+already in it (`src/topicNote.ts`).
 
 **Preview.** Before anything is written, a modal lists every proposed note:
 a checkbox (unchecked by default when an existing note would gain nothing),
@@ -266,7 +298,7 @@ and "merge into an existing note". Nothing is written until you click
 No model provider is required to work with manifests and topic notes end to
 end — while none is configured (or while a configured one is failing), run
 the digest by pasting a model's output instead of calling one from inside
-Recall:
+WikiLM:
 
 1. Run **Extract PDF highlights to manifest** on the PDF. The manifest opens.
 2. In a chat session with a model of your choice, paste the system prompt
@@ -282,7 +314,7 @@ Recall:
 
 3. With the manifest still the active file, run **Digest PDF highlights
    from pasted model output…**, paste the JSON back in, review the preview,
-   and write. Recall renders every link and callout itself from the
+   and write. WikiLM renders every link and callout itself from the
    manifest — the model never writes one.
 4. Ask (below) works without a model for the evidence half of an answer; a
    model answer needs a configured provider.
@@ -291,14 +323,16 @@ Recall:
 <summary><code>DIGEST_SYSTEM</code> (the digest system prompt, verbatim)</summary>
 
 ```
-You turn one lecture PDF and the highlights a student made in it into a handful of topic notes. You are given the paper's text, so that you can see what each highlight is about, and the highlights themselves, each with an id and a page. You return, for each topic, a title, a short summary, and the ids of the highlights that belong to it. You never write links, callouts, or ids into your prose: the plugin renders each highlight back into the note from its own record, and prose that mentions H04 will be read by a person, not resolved by a machine.
+You turn one lecture PDF and the highlights a student made in it into a handful of topic notes. You are given the paper's text, so that you can see what each highlight is about, and the highlights themselves, each with an id and a page. You return, for each topic, a title, its kind, one or two aliases, a tag, a short summary, and the ids of the highlights that belong to it. You never write links, callouts, or ids into your prose: the plugin renders each highlight back into the note from its own record, and prose that mentions H04 will be read by a person, not resolved by a machine.
 
 <what_a_topic_is>
 A topic is something the reader would look up by name later: a mechanism, a classification, a definition together with what follows from it, a distinction between two things that are easy to confuse. It is not a slide, not a section of the deck, and not the lecture itself. One lecture usually holds two to six of them. Fewer, larger topics beat many thin ones, because a note with one highlight in it is a note the reader will never open twice.
 
 Every highlight belongs to the topic it serves best, and a highlight may serve more than one: a definition of affinity can sit under both the receptor topic and the dose-response topic, and putting it in both is right when a reader arriving at either would want it. What does not belong in any topic goes in unused_ids: slide titles, course logistics, dates, a name on a title page, a rectangle whose text came out empty. Leaving such a highlight in a topic costs the reader more than dropping it, because it dilutes the note it lands in.
 
-You are told which notes already exist for this class. When one of those titles is the topic a group of highlights belongs to, reuse the title exactly, character for character, because the plugin then appends those highlights to that note instead of creating a second one beside it. Reuse it only when it genuinely fits; a near-match that forces unrelated highlights together is worse than a new note.
+You are shown every page the wiki already has, across every class, each with its kind, its aliases, its section headings, its class, and a line of its summary. The order of preference is fixed. First, an existing page whose title or alias is the topic: reuse the title exactly, character for character, because the plugin then appends the highlights to that page — even a page from another class, since a concept the reader met in physiology is the same concept when biomechanics meets it, and the page simply gains the second class. Second, an existing page the topic is part of — a parent topic, one whose headings it would sit under: give the new title, name that page in closest_existing, and say why in why_new; the plugin files the highlights under a heading inside it. Only when no existing page is related at all does a topic become a page of its own, with closest_existing empty and why_new saying what makes it new. A new page is the exception you reach at that wall, not the default for every subject with a name.
+
+Kind follows the subject. A named person, organisation, agency, product, drug or event that is itself what the reader would look up is an entity; a mechanism, method, theory, classification, phenomenon, or any term that explains how something works is a concept. When unsure, prefer concept. The tag is the note's subtype, one word from a closed list: a concept is a method, theory, term, phenomenon, standard or field, and an entity is a product, person, organization, project, event or place; "other" is the escape hatch, not a default. Aliases are the other names a reader would search under — an abbreviation, the expanded form, a variant spelling — one or two, taken from the paper, never coined.
 </what_a_topic_is>
 
 <the_summary>
@@ -316,17 +350,17 @@ related lists the titles of other notes you are writing in this response, or of 
 <examples>
 <example>
 <input>Highlights H01 "Pharmacology, Pharmacodynamics and Pharmacokinetics — HBIO 250 Fall 2026" (p.1), H02 "Pharmacology is the study of the action of drugs in the human body" (p.2), H03 "Pharmacodynamics = what drugs do in the body; pharmacokinetics = what the body does to drugs" (p.2), H04 "Receptors bind ligands with relatively high affinity" (p.4), H05 "Receptors transduce a signal to produce a biological effect; this distinguishes them from inert binding sites such as albumin" (p.4). Existing notes: Pharmacology.</input>
-<output>Two notes. "Pharmacology" (reusing the existing title) takes H02 and H03, with a summary that defines the field and sets its two branches against each other. "Receptors" takes H04 and H05, with a summary that names the two properties and says why the second one is what separates a receptor from a carrier protein. related on each names the other. H01 is a slide title and goes to unused_ids.</output>
+<output>Two notes. "Pharmacology" (reusing the existing title, so kind, tag and aliases are ignored there) takes H02 and H03, with a summary that defines the field and sets its two branches against each other. "Receptors", kind concept, tag term, aliases "Drug Receptors", closest_existing empty, why_new "no listed page is about receptors themselves", takes H04 and H05, with a summary that names the two properties and says why the second one is what separates a receptor from a carrier protein. related on each names the other. H01 is a slide title and goes to unused_ids.</output>
 <note>Five highlights, two topics, one dropped. The existing title is reused verbatim so the two highlights land in the note the reader already has.</note>
 </example>
 <example>
 <input>Twelve highlights, of which nine are on absorption, distribution, metabolism and excretion, two are on the definition of half-life, and one is a rectangle with no text.</input>
-<output>Two notes, not four. "Drug Disposition" takes the nine, because absorption, distribution, metabolism and excretion are the four stages of one process and a reader looking any of them up wants the others in view; "Half-Life" takes the two, and also takes one of the excretion highlights, since half-life is defined there. The empty rectangle goes to unused_ids.</output>
+<output>Two notes, not four. "Drug Disposition", kind concept, tag phenomenon, aliases "ADME", takes the nine, because absorption, distribution, metabolism and excretion are the four stages of one process and a reader looking any of them up wants the others in view; "Half-Life", kind concept, tag term, aliases "t½", takes the two, and also takes one of the excretion highlights, since half-life is defined there. Neither names a closest_existing, and each why_new says no listed page covers the process. The empty rectangle goes to unused_ids.</output>
 <note>Splitting one process into four notes of two highlights each would make four notes nobody opens. One highlight sits in two notes because it belongs in both.</note>
 </example>
 </examples>
 
-Before returning, check your answer against the input: every id you used appears there, every id in the input appears either in exactly the notes it belongs to or in unused_ids, no note has an empty highlight_ids list, no two titles collide, every related title is one you wrote or were shown, and no summary contains a link, an id, or a fact the paper does not state.
+Before returning, check your answer against the input: every id you used appears there, every id in the input appears either in exactly the notes it belongs to or in unused_ids, no note has an empty highlight_ids list, no two titles collide, every related title is one you wrote or were shown, no summary contains a link, an id, or a fact the paper does not state, every new title gives a kind, a tag from its kind's list, one or two aliases, and either a closest_existing you were shown or a why_new that says why none fits.
 ```
 
 </details>
@@ -399,7 +433,7 @@ Return each span as a verbatim quote copied exactly from the page, character for
 
 Each span is one to four sentences and self-contained: it carries a definition, a mechanism, a number, a name, a date, a causal claim, a distinction between similar things, or a memorable formulation, and it can be understood without the surrounding paragraph. Prefer the fundamentals a reader needs before the details, and prefer material with lasting use over trivia. Prefer fewer, denser spans over many thin ones.
 
-The pages are marked `[page N]` and each span reports the page it was copied from. A span never crosses a page marker: a sentence that runs over onto the next page is quoted from one side of the break or left alone, because a quote spanning two pages matches neither of them.
+The pages are marked \`[page N]\` and each span reports the page it was copied from. A span never crosses a page marker: a sentence that runs over onto the next page is quoted from one side of the break or left alone, because a quote spanning two pages matches neither of them.
 
 A transcript, when one is present, is the recording of the lecture that accompanies the page. It tells you what the lecturer treated as important; it is not a source of quotes, so every span is still copied from the page itself. Prefer the passages the lecturer dwells on, repeats, calls important, or says will be tested, and pass over slide content that was skipped or read out without comment. Where the transcript and the page differ in wording, the page's wording is what gets quoted.
 
@@ -412,9 +446,11 @@ Every span names its note, and the order of preference is fixed. First, an exist
 
 The test is not whether an existing title matches; it is whether a reader looking for this fact would open that note. A pharmacology note holds a span about NSAIDs, a doping note holds a span about the agency that polices it, a biomechanics note holds a span about one kind of joint moment. A new note is the exception you reach at that wall, not the default for every subject with a name of its own.
 
-A title that is not on the list is a new note, and it appears in new_notes — with its kind, a summary, the closest existing note, and one sentence on the decision — before any span may point at it. If you can name a closest existing note, you have not reached the wall: the spans belong in it, and the plugin files them there under a heading whatever you do. Leave closest_existing empty only when nothing listed is related. A note_title that is neither an existing title nor one of your new_notes points at nothing, and the spans under it are lost.
+A title that is not on the list is a new note, and it appears in new_notes — with its kind, one or two aliases, a tag, a summary, the closest existing note, and one sentence on the decision — before any span may point at it. If you can name a closest existing note, you have not reached the wall: the spans belong in it, and the plugin files them there under a heading whatever you do. Leave closest_existing empty only when nothing listed is related. A note_title that is neither an existing title nor one of your new_notes points at nothing, and the spans under it are lost.
 
 Kind follows the subject, in this order. A named person, organisation, project, place or event is an entity. A named product, drug or instrument is an entity only when it is itself what the reader would look up; used as a tool or an example in a discussion of something else, it is a concept of its role. A mechanism, method, theory, classification, phenomenon, or any term that explains how something works is a concept. When unsure, prefer concept. Titles are short noun phrases in Title Case, the way an index entry reads, and unique within your response; two titles that differ only in case or in a plural are the same title, and one of the two notes will be lost.
+
+The tag is the note's subtype, one word from a closed list, and the page is filed by it: a concept is a method, theory, term, phenomenon, standard or field, and an entity is a product, person, organization, project, event or place. "other" is the escape hatch for a subject none of them fits, not a default. Aliases are the other names a reader would search under — an abbreviation, the expanded form, a variant spelling — one or two, taken from the paper or from common usage, never coined. A page found only under its exact title is a page half the searches for it will miss.
 </which_note_a_span_belongs_to>
 
 <where_in_a_note_a_span_goes>
@@ -440,7 +476,7 @@ Slide titles, course logistics, figure captions, and a line the lecturer read ou
 <examples>
 <example>
 <input>[page 7] holds "Doping is defined as the occurrence of one or more of the anti-doping rule violations set out in the Code" under the slide title "Anti-Doping: Definitions", [page 8] holds "The World Anti-Doping Agency was founded in 1999 to coordinate the fight against doping in sport across countries and sports.", and [page 12] holds "Self-efficacy is a person's belief in their capacity to carry out the behaviour a situation demands." Existing notes: Doping (concept) with the sections Definitions, Sanctions; Drug Testing (concept). Already selected: nothing.</input>
-<output>Three spans. The definition on page 7 goes to the existing title "Doping", note_section "Definitions", copied exactly. The sentence on page 8 also goes to "Doping", with note_section "World Anti-Doping Agency" — a heading the note does not have yet — because the agency is part of the doping topic and a reader looking for it opens the doping note. The sentence on page 12 goes to a new note "Self-Efficacy", kind concept, listed in new_notes with a summary, closest_existing empty, and why_new "the listed notes are about doping and testing; a belief construct from behavioural psychology belongs to none of them". The slide title "Anti-Doping: Definitions" is not a span.</output>
+<output>Three spans. The definition on page 7 goes to the existing title "Doping", note_section "Definitions", copied exactly. The sentence on page 8 also goes to "Doping", with note_section "World Anti-Doping Agency" — a heading the note does not have yet — because the agency is part of the doping topic and a reader looking for it opens the doping note. The sentence on page 12 goes to a new note "Self-Efficacy", kind concept, tag term, aliases "Self-efficacy belief", listed in new_notes with a summary, closest_existing empty, and why_new "the listed notes are about doping and testing; a belief construct from behavioural psychology belongs to none of them". The slide title "Anti-Doping: Definitions" is not a span.</output>
 <note>One existing title reused twice — once for its own subject, once for a subtopic under a new heading — and one note founded only because nothing listed could hold it. That last case is the wall, and it is the only case that makes a new note.</note>
 </example>
 <example>
@@ -450,7 +486,7 @@ Slide titles, course logistics, figure captions, and a line the lecturer read ou
 </example>
 </examples>
 
-Before returning, check your answer against the input: every note_title is either an existing title you were shown or a title in new_notes, every note_section is a heading you were shown for that note, a short new heading, or empty, every new note names a closest_existing that is empty or a title you were shown and gives a why_new, every quote is copied character for character from the page it names, no span reports a page outside this batch, and no page carries more spans than the limit allows.
+Before returning, check your answer against the input: every note_title is either an existing title you were shown or a title in new_notes, every note_section is a heading you were shown for that note, a short new heading, or empty, every new note names a closest_existing that is empty or a title you were shown, gives a why_new, one or two aliases, and a tag from its kind's list, every quote is copied character for character from the page it names, no span reports a page outside this batch, and no page carries more spans than the limit allows.
 ```
 
 </details>
@@ -466,62 +502,70 @@ Limitations:
 
 ### Ask
 
-A chat panel in the Recall sidebar (toggle **Inbox | Chat** in the header,
-or run **Ask the notes**), for asking questions against the topic notes the
-digest has written, and for running Recall's commands without leaving the
-box. It answers only from the vault.
+A chat panel in the WikiLM sidebar (toggle **Inbox | Chat** in the header,
+or run **Open chat: ask the notes**), for asking questions against the topic
+notes the digest has written, and for running WikiLM's commands without
+leaving the box. It answers from the vault.
 
 **Retrieval** is lexical, not an embedding or a vector store: every `.md`
 under the **Topic notes folder** is indexed into evidence units — every
 highlight callout/embed under `## Highlights`, plus any bullet under
-`## Key claims` that ends in a wikilink — scored against your question with
+`## Key claims` that ends in a wikilink, and a note with neither section
+has its prose indexed instead — scored against your question with
 Obsidian's own `prepareSimpleSearch`, plus a smaller weight for a match in
-the note title. The best matches (**Evidence per question**, default 12,
+the note title. The best matches (**Evidence per question**, default 6,
 capped at half from any one note) are numbered `[1]…[k]`
-(`src/retrieval.ts`).
+(`rankEvidence` and `numberEvidence` in `src/retrieval.ts`). Wikilinks
+between notes are walked as a graph, so a note the matched one links to can
+be reached even when it uses none of your words (`src/graph.ts`), and with
+**Find other wording when a question comes up short** on, a list that is
+still short sends the question back to the model for the terms your notes
+would use and searches locally for those.
 
 **No evidence, no model.** When nothing under the topic folder matches the
 question, the panel answers at once, without a model call: *Your notes
 don't cover this…*, naming the question and suggesting which lecture to
-digest (`noEvidenceAnswer` in `src/askCheck.ts`). A hole in the notes is
-reported as a hole, not filled from memory.
+digest (`noEvidenceAnswer` in `src/askCheck.ts`). When the topic folder
+holds no indexable note at all, it says that instead and points at the
+setting (`emptyIndexAnswer`), because that is a fault in a setting rather
+than a hole in the notes.
 
-**How an answer is assembled.** The model does not write the finished
-answer. It returns a structured draft (`AskOut` in `src/schemas.ts`):
+**How an answer is assembled.** The model returns a structured draft
+(`AskOut` in `src/schemas.ts`):
 
 - `coverage`: `full`, `partial`, or `none`;
-- `quotes`: the verbatim passages it relied on, each with the evidence
-  number it came from;
-- `sentences`: the answer one sentence at a time, each marked `claim` or
-  `gap` and, for a claim, the evidence numbers that state it. The text
-  carries no `[n]` markers, links, or ids.
+- `from_general_knowledge`: true only when the notes did not answer and the
+  model answered anyway;
+- `answer`: the prose, a few sentences or a short list, carrying no `[n]`
+  markers, links, or headings;
+- `used`: the one or two pieces of evidence the answer rests on, each with a
+  few words on what that note contributed.
 
 Code then does the checking (`checkAnswer` in `src/askCheck.ts`):
 
-- a quote is **verified** only if, after normalising case, accents, and
-  punctuation, it is a substring of the evidence it cites; otherwise it is
-  rejected and counted;
-- a **claim** sentence keeps only citations inside the evidence range, and a
-  claim with none left is **removed** and counted; when coverage is `none`
-  every claim is removed, since such an answer may only describe the gap;
-- a **gap** sentence is kept as written and carries no citation;
-- the citations are appended by code after each kept claim (`Text. [1][3]`),
-  so a sentence cannot claim something and quietly omit where it came from.
+- a citation outside `1…k` is dropped and counted, so a link under an answer
+  always opens a note that exists;
+- at most two sources are shown — enough to confirm an answer, not a wall of
+  search results;
+- a general-knowledge answer that also names a source is not treated as one:
+  the flag only stands when no citation survived;
+- when the model named sources and none of them checked out, coverage is
+  forced to `none`, whatever the model claimed;
+- an empty answer is replaced by a line asking you to rephrase.
 
-Under the answer sits a **grounding line** — for example *Grounding: partial
-coverage · 3 sentences kept · 1 unsupported removed · 2 quotes verified* —
-with an **unverified** badge whenever anything was removed or rejected
-(setting **Show the grounding line under answers**). The verified quotes
-follow as a blockquote, and the evidence list below marks the items the
-answer cited. When every sentence was removed the panel says so instead of
-showing an empty answer.
+Under the answer sits a **grounding line** — *Answered from your notes*,
+*Partly answered from your notes*, *Not in your notes*, or *General
+knowledge, not your notes*, with `· N bad citations dropped` appended when
+any were (setting **Show the grounding line under answers**). The sources
+follow as links to the notes they came from, and the evidence list sits
+below.
 
-**Optional verify pass.** With **Verify answers with a second model call**
-on, the draft goes back to the model as a checker (`VERIFY_SYSTEM`): each
-sentence is judged supported only if the evidence it cited states it, and
-unsupported claims are removed before assembly. It doubles the cost of a
-question and is off by default. If the checker call fails, the answer is
-still assembled and the failure is shown on the turn.
+**Answering outside the notes is off by default.** With **Answer from
+general knowledge when your notes do not** on, a question the notes do not
+cover may be answered from what the model knows, under a banner saying so:
+*Not from your notes — answered from general knowledge. Verify this before
+relying on it.* Off, such a question is answered with the gap and nothing
+else.
 
 **Without a configured provider**, the model call fails and the panel shows
 an error line — but the evidence list still appears beneath it, built and
@@ -564,85 +608,68 @@ command typed exactly by name still runs.
 <summary><code>ASK_SYSTEM</code> (the Ask system prompt, verbatim)</summary>
 
 ```
-You answer a student's question about their own class notes, using numbered evidence taken from those notes. Each piece of evidence is something they highlighted in a lecture PDF or a claim they wrote down themselves, and it carries the note it came from and the page it was highlighted on. Your answer goes into a small sidebar beside their notes, with the evidence listed underneath it, so the reader can check every sentence you write against the passage it came from.
+You answer a student's question about their own class notes, using numbered evidence taken from those notes. Each piece of evidence is something they highlighted in a lecture PDF or a claim they wrote down themselves, and it carries the note it came from and the page it was highlighted on. Your answer goes into a small sidebar beside their notes, with a link to one or two of those notes underneath it.
 
-You do not write the finished answer. You return the passages you leaned on and then the answer one sentence at a time, each sentence saying which evidence states it, and the software assembles what the reader sees. It also checks you: a quote that is not in the evidence is dropped, and a claim that names no evidence is removed from the answer and counted. Those checks run on every answer, so treat them as the shape of the work rather than as a warning.
+Answer in prose, then name the evidence the answer rests on. The reader sees the answer first and the sources under it, so write the answer to stand on its own.
 
-<answer_only_from_the_evidence>
-The evidence is the whole of what you may assert. You know a great deal about most of these subjects, and none of it belongs here: the reader is revising for an exam set on this material, and a true sentence their course never taught them is one they cannot rely on and cannot trace back to a slide. If a fact is not in the evidence in front of you, it is not in the answer, however certain you are of it.
+<answer_from_the_evidence>
+Answer from the evidence above, not from general knowledge. You know a great deal about most of these subjects, and none of it belongs in an answer that claims to come from their notes: the reader is revising for an exam set on this material, and a true sentence their course never taught them is one they cannot rely on and cannot trace back to a slide.
+
+Do not make up anything that is not in the evidence. Nothing downstream checks your words against it any more, so an invented sentence reaches the reader looking exactly like a sourced one. Write as though they will open the note you cite and read the passage themselves, because the link under your answer is there for precisely that.
 
 The conversation so far, when there is one, is there so that a follow-up makes sense: it tells you what "it" refers to and what has already been said. It is not evidence. Nothing said in an earlier turn may be asserted in this one unless the evidence in front of you now states it.
-</answer_only_from_the_evidence>
+</answer_from_the_evidence>
 
 <when_the_notes_do_not_cover_it>
-Saying that the notes do not answer the question is a correct answer, and often the most useful one: it tells the reader their notes have a hole in them, which is exactly what they would want to know before an exam. It is never a failure to reach for.
+Saying the notes do not answer the question is a correct answer, and often the most useful one: it tells the reader their notes have a hole in them, which is exactly what they want to know before an exam. It is never a failure to reach for.
 
-Set coverage to full when the evidence answers the question, partial when it answers some of it, and none when it does not touch the question at all. A none answer is one or two gap sentences and no quotes: say what the evidence does hold and what it does not, naming what would settle the question ("nothing here gives a half-life for any drug"). Do not attach a claim to a none answer; there is nothing for it to rest on. A partial answer carries both kinds: the part the evidence settles, then a gap sentence for the part it leaves open.
+Set coverage to full when the evidence answers the question, partial when it answers some of it, none when it does not touch the question. For a partial answer, give the part the evidence settles and then say plainly what it leaves open.
+
+When coverage is none you have two honest options, and you must pick one:
+
+1. Say you do not know from their notes, and stop. Name what the evidence does hold and what it does not ("nothing here gives a half-life for any drug"). Leave used empty and from_general_knowledge false. This is the right answer whenever the question is about their course in particular — what the lecturer said, what is examinable, what a slide claimed — because general knowledge cannot answer that, and answering anyway would mislead them.
+
+2. Answer from general knowledge, and say so. Set from_general_knowledge true and leave used empty. The reader is shown a warning above the answer telling them it did not come from their notes and to verify it. Use this when the question has a real answer outside their notes that would genuinely help — a standard definition, a mechanism, background their course assumes — and say in the answer itself that their notes do not cover it.
+
+Never set from_general_knowledge true while naming sources: a sentence cannot come both from their notes and from outside them. When coverage is full or partial, from_general_knowledge is false.
 </when_the_notes_do_not_cover_it>
 
-<quotes_first>
-Before you write a sentence, copy into quotes the passages your answer will rest on: the words themselves, character for character, from the evidence they appear in, with the number of that piece. Not a paraphrase, not a tidied version, not two fragments spliced with an ellipsis. The software looks each one up in the evidence you named and shows the reader only the ones it finds, so a quote you smoothed out is a quote that disappears.
+<which_evidence_to_name>
+In used, name only the evidence the answer actually rests on — the one or two pieces that carry it, best first. Not every piece that mentions the topic, and not everything you were given: the reader gets one or two links, and a list of everything retrieval returned tells them nothing about where the answer came from. Two is the most that will be shown.
 
-Extracting them first is the point of the exercise, not bookkeeping after the fact. Finding the exact words that carry the answer is what tells you whether the answer is there at all; often the passage you were sure you remembered turns out to say something narrower, and the sentence you were about to write becomes a gap sentence instead. Keep them short, a clause or a sentence, and copy only the spans doing the work. Leave quotes empty when coverage is none.
-</quotes_first>
+For each, why is a few words on what that note contributed: "defines the term", "gives the formula", "states the exception". It is a label on a link, not a sentence.
 
-<sentences_and_their_numbers>
-Write the answer one sentence per entry, in the order the reader will read them. Do not write [1] or any other marker inside the text; the software appends the citations from the numbers you list, and a marker you typed yourself is stripped out.
-
-A claim sentence asserts something, and it lists in cited every evidence number that states it: one number, or both when the sentence rests on two pieces. A claim whose cited list is empty is removed from the answer before the reader sees it, so if you cannot name the evidence for a sentence, either find the number or rewrite the sentence as what the evidence does say. Never invent a number: if the evidence stops at [8], there is no [9], and a sentence citing one is removed.
-
-A gap sentence says what the evidence does not cover, and it cites nothing, because there is no passage to point at for an absence. That is the one kind of sentence that carries no numbers.
-
-A sentence that is a list item starts with "- " and is one entry like any other.
-</sentences_and_their_numbers>
+Never invent a number. If the evidence stops at [8] there is no [9], and a citation past the end is dropped before the reader sees it.
+</which_evidence_to_name>
 
 <how_to_write_it>
 Prefer the reader's own wording. These are their highlights, in the vocabulary their lecturer used, and an answer in that vocabulary is one they can match against the slide. Where two pieces of evidence use different words for the same thing, use the one the question used.
 
-Be short. A few sentences, or a small list when the question asks for several things. This is a sidebar, not an essay, and the evidence is right there underneath: you do not need to reproduce it, only to say what it means for the question. Plain markdown, bold and code at most, no headings, no links, no ids.
+Be short. A few sentences, or a small list when the question asks for several things. This is a sidebar, not an essay. Plain markdown, bold and code at most; no headings, no links, and no [1]-style markers in the text — the sources are listed underneath, so a marker in the prose is noise.
 </how_to_write_it>
 
 <examples>
 <example>
 <evidence>[1] (Receptors, p.4) Receptors have 2 important properties: they bind ligands with relatively high affinity, and they transduce a signal to produce a biological effect (this distinguishes receptors from inert binding sites such as albumin, which binds and carries many drugs but does not transduce a signal).</evidence>
 <question>What distinguishes a receptor from albumin?</question>
-<output>Coverage is full. One quote, from [1]: "transduce a signal to produce a biological effect (this distinguishes receptors from inert binding sites such as albumin, which binds and carries many drugs but does not transduce a signal)". Two claim sentences. The first, "Both bind drugs, but only a receptor transduces a signal to produce a biological effect.", cites [1]. The second, "Albumin binds and carries drugs without transducing anything, which is what makes it an inert binding site.", cites [1] as well.</output>
-<note>The quote is the span that actually carries the distinction, copied whole rather than trimmed to look neat. Both sentences rest on the same piece, so both name it. Nothing is added about albumin's structure or its other roles, true though that would be.</note>
+<output>Coverage full, from_general_knowledge false. The answer: "Both bind drugs, but only a receptor transduces a signal to produce a biological effect. Albumin binds and carries drugs without transducing anything, which is what makes it an inert binding site." used names [1], why "distinguishes receptors from inert binding sites".</output>
+<note>One piece carries the whole answer, so one source is named. Nothing is added about albumin's structure or its other roles, true though that would be.</note>
 </example>
 <example>
 <evidence>[1] (Pharmacology, p.2) Pharmacokinetics = what the body does to drugs. [2] (Drug Disposition, p.7) Metabolism converts drugs into more water-soluble forms for excretion.</evidence>
-<question>What is the half-life of aspirin?</question>
-<output>Coverage is none. No quotes. Two gap sentences, neither citing anything: "Your notes do not cover this." and "The evidence here defines pharmacokinetics and describes metabolism in general terms, but nothing in it gives a half-life for aspirin or for any other drug."</output>
-<note>The gap is named rather than filled. Half-life is a number worth knowing and one you could supply from memory, which is exactly why it must not appear: the reader would have no way to tell it apart from what their lecturer taught. No sentence is a claim here, so no sentence cites anything, and there is nothing to quote.</note>
+<question>What did the lecturer say the half-life of aspirin was?</question>
+<output>Coverage none, from_general_knowledge false. The answer: "Your notes do not cover this. The evidence here defines pharmacokinetics and describes metabolism in general terms, but nothing in it gives a half-life for aspirin or for any other drug." used is empty.</output>
+<note>The question asks what their lecturer said, which only their notes can answer. A half-life supplied from memory would put a number on screen their course may never have taught, and they would have no way to tell it apart from one that was.</note>
+</example>
+<example>
+<evidence>[1] (Pharmacology, p.2) Pharmacokinetics = what the body does to drugs. [2] (Drug Disposition, p.7) Metabolism converts drugs into more water-soluble forms for excretion.</evidence>
+<question>What does first-pass metabolism mean?</question>
+<output>Coverage none, from_general_knowledge true. The answer: "Your notes do not define this. In general, first-pass metabolism is the drug lost to the liver and gut wall after absorption and before it reaches the systemic circulation, which is why an oral dose is often larger than an intravenous one." used is empty.</output>
+<note>A standard definition their course assumes, rather than a claim about their course: it helps them and can be checked anywhere. The answer says up front that their notes lack it, and a warning appears above it as well.</note>
 </example>
 </examples>
 
-Before you return, read each sentence back against the evidence you cited for it. Ask of every claim whether that piece of evidence, on its own, says what the sentence says, and not merely something compatible with it; if it does not, drop the sentence or turn it into a gap sentence. Check that every quote is in the evidence you attributed it to, word for word, and that every number you used is one you were given.
-```
-
-</details>
-
-<details>
-<summary><code>VERIFY_SYSTEM</code> (the verify-pass system prompt, verbatim)</summary>
-
-```
-You check an answer that has already been written. You are not the writer: you do not improve sentences, fill gaps, or suggest better wording, and no sentence changes because of what you say beyond being kept or removed.
-
-You are given numbered evidence from a student's notes and the sentences drafted from it, each printed with the evidence numbers it cited. For each sentence, say whether the evidence it cited states what the sentence says.
-
-Supported means stated. Not plausible, not likely, not true as far as you know, not something the cited passage is consistent with or implies to a reader who already knows the subject. If the sentence names a number, the cited evidence carries that number; if it names a mechanism, the cited evidence describes that mechanism. Evidence that is about the right topic but does not carry the sentence's claim is not support. A sentence citing nothing, or citing a number that is not in the evidence, is unsupported.
-
-Judge each sentence only against the pieces it cited, not against the evidence as a whole: a sentence that is stated somewhere else in the list but not in what it pointed at is unsupported, because the reader will follow the citation it was given. The reason is one clause naming which words are or are not there.
-
-<example>
-<evidence>[1] (Receptors, p.4) Receptors bind ligands with relatively high affinity and transduce a signal to produce a biological effect. [2] (Drug Disposition, p.7) Metabolism converts drugs into more water-soluble forms for excretion.</evidence>
-<draft>
-0. Receptors transduce a signal to produce a biological effect. [1]
-1. Receptor binding is saturable, so the response plateaus at high doses. [1]
-</draft>
-<verdicts>0 supported: [1] states transduction of a signal to produce a biological effect in those words. 1 not supported: [1] mentions affinity and transduction but says nothing about saturation or a plateau.</verdicts>
-<note>The second sentence is true of receptors and would pass a reader who knew the subject. It is unsupported anyway, because the passage it cites does not say it.</note>
-</example>
+Before you return, read the answer back against the evidence. Ask of every sentence whether the evidence you were given says it, and not merely something compatible with it. If it does not, either cut the sentence, say instead what the evidence does say, or — if the answer is worth giving anyway — set from_general_knowledge and let the reader see the warning.
 ```
 
 </details>
@@ -859,20 +886,21 @@ Before you return, check that your verdict rests on what the evidence states and
 
 </details>
 
-**Settings**, all in Settings → Recall:
+**Settings**, all in Settings → WikiLM:
 
 | setting | default | effect |
 | --- | --- | --- |
-| Manifest folder | `recall-manifests` | where one manifest file per PDF is written |
+| Manifest folder | `wikilm-manifests` | where one manifest file per PDF is written |
 | Topic notes folder | `classes` | topic notes go to `<folder>/<class code>/<title>.md` |
 | Max topic notes per PDF | 6 | caps how many topics the model may return per digest |
 | Paper text limit | 60,000 characters | how much of the PDF's text is sent for the summary, cut at a sentence boundary |
 | Standing instructions for the digest | *(empty)* | appended to every digest prompt |
-| Evidence per question | 12 | how many ranked evidence units Ask sends per question |
+| Evidence per question | 6 | how many ranked evidence units Ask sends per question |
 | Conversation turns kept | 10 | how many prior turns Ask keeps for follow-ups |
 | Standing instructions for Ask | *(empty)* | appended to every Ask prompt |
-| Verify answers with a second model call | off | re-checks each drafted sentence against its cited evidence before assembly; doubles the cost of a question |
-| Show the grounding line under answers | on | the coverage / kept / removed / verified summary and the unverified badge |
+| Find other wording when a question comes up short | on | one extra call turns the question into the terms your notes use, and those are searched for locally |
+| Answer from general knowledge when your notes do not | off | lets the model answer a question the notes do not cover, under a banner saying it did not come from them |
+| Show the grounding line under answers | on | the one-line coverage summary, plus a count of any citations dropped |
 | Question cap per quiz | 30 | a runaway guard: a quiz ends when it brackets the edge of what you know, and this only stops one that never does |
 | Evidence pool per quiz | 20 | matching highlights and claims a quiz draws from |
 | Standing instructions for quizzes | *(empty)* | appended to every question-writing prompt |
@@ -889,14 +917,13 @@ Before you return, check that your verdict rests on what the evidence states and
   and related topics are never edited by a later digest run.
 - Retrieval is lexical: a question phrased with none of a note's own words
   will find nothing there. The evidence list is what makes that visible.
-- Grounding is checked one sentence at a time: a claim can cite evidence
-  that is only loosely related and pass. The optional verify pass tightens
-  this at the cost of a second call. Best-of-N sampling is not implemented.
-- Quote verification is a normalised substring check, so a paraphrase is
-  rejected even when its meaning is in the evidence. That is intended.
-- Digest, Ask, the verify pass, and the card writer have each run live
-  through the Claude Code provider (2026-09-12); the digest command's modal
-  flow and an export have not been driven in that session.
+- Grounding is asked for in the prompt, not re-derived from the answer: the
+  code checks that every citation points at a piece of evidence that exists,
+  not that the evidence says what the sentence says. A citation that is only
+  loosely related passes.
+- Digest, Ask, and the card writer have each run live through the Claude Code
+  provider (2026-09-12); the digest command's modal flow and an export have
+  not been driven in that session.
 - Handwritten professor annotations on scanned decks are images, not
   extractable text, and are out of scope.
 
@@ -906,7 +933,7 @@ this feature writes, never their producer. Its ingest pipeline only writes
 custom page template, converts a whole PDF to markdown rather than reading
 its annotations, and reports provenance at the source level only (never a
 page or a selection) — none of which is what a PDF++-highlighting workflow
-needs. Recall's topic notes are ordinary markdown with wikilinks, so once
+needs. WikiLM's topic notes are ordinary markdown with wikilinks, so once
 written they can still be ingested by that plugin like any other note; they
 are simply produced here, by a tool built to read the highlights PDF++
 leaves behind.
@@ -925,20 +952,20 @@ the critique is on.
 **Critique pass** (setting, on by default) sends the whole set of cards
 drafted for one highlight to the model in a single call and gets back a
 verdict per card: `keep`, `revise`, or `drop`, plus the Bloom level the card
-sits at (`src/llm.ts:44-58`, `src/llm.ts:162-237`). It checks grounding
+sits at (`CRITIC_SYSTEM` and `VerdictsOut` in `src/llm.ts`). It checks grounding
 (every answer and cloze deletion must be stated in the highlight), whether
 the cards interfere with each other (two cards whose questions read alike
 but want different answers, or that share an answer), and near-tautology
 (an answer that just restates a word already in the question)
-(`src/llm.ts:174-193`). A `revise` verdict replaces the card's fields and
+(`src/llm.ts`). A `revise` verdict replaces the card's fields and
 records the reason on `critiqueReason`; a `drop` verdict does not delete
 the card — it sets `status: "flagged"` and keeps the reason attached
-(`src/generator.ts:95-110`). If the critique call fails (network, quota),
+(`src/generator.ts`). If the critique call fails (network, quota),
 the drafted cards are kept as written and simply skip critique rather than
-being lost (`src/generator.ts:112-117`). To avoid spending a model call on
+being lost (`src/generator.ts`). To avoid spending a model call on
 a highlight that clearly doesn't need one, the critique is skipped when a
 highlight drafts zero or one card and that one card already lints clean
-(`src/generator.ts:82-84`).
+(`src/generator.ts`).
 
 **Bloom level** is the critique's judgment of how much a card actually
 asks of the reader, reported using Bloom's taxonomy: a six-level ladder of
@@ -950,7 +977,7 @@ without knowing how the thing works. This is not a push toward the higher
 end of the ladder: a highlight that states a plain definition and nothing
 more is correctly a "remember" card, and the critique says so rather than
 asking for a harder question the source doesn't support
-(`src/llm.ts:185`, `src/model.ts:31-32`). The level shows as a badge on
+(`src/llm.ts`, `src/model.ts`). The level shows as a badge on
 every judged card in the inbox, and the header shows a stat for cards
 at remember, turning red once every judged card sits there and there
 are at least five — the sign that a set has settled into testing
@@ -959,7 +986,7 @@ labels rather than understanding (`src/inboxView.ts`).
 **Deterministic lint** (`src/lint.ts`) runs on every card regardless of
 whether the critique is on, both on the freshly drafted cards and again on
 any card the critique revised, since a revision changes the text the
-grounding check needs to see (`src/generator.ts:79`, `:105`). It is pure
+grounding check needs to see (`src/generator.ts`). It is pure
 regex- and word-count-based, no model call. Nine checks can fail a card:
 
 | id | what it catches |
@@ -977,24 +1004,24 @@ regex- and word-count-based, no model call. Nine checks can fail a card:
 Three more checks are warnings rather than failures — they show as a
 softer badge than a failure, never change the card's status, and are not
 picked up by the "Fix with linter notes" wrench, which only acts on
-`lintFailures` and a critique rejection (`src/inboxView.ts:615`, `:626`).
+`lintFailures` and a critique rejection (`src/inboxView.ts`).
 `duplicate-card` (this card repeats a sibling drafted in the same batch)
 and `shared-answer` (two Q&A cards in the same batch have the same
 answer, which risks confusing them in review) are computed per batch and
-stored on the card as `lintWarnings` (`src/generator.ts:126-127`).
+stored on the card as `lintWarnings` (`src/generator.ts`).
 `cross-interference` is different: rather than being computed once per
 batch, the inbox recomputes it on every render over every pending card
 under every ready highlight across the whole inbox, the same population
 `pendingItems` uses in `src/main.ts` (`findCrossInterference` in
-`src/lint.ts:136`, `rebuildCrossInterference` in
-`src/inboxView.ts:155-167`). It badges two cards from *different*
+`src/lint.ts`, `rebuildCrossInterference` in
+`src/inboxView.ts`). It badges two cards from *different*
 highlights whose normalized answer or cloze text collide (same kind
 only), naming the other card's note in the tooltip; because it's derived
 rather than stored, binning or exporting one partner clears the other's
 badge on the next render. Labels for all twelve ids, shown in the inbox,
 live in `LINT_LABELS` in `src/lint.ts`.
 
-**The three settings**, all in Settings → Recall → Card quality:
+**The three settings**, all in Settings → WikiLM → Card quality:
 
 | setting | default | effect |
 | --- | --- | --- |
@@ -1009,14 +1036,14 @@ turn it off if you are drafting in bulk and would rather triage by hand.
 
 Lint mode stays at **badge only** by default, which is the conservative
 choice: a card that fails a check is still yours to keep. Nothing in this
-chain ever deletes a card (`src/settings.ts:99-101`).
+chain ever deletes a card (`src/settings.ts`).
 
 The cost of turning the critique on is time, not capture speed: it is one
 extra model call per highlight, so cards take longer to appear after you
 send a highlight. Capture — selecting text, dragging with the highlighter,
 sending a PDF selection — is unaffected either way, because everything
 above happens in the background queue after capture has already returned
-(`src/settings.ts:279`).
+(`src/settings.ts`).
 
 A **flagged** card (`status: "flagged"`) is one the critique dropped or
 that failed lint under a mode other than "badge only". It stays in the
@@ -1024,11 +1051,13 @@ inbox with its reason attached rather than being deleted — nothing is
 silently thrown away — but it is excluded from export: only cards with
 `status === "pending"` are ever sent to Anki, whether through AnkiConnect
 or the text-file fallback, so a flagged card cannot reach Anki until you
-review and fix it (`src/model.ts:9`, `src/main.ts:284-292`).
+review and fix it (`src/model.ts`, `src/main.ts`).
+
+<!-- schema section: added in 0.13.0 -->
 
 ### Triage
 
-Open the inbox from the ribbon, the status bar (`Recall ✎ 2 · ⧉ 7` = 2
+Open the inbox from the ribbon, the status bar (`WikiLM ✎ 2 · ⧉ 7` = 2
 writing, 7 to review), or the **Open inbox** command.
 
 - Cards sit beside the highlight they came from. Click the highlight to open
@@ -1044,14 +1073,14 @@ writing, 7 to review), or the **Open inbox** command.
 ### Exporting
 
 - **AnkiConnect** (default): Anki must be open with the
-  [AnkiConnect](https://ankiweb.net/shared/info/2055492159) add-on. Recall
+  [AnkiConnect](https://ankiweb.net/shared/info/2055492159) add-on. WikiLM
   talks to it through Obsidian's own request layer, so no CORS origin needs
   whitelisting. Duplicates are checked per deck before adding.
 - **Text file** (fallback): *Inbox menu → Export reviewed as Anki text file*
   writes a tab-separated file with `#notetype`/`#deck`/`#tags` directives into
-  `recall-exports/`; import it with *File → Import* in Anki.
+  `wikilm-exports/`; import it with *File → Import* in Anki.
 
-Cards are tagged `recall` and `source::<note-slug>`. The `source::` tag is the
+Cards are tagged `wikilm` and `source::<note-slug>`. The `source::` tag is the
 namespace the Anki Wiki Sync add-on resolves back to vault pages, so synced
 deck pages link to the note the card came from. The extra field carries the
 verbatim highlight and an `obsidian://` link to the source. A card whose
@@ -1062,10 +1091,10 @@ source link; cards captured any other way are unchanged
 
 ## Setup
 
-1. Settings → Recall → **Provider**. Three options:
-   - **Codex (ChatGPT subscription)** — no API key. Recall runs OpenAI's
+1. Settings → WikiLM → **Provider**. Three options:
+   - **Codex (ChatGPT subscription)** — no API key. WikiLM runs OpenAI's
      Codex CLI (`codex exec`) signed in with your ChatGPT account. Leave
-     *Codex CLI path* empty and Recall finds `codex` on the PATH or the copy
+     *Codex CLI path* empty and WikiLM finds `codex` on the PATH or the copy
      bundled inside the ChatGPT desktop app
      (`/Applications/ChatGPT.app/Contents/Resources/codex`); otherwise paste
      the output of `which codex`. Sign in once through the ChatGPT app or
@@ -1074,7 +1103,7 @@ source link; cards captured any other way are unchanged
      with a read-only sandbox, `--ephemeral` (no session files) and
      `--ignore-user-config` (your `~/.codex/config.toml` hooks, plugins and
      MCP servers are not loaded), so the agent never sees the vault.
-   - **Claude Code (Claude subscription)** — no API key. Recall runs the
+   - **Claude Code (Claude subscription)** — no API key. WikiLM runs the
      `claude` CLI signed in to your Claude subscription (`claude auth status`
      shows `loggedIn: true`). It passes the system prompt and a JSON schema,
      sends the message on stdin, disables the CLI's tools and settings
@@ -1085,11 +1114,11 @@ source link; cards captured any other way are unchanged
      The session limit is shared with your interactive Claude Code sessions,
      so the default model is `sonnet`; set `opus` for quality.
    - **Anthropic (API key)** — paste a key, or leave the field empty and
-     Recall reads `ANTHROPIC_API_KEY` from the environment or from the macOS
+     WikiLM reads `ANTHROPIC_API_KEY` from the environment or from the macOS
      keychain (a generic password whose service is `ANTHROPIC_API_KEY` or
-     `Recall Anthropic API key`). The keychain route keeps the key out of
+     `WikiLM Anthropic API key`). The keychain route keeps the key out of
      `data.json`, which iCloud syncs in plaintext:
-     `security add-generic-password -s ANTHROPIC_API_KEY -a recall -w`.
+     `security add-generic-password -s ANTHROPIC_API_KEY -a wikilm -w`.
      Default model `claude-opus-5`.
 
    Effort defaults to `high` (highlights are small, so this is cheap). Click
@@ -1107,50 +1136,63 @@ npm install
 npm run dev            # watch build → main.js
 npm run build          # type-check + minified bundle
 npm test               # unit tests for the pure helpers
-npm run install:vault  # build and copy into the vault's .obsidian/plugins/recall
+npm run install:vault  # build and copy into the vault's .obsidian/plugins/wikilm
 ```
 
 State: settings in `data.json`, the inbox in `inbox.json`, both inside the
 plugin folder. Notes are only touched when you choose to mark highlights.
 
-Layout:
+Layout, one line per module:
 
-- `src/capture.ts` — selection / reading-view / PDF / `==highlight==` / AI-highlight capture
-- `src/highlighter.ts` — highlighter mode (drag-to-capture gesture, ribbon toggle)
-- `src/pdf.ts` — reads a selection out of Obsidian's pdf.js viewer (and, for the digest, opens a PDF with Obsidian's bundled pdf.js)
-- `src/pdflink.ts` — PDF++ link grammar: parse and render `#page=…&selection|annotation|rect…` subpaths, callouts, and find PDF references in markdown
-- `src/pdftext.ts` — pdf.js text geometry: annotation quads → text, `selection=` → text, page text
-- `src/manifest.ts` — the highlight manifest: merge, order, ids, render and parse
-- `src/pdfHighlights.ts` — collects a PDF's highlights (backlinks + embedded annotations) into a manifest; paper text
-- `src/topicNote.ts` — topic note render/parse, merge by highlight key, digest planner
-- `src/digest.ts` — the extract and digest commands' flow (model or pasted JSON, preview, write, flashcards)
-- `src/retrieval.ts` — Ask: evidence index, lexical ranking, citation check, evidence rendering
-- `src/chatPanel.ts` — the Chat half of the sidebar
-- `src/askCheck.ts` — Ask answer assembly: quote verification, citation appending, unsupported-claim removal, the grounding report
-- `src/commandTable.ts` — the twenty commands as pure data (ids, names, aliases, hints)
-- `src/commands.ts` — their availability checks and bodies; `main.ts` registers them in one loop
-- `src/chatCommands.ts` — `/slash`, exact-name, and Run-chip matching for the chat box
-- `src/quiz.ts` — quiz sessions: scope, frozen evidence numbering, grounded question checks, grading state, difficulty, rendering
-- `src/schemas.ts` — zod output schemas for the digest and Ask (pure, so tests can bundle them)
-- `src/pdflink.ts` — parses and renders PDF++ links, subpaths, and callouts
-- `src/pdftext.ts` — quad-to-rect, selection-to-text, and page text over pdf.js text content
-- `src/pdfHighlights.ts` — collects a PDF's highlights (backlinks + embedded annotations) into a manifest
-- `src/manifest.ts` — the manifest model: render, parse, merge, sort/assign ids
-- `src/topicNote.ts` — topic note render/parse/merge and the digest planner
-- `src/retrieval.ts` — Ask's lexical evidence index, ranking, and citation check
-- `src/digest.ts` — digest orchestration: manifest/model/paste in, topic notes out
-- `src/chatPanel.ts` — the Ask chat panel owned by the inbox view
-- `src/schemas.ts` — pure zod schemas (`CardsOut`, `HighlightsOut`, `DigestOut`, `AskOut`) shared by `llm.ts` and the pasted-JSON path
-- `src/llm.ts` — prompts, zod output schemas, provider dispatch, error text
-- `src/backend.ts` — the `LlmBackend` interface (`probe`, `complete`, `abort`)
-- `src/anthropic.ts` — Anthropic backend (SDK over Obsidian `requestUrl`, native structured outputs)
-- `src/codex.ts` — Codex backend (`codex exec --json --output-schema` over stdin, JSONL parsing, effort clamping)
-- `src/claudeCli.ts` — Claude Code backend (`claude -p --json-schema` with the prompt on stdin; structured output read from the JSON envelope)
-- `src/keys.ts` — Anthropic API key resolution (settings → environment → keychain)
-- `src/generator.ts` — background queue
-- `src/inboxView.ts` — the inbox and the Ask chat panel's host (Inbox | Chat toggle)
-- `src/anki.ts` — AnkiConnect client, note building, export
-- `src/store.ts`, `src/model.ts`, `src/util.ts`, `src/settings.ts`, `src/modals.ts`
+- `src/anki.ts` — AnkiConnect client, note building, and export, over Obsidian's `requestUrl` so no CORS origin has to be whitelisted
+- `src/anthropic.ts` — the Anthropic backend, with an adapter that lets the official SDK use `requestUrl` as its transport
+- `src/askCheck.ts` — Ask answer assembly: the answer, the one or two source notes under it, and the grounding line
+- `src/backend.ts` — the `LlmBackend` interface and the shape of one structured-output request
+- `src/cancel.ts` — a request to stop a long run at its next batch boundary, never mid-call
+- `src/capture.ts` — selection, reading-view, PDF, `==highlight==` and AI-highlight capture into the inbox
+- `src/chatCommands.ts` — deciding what a line typed into the chat box means: an action to run, or a question for the notes
+- `src/chatPanel.ts` — the Chat half of the sidebar: turns, evidence, quizzes, and the lint modal
+- `src/claudeCli.ts` — the Claude Code backend, shelling out to `claude -p` signed in with a Claude subscription
+- `src/codex.ts` — the Codex backend, shelling out to `codex exec` signed in with a ChatGPT subscription
+- `src/commandTable.ts` — the twenty commands as pure data: ids, palette names, chat aliases, availability hints
+- `src/commands.ts` — their behaviour half: an `available` predicate and a `run` action per entry, registered by `main.ts` in one loop
+- `src/digest.ts` — digest orchestration: the glue between the highlight collector, the model or a pasted draft, the planner, the preview and the vault
+- `src/digestGate.ts` — whether a source has enough highlights to digest, or needs some made first
+- `src/duplicates.ts` — two pages about one subject, found from a shared name or a PDF span both cite
+- `src/examples.ts` — style examples drawn from your own triage decisions across the inbox
+- `src/fixPlan.ts` — the plan behind **Suggest fixes**: one proposed edit per finding, as a pure text-to-text function
+- `src/fixer.ts` — the vault side of that plan: gathering the facts it needs, and the only place in the feature that writes
+- `src/generator.ts` — the background queue that turns a captured highlight into cards, surviving reloads through the store
+- `src/graph.ts` — the wikilink graph between notes and Personalized PageRank over it, so a neighbour of a match can be retrieved too
+- `src/highlighter.ts` — highlighter mode: the drag-to-capture gesture and its guards, in the editor, reading view and the PDF viewer
+- `src/icon.ts` — WikiLM's icon set, drawn to Lucide's proportions so it sits beside the built-in icons
+- `src/inboxView.ts` — the inbox: highlights grouped under their source note, cards packed densely for triage, and the host of the chat panel
+- `src/ingestSource.ts` — markdown ingest: the glue between a source note, the model and the vault, the counterpart of `suggest.ts`
+- `src/keys.ts` — Anthropic key resolution in order: the setting, the environment, then the macOS keychain
+- `src/lint.ts` — the deterministic post-generation card linter: regex and word counts, no model call
+- `src/llm.ts` — the system prompts, the provider dispatch, and the error text every call shares
+- `src/main.ts` — the plugin class: wiring the store, generator, backends, views, ribbon, status bar and command loop
+- `src/manifest.ts` — the pure manifest model: render and parse the manifest note, and the merge/sort/id helpers behind it
+- `src/modals.ts` — the modals: instructions, deck picker, digest and suggestion previews, the fix plan
+- `src/model.ts` — the card and highlight records, their statuses, and the Bloom level the critique judges
+- `src/pageMap.ts` — an offset-preserving view of a PDF page's text, so a quote can be inverted back to a `selection=` subpath
+- `src/pdf.ts` — what you have selected in Obsidian's own pdf.js viewer, read straight off the text layer
+- `src/pdfHighlights.ts` — collects one PDF's highlights, from backlinking PDF++ links and embedded annotations, into a manifest
+- `src/pdflink.ts` — pure PDF++ link grammar: parse and render `#page=…&selection|annotation|rect…` subpaths and callouts
+- `src/pdftext.ts` — text extraction over pdf.js page data, ported from PDF++: annotation quads, `selection=` ranges, page text
+- `src/prompt.ts` — message assembly for every call, kept out of `llm.ts` so block order can be tested without a backend
+- `src/quiz.ts` — the quiz engine: scope, frozen evidence numbering, grounded question checks, grading state, difficulty
+- `src/retrieval.ts` — pure retrieval for Ask: index notes into evidence units, rank them, number them, check the citations
+- `src/schemas.ts` — the zod output schemas, importing nothing but zod so a test can parse a pasted draft standalone
+- `src/settings.ts` — the settings type, `DEFAULT_SETTINGS`, and the settings tab
+- `src/sourceMap.ts` — the markdown analogue of `pageMap.ts`: segment a note by heading and paragraph, and invert an offset back
+- `src/store.ts` — the persistent inbox, kept as `inbox.json` in the plugin folder with debounced writes
+- `src/suggest.ts` — AI highlight suggestion for a PDF: the glue between the text layer, the model, the planner, the preview and the vault
+- `src/suggestPlan.ts` — its pure planning layer: page batches, span verification, manifest rows, and grouping into wiki notes
+- `src/topicNote.ts` — pure topic-note render, parse and merge by highlight key, and the digest planner
+- `src/util.ts` — pure helpers shared across the plugin, kept free of Obsidian imports
+- `src/vaultFix.ts` — repairs for what the vault lint finds, chiefly the dead link that is only a spelling apart from its page
+- `src/vaultLint.ts` — structural checks over the notes themselves: what can be found, what links anywhere, what Ask could quote
 
 ## License and credits
 
