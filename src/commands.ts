@@ -18,7 +18,7 @@ import { isPdfFile, pdfsLinkedFrom, readPdfSelection } from "./pdf";
 import { isManifestNote } from "./pdfHighlights";
 import { digestPdf, extractPdfHighlights } from "./digest";
 import { suggestPdfHighlights } from "./suggest";
-import { askInstruction, askTranscript, pickFolder, pickPdf } from "./modals";
+import { askInstruction, askTranscript, pickFolder, pickPdf, SchemaSuggestionsModal } from "./modals";
 import { normalizeTranscript, truncateTranscript } from "./util";
 
 export interface WikiLmCommand extends CommandSpec {
@@ -240,6 +240,22 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
       let n = 0;
       for (const h of p.store.all()) if (h.status === "error") (p.generator.enqueue(h), n++);
       new Notice(`WikiLM: retrying ${n}.`);
+    },
+  },
+  "open-schema": {
+    available: () => true,
+    // `ensure` writes the note from the template when it is not there yet, so
+    // this is also how a reader first meets the file: they ask to see their
+    // house rules and are shown the ones the plugin is already following.
+    run: async (p) => {
+      const file = await p.schema.ensure();
+      await p.app.workspace.getLeaf(false).openFile(file);
+    },
+  },
+  "review-schema-suggestions": {
+    available: () => true,
+    run: (p) => {
+      new SchemaSuggestionsModal(p.app, p.schema).open();
     },
   },
 };

@@ -65,6 +65,8 @@ and `/help` in the chat prints it.
 | **Open inbox** | `inbox` | always |
 | **Export all reviewed cards to Anki** | `export` | always |
 | **Retry failed highlights** | `retry` | always |
+| **Open the schema note** | `schema` | always |
+| **Review schema suggestions** | `suggestions` | always |
 
 What the capture commands do: **Send selection to inbox** takes the selection
 (or the paragraph under the cursor; in reading view, the selected text) and
@@ -892,6 +894,8 @@ Before you return, check that your verdict rests on what the evidence states and
 | --- | --- | --- |
 | Manifest folder | `wikilm-manifests` | where one manifest file per PDF is written |
 | Topic notes folder | `classes` | topic notes go to `<folder>/<class code>/<title>.md` |
+| Schema folder | `schema` | where `wikilm.md` and `wikilm-suggestions.md` live |
+| Propose schema rules from my edits | **on** | watches your card edits and proposes a rule when the same correction repeats |
 | Max topic notes per PDF | 6 | caps how many topics the model may return per digest |
 | Paper text limit | 60,000 characters | how much of the PDF's text is sent for the summary, cut at a sentence boundary |
 | Standing instructions for the digest | *(empty)* | appended to every digest prompt |
@@ -1053,7 +1057,49 @@ silently thrown away — but it is excluded from export: only cards with
 or the text-file fallback, so a flagged card cannot reach Anki until you
 review and fix it (`src/model.ts`, `src/main.ts`).
 
-<!-- schema section: added in 0.13.0 -->
+### The schema note
+
+`schema/wikilm.md` is your file. WikiLM writes it once, from a template that
+describes what the plugin is already doing, and reads it before every model
+call. The sections in it are handed to the model as your house rules, so a
+line you add there — "answers in German", "never cloze a date", "spell out
+every abbreviation the first time" — applies from the next card onward. There
+is no setting for it and no code to edit. Delete a rule and it stops applying;
+empty a whole section and nothing from it is sent.
+
+It is modelled on `wiki/schema/config.md` from
+[gd4ai/obsidian-llm-wiki](https://github.com/gd4ai/obsidian-llm-wiki): a
+reader-owned configuration note with page templates and naming conventions,
+reimplemented here with a flashcard half and the text written fresh. Open it
+with **Open the schema note**, which creates it if you have not seen it yet.
+
+Which sections steer which call is decided by the heading. A heading naming
+cards or Learned (**Card Templates**, **Card Rules**, **Learned**) goes to the
+card writer, the critique and the rewrite. A heading naming the wiki, pages,
+naming or structure (**Wiki Structure**, **Concept Page Template**, **Entity
+Page Template**, **Naming Conventions**) goes to the digest and the PDF
+highlighter. A heading matching neither list — one you invented — goes to
+both, because a rule you wrote and WikiLM could not classify should reach one
+call too many rather than one too few (`src/schemaNote.ts`).
+
+**## Learned** starts empty and fills only when you accept something. WikiLM
+watches the edits you make in the inbox — what you retype by hand, what you
+ask a rewrite for — and when the same correction turns up three or four times
+it writes a proposal to `schema/wikilm-suggestions.md`: the pattern in a
+sentence, the rule it would add, and the edits that earned it. The inbox
+header grows a **2 schema suggestions** chip, and **Review schema
+suggestions** opens them. Each one shows its rule in a box you can rewrite
+before accepting — the wording is what the model sees, so it should be yours.
+Accept writes it under `## Learned` with the date and the evidence count.
+Dismiss records that you said no and keeps that pattern quiet for 30 days;
+neither entry is deleted, so the same observation is never proposed twice.
+Turn the whole thing off with **Propose schema rules from my edits**.
+
+The invariant: WikiLM creates the note once and afterwards only ever appends
+under `## Learned`, and only when you press Accept. Nothing else in the file is
+ever rewritten by the plugin, and no rule is ever inferred silently
+(`src/schemaFile.ts`, `src/preferences.ts`).
+
 
 ### Triage
 

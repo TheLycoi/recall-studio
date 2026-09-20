@@ -44,10 +44,12 @@ const EXPECTED = [
   ["open-inbox", "Open inbox"],
   ["export-reviewed", "Export all reviewed cards to Anki"],
   ["retry-failed", "Retry failed highlights"],
+  ["open-schema", "Open the schema note"],
+  ["review-schema-suggestions", "Review schema suggestions"],
 ];
 
-test("COMMAND_TABLE holds the twenty (id, name) pairs verbatim and in order", () => {
-  assert.equal(table.COMMAND_TABLE.length, 20);
+test("COMMAND_TABLE holds the twenty-two (id, name) pairs verbatim and in order", () => {
+  assert.equal(table.COMMAND_TABLE.length, 22);
   assert.deepEqual(
     table.COMMAND_TABLE.map((c) => [c.id, c.name]),
     EXPECTED,
@@ -143,6 +145,11 @@ test("lint, export, inbox and help are phrases", () => {
 test("a palette name or alias typed exactly still runs that command", () => {
   assert.deepEqual(cc.matchIntent("Extract PDF highlights to manifest", CTX), { kind: "command", id: "extract-pdf-highlights" });
   assert.deepEqual(cc.matchIntent("retry", CTX), { kind: "command", id: "retry-failed" });
+  // The schema aliases reach the exact-alias match at the bottom of the
+  // matcher rather than being eaten by an earlier verb rule: "suggest" opens
+  // the PDF highlighter, and "suggestions" must not.
+  assert.deepEqual(cc.matchIntent("schema", CTX), { kind: "command", id: "open-schema" });
+  assert.deepEqual(cc.matchIntent("/suggestions", CTX), { kind: "command", id: "review-schema-suggestions" });
 });
 
 test("a leading slash is tolerated and means the same thing", () => {

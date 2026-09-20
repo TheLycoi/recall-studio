@@ -143,4 +143,16 @@ export const COMMAND_TABLE: CommandSpec[] = [
     aliases: ["retry"],
     hint: "always",
   },
+  {
+    id: "open-schema",
+    name: "Open the schema note",
+    aliases: ["schema"],
+    hint: "always",
+  },
+  {
+    id: "review-schema-suggestions",
+    name: "Review schema suggestions",
+    aliases: ["suggestions"],
+    hint: "always",
+  },
 ];
