@@ -191,23 +191,12 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
       const file = p.app.workspace.getActiveFile();
       if (!file) return;
       if (isPdfFile(file) || isManifestNote(p, file)) {
-        await digestPdf(p, file, "model");
+        await digestPdf(p, file);
         return;
       }
       const pdfs = pdfsLinkedFrom(p.app, file);
       const pdf = pdfs.length === 1 ? pdfs[0] : await pickPdf(p.app, pdfs);
-      if (pdf) await digestPdf(p, pdf, "model");
-    },
-  },
-  "digest-pdf-highlights-from-json": {
-    available: (p) => {
-      const file = p.app.workspace.getActiveFile();
-      return !!file && (isPdfFile(file) || isManifestNote(p, file));
-    },
-    run: (p) => {
-      const file = p.app.workspace.getActiveFile();
-      if (!file || !(isPdfFile(file) || isManifestNote(p, file))) return;
-      void digestPdf(p, file, "paste");
+      if (pdf) await digestPdf(p, pdf);
     },
   },
   "ai-highlight-pdf": {

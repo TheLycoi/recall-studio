@@ -58,7 +58,6 @@ and `/help` in the chat prints it.
 | **Add transcript for document highlighting** | `transcript` | needs an open note |
 | **Extract PDF highlights to manifest** | `extract` | needs an open PDF |
 | **Digest PDF highlights into topic notes…** | `digest` | needs an open PDF, a manifest note, or a note with PDF++ links |
-| **Digest PDF highlights from pasted model output…** | `digest-json`, `paste` | needs an open PDF or manifest note |
 | **AI-highlight this PDF into the wiki…** | `suggest` | needs an open PDF |
 | **Open chat: ask the notes** | `chat`, `ask` | always |
 | **Lint wiki: find gaps, dead links and ungrounded quotes** | `wiki`, `lint` | always available |
@@ -211,7 +210,6 @@ Four commands, active on a PDF (or, for the last two, on a manifest note):
 | --- | --- |
 | **Extract PDF highlights to manifest** | Collects every highlight of the active PDF — PDF++ links in notes that back-link to it, plus annotations embedded in the file itself — and writes a manifest, then opens it. |
 | **Digest PDF highlights into topic notes…** | Asks the configured model to group the manifest's highlights into topic notes and write each one's summary, then shows a preview before writing anything. |
-| **Digest PDF highlights from pasted model output…** | Same, but the draft comes from JSON you paste in rather than a live model call — see "Interim: digesting by hand" below. |
 | **Open chat: ask the notes** | Opens the WikiLM sidebar in Chat mode (`src/main.ts`). |
 
 **Pages are concept or entity pages.** A new page carries `type: concept` or
@@ -294,78 +292,6 @@ the highlights as a compact list (skipped ones struck through), and related
 titles. Titles are editable inline, which can move a note between "create"
 and "merge into an existing note". Nothing is written until you click
 "Write N notes"; Cancel or Esc touches no file.
-
-#### Interim: digesting by hand
-
-No model provider is required to work with manifests and topic notes end to
-end — while none is configured (or while a configured one is failing), run
-the digest by pasting a model's output instead of calling one from inside
-WikiLM:
-
-1. Run **Extract PDF highlights to manifest** on the PDF. The manifest opens.
-2. In a chat session with a model of your choice, paste the system prompt
-   below (`DIGEST_SYSTEM`), then this instruction, followed by the
-   manifest's body and, if you want it, the PDF's text:
-
-   > Below is a manifest of highlights from one lecture PDF, followed by the
-   > paper's text. Return only a JSON object of this shape:
-   > `{"notes":[{"title":"…","summary":"…","highlight_ids":["H01"],"related":["…"]}],"unused_ids":["…"]}`.
-   > Refer to highlights by the `id::` in each callout. Do not write links or
-   > callouts. Existing notes in this class: <titles in classes/<CODE>/>.
-   > Write at most 6 notes.
-
-3. With the manifest still the active file, run **Digest PDF highlights
-   from pasted model output…**, paste the JSON back in, review the preview,
-   and write. WikiLM renders every link and callout itself from the
-   manifest — the model never writes one.
-4. Ask (below) works without a model for the evidence half of an answer; a
-   model answer needs a configured provider.
-
-<details>
-<summary><code>DIGEST_SYSTEM</code> (the digest system prompt, verbatim)</summary>
-
-```
-You turn one lecture PDF and the highlights a student made in it into a handful of topic notes. You are given the paper's text, so that you can see what each highlight is about, and the highlights themselves, each with an id and a page. You return, for each topic, a title, its kind, one or two aliases, a tag, a short summary, and the ids of the highlights that belong to it. You never write links, callouts, or ids into your prose: the plugin renders each highlight back into the note from its own record, and prose that mentions H04 will be read by a person, not resolved by a machine.
-
-<what_a_topic_is>
-A topic is something the reader would look up by name later: a mechanism, a classification, a definition together with what follows from it, a distinction between two things that are easy to confuse. It is not a slide, not a section of the deck, and not the lecture itself. One lecture usually holds two to six of them. Fewer, larger topics beat many thin ones, because a note with one highlight in it is a note the reader will never open twice.
-
-Every highlight belongs to the topic it serves best, and a highlight may serve more than one: a definition of affinity can sit under both the receptor topic and the dose-response topic, and putting it in both is right when a reader arriving at either would want it. What does not belong in any topic goes in unused_ids: slide titles, course logistics, dates, a name on a title page, a rectangle whose text came out empty. Leaving such a highlight in a topic costs the reader more than dropping it, because it dilutes the note it lands in.
-
-You are shown every page the wiki already has, across every class, each with its kind, its aliases, its section headings, its class, and a line of its summary. The order of preference is fixed. First, an existing page whose title or alias is the topic: reuse the title exactly, character for character, because the plugin then appends the highlights to that page — even a page from another class, since a concept the reader met in physiology is the same concept when biomechanics meets it, and the page simply gains the second class. Second, an existing page the topic is part of — a parent topic, one whose headings it would sit under: give the new title, name that page in closest_existing, and say why in why_new; the plugin files the highlights under a heading inside it. Only when no existing page is related at all does a topic become a page of its own, with closest_existing empty and why_new saying what makes it new. A new page is the exception you reach at that wall, not the default for every subject with a name.
-
-Kind follows the subject. A named person, organisation, agency, product, drug or event that is itself what the reader would look up is an entity; a mechanism, method, theory, classification, phenomenon, or any term that explains how something works is a concept. When unsure, prefer concept. The tag is the note's subtype, one word from a closed list: a concept is a method, theory, term, phenomenon, standard or field, and an entity is a product, person, organization, project, event or place; "other" is the escape hatch, not a default. Aliases are the other names a reader would search under — an abbreviation, the expanded form, a variant spelling — one or two, taken from the paper, never coined.
-</what_a_topic_is>
-
-<the_summary>
-Three to five sentences about this topic, drawn from the whole paper but weighted toward what the reader chose to highlight. The highlights tell you what they cared about; the rest of the paper tells you what those highlights mean, and lets you write the sentence that connects two of them. Write in the reader's language, the one the paper is written in, and keep close to its wording so the summary reads as their own note rather than as a stranger's gloss.
-
-Nothing from outside the paper. If you know more about the subject than the paper says, that knowledge does not belong here: the reader will study from this note and cannot tell your additions from theirs. No citations, no links, no highlight ids, no page numbers in the prose. The highlights appear underneath the summary in the finished note, so the summary does not need to quote them; it needs to say what they add up to.
-</the_summary>
-
-<titles_and_related>
-A title is a short noun phrase in Title Case, the way an index entry reads: "Receptor Binding", "First-Pass Metabolism", "Stages of Change". Not a sentence, not a question, and unique within your response. Two titles that differ only in case or in a plural are the same title, and one of the two notes will be lost.
-
-related lists the titles of other notes you are writing in this response, or of the existing notes you were shown, and nothing else. An invented title points at a note that does not exist. Leave it empty when nothing connects.
-</titles_and_related>
-
-<examples>
-<example>
-<input>Highlights H01 "Pharmacology, Pharmacodynamics and Pharmacokinetics — HBIO 250 Fall 2026" (p.1), H02 "Pharmacology is the study of the action of drugs in the human body" (p.2), H03 "Pharmacodynamics = what drugs do in the body; pharmacokinetics = what the body does to drugs" (p.2), H04 "Receptors bind ligands with relatively high affinity" (p.4), H05 "Receptors transduce a signal to produce a biological effect; this distinguishes them from inert binding sites such as albumin" (p.4). Existing notes: Pharmacology.</input>
-<output>Two notes. "Pharmacology" (reusing the existing title, so kind, tag and aliases are ignored there) takes H02 and H03, with a summary that defines the field and sets its two branches against each other. "Receptors", kind concept, tag term, aliases "Drug Receptors", closest_existing empty, why_new "no listed page is about receptors themselves", takes H04 and H05, with a summary that names the two properties and says why the second one is what separates a receptor from a carrier protein. related on each names the other. H01 is a slide title and goes to unused_ids.</output>
-<note>Five highlights, two topics, one dropped. The existing title is reused verbatim so the two highlights land in the note the reader already has.</note>
-</example>
-<example>
-<input>Twelve highlights, of which nine are on absorption, distribution, metabolism and excretion, two are on the definition of half-life, and one is a rectangle with no text.</input>
-<output>Two notes, not four. "Drug Disposition", kind concept, tag phenomenon, aliases "ADME", takes the nine, because absorption, distribution, metabolism and excretion are the four stages of one process and a reader looking any of them up wants the others in view; "Half-Life", kind concept, tag term, aliases "t½", takes the two, and also takes one of the excretion highlights, since half-life is defined there. Neither names a closest_existing, and each why_new says no listed page covers the process. The empty rectangle goes to unused_ids.</output>
-<note>Splitting one process into four notes of two highlights each would make four notes nobody opens. One highlight sits in two notes because it belongs in both.</note>
-</example>
-</examples>
-
-Before returning, check your answer against the input: every id you used appears there, every id in the input appears either in exactly the notes it belongs to or in unused_ids, no note has an empty highlight_ids list, no two titles collide, every related title is one you wrote or were shown, no summary contains a link, an id, or a fact the paper does not state, every new title gives a kind, a tag from its kind's list, one or two aliases, and either a closest_existing you were shown or a why_new that says why none fits.
-```
-
-</details>
 
 ### Suggesting highlights in a PDF
 

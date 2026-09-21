@@ -98,12 +98,6 @@ export const COMMAND_TABLE: CommandSpec[] = [
     hint: "needs an open PDF, a manifest note, or a note with PDF++ links",
   },
   {
-    id: "digest-pdf-highlights-from-json",
-    name: "Digest PDF highlights from pasted model output…",
-    aliases: ["digest-json", "paste"],
-    hint: "needs an open PDF or manifest note",
-  },
-  {
     id: "ai-highlight-pdf",
     name: "AI-highlight this PDF into the wiki…",
     aliases: ["suggest"],

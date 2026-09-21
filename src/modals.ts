@@ -348,65 +348,6 @@ export function askDigestOptions(
   return new Promise((resolve) => new DigestOptionsModal(app, defaults, resolve, title).open());
 }
 
-/** Paste a model's raw JSON output (the interim, provider-less path). */
-export class PasteJsonModal extends Modal {
-  private value = "";
-  private resolved = false;
-
-  constructor(
-    app: App,
-    private title: string,
-    private help: string,
-    private resolve: (v: string | null) => void,
-  ) {
-    super(app);
-  }
-
-  onOpen(): void {
-    const { contentEl } = this;
-    contentEl.addClass("wikilm-modal");
-    contentEl.createEl("h3", { text: this.title });
-    contentEl.createEl("p", { text: this.help, cls: "wikilm-muted" });
-
-    const ta = contentEl.createEl("textarea", { attr: { rows: "14", placeholder: "Paste the model's JSON here…" } });
-    ta.addClass("wikilm-modal-textarea");
-
-    let useBtn!: ButtonComponent;
-    new Setting(contentEl)
-      .addButton((b) => b.setButtonText("Cancel").onClick(() => this.close()))
-      .addButton((b) => {
-        useBtn = b;
-        b.setCta()
-          .setButtonText("Use")
-          .setDisabled(true)
-          .onClick(() => this.submit());
-      });
-
-    ta.addEventListener("input", () => {
-      this.value = ta.value;
-      useBtn.setDisabled(this.value.trim().length === 0);
-    });
-
-    window.setTimeout(() => ta.focus(), 20);
-  }
-
-  private submit() {
-    const text = this.value.trim();
-    if (!text) return;
-    this.resolved = true;
-    this.resolve(text);
-    this.close();
-  }
-
-  onClose(): void {
-    this.contentEl.empty();
-    if (!this.resolved) this.resolve(null);
-  }
-}
-
-export function askPastedJson(app: App, title: string, help: string): Promise<string | null> {
-  return new Promise((resolve) => new PasteJsonModal(app, title, help, resolve).open());
-}
 
 /**
  * Preview the notes a digest run would write. Checkbox state defaults to

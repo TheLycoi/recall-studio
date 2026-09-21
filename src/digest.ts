@@ -1,6 +1,6 @@
 /**
  * Digest orchestration: the Obsidian-side glue between the highlight collector
- * (src/pdfHighlights.ts), the model or a pasted draft, the pure planner
+ * (src/pdfHighlights.ts), the model, the pure planner
  * (src/topicNote.ts), the preview modal (src/modals.ts) and the vault.
  *
  * Nothing here parses, renders or ranks anything itself: every one of those
@@ -13,10 +13,10 @@ import { captureManifestHighlights } from "./capture";
 import { decideGate, type GateDecision } from "./digestGate";
 import { describeError } from "./llm";
 import type { Manifest } from "./manifest";
-import { askDigestOptions, askInstruction, askPastedJson, previewDigest } from "./modals";
+import { askDigestOptions, askInstruction, previewDigest } from "./modals";
 import { collectPdfHighlights, readManifestNote, writeManifest } from "./pdfHighlights";
 import { isPdfFile } from "./pdf";
-import { DigestOut, type DigestDraft } from "./schemas";
+import type { DigestDraft } from "./schemas";
 import { suggestPdfHighlights } from "./suggest";
 import { applyDigestChoices, noteAliases, noteSections, parseTopicNote, planTopicNotes, type ExistingPage } from "./topicNote";
 import type { DigestExistingNote } from "./prompt";
@@ -27,16 +27,6 @@ function today(): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
-
-/**
- * The help text of the paste modal, which mirrors the plan's interim manual
- * procedure: paste DIGEST_SYSTEM and the manifest into a chat session, then
- * bring its JSON back here.
- */
-const PASTE_HELP =
-  "Paste the JSON object the model returned — " +
-  '{"notes":[{"title":"…","summary":"…","highlight_ids":["H01"],"related":["…"]}],"unused_ids":["…"]} — ' +
-  "referring to highlights by the `id::` in each manifest callout; WikiLM renders every link and callout itself.";
 
 /**
  * "Extract PDF highlights to manifest": collect the PDF's highlights (no paper
@@ -162,35 +152,11 @@ async function draftFromModel(
   } catch (e) {
     console.error("WikiLM: digest failed", e);
     new Notice(
-      `WikiLM: digest failed. ${describeError(e)} Run “Extract PDF highlights to manifest” and digest by hand, or paste a model's JSON.`,
+      `WikiLM: digest failed. ${describeError(e)} Check the provider and the Claude Code CLI path in WikiLM's settings, then try again.`,
       10000,
     );
     return null;
   }
-}
-
-/** Ask for the model's JSON and validate it; null when cancelled or unusable. */
-async function draftFromPaste(plugin: WikiLmPlugin): Promise<DigestDraft | null> {
-  const raw = await askPastedJson(plugin.app, "Paste the model's JSON", PASTE_HELP);
-  if (raw === null) return null;
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (e) {
-    new Notice(`WikiLM: that is not valid JSON. ${(e as Error).message}`, 8000);
-    return null;
-  }
-  const checked = DigestOut.safeParse(parsed);
-  if (!checked.success) {
-    const first = checked.error.issues[0];
-    new Notice(
-      `WikiLM: the JSON does not match the digest shape${first ? ` (${first.path.join(".")}: ${first.message})` : ""}.`,
-      10000,
-    );
-    return null;
-  }
-  return checked.data;
 }
 
 export interface DigestOptions {
@@ -205,15 +171,9 @@ export interface DigestOptions {
 
 /**
  * "Digest PDF highlights…": manifest in, topic notes out, gated by a preview.
- * `mode` chooses where the draft comes from — the provider, or a JSON blob
- * pasted from a chat session (the interim path while no provider works).
+ * The draft always comes from the configured provider.
  */
-export async function digestPdf(
-  plugin: WikiLmPlugin,
-  source: TFile,
-  mode: "model" | "paste",
-  opts: DigestOptions = {},
-): Promise<void> {
+export async function digestPdf(plugin: WikiLmPlugin, source: TFile, opts: DigestOptions = {}): Promise<void> {
   try {
     const resolved = await resolveSource(plugin, source);
     if (!resolved) return;
@@ -260,10 +220,7 @@ export async function digestPdf(
     const topicFolder = plugin.settings.topicFolder;
     const pages = await existingPages(plugin, topicFolder);
 
-    const draft =
-      mode === "model"
-        ? await draftFromModel(plugin, manifest, classCode, paperText, instruction, pages)
-        : await draftFromPaste(plugin);
+    const draft = await draftFromModel(plugin, manifest, classCode, paperText, instruction, pages);
     if (!draft) return;
 
     const created = today();

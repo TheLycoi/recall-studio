@@ -37,7 +37,6 @@ const EXPECTED = [
   ["add-transcript", "Add transcript for document highlighting"],
   ["extract-pdf-highlights", "Extract PDF highlights to manifest"],
   ["digest-pdf-highlights", "Digest PDF highlights into topic notes…"],
-  ["digest-pdf-highlights-from-json", "Digest PDF highlights from pasted model output…"],
   ["ai-highlight-pdf", "AI-highlight this PDF into the wiki…"],
   ["open-chat", "Open chat: ask the notes"],
   ["lint-wiki", "Lint wiki: find gaps, dead links and ungrounded quotes"],
@@ -48,8 +47,8 @@ const EXPECTED = [
   ["review-schema-suggestions", "Review schema suggestions"],
 ];
 
-test("COMMAND_TABLE holds the twenty-two (id, name) pairs verbatim and in order", () => {
-  assert.equal(table.COMMAND_TABLE.length, 22);
+test("COMMAND_TABLE holds the twenty-one (id, name) pairs verbatim and in order", () => {
+  assert.equal(table.COMMAND_TABLE.length, 21);
   assert.deepEqual(
     table.COMMAND_TABLE.map((c) => [c.id, c.name]),
     EXPECTED,

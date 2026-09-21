@@ -696,7 +696,7 @@ export class ChatPanel {
     // to `never`, which is not what "this is not a PDF" should mean here.
     const digestible = file.extension.toLowerCase() === "pdf" || isManifestNote(this.plugin, file);
     if (digestible) {
-      await this.narrate(`Digesting ${file.basename}…`, () => digestPdf(this.plugin, file, "model", { gate: (d) => this.gateChips(d) }));
+      await this.narrate(`Digesting ${file.basename}…`, () => digestPdf(this.plugin, file, { gate: (d) => this.gateChips(d) }));
       return;
     }
     const pdfs = pdfsLinkedFrom(this.plugin.app, file);
@@ -705,7 +705,7 @@ export class ChatPanel {
       return;
     }
     if (pdfs.length === 1) {
-      await this.narrate(`Digesting ${pdfs[0].basename}…`, () => digestPdf(this.plugin, pdfs[0], "model", { gate: (d) => this.gateChips(d) }));
+      await this.narrate(`Digesting ${pdfs[0].basename}…`, () => digestPdf(this.plugin, pdfs[0], { gate: (d) => this.gateChips(d) }));
       return;
     }
     this.pushChips(
