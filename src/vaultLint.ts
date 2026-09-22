@@ -225,7 +225,10 @@ function mentionQuotes(body: string): Array<{ quote: string; cited: string | nul
     const bullet = /^-\s*"(.+?)"\s*(?:\u2014|--|—)?\s*(?:\[\[([^\]]+)\]\])?\s*$/.exec(line);
     if (bullet) {
       const cited = bullet[2] ? bullet[2].split("|")[0].trim() : null;
-      out.push({ quote: bullet[1].trim(), cited, anchored: false });
+      // A bullet whose link opens the PDF at a selection is anchored the same
+      // way a callout is: the click is the check, not a string search.
+      const anchored = cited !== null && /\.pdf(?:#|$)/i.test(cited);
+      out.push({ quote: bullet[1].trim(), cited, anchored });
     }
   }
   return out;

@@ -2,7 +2,7 @@
 // import (see src/lint.ts:1-6); bundled standalone and exercised with
 // node --test (test/topicNote.test.mjs).
 import { splitFrontmatter } from "./util";
-import { findAllPdfReferences, highlightKey, pdfFileName, renderCallout, type PdfTarget } from "./pdflink";
+import { findAllPdfReferences, highlightKey, pdfFileName, renderCallout, renderPdfLink, type PdfTarget } from "./pdflink";
 import type { ManifestHighlight, Manifest } from "./manifest";
 import type { DigestDraft } from "./schemas";
 import { routeProposed, type WikiNoteIn } from "./suggestPlan";
@@ -232,6 +232,27 @@ function highlightsSectionRange(body: string): { start: number; end: number } | 
   return { start: headingEnd, end };
 }
 
+/**
+ * The quote of a bullet row: the line's text with its link and marker
+ * removed, then the nested items under it joined with "; ", so evidence
+ * reads "involves 4 factors: Absorption; Distribution" rather than stopping
+ * at the colon. Nested items end at the first line not indented under it.
+ */
+function bulletRowText(lines: string[], at: number): string {
+  const head = (lines[at] ?? "")
+    .replace(/!?\[\[[^\]]*\.pdf#[^\]]*\]\]/gi, "")
+    .replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const items: string[] = [];
+  for (let i = at + 1; i < lines.length; i++) {
+    const m = /^\s{2,}(?:[-*+]|\d+[.)])\s+(.*)$/.exec(lines[i]);
+    if (!m) break;
+    items.push(m[1].trim());
+  }
+  return items.length ? `${head} ${items.join("; ")}`.trim() : head;
+}
+
 export function parseTopicNote(md: string): ParsedTopicNote {
   const { body: raw } = splitFrontmatter(md);
   const fmMatch = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(md);
@@ -259,6 +280,7 @@ export function parseTopicNote(md: string): ParsedTopicNote {
   const range = highlightsSectionRange(raw);
   if (range) {
     const section = raw.slice(range.start, range.end);
+    const lines = section.split("\n");
     const refs = findAllPdfReferences(section);
     for (const r of refs) {
       highlights.push({
@@ -266,7 +288,7 @@ export function parseTopicNote(md: string): ParsedTopicNote {
         target: r.target,
         key: highlightKey(r.target),
         page: r.target.page,
-        text: r.embed ? "" : (r.quote ?? ""),
+        text: r.embed ? "" : (r.quote ?? bulletRowText(lines, r.line)),
         line: r.line,
       });
     }
@@ -767,9 +789,96 @@ export function wikiDisplay(pdfBasename: string, page: number): string {
   return `${pdfBasename}, p.${page}`;
 }
 
-/** One highlight as a page prints it: the note-sourced citation line when it has one, else the PDF++ callout. */
+/** Indent of a nested list item under a row's lead bullet. Two spaces: the least CommonMark accepts under `- `. */
+const NESTED_INDENT = "  ";
+
+/**
+ * A quote split into the list the slide printed it as.
+ *
+ * The text layer joins a slide's bullets into one line — "4 factors:•
+ * Absorption• Distribution" — and a hand-pasted callout keeps them as
+ * separate lines. Both read as a list on the slide, so both render as one
+ * here: the words before the first marker are the lead, each marker starts an
+ * item. A numbered run keeps its numbers when it has at least two items in
+ * sequence — from 1, or from wherever the previous slide's list left off
+ * ("4. Fat solubility … 5. Physio-chemical …") — and a lone number in a
+ * sentence ("2 important properties") is not a list, so the text stays whole.
+ */
+export function splitInlineList(text: string): { lead: string; items: string[]; ordered: boolean; start: number } {
+  const whole = text.replace(/\r/g, "").trim();
+  const lines = whole.split("\n").map((l) => l.trim()).filter(Boolean);
+  const joined = lines.join(" ");
+
+  const bulletParts = joined.split(/\s*[•▪◦]\s*/).map((p) => p.trim());
+  if (bulletParts.length >= 3 || (bulletParts.length === 2 && joined.trimStart().startsWith("•"))) {
+    const [lead, ...items] = bulletParts;
+    return { lead, items: items.filter(Boolean), ordered: false, start: 1 };
+  }
+  if (lines.length >= 2 && lines.slice(1).every((l) => /^[-*•▪◦]\s+/.test(l))) {
+    return { lead: lines[0].replace(/^[-*•▪◦]\s+/, ""), items: lines.slice(1).map((l) => l.replace(/^[-*•▪◦]\s+/, "")), ordered: false, start: 1 };
+  }
+
+  const parts = joined.split(/(?:^|\s)(?=\d+\.\s)/).map((p) => p.trim()).filter(Boolean);
+  const numberOf = (p: string): number => Number(/^(\d+)\.\s/.exec(p)?.[1] ?? NaN);
+  const firstNumbered = parts.findIndex((p) => !Number.isNaN(numberOf(p)));
+  if (firstNumbered >= 0 && firstNumbered <= 1) {
+    const run = parts.slice(firstNumbered);
+    const start = numberOf(run[0]);
+    const consecutive = run.length >= 2 && run.every((p, i) => numberOf(p) === start + i);
+    if (consecutive) {
+      return { lead: firstNumbered === 1 ? parts[0] : "", items: run.map((p) => p.replace(/^\d+\.\s+/, "")), ordered: true, start };
+    }
+  }
+  return { lead: joined, items: [], ordered: false, start: 1 };
+}
+
+/**
+ * One highlight as a page prints it.
+ *
+ * A note-sourced row is its citation line; a rectangle with no text is the
+ * bare embed, so the figure draws. Everything else is a bullet: the quote,
+ * then a short `p.N` link that opens the PDF at the selection. The link's
+ * display used to be the full "<basename>, p.N" that PDF++ copies, which put
+ * a sixty-character filename on every line of a note; the page number is
+ * what a reader wants to see, and the filename is in the link for the click.
+ * A quote that was a list on the slide is a list here, nested under its lead.
+ */
+export function renderHighlightRow(pdfBasename: string, h: ManifestHighlight): string {
+  if (h.mention) return h.mention;
+  if (h.target.rect && !h.text) return renderCallout(pdfBasename, h.target, wikiDisplay(pdfBasename, h.page), h.text);
+  const link = renderPdfLink(pdfBasename, h.target, `p.${h.page}`);
+  const { lead, items, ordered, start } = splitInlineList(h.text);
+  const first = lead ? `- ${lead} ${link}` : `- ${link}`;
+  const rest = items.map((item, i) => `${NESTED_INDENT}${ordered ? `${start + i}.` : "-"} ${item}`);
+  return [first, ...rest].join("\n");
+}
+
+/** One highlight as a page prints it: the note-sourced citation line when it has one, else the bullet row. */
 function rowMarkdown(pdfBasename: string, h: ManifestHighlight): string {
-  return h.mention ?? renderCallout(pdfBasename, h.target, wikiDisplay(pdfBasename, h.page), h.text);
+  return renderHighlightRow(pdfBasename, h);
+}
+
+/** Whether a rendered row is a list item, so neighbours can decide how to sit against it. */
+function isListRow(md: string): boolean {
+  return /^\s*(?:[-*+]|\d+[.)])\s/.test(md);
+}
+
+/**
+ * Rendered rows as one block. Two list items sit on consecutive lines, or the
+ * list breaks in two with a gap between; anything else — an embed, a callout
+ * — keeps a blank line either side, which is what markdown needs to end a
+ * list before it and start one after.
+ */
+export function joinRows(rows: string[]): string {
+  let out = "";
+  rows.forEach((row, i) => {
+    if (i === 0) {
+      out = row;
+      return;
+    }
+    out += isListRow(rows[i - 1]) && isListRow(row) ? `\n${row}` : `\n\n${row}`;
+  });
+  return out;
 }
 
 /** Case, whitespace and smart quotes folded, so a quote survives reflowing when it is looked for in a page. */
@@ -963,7 +1072,7 @@ export function renderKarpathyNote(a: RenderKarpathyNoteArgs): string {
   lines.push("## Mentions in Source");
   lines.push("");
   if (sorted.length > 0) {
-    lines.push(sorted.map((h) => rowMarkdown(a.pdfBasename, h)).join("\n\n"));
+    lines.push(joinRows(sorted.map((h) => rowMarkdown(a.pdfBasename, h))));
   }
   return lines.join("\n").replace(/\n{3,}$/, "\n") + "\n";
 }
@@ -1012,7 +1121,7 @@ export function renderWikiNote(a: RenderWikiNoteArgs): string {
   }
   lines.push("## Highlights");
   lines.push("");
-  if (callouts.length > 0) lines.push(callouts.join("\n\n"));
+  if (callouts.length > 0) lines.push(joinRows(callouts));
   return lines.join("\n") + "\n";
 }
 
@@ -1049,7 +1158,11 @@ export function spliceIntoSection(body: string, headingEnd: number, text: string
   const trailingBlanksMatch = /\n*$/.exec(section);
   const trailingBlanks = trailingBlanksMatch ? trailingBlanksMatch[0] : "";
   const sectionCore = trailingBlanks ? section.slice(0, section.length - trailingBlanks.length) : section;
-  const appended = sectionCore.length > 0 ? `${sectionCore}\n\n${text}` : text;
+  // A list item appended to a section that ends in a list item continues that
+  // list; a blank line between them would render two lists with a gap.
+  const lastLine = sectionCore.slice(sectionCore.lastIndexOf("\n") + 1);
+  const gap = isListRow(lastLine) && isListRow(text) ? "\n" : "\n\n";
+  const appended = sectionCore.length > 0 ? `${sectionCore}${gap}${text}` : text;
 
   return body.slice(0, headingEnd) + appended + trailingBlanks + body.slice(sectionEnd);
 }
@@ -1145,7 +1258,7 @@ export function mergeWikiHighlights(
   const wanted = safeHeading(options.section ?? "");
   if (wanted) {
     if (toAdd.length === 0) return { md: body, added: 0, skipped };
-    const callouts = toAdd.map((h) => rowMarkdown(pdfBasename, h)).join("\n\n");
+    const callouts = joinRows(toAdd.map((h) => rowMarkdown(pdfBasename, h)));
     const found = findSection(body, wanted);
     if (found) {
       return {
@@ -1155,8 +1268,14 @@ export function mergeWikiHighlights(
         section: { heading: found.heading, created: false },
       };
     }
+    // A section the plugin writes takes its heading from the slide it came
+    // from: the heading is a link to the page of its first row, so the title
+    // itself opens the deck there. Only a created heading: one the reader
+    // wrote is theirs and is matched, never rewritten.
+    const firstPdf = toAdd.find((h) => !h.mention);
+    const heading = firstPdf ? renderPdfLink(pdfBasename, { page: firstPdf.page }, wanted) : wanted;
     return {
-      md: insertBeforeTrailing(body, `## ${wanted}\n\n${callouts}`),
+      md: insertBeforeTrailing(body, `## ${heading}\n\n${callouts}`),
       added: toAdd.length,
       skipped,
       section: { heading: wanted, created: true },
@@ -1175,7 +1294,7 @@ export function mergeWikiHighlights(
     }
     const newCallouts = toAdd.map((h) => rowMarkdown(pdfBasename, h));
     const headingEnd = headingMatch.index + headingMatch[0].length;
-    return { md: spliceIntoSection(body, headingEnd, newCallouts.join("\n\n")), added: toAdd.length, skipped };
+    return { md: spliceIntoSection(body, headingEnd, joinRows(newCallouts)), added: toAdd.length, skipped };
   }
 
   if (toAdd.length === 0) {
@@ -1183,7 +1302,7 @@ export function mergeWikiHighlights(
   }
 
   const newCallouts = toAdd.map((h) => rowMarkdown(pdfBasename, h));
-  const sectionText = `## ${schema === "karpathy" ? "Mentions in Source" : "Highlights"}\n\n${newCallouts.join("\n\n")}`;
+  const sectionText = `## ${schema === "karpathy" ? "Mentions in Source" : "Highlights"}\n\n${joinRows(newCallouts)}`;
 
   // Insert before the first of `## Related topics` or `## Flashcard Seeds`
   // (WikiLM's own digest skeleton), whichever appears first; else append at EOF.

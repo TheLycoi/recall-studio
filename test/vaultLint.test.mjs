@@ -270,3 +270,13 @@ test("an unknown kind is still a schema violation", () => {
   const r = vl.lintVault([page("wiki/x.md", "type: nonsense", "A sentence of prose here.")], { schema: vl.WIKI_SCHEMA });
   assert.equal(r.issues.filter((i) => i.id === "schema-violation").length, 1);
 });
+
+test("a bullet whose link opens the PDF is anchored, never string-checked", () => {
+  const p = page(
+    "wiki/a.md",
+    'type: concept\ntags: [method]\naliases:\n  - "A"',
+    '## Mentions in Source\n\n- "a span that appears in no source note" [[Paper.pdf#page=2&selection=1,0,1,9&color=yellow|p.2]]',
+  );
+  const r = vl.lintVault([p], { sources: SOURCES });
+  assert.deepEqual(r.issues.filter((i) => i.id.endsWith("-quote")), []);
+});

@@ -352,7 +352,7 @@ test("planTopicNotes files a new title that names a home into that page under a 
   const out = tn.planTopicNotes(draft, manifest, { classCode: "HBIO250", topicFolder: "classes", created: "2026-09-17", pages: [home] });
   const filed = out.notes.find((n) => n.path === home.path);
   assert.ok(filed, "COX Inhibitors was filed into Pharmacology");
-  assert.ok(filed.content.includes("## COX Inhibitors"), "under a heading named after the proposal");
+  assert.ok(tn.noteSections(filed.content).includes("COX Inhibitors"), "under a heading named after the proposal");
   assert.deepEqual(filed.routed.map((r) => [r.from, r.heading]), [["COX Inhibitors", "COX Inhibitors"]]);
   const created = out.notes.find((n) => n.title === "Self-Efficacy");
   assert.equal(created.exists, false);
@@ -392,8 +392,8 @@ test("planTopicNotes gives one row per page when two proposals are filed into th
   assert.equal(rows.length, 1, "one page, one row");
   assert.equal(rows[0].added, 2, "both proposals' highlights counted");
   assert.deepEqual(rows[0].routed.map((r) => r.from), ["COX Inhibitors", "Beta Blockers"]);
-  assert.ok(rows[0].content.includes("## COX Inhibitors"), rows[0].content);
-  assert.ok(rows[0].content.includes("## Beta Blockers"), rows[0].content);
+  assert.ok(tn.noteSections(rows[0].content).includes("COX Inhibitors"), rows[0].content);
+  assert.ok(tn.noteSections(rows[0].content).includes("Beta Blockers"), rows[0].content);
   assert.equal(rows[0].highlights.length, 2, "the union of both groups' highlights");
 });
 
@@ -642,15 +642,12 @@ S.
 
 ## Highlights
 
-> [!PDF|yellow] [[${PDF_BASENAME}.pdf#page=2&selection=1,0,5,0&color=yellow|${PDF_BASENAME}, p.2]]
-> > Page two text
-
-> [!PDF|yellow] [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|${PDF_BASENAME}, p.4]]
-> > Page four text
+- Page two text [[${PDF_BASENAME}.pdf#page=2&selection=1,0,5,0&color=yellow|p.2]]
+- Page four text [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|p.4]]
 `;
   assert.equal(rendered, expected);
-  const calloutLines = rendered.split("\n").filter((l) => l.startsWith("> [!PDF"));
-  assert.ok(calloutLines[0].includes(`|${PDF_BASENAME}, p.2]]`));
+  // Two rows are one list: consecutive lines, no blank line splitting them.
+  assert.ok(!rendered.includes("p.2]]\n\n- Page four"));
 });
 
 test("renderWikiNote omits the Summary section when summary is empty", () => {
@@ -684,7 +681,7 @@ Some prose here. [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|$
   assert.equal(result.added, 1);
   assert.equal(result.skipped, 1);
 
-  const expectedNewCallout = `> [!PDF|yellow] [[${PDF_BASENAME}.pdf#page=6&selection=0,0,3,0&color=yellow|${PDF_BASENAME}, p.6]]\n> > Brand new text`;
+  const expectedNewCallout = `- Brand new text [[${PDF_BASENAME}.pdf#page=6&selection=0,0,3,0&color=yellow|p.6]]`;
   const expectedTail = `\n\n## Highlights\n\n${expectedNewCallout}\n`;
   assert.ok(result.md.endsWith(expectedTail));
 
@@ -932,7 +929,7 @@ test("a karpathy merge appends under Mentions in Source, not Highlights", () => 
   assert.equal(r.added, 1);
   assert.ok(r.md.includes("## Mentions in Source"));
   assert.ok(!r.md.includes("## Highlights"), "a second section would not match the page's own schema");
-  assert.ok(r.md.includes("[!PDF"));
+  assert.ok(r.md.includes("- span a [[Paper.pdf#page=2&selection=0,0,0,4&color=yellow|p.2]]"));
 });
 
 test("a merge keeps created and moves updated", () => {
@@ -1092,7 +1089,7 @@ Receptor text.
   const newLink = r.md.indexOf("page=6&selection=0,0,0,4");
   const highlights = r.md.indexOf("## Highlights");
   assert.ok(receptors < newLink && newLink < highlights, "the callout sits inside Receptors, ahead of Highlights");
-  assert.ok(r.md.includes("Receptor text.\n\n> [!PDF"), "appended after the section's own text");
+  assert.ok(r.md.includes("Receptor text.\n\n- span b [["), "appended after the section's own text");
   assert.ok(r.md.includes("## Dosing\nDose text.\n\n## Receptors"), "the sections before it are untouched");
 });
 
@@ -1113,10 +1110,10 @@ Receptor text.
   assert.equal(r.added, 1);
   assert.deepEqual(r.section, { heading: "COX Inhibitors and NSAIDs", created: true });
   const receptors = r.md.indexOf("## Receptors");
-  const cox = r.md.indexOf("## COX Inhibitors and NSAIDs");
+  const cox = r.md.indexOf(`## [[${PDF_BASENAME}.pdf#page=19|COX Inhibitors and NSAIDs]]`);
   const highlights = r.md.indexOf("## Highlights");
-  assert.ok(receptors < cox && cox < highlights, "a new subtopic sits with the subtopics, ahead of the highlights");
-  assert.ok(r.md.includes("## COX Inhibitors and NSAIDs\n\n> [!PDF"), r.md);
+  assert.ok(cox >= 0 && receptors < cox && cox < highlights, "a new subtopic sits with the subtopics, ahead of the highlights");
+  assert.ok(r.md.includes(`## [[${PDF_BASENAME}.pdf#page=19|COX Inhibitors and NSAIDs]]\n\n- span c [[`), r.md);
 });
 
 test("a karpathy merge with a new section places it before Related Concepts and still dates the page", () => {
@@ -1145,9 +1142,9 @@ Text.
   const r = tn.mergeWikiHighlights(page, "Paper", "", [HL(2, "a")], { schema: "karpathy", section: "Chunk Size", today: "2026-09-16" });
   assert.equal(r.added, 1);
   const definition = r.md.indexOf("## Definition");
-  const section = r.md.indexOf("## Chunk Size");
+  const section = r.md.indexOf("## [[Paper.pdf#page=2|Chunk Size]]");
   const related = r.md.indexOf("## Related Concepts");
-  assert.ok(definition < section && section < related, r.md);
+  assert.ok(section >= 0 && definition < section && section < related, r.md);
   assert.ok(r.md.includes("updated: 2026-09-16"));
   assert.ok(r.md.includes("created: 2026-09-01"));
 });
@@ -1236,4 +1233,134 @@ test("parseTopicNote reads a class list and keeps classCode as the first", () =>
   const inline = tn.parseTopicNote("---\nclass: [HBIO250, PHED163]\n---\n# T\n");
   assert.deepEqual(inline.classCodes, ["HBIO250", "PHED163"]);
   assert.equal(inline.classCode, "HBIO250");
+});
+
+// ---- rows as bullets: the slide link on the heading, the quote as a list ----
+
+test("a selection row renders as a bullet with a short page link, not a callout", () => {
+  const md = tn.renderHighlightRow(PDF_BASENAME, wikiHighlight());
+  assert.equal(md, `- Some highlight text [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|p.4]]`);
+  assert.ok(!md.includes("[!PDF"));
+  assert.ok(!md.includes(`${PDF_BASENAME}, p.4`), "the sixty-character filename never appears as display text");
+});
+
+test("an inline bullet run inside a quote becomes a nested list under the lead", () => {
+  const h = wikiHighlight({
+    page: 20,
+    key: "page=20&selection=1,0,9,4",
+    target: { page: 20, selection: { beginIndex: 1, beginOffset: 0, endIndex: 9, endOffset: 4 }, color: "yellow" },
+    text: "Therefore, the pharmacokinetics of a drug involves 4 factors:• Absorption• Distribution• Metabolism• Elimination",
+  });
+  assert.equal(
+    tn.renderHighlightRow(PDF_BASENAME, h),
+    [
+      `- Therefore, the pharmacokinetics of a drug involves 4 factors: [[${PDF_BASENAME}.pdf#page=20&selection=1,0,9,4&color=yellow|p.20]]`,
+      "  - Absorption",
+      "  - Distribution",
+      "  - Metabolism",
+      "  - Elimination",
+    ].join("\n"),
+  );
+});
+
+test("a numbered run keeps its numbers as an ordered nested list, and a lone number is not a list", () => {
+  const h = wikiHighlight({
+    text: "1. Enteral = Oral (sublingual, buccal, GI tract) & via other mucous membranes (rectal) 2. “ Parenteral ” (par - outside or beyond intestine)",
+  });
+  assert.equal(
+    tn.renderHighlightRow(PDF_BASENAME, h),
+    [
+      `- [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|p.4]]`,
+      "  1. Enteral = Oral (sublingual, buccal, GI tract) & via other mucous membranes (rectal)",
+      "  2. “ Parenteral ” (par - outside or beyond intestine)",
+    ].join("\n"),
+  );
+  // "2 important properties: 1. They bind…" has one numbered item after a
+  // lead and a "2." glued to the prose — it is a sentence, not a list.
+  // A run that continues from the previous slide keeps its own numbers.
+  const cont = wikiHighlight({ text: "4. Fat solubility of the drug (is it oil-based?) 5. Physio-chemical reaction with the contents of the GI tract" });
+  assert.equal(
+    tn.renderHighlightRow(PDF_BASENAME, cont),
+    [`- [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|p.4]]`, "  4. Fat solubility of the drug (is it oil-based?)", "  5. Physio-chemical reaction with the contents of the GI tract"].join("\n"),
+  );
+  // Numbers that do not run in sequence are prose: a date and a section number are not a list.
+  const gaps = wikiHighlight({ text: "Adopted in 2004. Section 7. applies, and 12. is repealed" });
+  assert.equal(tn.renderHighlightRow(PDF_BASENAME, gaps), `- Adopted in 2004. Section 7. applies, and 12. is repealed [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|p.4]]`);
+  const prose = wikiHighlight({ text: "Receptors have 2 important properties: they bind ligands and transduce a signal." });
+  assert.equal(tn.renderHighlightRow(PDF_BASENAME, prose), `- Receptors have 2 important properties: they bind ligands and transduce a signal. [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|p.4]]`);
+});
+
+test("newlines in a quote split it the same way as inline bullets", () => {
+  const h = wikiHighlight({ text: "involves 4 factors:\n• Absorption\n• Distribution" });
+  assert.equal(
+    tn.renderHighlightRow(PDF_BASENAME, h),
+    [`- involves 4 factors: [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|p.4]]`, "  - Absorption", "  - Distribution"].join("\n"),
+  );
+});
+
+test("a rect row with no text is still the bare embed, and a mention row is still its line", () => {
+  const rect = wikiHighlight({ kind: "rect", color: null, key: "page=4&rect=13,55,713,222", target: { page: 4, rect: [13, 55, 713, 222] }, text: "" });
+  assert.equal(tn.renderHighlightRow(PDF_BASENAME, rect), `![[${PDF_BASENAME}.pdf#page=4&rect=13,55,713,222|${PDF_BASENAME}, p.4]]`);
+  assert.equal(tn.renderHighlightRow("P", MENTION_ROW), MENTION_ROW.mention);
+});
+
+test("a section the merge creates carries a link to its first slide in the heading", () => {
+  const existing = `---\nclass: HBIO250\n---\n\n## Receptors\nReceptor text.\n\n## Highlights\n\n## Related topics\n- [[Pharmacology]]\n`;
+  const r = tn.mergeWikiHighlights(existing, PDF_BASENAME, "HBIO250", [HL(21, "b"), HL(19, "a")], { section: "COX Inhibitors and NSAIDs" });
+  assert.equal(r.added, 2);
+  assert.deepEqual(r.section, { heading: "COX Inhibitors and NSAIDs", created: true });
+  const heading = `## [[${PDF_BASENAME}.pdf#page=19|COX Inhibitors and NSAIDs]]`;
+  assert.ok(r.md.includes(`${heading}\n\n- span a [[${PDF_BASENAME}.pdf#page=19&selection=0,0,0,4&color=yellow|p.19]]\n- span b [[`), r.md);
+  assert.ok(r.md.indexOf(heading) < r.md.indexOf("## Highlights"), "the new section sits ahead of the highlights");
+
+  // The linked heading is still the section on the next merge: matched by
+  // its display text, not rewritten, and the new row goes under it.
+  const again = tn.mergeWikiHighlights(r.md, PDF_BASENAME, "HBIO250", [HL(21, "b"), HL(23, "c")], { section: "cox inhibitors and nsaids" });
+  assert.equal(again.added, 1);
+  assert.equal(again.skipped, 1);
+  assert.deepEqual(again.section, { heading: "COX Inhibitors and NSAIDs", created: false });
+  assert.equal(again.md.split(heading).length, 2, "the heading is written once");
+  assert.ok(again.md.includes("- span b [[") && again.md.indexOf("- span c [[") < again.md.indexOf("## Highlights"));
+  assert.deepEqual(tn.noteSections(again.md), ["Receptors", "COX Inhibitors and NSAIDs", "Highlights", "Related topics"]);
+});
+
+test("an existing heading the reader wrote is never rewritten with a link", () => {
+  const existing = `---\nclass: HBIO250\n---\n\n## Receptors\nReceptor text.\n\n## Highlights\n\n`;
+  const r = tn.mergeWikiHighlights(existing, PDF_BASENAME, "HBIO250", [HL(6, "b")], { section: "Receptors" });
+  assert.ok(r.md.includes("## Receptors\nReceptor text.\n\n- span b [["), r.md);
+  assert.ok(!r.md.includes("## [["));
+});
+
+test("parseTopicNote reads a bullet row's text, nested items included, without the link", () => {
+  const md = [
+    "---",
+    "class: HBIO250",
+    "---",
+    "",
+    "## Highlights",
+    "",
+    `- Therefore, the pharmacokinetics of a drug involves 4 factors: [[${PDF_BASENAME}.pdf#page=20&selection=1,0,9,4&color=yellow|p.20]]`,
+    "  - Absorption",
+    "  - Distribution",
+    `- Some highlight text [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|p.4]]`,
+    "",
+    "## Related topics",
+    "",
+  ].join("\n");
+  const parsed = tn.parseTopicNote(md);
+  assert.deepEqual(
+    parsed.highlights.map((h) => [h.page, h.key, h.text]),
+    [
+      [20, "page=20&selection=1,0,9,4", "Therefore, the pharmacokinetics of a drug involves 4 factors: Absorption; Distribution"],
+      [4, "page=4&selection=2,0,33,19", "Some highlight text"],
+    ],
+  );
+});
+
+test("renderWikiNote's class schema writes bullets under Highlights", () => {
+  const rendered = tn.renderWikiNote({ classCode: "HBIO250", pdfBasename: PDF_BASENAME, summary: "S.", highlights: [wikiHighlight()] });
+  assert.equal(
+    rendered,
+    `---\nclass: HBIO250\n---\n\n## Summary\nS.\n\n## Highlights\n\n- Some highlight text [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|p.4]]\n`,
+  );
 });
