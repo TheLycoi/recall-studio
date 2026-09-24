@@ -216,3 +216,64 @@ test("renderManifest: rect highlight with empty text renders as an embed line, n
   assert.ok(rendered.includes("> [!PDF] [[p.pdf#page=9&rect=42,48,675,410|p.9]]"));
   assert.ok(rendered.includes("> > \n"));
 });
+
+// ---- 2.0: reader notes and heading ride on the manifest
+
+test("notes and heading render as fields and parse back, newlines folded to ' / '", () => {
+  const manifest = {
+    pdfPath: "wiki/sources/classes/PSYC360/Chapter 5 -1.pdf",
+    pdfBasename: "Chapter 5 -1",
+    classCode: "PSYC360",
+    extracted: "2026-09-24T08:34:20",
+    sources: ["wiki/concepts/Childhood and Adolescent-Onset Disorders.md"],
+    highlights: [
+      {
+        id: "H01",
+        key: "page=23&selection=0,0,2,33",
+        page: 23,
+        kind: "selection",
+        color: "note",
+        target: { page: 23, selection: { beginIndex: 0, beginOffset: 0, endIndex: 2, endOffset: 33 }, color: "note" },
+        text: "Attachment Disorders, Conduct Disorder, and Oppositional Defiant Disorder",
+        before: "",
+        after: "",
+        origins: ["wiki/concepts/Childhood and Adolescent-Onset Disorders.md"],
+        notes: "- **Oppositional Defiant Disorder**\n\t- A pattern of angry/irritable mood lasting 6 months",
+        heading: "Attachment Disorders, Conduct Disorder, and Oppositional Defiant Disorder",
+      },
+      {
+        id: "H02",
+        key: "page=30&selection=0,0,0,30",
+        page: 30,
+        kind: "selection",
+        color: null,
+        target: { page: 30, selection: { beginIndex: 0, beginOffset: 0, endIndex: 0, endOffset: 30 } },
+        text: "Conduct Disorder (CD)",
+        before: "",
+        after: "",
+        origins: ["pdf annotation"],
+      },
+    ],
+  };
+  const md = mf.renderManifest(manifest);
+  assert.match(md, /^> heading:: Attachment Disorders, Conduct Disorder, and Oppositional Defiant Disorder$/m);
+  assert.match(md, /^> notes:: - \*\*Oppositional Defiant Disorder\*\* \/ \t- A pattern of angry\/irritable mood lasting 6 months$/m);
+  const back = mf.parseManifest(md);
+  assert.equal(back.highlights[0].notes, manifest.highlights[0].notes, "notes round-trip with their line breaks");
+  assert.equal(back.highlights[0].heading, manifest.highlights[0].heading);
+  assert.equal(back.highlights[1].notes, undefined, "a row without notes carries none");
+  assert.equal(back.highlights[1].heading, undefined);
+});
+
+test("merging by key keeps the first non-empty notes and heading", () => {
+  const target = { page: 3, selection: { beginIndex: 1, beginOffset: 0, endIndex: 1, endOffset: 5 } };
+  const base = { key: "page=3&selection=1,0,1,5", page: 3, kind: "selection", color: null, target, text: "Sarcomere", before: "", after: "" };
+  const merged = mf.mergeHighlights([
+    { ...base, id: "", origins: ["a.md"] },
+    { ...base, id: "", origins: ["b.md"], notes: "- the contractile unit", heading: "Muscle" },
+  ]);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].notes, "- the contractile unit");
+  assert.equal(merged[0].heading, "Muscle");
+  assert.deepEqual(merged[0].origins, ["a.md", "b.md"]);
+});

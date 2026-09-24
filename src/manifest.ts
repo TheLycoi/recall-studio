@@ -22,6 +22,27 @@ export interface ManifestHighlight {
    * its quote text, since it has no PDF++ key. Absent for every PDF row.
    */
   mention?: string;
+  /**
+   * The reader's own words under the link this highlight came from, as
+   * `findAllPdfReferences` read them (src/pdflink.ts `PdfReference.notes`),
+   * and the heading that stood above it. Both are what the digest sends the
+   * model beside the quote. Absent for a callout reference, an embedded
+   * annotation, and a link with nothing under it.
+   */
+  notes?: string;
+  heading?: string;
+  /**
+   * Set by the digest planner, never by the manifest: what the model wrote
+   * for this highlight. `passage` is the digested text in the model's words
+   * and `label` the few words that name it; `verbatim` says the quote itself
+   * is what the page should hold, in which case `passage` is ignored.
+   * `coverage` is how the source treats the highlight — a slide title is
+   * `named`, and the planner keeps those out of pages.
+   */
+  passage?: string;
+  label?: string;
+  verbatim?: boolean;
+  coverage?: "defined" | "discussed" | "named";
 }
 
 export interface Manifest {
@@ -84,6 +105,8 @@ export function mergeHighlights(highlights: ManifestHighlight[]): ManifestHighli
     if (existing) {
       existing.text = existing.text || h.text;
       existing.origins = Array.from(new Set([...existing.origins, ...h.origins]));
+      if (!existing.notes && h.notes) existing.notes = h.notes;
+      if (!existing.heading && h.heading) existing.heading = h.heading;
       continue;
     }
     byKey.set(h.key, { ...h, origins: [...h.origins] });
@@ -174,7 +197,19 @@ function renderHighlightBlock(pdfBasename: string, h: ManifestHighlight): string
   lines.push(`> origin:: ${h.origins.join("; ")}`);
   lines.push(`> before:: ${h.before}`);
   lines.push(`> after:: ${h.after}`);
+  // One line per field: a note's line breaks are folded to ` / ` and unfolded
+  // by parseManifest, so the reader's nesting survives a round trip.
+  if (h.heading) lines.push(`> heading:: ${foldLines(h.heading)}`);
+  if (h.notes) lines.push(`> notes:: ${foldLines(h.notes)}`);
   return lines.join("\n");
+}
+
+const LINE_FOLD = " / ";
+function foldLines(s: string): string {
+  return s.replace(/\r?\n/g, LINE_FOLD);
+}
+function unfoldLines(s: string): string {
+  return s.split(LINE_FOLD).join("\n");
 }
 
 export function renderManifest(m: Manifest): string {
@@ -279,8 +314,13 @@ export function parseManifest(md: string): Manifest {
       : [];
     const before = fields.get("before") ?? "";
     const after = fields.get("after") ?? "";
+    const row: ManifestHighlight = { id, key, page, kind, color, target, text, before, after, origins };
+    const heading = fields.get("heading");
+    if (heading) row.heading = unfoldLines(heading);
+    const notes = fields.get("notes");
+    if (notes) row.notes = unfoldLines(notes);
 
-    highlights.push({ id, key, page, kind, color, target, text, before, after, origins });
+    highlights.push(row);
   }
 
   return { pdfPath, pdfBasename, classCode, extracted, sources, highlights };

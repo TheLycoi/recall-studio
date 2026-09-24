@@ -91,9 +91,10 @@ function row(
   text: string,
   page: string,
   origins: string[],
+  reader?: { notes: string | null; heading: string | null },
 ): ManifestHighlight {
   const ctx = text ? contextFor(page, text, MANIFEST_CONTEXT_CHARS) : { before: "", after: "" };
-  return {
+  const row: ManifestHighlight = {
     id: "",
     key: highlightKey(target),
     page: target.page,
@@ -105,6 +106,9 @@ function row(
     after: ctx.after,
     origins,
   };
+  if (reader?.notes) row.notes = reader.notes;
+  if (reader?.heading) row.heading = reader.heading;
+  return row;
 }
 
 /** One backlinking note's references to this PDF. */
@@ -263,7 +267,7 @@ export async function collectPdfHighlights(
               `page ${target.page}: the quote in ${note.path} differs from the text the selection resolves to; the quote was kept`,
             );
           }
-          rows.push(row(target, "selection", color, text, pageTextFor(target.page), [note.path]));
+          rows.push(row(target, "selection", color, text, pageTextFor(target.page), [note.path], ref));
           continue;
         }
 
@@ -273,13 +277,13 @@ export async function collectPdfHighlights(
             const embedded = annotationHighlights(page.items, page.annots).find((a) => a.id === target.annotation);
             text = embedded?.text ?? "";
           }
-          rows.push(row(target, "annotation", color, text, pageTextFor(target.page), [note.path]));
+          rows.push(row(target, "annotation", color, text, pageTextFor(target.page), [note.path], ref));
           continue;
         }
 
         // rect: the embed carries no quote, so read the rectangle.
         const text = target.rect ? singleLine(textInRect(items, target.rect).text) : "";
-        rows.push(row(target, "rect", color, text, pageTextFor(target.page), [note.path]));
+        rows.push(row(target, "rect", color, text, pageTextFor(target.page), [note.path], ref));
       }
     }
 
