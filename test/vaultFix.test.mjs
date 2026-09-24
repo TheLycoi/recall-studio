@@ -141,3 +141,178 @@ test("planLinkFixes carries the confidence onto each fix and never invents a pag
   assert.equal(plan.fixable[0].confidence, "slug");
   assert.equal(plan.unresolved.length, 1, "an unwritten page is reported, never created");
 });
+
+// ---------------------------------------------------- unwrapping dead links
+// A link to a page nobody wrote cannot be repaired by pointing it somewhere
+// else. Unwrapping keeps the words and drops only the brackets, so the
+// sentence still reads and nothing the reader wrote is destroyed.
+
+test("unwrapDeadLink keeps the words the reader wrote and drops the brackets", () => {
+  const body = "See [[Iterative refinement]] for more.";
+  assert.equal(vf.unwrapDeadLink(body, "Iterative refinement"), "See Iterative refinement for more.");
+});
+
+test("unwrapDeadLink prefers the display text the author chose", () => {
+  const body = "See [[Iterative refinement|refining it step by step]].";
+  assert.equal(vf.unwrapDeadLink(body, "Iterative refinement"), "See refining it step by step.");
+});
+
+test("unwrapDeadLink shows a path target by its basename, not its folder", () => {
+  const body = "- [[concepts/Orchestrator-Workers Pattern]]";
+  assert.equal(vf.unwrapDeadLink(body, "concepts/Orchestrator-Workers Pattern"), "- Orchestrator-Workers Pattern");
+});
+
+test("unwrapDeadLink leaves a live link and a different dead one alone", () => {
+  const body = "[[Spaced repetition]] and [[Iterative refinement]]";
+  const out = vf.unwrapDeadLink(body, "Iterative refinement");
+  assert.equal(out, "[[Spaced repetition]] and Iterative refinement");
+});
+
+test("unwrapDeadLink removes an embed entirely: unwrapped text is not a figure", () => {
+  // `![[X]]` transcludes a note. With no note there is nothing to show, and
+  // leaving the bare words behind would read as prose the reader never wrote.
+  // The line goes with it, rather than being left blank where a figure was.
+  const body = "before\n![[Missing figure]]\nafter";
+  assert.equal(vf.unwrapDeadLink(body, "Missing figure"), "before\nafter");
+});
+
+test("unwrapDeadLink is idempotent and byte-identical when there is nothing to do", () => {
+  const body = "See [[Iterative refinement]] for more.";
+  const once = vf.unwrapDeadLink(body, "Iterative refinement");
+  assert.equal(vf.unwrapDeadLink(once, "Iterative refinement"), once);
+  const clean = "Nothing dead here.";
+  assert.equal(vf.unwrapDeadLink(clean, "Iterative refinement"), clean);
+});
+
+test("unwrapDeadLink drops an anchor: a heading in a page that does not exist", () => {
+  assert.equal(vf.unwrapDeadLink("[[Missing#Definition]]", "Missing"), "Missing");
+});
+
+// ------------------------------------- what is prose, and what only looks it
+// The link scanner in src/graph.ts reads a note as one string, so it reports a
+// `[[Missing]]` written inside a code fence as a dead link like any other. That
+// is harmless while the only repair rewrites one link into another, but an
+// unwrap deletes the syntax, and syntax inside a fence is the content.
+
+test("unwrapDeadLink leaves a link inside a fenced code block alone", () => {
+  const body = "Write it like this:\n\n```\n[[Missing]]\n```\n";
+  assert.equal(vf.unwrapDeadLink(body, "Missing"), body);
+  // Tildes open a fence too, and a fence may be indented inside a list.
+  const tilde = "~~~md\n[[Missing]]\n~~~";
+  assert.equal(vf.unwrapDeadLink(tilde, "Missing"), tilde);
+});
+
+test("unwrapDeadLink leaves a link inside an inline code span alone", () => {
+  const body = "Type `[[Missing]]` to link it.";
+  assert.equal(vf.unwrapDeadLink(body, "Missing"), body);
+});
+
+test("unwrapDeadLink leaves frontmatter alone: a link property is not prose", () => {
+  // `related: "[[X]]"` is a typed property Dataview and Bases query. Stripping
+  // the brackets turns a link into a meaningless string.
+  const body = '---\nrelated: "[[Missing]]"\n---\n\nSee [[Missing]].';
+  assert.equal(vf.unwrapDeadLink(body, "Missing"), '---\nrelated: "[[Missing]]"\n---\n\nSee Missing.');
+});
+
+test("unwrapDeadLink still unwraps prose that follows a code block", () => {
+  const body = "```\ncode\n```\n\nSee [[Missing]] here.";
+  assert.equal(vf.unwrapDeadLink(body, "Missing"), "```\ncode\n```\n\nSee Missing here.");
+});
+
+test("a dead embed that is a whole line takes its line with it", () => {
+  // Returning "" alone would leave "- " behind, which renders as a stray
+  // bullet: a repair that visibly damages the note it claims to tidy.
+  assert.equal(vf.unwrapDeadLink("- ![[Missing]]\n- next", "Missing"), "- next");
+  assert.equal(vf.unwrapDeadLink("before\n\n![[Missing]]\n\nafter", "Missing"), "before\n\nafter");
+  // Inline in a sentence, it is not the line, so only the embed goes.
+  assert.equal(vf.unwrapDeadLink("see ![[Missing]] there", "Missing"), "see  there");
+});
+
+test("a link target holding regex metacharacters is matched literally", () => {
+  // The target is compared as a string, never interpolated into a pattern.
+  assert.equal(vf.unwrapDeadLink("[[C++ (lang)]]", "C++ (lang)"), "C++ (lang)");
+  assert.equal(vf.unwrapDeadLink("[[a.b*c]]", "a.b*c"), "a.b*c");
+});
+
+test("an empty display or basename falls back to the words, never to nothing", () => {
+  assert.equal(vf.unwrapDeadLink("x [[Missing|   ]] y", "Missing"), "x Missing y");
+  assert.equal(vf.unwrapDeadLink("[[folder/]]", "folder/"), "folder/");
+});
+
+// ------------------------------------------- repairs agree on what prose is
+
+test("applyLinkFix leaves a link inside a fence or a code span alone", () => {
+  // The two repairs in this file must agree about what prose is. `unwrapDeadLink`
+  // already honours the mask; a relink that rewrites the example inside a ```md
+  // fence edits documentation while reporting a repair on a link.
+  const body = "Docs:\n\n```md\n[[Missing]]\n```\n\ninline `[[Missing]]` too.\n";
+  assert.equal(vf.applyLinkFix(body, "Missing", "[[concepts/real|Real]]"), body);
+});
+
+test("applyLinkFix leaves a link in the frontmatter alone", () => {
+  const body = '---\nrelated: "[[Missing]]"\n---\n\nSee [[Missing]].\n';
+  assert.equal(
+    vf.applyLinkFix(body, "Missing", "[[concepts/real|Real]]"),
+    '---\nrelated: "[[Missing]]"\n---\n\nSee [[concepts/real|Real]].\n',
+  );
+});
+
+test("applyLinkFix still rewrites prose that follows a code block", () => {
+  const body = "```\ncode\n```\n\nSee [[Missing]] here.";
+  assert.equal(
+    vf.applyLinkFix(body, "Missing", "[[concepts/real|Real]]"),
+    "```\ncode\n```\n\nSee [[concepts/real|Real]] here.",
+  );
+});
+
+// --------------------------------------------------- display text is escaped
+
+test("buildReplacement escapes a heading that itself holds a wikilink", () => {
+  // `]]` inside the display text closes the link early, leaving permanently
+  // broken markup that no later repair can recognise or undo.
+  const page = { path: "wiki/concepts/y.md", title: "y", displayTitle: "See [[Other]]", aliases: [] };
+  const rep = vf.buildReplacement(page, "wiki/");
+  assert.ok(!/\]\]/.test(rep.slice(2, -2)), `display text still closes the link: ${rep}`);
+  // Applying it yields one well-formed link, not a nest of them.
+  const out = vf.applyLinkFix("A [[Missing]] b.\n", "Missing", rep);
+  assert.equal(out.match(/\[\[/g).length, 1);
+  assert.equal(out.match(/\]\]/g).length, 1);
+});
+
+test("buildReplacement escapes a pipe in the display text", () => {
+  // A second `|` makes Obsidian read everything after it as a further field,
+  // so the reader sees a truncated name.
+  const page = { path: "wiki/concepts/z.md", title: "z", displayTitle: "A|B", aliases: [] };
+  const rep = vf.buildReplacement(page, "wiki/");
+  assert.equal(rep.split("|").length, 2, `display text holds a second pipe: ${rep}`);
+});
+
+test("buildReplacement leaves an ordinary heading untouched", () => {
+  const page = { path: "wiki/concepts/y.md", title: "y", displayTitle: "Spaced repetition", aliases: [] };
+  assert.equal(vf.buildReplacement(page, "wiki/"), "[[concepts/y|Spaced repetition]]");
+});
+
+// ------------------------------------------------ unwrap: the leftover bullet
+
+test("a dead embed on the last line takes its bullet with it", () => {
+  // The comment above the embed branch promises the bullet goes. Without a
+  // trailing newline the line is still the whole line, so "- " must not survive.
+  assert.equal(vf.unwrapDeadLink("- ![[Missing]]", "Missing"), "");
+  assert.equal(vf.unwrapDeadLink("before\n\n- ![[Missing]]", "Missing"), "before\n\n");
+  // Inline in a sentence it is not the line, so only the embed goes.
+  assert.equal(vf.unwrapDeadLink("see ![[Missing]]", "Missing"), "see ");
+});
+
+test("unwrapDeadLink leaves a link in a four-space indented code block alone", () => {
+  // An indented code block is a code block. Unwrapping the example inside one
+  // is the exact failure the prose mask exists to prevent.
+  const body = "Example:\n\n    [[Missing]]\n\nend.\n";
+  assert.equal(vf.unwrapDeadLink(body, "Missing"), body);
+});
+
+test("an indented continuation line under a list item is still prose", () => {
+  // Four spaces under a bullet is a wrapped list item, not a code block, so a
+  // dead link there must still be unwrapped.
+  const body = "- a point\n    [[Missing]] continues it.\n";
+  assert.equal(vf.unwrapDeadLink(body, "Missing"), "- a point\n    Missing continues it.\n");
+});

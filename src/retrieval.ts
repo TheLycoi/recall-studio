@@ -6,7 +6,7 @@
 // this module — or its test bundle — ever resolving `obsidian`.
 import { basenameNoExt } from "./util";
 import { parsePdfSubpath, renderCallout, splitLinktext, type PdfTarget } from "./pdflink";
-import { parseTopicNote } from "./topicNote";
+import { execHeading, nextHeadingAfter, parseTopicNote } from "./topicNote";
 import type { AskEvidenceIn } from "./prompt";
 import { isGraphUsable, pprFromSeeds, type Graph, type PPROptions } from "./graph";
 
@@ -32,14 +32,21 @@ export interface EvidenceUnit {
  */
 const CLAIM_SEP_RE = /\s+[—-]\s+(?=\[\[[^\]]+\]\]\s*$)/;
 
-/** The `## Key claims` section body: the lines after the heading, up to the next `## ` heading or EOF. */
+/**
+ * The `## Key claims` section body: the lines after the heading, up to the
+ * next `## ` heading or EOF.
+ *
+ * The heading and the boundary are found with the fence-aware scanners
+ * (`src/topicNote.ts`), the same ones `proseUnits` below already agrees with:
+ * a `## ` line inside a fenced block is text the reader wrote, and reading it
+ * as a heading would cut the section short and drop every claim below the
+ * fence out of the index, where nothing can cite it.
+ */
 function keyClaimsSection(body: string): string | null {
-  const m = /^##\s+Key claims\s*$/m.exec(body);
+  const m = execHeading(body, /^##\s+Key claims\s*$/m);
   if (!m) return null;
   const headingEnd = m.index + m[0].length;
-  const rest = body.slice(headingEnd);
-  const next = /^##\s/m.exec(rest);
-  return next ? rest.slice(0, next.index) : rest;
+  return body.slice(headingEnd, nextHeadingAfter(body, headingEnd));
 }
 
 /** Drop `==mark==` wrappers, keeping the marked text. */

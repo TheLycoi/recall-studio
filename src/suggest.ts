@@ -20,7 +20,7 @@ import type { SuggestDraft } from "./schemas";
 import type { SuggestExistingNote } from "./prompt";
 import { SUGGEST_PER_PAGE } from "./settings";
 import { applyPreviewChoices, batchPages, planWikiNotes, toManifestHighlights, verifySpans, type VerifiedSpan, type WikiNoteIn } from "./suggestPlan";
-import { noteSections, safeTitle, type PreparedNote } from "./topicNote";
+import { mergeWikiHighlights, noteSections, safeTitle, type PreparedNote, type WikiSchema } from "./topicNote";
 
 /** How much of an already-selected passage the prompt shows (src/prompt.ts:267). */
 const ALREADY_SELECTED_CHARS = 80;
@@ -93,16 +93,69 @@ export interface WriteNotesResult {
   refused: number;
 }
 
+/** The merge context a planned page needs to be rebuilt against the file as it reads at write time. */
+export interface WriteMergeContext {
+  pdfBasename: string;
+  classCode: string;
+  schema: WikiSchema;
+}
+
+/**
+ * Replay a planned merge against the page as it reads right now.
+ *
+ * `planWikiNotes` folded the spans into the copy of the page read by
+ * `wikiNotes`, which for this command is stale by *several* sequential model
+ * calls — one per page batch — plus a preview the reader ticks span by span.
+ * `mergeWikiHighlights` is pure and keyed by `highlightKey`, so running it
+ * again over the current text reproduces the same callouts while keeping every
+ * edit made in that window, and a span the reader added by hand meanwhile is
+ * recognised as present and skipped rather than written twice.
+ *
+ * `note.sections` records the `##` heading each span was filed under, so the
+ * planner's per-section grouping is rebuilt from it; a span named by no entry
+ * belongs in the page's default highlights section.
+ */
+function remergeNote(current: string, note: PreparedNote, ctx: WriteMergeContext): string {
+  const sectionOf = new Map<string, string>();
+  for (const s of note.sections ?? []) {
+    for (const key of s.keys) sectionOf.set(key, s.heading);
+  }
+
+  const bySection = new Map<string, typeof note.highlights>();
+  for (const h of note.highlights) {
+    const heading = sectionOf.get(h.key) ?? "";
+    const list = bySection.get(heading);
+    if (list) list.push(h);
+    else bySection.set(heading, [h]);
+  }
+
+  let md = current;
+  for (const [heading, highlights] of bySection) {
+    md = mergeWikiHighlights(md, ctx.pdfBasename, ctx.classCode, highlights, {
+      schema: ctx.schema,
+      section: heading || undefined,
+    }).md;
+  }
+  return md;
+}
+
 /**
  * Write planned pages into the vault, creating folders on first use. Same
  * vault idiom as the digest (src/digest.ts). `refuse` is the caller's last
  * check before a write — a page named after the source PDF, or aimed at the
  * folder the sources live in, is refused rather than trusted.
+ *
+ * `merge` is how an existing page is updated: given it, the plan's merge is
+ * re-run inside `vault.process` against the locked current text, so nothing
+ * the reader typed while the model ran and the preview sat open is lost. A
+ * caller that omits it still gets the old last-write-wins `modify`, which is
+ * only safe when no time passes between the read and the write.
  */
 export async function writeNotes(
   plugin: WikiLmPlugin,
   notes: PreparedNote[],
   refuse: (note: PreparedNote) => boolean,
+  merge?: WriteMergeContext,
 ): Promise<WriteNotesResult> {
   const result: WriteNotesResult = { written: 0, newCount: 0, spansWritten: 0, refused: 0 };
   for (const note of notes) {
@@ -113,7 +166,10 @@ export async function writeNotes(
     const path = normalizePath(note.path);
     const file = plugin.app.vault.getAbstractFileByPath(path); // obsidian.d.ts:7369
     if (file instanceof TFile) {
-      await plugin.app.vault.modify(file, note.content); // obsidian.d.ts:7467
+      // Read-modify-write under a lock (obsidian.d.ts:7510) rather than
+      // clobbering the file with a string merged minutes ago.
+      if (merge) await plugin.app.vault.process(file, (data) => remergeNote(data, note, merge));
+      else await plugin.app.vault.modify(file, note.content); // obsidian.d.ts:7467
     } else {
       const folder = path.split("/").slice(0, -1).join("/");
       if (folder && !(await plugin.app.vault.adapter.exists(folder))) {
@@ -293,7 +349,11 @@ export async function suggestPdfHighlights(
     const result =
       options.product === "flashcards"
         ? { written: 0, newCount: 0, spansWritten: 0, refused: 0 }
-        : await writeNotes(plugin, final.notes, refuse);
+        : await writeNotes(plugin, final.notes, refuse, {
+            pdfBasename: manifest.pdfBasename,
+            classCode,
+            schema: s.wikiSchema,
+          });
     let queued = 0;
     if (options.product !== "notes") {
       for (const note of final.notes) {

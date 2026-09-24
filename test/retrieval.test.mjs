@@ -513,3 +513,51 @@ test("mergeEvidence appends without repeating or exceeding k", () => {
   const c = unit("c.md", "three", "c#1");
   assert.deepEqual(rt.mergeEvidence([a], [a, b, c], 2).map((u) => u.id), ["a#1", "b#1"]);
 });
+
+// A `## ` line inside a fenced block is text the reader wrote, not a heading,
+// so it must not close the `## Key claims` section. `proseUnits` already
+// tracks fences; the section scan has to agree or a claim below the fence is
+// dropped from the index and cannot be cited.
+test("indexNote keeps claims below a fenced ## heading inside Key claims", () => {
+  const md = [
+    "## Key claims",
+    "",
+    "```md",
+    "## Example format",
+    "```",
+    "",
+    "- A claim about clearance. — [[Notes.pdf#page=3|p.3]]",
+    "",
+    "## Related topics",
+    "",
+  ].join("\n");
+  const units = rt.indexNote("classes/HBIO250/Clearance.md", md);
+  assert.deepEqual(
+    units.filter((u) => u.kind === "claim").map((u) => u.text),
+    ["A claim about clearance."],
+  );
+});
+
+test("indexNote ignores a fenced ## Key claims above the real one", () => {
+  const md = [
+    "# Clearance",
+    "",
+    "## Format",
+    "",
+    "~~~markdown",
+    "## Key claims",
+    "",
+    "- example — [[X.pdf#page=9|p.9]]",
+    "~~~",
+    "",
+    "## Key claims",
+    "",
+    "- A claim about clearance. — [[Notes.pdf#page=3|p.3]]",
+    "",
+  ].join("\n");
+  const claims = rt.indexNote("classes/HBIO250/Clearance.md", md).filter((u) => u.kind === "claim");
+  assert.deepEqual(
+    claims.map((u) => [u.text, u.page]),
+    [["A claim about clearance.", 3]],
+  );
+});

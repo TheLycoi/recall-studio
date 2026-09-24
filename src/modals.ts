@@ -695,12 +695,15 @@ export interface LintFixCounts {
   deadLinksFixable: number;
   deadLinksUnresolved: number;
   schemaViolations: number;
+  /** Open proposals from the card observer; they are a question, not a wiki fault. */
+  schemaSuggestions: number;
 }
 
 /** What each button does. An absent callback hides its button. */
 export interface LintFixActions {
   onFixDeadLinks?: () => void;
   onRetagViolations?: () => void;
+  onReviewSchema?: () => void;
 }
 
 /**
@@ -777,7 +780,7 @@ export class LintReportModal extends Modal {
       void this.app.workspace.openLinkText(href, "", false);
     });
 
-    const { deadLinksFixable, deadLinksUnresolved, schemaViolations } = this.counts;
+    const { deadLinksFixable, deadLinksUnresolved, schemaViolations, schemaSuggestions } = this.counts;
     const row = new Setting(contentEl);
 
     // Before Close, and a CTA, because it is the one button that offers every
@@ -809,6 +812,21 @@ export class LintReportModal extends Modal {
             this.actions.onFixDeadLinks?.();
           });
       });
+    }
+
+    // Last of the count-gated buttons and never a CTA: the proposals are the
+    // reader's own preferences to accept or dismiss, not a repair the check is
+    // recommending.
+    if (schemaSuggestions > 0 && this.actions.onReviewSchema) {
+      row.addButton((b) =>
+        b
+          .setButtonText(`Review ${schemaSuggestions} suggestion${schemaSuggestions === 1 ? "" : "s"}`)
+          .setTooltip("Rules your card edits imply, waiting for you to accept or dismiss")
+          .onClick(() => {
+            this.close();
+            this.actions.onReviewSchema?.();
+          }),
+      );
     }
 
     if (schemaViolations > 0 && this.actions.onRetagViolations) {
@@ -925,6 +943,7 @@ const FIX_GROUP: Record<FixKind, string> = {
   "cross-link": "Duplicate pages",
   relink: "Dead links",
   repoint: "Dead links",
+  unwrap: "Dead links",
   "hub-link": "Unlinked pages",
   "related-link": "Unlinked pages",
   "rect-callout": "Rect-only notes",
@@ -974,7 +993,7 @@ export class FixPlanModal extends Modal {
     contentEl.createEl("h3", { text: "Fix plan" });
     contentEl.createEl("p", {
       cls: "wikilm-muted",
-      text: "Nothing is written until Apply, and only the rows left ticked. No pages are created, merged or unlinked.",
+      text: "Nothing is written until Apply, and only the rows left ticked. No pages are created or merged, and a link is only unlinked by a row you left ticked.",
     });
 
     this.list = contentEl.createDiv({ cls: "wikilm-fix-plan" });

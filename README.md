@@ -53,19 +53,19 @@ and `/help` in the chat prints it.
 | **AI-highlight this note and write cards** | `ai` | needs an open note |
 | **AI-highlight this note with instructions…** | `ai-instruct` | needs an open note |
 | **Ingest source: read this markdown into the wiki** | `ingest`, `read-source` | needs an open note |
-| **Ingest folder: read every note in a folder into the wiki** | `ingest-folder`, `read-folder` | always |
+| **Ingest folder: read every note in a folder into the wiki** | `read-folder` | always |
 | **Cancel the running AI highlight or ingest** | `cancel`, `stop-run` | while a run is in progress |
 | **Add transcript for document highlighting** | `transcript` | needs an open note |
 | **Extract PDF highlights to manifest** | `extract` | needs an open PDF |
 | **Digest PDF highlights into topic notes…** | `digest` | needs an open PDF, a manifest note, or a note with PDF++ links |
 | **AI-highlight this PDF into the wiki…** | `suggest` | needs an open PDF |
 | **Open chat: ask the notes** | `chat`, `ask` | always |
-| **Lint wiki: find gaps, dead links and ungrounded quotes** | `wiki`, `lint` | always available |
+| **Lint wiki: find gaps, dead links and ungrounded quotes** | `lint` | always |
 | **Open inbox** | `inbox` | always |
 | **Export all reviewed cards to Anki** | `export` | always |
 | **Retry failed highlights** | `retry` | always |
 | **Open the schema note** | `schema` | always |
-| **Review schema suggestions** | `suggestions` | always |
+| **Review schema suggestions** | `schema-review` | always |
 
 What the capture commands do: **Send selection to inbox** takes the selection
 (or the paragraph under the cursor; in reading view, the selected text) and
@@ -515,15 +515,19 @@ else is a question for your notes. Three buttons above the box — **Quiz me**,
 **Suggest fixes.** The Wiki check modal offers a plan when any finding can be
 repaired: one row per proposed edit, each with a checkbox and a one-line
 description, in the order upstream's Smart Fix All uses — aliases and tags,
-cross-links between duplicate pages, link rewrites, repointed dead links,
-hub or neighbour links for unlinked pages, PDF++ callouts for notes that hold
+cross-links between duplicate pages, link rewrites, repointed and
+withdrawn dead links, hub or neighbour links for unlinked pages, PDF++ callouts for notes that hold
 only rectangle embeds, and citations for quotes found verbatim in exactly one
 source. Nothing is written until you click **Apply**, and only the rows left
 ticked are written, each note once. Aliases and tags come from the model, and
 only when you click **Ask the model for aliases and tags** inside the plan. A
-dead link whose page does not exist is repointed at a note you pick with
-**Point at…**; the fixer never creates a stub page, never merges two pages,
-and never drops a link. After Apply the lint runs again so you see what
+dead link whose page does not exist is offered two rows, and you choose between
+them: **Point at…** repoints it at a note you name, and **Unlink** strips the
+link back to the words around it, keeping the sentence and dropping only the
+brackets. An embed of a missing page is removed outright, since it transcludes
+nothing. The fixer never creates a stub page and never merges two pages. It
+leaves the wiki's generated `log.md` and its `schema/` documentation alone,
+where broken links are examples rather than rot. After Apply the lint runs again so you see what
 changed. Suggest fixes covers exactly the notes the lint covers — those under
 the topic notes folder — so the wiki's own concept and entity pages are
 offered fixes only when that folder is theirs.
@@ -1062,7 +1066,7 @@ source link; cards captured any other way are unchanged
 
 ## Setup
 
-1. Settings → WikiLM → **Provider**. Three options:
+1. Settings → WikiLM → **Provider**. Four options:
    - **Codex (ChatGPT subscription)** — no API key. WikiLM runs OpenAI's
      Codex CLI (`codex exec`) signed in with your ChatGPT account. Leave
      *Codex CLI path* empty and WikiLM finds `codex` on the PATH or the copy
@@ -1091,6 +1095,17 @@ source link; cards captured any other way are unchanged
      `data.json`, which iCloud syncs in plaintext:
      `security add-generic-password -s ANTHROPIC_API_KEY -a wikilm -w`.
      Default model `claude-opus-5`.
+   - **Google Gemini (API key)** — paste a key from Google AI Studio, or
+     leave the field empty and WikiLM reads `GEMINI_API_KEY` from the
+     environment or from the macOS keychain (a generic password whose
+     service is `GEMINI_API_KEY` or `WikiLM Gemini API key`), the same
+     keychain route the Anthropic provider uses:
+     `security add-generic-password -s GEMINI_API_KEY -a wikilm -w`.
+     Calls go to the `generateContent` REST API with a JSON response schema,
+     through Obsidian's `requestUrl` so no CORS proxy is needed. Default
+     model `gemini-3.1-pro-preview`; `gemini-3-flash-preview` is faster and
+     cheaper. Gemini's thinking scale stops at `high`, so the `xhigh` and
+     `max` effort levels are rounded down to it.
 
    Effort defaults to `high` (highlights are small, so this is cheap). Click
    **Test** to confirm the provider answers.
@@ -1125,6 +1140,7 @@ Layout, one line per module:
 - `src/chatPanel.ts` — the Chat half of the sidebar: turns, evidence, quizzes, and the lint modal
 - `src/claudeCli.ts` — the Claude Code backend, shelling out to `claude -p` signed in with a Claude subscription
 - `src/codex.ts` — the Codex backend, shelling out to `codex exec` signed in with a ChatGPT subscription
+- `src/gemini.ts` — the Gemini backend, calling Google's `generateContent` REST API with an API key
 - `src/commandTable.ts` — the twenty commands as pure data: ids, palette names, chat aliases, availability hints
 - `src/commands.ts` — their behaviour half: an `available` predicate and a `run` action per entry, registered by `main.ts` in one loop
 - `src/digest.ts` — digest orchestration: the glue between the highlight collector, the model or a pasted draft, the planner, the preview and the vault
@@ -1162,7 +1178,7 @@ Layout, one line per module:
 - `src/suggestPlan.ts` — its pure planning layer: page batches, span verification, manifest rows, and grouping into wiki notes
 - `src/topicNote.ts` — pure topic-note render, parse and merge by highlight key, and the digest planner
 - `src/util.ts` — pure helpers shared across the plugin, kept free of Obsidian imports
-- `src/vaultFix.ts` — repairs for what the vault lint finds, chiefly the dead link that is only a spelling apart from its page
+- `src/vaultFix.ts` — repairs for what the vault lint finds: the dead link that is only a spelling apart from its page, and the unwrap that withdraws one whose page was never written
 - `src/vaultLint.ts` — structural checks over the notes themselves: what can be found, what links anywhere, what Ask could quote
 
 ## License and credits

@@ -45,7 +45,16 @@ export function parsePdfSubpath(subpath: string): PdfTarget | null {
     const eq = part.indexOf("=");
     if (eq < 0) continue;
     const key = part.slice(0, eq);
-    const value = part.slice(eq + 1);
+    // Obsidian and PDF++ percent-encode the commas in some links, so a value
+    // read raw fails the digit tests below. A malformed escape ("%zz") makes
+    // decodeURIComponent throw, and one bad link must not take a whole scan
+    // down with it, so the raw text stands in.
+    let value = part.slice(eq + 1);
+    try {
+      value = decodeURIComponent(value);
+    } catch {
+      // Keep the raw value.
+    }
     if (!params.has(key)) params.set(key, value);
   }
 
@@ -55,13 +64,17 @@ export function parsePdfSubpath(subpath: string): PdfTarget | null {
 
   const target: PdfTarget = { page };
 
+  // A selection or rect that will not parse refuses the whole link rather than
+  // falling back to the page. A page-only target looks valid and dedupes by
+  // `highlightKey`, so every unparseable highlight on one page would collapse
+  // into a single row and the reader would lose distinct highlights. Declining
+  // to read the link leaves it exactly as they wrote it.
   const selectionRaw = params.get("selection");
   if (selectionRaw !== undefined) {
     const nums = selectionRaw.split(",").map((n) => n.trim());
-    if (nums.length === 4 && nums.every((n) => /^\d+$/.test(n))) {
-      const [a, b, c, d] = nums.map(Number);
-      target.selection = { beginIndex: a, beginOffset: b, endIndex: c, endOffset: d };
-    }
+    if (nums.length !== 4 || !nums.every((n) => /^\d+$/.test(n))) return null;
+    const [a, b, c, d] = nums.map(Number);
+    target.selection = { beginIndex: a, beginOffset: b, endIndex: c, endOffset: d };
   }
 
   const annotationRaw = params.get("annotation");
@@ -72,9 +85,8 @@ export function parsePdfSubpath(subpath: string): PdfTarget | null {
   const rectRaw = params.get("rect");
   if (rectRaw !== undefined) {
     const nums = rectRaw.split(",").map((n) => n.trim());
-    if (nums.length === 4 && nums.every((n) => /^\d+(\.\d+)?$/.test(n))) {
-      target.rect = nums.map(Number) as [number, number, number, number];
-    }
+    if (nums.length !== 4 || !nums.every((n) => /^\d+(\.\d+)?$/.test(n))) return null;
+    target.rect = nums.map(Number) as [number, number, number, number];
   }
 
   const colorRaw = params.get("color");

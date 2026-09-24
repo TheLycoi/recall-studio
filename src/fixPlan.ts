@@ -24,7 +24,7 @@
  */
 import type { VaultIssue } from "./vaultLint";
 import type { FixPage, LinkFix, FixConfidence } from "./vaultFix";
-import { applyLinkFix, buildReplacement } from "./vaultFix";
+import { applyLinkFix, buildReplacement, unwrapDeadLink } from "./vaultFix";
 import { findAllPdfReferences, highlightKey, parsePdfSubpath, renderCallout } from "./pdflink";
 import { linkKey } from "./graph";
 import { findSection, spliceIntoSection, insertBeforeTrailing } from "./topicNote";
@@ -34,6 +34,7 @@ export type FixKind =
   | "cross-link"
   | "relink"
   | "repoint"
+  | "unwrap"
   | "hub-link"
   | "related-link"
   | "rect-callout"
@@ -495,6 +496,64 @@ export function planRepoints(unresolved: VaultIssue[]): Fix[] {
 }
 
 /**
+ * Notes whose broken links are deliberate, and must never be stripped.
+ *
+ * `log.md` is a generated report: its links name the pages a run touched, and
+ * some of those name files by a path that no longer resolves. `schema/` holds
+ * the wiki's own documentation, where `[[entities/page-name]]` is an example of
+ * the shape a link takes rather than a link that was meant to arrive anywhere.
+ * Unwrapping either would destroy the example while reporting a repair.
+ */
+function isAuthoredPage(path: string, wikiPrefix: string): boolean {
+  const prefix = wikiPrefix.endsWith("/") ? wikiPrefix : `${wikiPrefix}/`;
+  // Only a page inside the configured wiki folder can be one of its generated
+  // or documentation files. A note that merely spells "wiki" somewhere in its
+  // path is the reader's own, and is treated as prose.
+  if (!path.startsWith(prefix)) return true;
+  const rel = path.slice(prefix.length);
+  if (/^log\.md$/i.test(rel)) return false;
+  if (/^schema\//i.test(rel)) return false;
+  if (/^Welcome to /i.test(rel)) return false;
+  return true;
+}
+
+/**
+ * Withdraw a dead link whose page nobody wrote.
+ *
+ * The companion to `planRepoints`: that row asks the reader to name the page
+ * they meant, this one accepts that there is no such page and strips the link
+ * back to the words around it. Both rows are offered for the same finding, so
+ * the choice between them stays the reader's.
+ *
+ * A row is only offered when it would actually change the note, and only for
+ * pages the reader wrote — the wiki's generated log and its schema examples
+ * hold broken links on purpose.
+ */
+export function planUnwraps(unresolved: VaultIssue[], contents: Map<string, string>, wikiPrefix: string): Fix[] {
+  const fixes: Fix[] = [];
+  let n = 0;
+  for (const issue of unresolved) {
+    if (issue.id !== "dead-link" || !issue.target) continue;
+    if (!isAuthoredPage(issue.path, wikiPrefix)) continue;
+    const body = contents.get(issue.path);
+    // Nothing to propose when the note's text does not hold the link, so an
+    // applied plan never reports an edit that changed no bytes.
+    if (body === undefined || unwrapDeadLink(body, issue.target) === body) continue;
+    const target = issue.target;
+    fixes.push({
+      id: `unwrap:${issue.path}:${n++}`,
+      kind: "unwrap",
+      path: issue.path,
+      label: `Unlink ${target} (no such page) — keep the words, drop the link`,
+      enabled: true,
+      target,
+      apply: (content: string) => unwrapDeadLink(content, target),
+    });
+  }
+  return fixes;
+}
+
+/**
  * The target of a repoint row, once the reader has picked one. The row keeps
  * its id, so the modal can swap it in place, and reads the dead link off the
  * row's `target` rather than out of its label, which is prose and may hold
@@ -735,6 +794,7 @@ const KIND_ORDER: FixKind[] = [
   "cross-link",
   "relink",
   "repoint",
+  "unwrap",
   "hub-link",
   "related-link",
   "rect-callout",
@@ -750,10 +810,39 @@ export function orderFixes(fixes: Fix[]): Fix[] {
   });
 }
 
+/**
+ * The two rows offered for one dead link are alternatives, not a sequence.
+ *
+ * `planRepoints` and `planUnwraps` both answer the same finding, and the reader
+ * picks one. Repoint runs first, which normally leaves the unwrap nothing to
+ * match — the link now names a different page. But when the reader picks a page
+ * whose wiki-relative path equals the dead target's spelling, which is every
+ * page at the top of the wiki folder, the repoint writes `[[Missing|Missing]]`
+ * and the unwrap's target still matches it. The unwrap then deletes the page
+ * the reader had just chosen, and the plan reports that as a repair.
+ *
+ * So an unwrap is dropped once a repoint for the same note and the same link
+ * has been answered. A repoint still waiting on a target (`needsTarget`) is not
+ * an answer and suppresses nothing, which leaves the unwrap the only offer on
+ * the table — as it should be until the reader names a page.
+ */
+function dropAnsweredUnwraps(fixes: Fix[]): Fix[] {
+  const answered = new Set<string>();
+  for (const fix of fixes) {
+    if (fix.kind === "repoint" && !fix.needsTarget && fix.enabled && fix.target) {
+      answered.add(`${fix.path}\u0000${fix.target.trim()}`);
+    }
+  }
+  if (answered.size === 0) return fixes;
+  return fixes.filter(
+    (fix) => !(fix.kind === "unwrap" && fix.target && answered.has(`${fix.path}\u0000${fix.target.trim()}`)),
+  );
+}
+
 /** The fixes for each note, in the order they must be applied. */
 export function groupByNote(fixes: Fix[]): Map<string, Fix[]> {
   const out = new Map<string, Fix[]>();
-  for (const fix of orderFixes(fixes)) {
+  for (const fix of orderFixes(dropAnsweredUnwraps(fixes))) {
     const list = out.get(fix.path);
     if (list) list.push(fix);
     else out.set(fix.path, [fix]);

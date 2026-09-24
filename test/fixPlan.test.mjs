@@ -645,3 +645,150 @@ test("every fix id is unique within a plan", () => {
   const ids = fixes.map((f) => f.id);
   assert.equal(new Set(ids).size, ids.length);
 });
+
+// ------------------------------------------------------- unwrapping rows
+// The second repair for a dead link whose page nobody wrote: strip it back to
+// plain text. The row sits beside the repoint row for the same finding, so the
+// reader chooses between naming a page and withdrawing the link.
+
+test("planUnwraps offers one row per dead link in a wiki page", () => {
+  const rows = fp.planUnwraps(
+    [{ id: "dead-link", path: "wiki/concepts/a.md", title: "A", target: "Iterative refinement" }],
+    new Map([["wiki/concepts/a.md", "See [[Iterative refinement]]."]]),
+    "wiki/",
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].kind, "unwrap");
+  assert.equal(rows[0].target, "Iterative refinement");
+  assert.equal(rows[0].apply("See [[Iterative refinement]]."), "See Iterative refinement.");
+});
+
+test("planUnwraps skips the wiki's own generated and documentation notes", () => {
+  // log.md is a generated report, and schema/config.md holds deliberate
+  // placeholders like [[entities/page-name]]. Stripping those would corrupt
+  // the examples the schema is documented with.
+  const issues = [
+    { id: "dead-link", path: "wiki/log.md", title: "log", target: "entities/andy-matuschak.md" },
+    { id: "dead-link", path: "wiki/schema/config.md", title: "config", target: "entities/page-name" },
+    { id: "dead-link", path: "wiki/concepts/a.md", title: "A", target: "Iterative refinement" },
+  ];
+  const contents = new Map([
+    ["wiki/log.md", "[[entities/andy-matuschak.md]]"],
+    ["wiki/schema/config.md", "[[entities/page-name]]"],
+    ["wiki/concepts/a.md", "[[Iterative refinement]]"],
+  ]);
+  const rows = fp.planUnwraps(issues, contents, "wiki/");
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].path, "wiki/concepts/a.md");
+});
+
+test("planUnwraps offers nothing when the edit would change no bytes", () => {
+  // The finding names a target the note's text does not actually hold.
+  const rows = fp.planUnwraps(
+    [{ id: "dead-link", path: "wiki/concepts/a.md", title: "A", target: "Iterative refinement" }],
+    new Map([["wiki/concepts/a.md", "nothing to unwrap here"]]),
+    "wiki/",
+  );
+  assert.equal(rows.length, 0);
+});
+
+test("an unwrap row is deterministic and idempotent", () => {
+  const issues = [{ id: "dead-link", path: "wiki/concepts/a.md", title: "A", target: "Iterative refinement" }];
+  const contents = new Map([["wiki/concepts/a.md", "See [[Iterative refinement]]."]]);
+  const a = fp.planUnwraps(issues, contents, "wiki/");
+  const b = fp.planUnwraps(issues, contents, "wiki/");
+  assert.deepEqual(a.map((r) => r.id), b.map((r) => r.id));
+  const once = a[0].apply("See [[Iterative refinement]].");
+  assert.equal(a[0].apply(once), once);
+});
+
+test("unwrap rows sort after repoints: naming a page beats withdrawing the link", () => {
+  const issue = { id: "dead-link", path: "wiki/concepts/a.md", title: "A", target: "Iterative refinement" };
+  const contents = new Map([["wiki/concepts/a.md", "[[Iterative refinement]]"]]);
+  const ordered = fp.orderFixes([...fp.planUnwraps([issue], contents, "wiki/"), ...fp.planRepoints([issue])]);
+  assert.deepEqual(ordered.map((f) => f.kind), ["repoint", "unwrap"]);
+});
+
+test("planUnwraps honours a configured wiki folder, not a hardcoded one", () => {
+  // wikiConceptsFolder/wikiEntitiesFolder are settings. A reader who moved the
+  // wiki to `knowledge/` must still keep their generated log and schema docs.
+  const issues = [
+    { id: "dead-link", path: "knowledge/log.md", title: "log", target: "Missing" },
+    { id: "dead-link", path: "knowledge/schema/config.md", title: "config", target: "Missing" },
+    { id: "dead-link", path: "knowledge/concepts/a.md", title: "A", target: "Missing" },
+  ];
+  const contents = new Map(issues.map((i) => [i.path, "[[Missing]]"]));
+  const rows = fp.planUnwraps(issues, contents, "knowledge/");
+  assert.deepEqual(rows.map((r) => r.path), ["knowledge/concepts/a.md"]);
+});
+
+test("planUnwraps does not mistake a note merely containing 'wiki/' for the wiki root", () => {
+  // A path-substring match would strip the prefix off `notes/wiki/…` and, worse,
+  // treat a reader's own `notes/wiki/schema/x.md` as documentation.
+  const issues = [{ id: "dead-link", path: "notes/wikipedia/log.md", title: "log", target: "Missing" }];
+  const contents = new Map([["notes/wikipedia/log.md", "[[Missing]]"]]);
+  // With the wiki at `wiki/`, this note is not in it, so it is the reader's.
+  assert.equal(fp.planUnwraps(issues, contents, "wiki/").length, 1);
+});
+
+// ------------------------------- a repoint and an unwrap for the same link
+
+test("an unwrap never destroys the link a repoint just wrote", () => {
+  // Both rows are offered for one dead link, and the reader picked the repoint.
+  // A page at the top of the wiki folder repoints "Missing" to "Missing", which
+  // the unwrap's target comparison still matches, so unwrap ran second and
+  // deleted the reader's explicit choice while the UI reported success.
+  const body = "See [[Missing]] here.\n";
+  const issues = [{ id: "dead-link", path: "wiki/a.md", title: "A", target: "Missing" }];
+  const contents = new Map([["wiki/a.md", body]]);
+  const page = { path: "wiki/Missing.md", title: "Missing", aliases: [] };
+  const concrete = fp.repointFix(fp.planRepoints(issues)[0], page, "wiki/");
+  const rows = [concrete, ...fp.planUnwraps(issues, contents, "wiki/")];
+  const out = fp.applyFixesToNote(body, fp.groupByNote(rows).get("wiki/a.md"));
+  assert.match(out, /\[\[Missing\|Missing\]\]/, `the reader's repoint was unwrapped away: ${out}`);
+});
+
+test("a repoint to a different page still lets the unwrap no-op harmlessly", () => {
+  // The general repoint-before-unwrap order is sound: once the link points
+  // somewhere new, the unwrap's target no longer matches and it changes nothing.
+  const body = "See [[Missing]] here.\n";
+  const issues = [{ id: "dead-link", path: "wiki/a.md", title: "A", target: "Missing" }];
+  const contents = new Map([["wiki/a.md", body]]);
+  const page = { path: "wiki/concepts/real.md", title: "real", displayTitle: "Real", aliases: [] };
+  const concrete = fp.repointFix(fp.planRepoints(issues)[0], page, "wiki/");
+  const rows = [concrete, ...fp.planUnwraps(issues, contents, "wiki/")];
+  const list = fp.groupByNote(rows).get("wiki/a.md");
+  const out = fp.applyFixesToNote(body, list);
+  assert.equal(out, "See [[concepts/real|Real]] here.\n");
+  // And applying the same list again is a no-op, as every plan must be.
+  assert.equal(fp.applyFixesToNote(out, list), out);
+});
+
+test("an unwrap for a link no repoint claimed is still applied", () => {
+  // Dropping the collision must not disarm unwraps generally: a second dead
+  // link on the same note, which no repoint touched, still gets stripped.
+  const body = "See [[Missing]] and [[Other]].\n";
+  const issues = [
+    { id: "dead-link", path: "wiki/a.md", title: "A", target: "Missing" },
+    { id: "dead-link", path: "wiki/a.md", title: "A", target: "Other" },
+  ];
+  const contents = new Map([["wiki/a.md", body]]);
+  const page = { path: "wiki/Missing.md", title: "Missing", aliases: [] };
+  const repoints = fp.planRepoints(issues);
+  const chosen = fp.repointFix(repoints.find((r) => r.target === "Missing"), page, "wiki/");
+  const rows = [chosen, ...fp.planUnwraps(issues, contents, "wiki/")];
+  const out = fp.applyFixesToNote(body, fp.groupByNote(rows).get("wiki/a.md"));
+  assert.equal(out, "See [[Missing|Missing]] and Other.\n");
+});
+
+test("an unticked repoint leaves its unwrap free to run", () => {
+  // The reader never picked a page, so the repoint applies nothing and the
+  // unwrap is the only answer on offer. It must not be suppressed by a row
+  // that does nothing.
+  const body = "See [[Missing]] here.\n";
+  const issues = [{ id: "dead-link", path: "wiki/a.md", title: "A", target: "Missing" }];
+  const contents = new Map([["wiki/a.md", body]]);
+  const rows = [...fp.planRepoints(issues), ...fp.planUnwraps(issues, contents, "wiki/")];
+  const out = fp.applyFixesToNote(body, fp.groupByNote(rows).get("wiki/a.md"));
+  assert.equal(out, "See Missing here.\n");
+});

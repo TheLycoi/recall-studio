@@ -78,6 +78,50 @@ function scanHeadings(body: string): HeadingLine[] {
 }
 
 /**
+ * The start offset of the first `##` heading at or after `offset`, or
+ * `body.length` when the rest of the body holds none.
+ *
+ * Every section boundary goes through here rather than a bare `/^##\s/m`,
+ * because a `## ` line inside a fenced block is text the reader wrote — a
+ * page that documents the note format quotes its own headings. Scanning
+ * without the fence, a merge splices new rows into the middle of the reader's
+ * code block, and a parse stops a section early and returns the fence's
+ * contents plus a stray closing ```. An unclosed fence runs to EOF, which is
+ * how a Markdown renderer reads it too.
+ */
+export function nextHeadingAfter(body: string, offset: number): number {
+  let fenced = false;
+  let at = 0;
+  for (const line of body.split("\n")) {
+    if (/^\s*(```|~~~)/.test(line)) {
+      fenced = !fenced;
+    } else if (!fenced && at >= offset && /^ {0,3}##\s/.test(line)) {
+      return at;
+    }
+    at += line.length + 1;
+  }
+  return body.length;
+}
+
+/**
+ * The first match of a heading pattern that is a real heading and not a line
+ * inside a fenced block. `re` must be an anchored, multiline heading pattern
+ * (`/^##\s+Highlights\s*$/m`); the match is retried past each fenced hit, so
+ * a page whose fenced example names the same heading still merges into the
+ * real one below it.
+ */
+export function execHeading(body: string, re: RegExp): RegExpExecArray | null {
+  const scan = new RegExp(re.source, re.flags.includes("g") ? re.flags : `${re.flags}g`);
+  for (let m = scan.exec(body); m; m = scan.exec(body)) {
+    if (nextHeadingAfter(body, m.index) === m.index) return m;
+    // Zero-length matches would spin here; a heading pattern cannot produce
+    // one, but advancing guarantees it regardless.
+    if (scan.lastIndex === m.index) scan.lastIndex = m.index + 1;
+  }
+  return null;
+}
+
+/**
  * The `##` headings of a note, in order, as the reader wrote them.
  *
  * These are the note's subtopics, and they are what the suggester shows the
@@ -223,13 +267,10 @@ export interface ParsedTopicNote {
 
 /** Find the `## Highlights` section body (the lines after the heading, up to the next `## ` heading or EOF). */
 function highlightsSectionRange(body: string): { start: number; end: number } | null {
-  const m = /^##\s+Highlights\s*$/m.exec(body);
+  const m = execHeading(body, /^##\s+Highlights\s*$/m);
   if (!m) return null;
   const headingEnd = m.index + m[0].length;
-  const rest = body.slice(headingEnd);
-  const next = /^##\s/m.exec(rest);
-  const end = next ? headingEnd + next.index : body.length;
-  return { start: headingEnd, end };
+  return { start: headingEnd, end: nextHeadingAfter(body, headingEnd) };
 }
 
 /**
@@ -268,12 +309,10 @@ export function parseTopicNote(md: string): ParsedTopicNote {
   const title = titleMatch ? titleMatch[1].trim() : "";
 
   let summary = "";
-  const summaryHeadingMatch = /^##\s+Summary\s*$/m.exec(raw);
+  const summaryHeadingMatch = execHeading(raw, /^##\s+Summary\s*$/m);
   if (summaryHeadingMatch) {
-    const after = raw.slice(summaryHeadingMatch.index + summaryHeadingMatch[0].length);
-    const nextHeading = /^##\s/m.exec(after);
-    const sectionBody = nextHeading ? after.slice(0, nextHeading.index) : after;
-    summary = sectionBody.trim();
+    const headingEnd = summaryHeadingMatch.index + summaryHeadingMatch[0].length;
+    summary = raw.slice(headingEnd, nextHeadingAfter(raw, headingEnd)).trim();
   }
 
   const highlights: ParsedTopicHighlight[] = [];
@@ -361,14 +400,11 @@ export function mergeTopicHighlights(
 }
 
 function mergeTopicHighlightsBody(existingMd: string, pdfBasename: string, highlights: ManifestHighlight[]): MergeResult {
-  const headingRe = /^##\s+Highlights\s*$/m;
-  const headingMatch = headingRe.exec(existingMd);
+  const headingMatch = execHeading(existingMd, /^##\s+Highlights\s*$/m);
 
   if (headingMatch) {
     const headingEnd = headingMatch.index + headingMatch[0].length;
-    const rest = existingMd.slice(headingEnd);
-    const nextHeadingMatch = /^##\s/m.exec(rest);
-    const sectionEnd = nextHeadingMatch ? headingEnd + nextHeadingMatch.index : existingMd.length;
+    const sectionEnd = nextHeadingAfter(existingMd, headingEnd);
     const section = existingMd.slice(headingEnd, sectionEnd);
 
     const existingKeys = new Set(findAllPdfReferences(section).map((r) => highlightKey(r.target)));
@@ -401,7 +437,7 @@ function mergeTopicHighlightsBody(existingMd: string, pdfBasename: string, highl
   const newCallouts = toAdd.map((h) => renderCallout(pdfBasename, h.target, `p.${h.page}`, h.text));
   const sectionText = `## Highlights\n\n${newCallouts.join("\n\n")}`;
 
-  const relatedMatch = /^##\s+Related topics\s*$/m.exec(existingMd);
+  const relatedMatch = execHeading(existingMd, /^##\s+Related topics\s*$/m);
   let newMd: string;
   if (relatedMatch) {
     const before = existingMd.slice(0, relatedMatch.index);
@@ -1150,9 +1186,7 @@ function touchFrontmatter(md: string, options: MergeWikiOptions): string {
  * so the page's own spacing survives the edit.
  */
 export function spliceIntoSection(body: string, headingEnd: number, text: string): string {
-  const rest = body.slice(headingEnd);
-  const nextHeadingMatch = /^##\s/m.exec(rest);
-  const sectionEnd = nextHeadingMatch ? headingEnd + nextHeadingMatch.index : body.length;
+  const sectionEnd = nextHeadingAfter(body, headingEnd);
   const section = body.slice(headingEnd, sectionEnd);
 
   const trailingBlanksMatch = /\n*$/.exec(section);
@@ -1191,7 +1225,7 @@ const TRAILING_HEADINGS = [
 export function insertBeforeTrailing(body: string, sectionText: string): string {
   let at = -1;
   for (const re of TRAILING_HEADINGS) {
-    const m = re.exec(body);
+    const m = execHeading(body, re);
     if (m && (at < 0 || m.index < at)) at = m.index;
   }
   if (at < 0) return `${body.replace(/\n*$/, "")}\n\n${sectionText}\n`;
@@ -1286,7 +1320,7 @@ export function mergeWikiHighlights(
   // schema uses `## Highlights`. Merging into the wrong one would append a
   // second section the page's own schema does not have.
   const headingRe = schema === "karpathy" ? /^##\s+Mentions in Source\s*$/m : /^##\s+Highlights\s*$/m;
-  const headingMatch = headingRe.exec(body);
+  const headingMatch = execHeading(body, headingRe);
 
   if (headingMatch) {
     if (toAdd.length === 0) {
@@ -1306,8 +1340,8 @@ export function mergeWikiHighlights(
 
   // Insert before the first of `## Related topics` or `## Flashcard Seeds`
   // (WikiLM's own digest skeleton), whichever appears first; else append at EOF.
-  const relatedMatch = /^##\s+Related topics\s*$/m.exec(body);
-  const seedsMatch = /^##\s+Flashcard Seeds\s*$/m.exec(body);
+  const relatedMatch = execHeading(body, /^##\s+Related topics\s*$/m);
+  const seedsMatch = execHeading(body, /^##\s+Flashcard Seeds\s*$/m);
   let anchorMatch: RegExpExecArray | null = null;
   if (relatedMatch && seedsMatch) {
     anchorMatch = relatedMatch.index <= seedsMatch.index ? relatedMatch : seedsMatch;

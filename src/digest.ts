@@ -12,13 +12,13 @@ import type WikiLmPlugin from "./main";
 import { captureManifestHighlights } from "./capture";
 import { decideGate, type GateDecision } from "./digestGate";
 import { describeError } from "./llm";
-import type { Manifest } from "./manifest";
+import type { Manifest, ManifestHighlight } from "./manifest";
 import { askDigestOptions, askInstruction, previewDigest } from "./modals";
 import { collectPdfHighlights, readManifestNote, writeManifest } from "./pdfHighlights";
 import { isPdfFile } from "./pdf";
 import type { DigestDraft } from "./schemas";
 import { suggestPdfHighlights } from "./suggest";
-import { applyDigestChoices, noteAliases, noteSections, parseTopicNote, planTopicNotes, type ExistingPage } from "./topicNote";
+import { applyDigestChoices, mergeTopicHighlights, noteAliases, noteSections, parseTopicNote, planTopicNotes, type ExistingPage, type PreparedNote } from "./topicNote";
 import type { DigestExistingNote } from "./prompt";
 
 /** Local calendar date, `YYYY-MM-DD`, for the topic note's `created` field. */
@@ -159,6 +159,48 @@ async function draftFromModel(
   }
 }
 
+/**
+ * Replay a planned merge against the page as it reads right now.
+ *
+ * The planner built `note.content` by folding the highlights into the copy of
+ * the page it read before the model call; that copy is stale by the time the
+ * reader accepts the preview. `mergeTopicHighlights` is pure and keyed by
+ * `highlightKey`, so running it again over the current text reproduces exactly
+ * the same additions while leaving every edit made in the meantime in place —
+ * and a highlight the reader added by hand in that window is now recognised as
+ * present and skipped rather than duplicated.
+ *
+ * `note.sections` records which `##` heading each highlight was filed under
+ * (coalescing concatenates one entry per merge the planner ran), so the
+ * grouping is rebuilt from it: anything not named there belongs in the page's
+ * own `## Highlights` section, which is what the planner's default branch did.
+ */
+function remergeNote(current: string, pdfBasename: string, classCode: string, note: PreparedNote): string {
+  const sectionOf = new Map<string, string>();
+  for (const s of note.sections ?? []) {
+    for (const key of s.keys) sectionOf.set(key, s.heading);
+  }
+
+  // Preserve the planner's order: the default section first when it merged
+  // first, otherwise the order the section entries were recorded in.
+  const bySection = new Map<string, ManifestHighlight[]>();
+  for (const h of note.highlights) {
+    const heading = sectionOf.get(h.key) ?? "";
+    const list = bySection.get(heading);
+    if (list) list.push(h);
+    else bySection.set(heading, [h]);
+  }
+
+  let md = current;
+  for (const [heading, highlights] of bySection) {
+    md = mergeTopicHighlights(md, pdfBasename, highlights, {
+      classCode,
+      section: heading || undefined,
+    }).md;
+  }
+  return md;
+}
+
 export interface DigestOptions {
   /**
    * What to do when the source has no highlights with text. Absent (the
@@ -268,7 +310,15 @@ export async function digestPdf(plugin: WikiLmPlugin, source: TFile, opts: Diges
       const path = normalizePath(note.path);
       const file = plugin.app.vault.getAbstractFileByPath(path);
       if (file instanceof TFile) {
-        await plugin.app.vault.modify(file, note.content); // obsidian.d.ts:7467
+        // `note.content` was merged against the copy of this page read by
+        // `existingPages` before the model was called — a full LLM round trip
+        // and a preview the reader ticks at their own pace ago. Writing that
+        // string back with `modify` would be last-write-wins over anything
+        // they typed into the page in that window. Re-run the same pure merge
+        // inside `process` (read-modify-write under a lock,
+        // obsidian.d.ts:7510) so the highlights land in the page as it reads
+        // at write time, not as it read minutes earlier.
+        await plugin.app.vault.process(file, (data) => remergeNote(data, manifest.pdfBasename, classCode, note));
       } else {
         // A merge may land in another class's folder, so each note names its
         // own parent. Same folder-creation pattern as the Anki export in

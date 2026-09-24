@@ -193,7 +193,15 @@ export async function ingestSourceNote(plugin: WikiLmPlugin, file: TFile, opts: 
     const result =
       options.product === "flashcards"
         ? { written: 0, newCount: 0, spansWritten: 0, refused: 0 }
-        : await writeNotes(plugin, final.notes, (note) => note.path.split("/").includes("sources"));
+        : // The merge context is passed so the write re-runs under `vault.process`
+          // against the note's current text. Without it `writeNotes` falls back to
+          // clobbering the file with a string merged before the preview modal
+          // opened, losing anything the reader edited while deciding.
+          await writeNotes(plugin, final.notes, (note) => note.path.split("/").includes("sources"), {
+            pdfBasename: planOpts.pdfBasename,
+            classCode: planOpts.classCode,
+            schema: planOpts.schema,
+          });
 
     let queued = 0;
     if (options.product !== "notes") {

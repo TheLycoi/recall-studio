@@ -211,3 +211,57 @@ test("renderPdfLink accepts the name with or without .pdf", () => {
   assert.equal(pl.renderPdfLink("A", t, "p.4"), "[[A.pdf#page=4&selection=2,0,33,19&color=yellow|p.4]]");
   assert.equal(pl.renderPdfEmbed("A.PDF", { page: 2, rect: [1, 2, 3, 4] }, "p.2"), "![[A.pdf#page=2&rect=1,2,3,4|p.2]]");
 });
+
+// --------------------------------------------- percent-encoded subpath values
+
+test("parsePdfSubpath decodes a percent-encoded selection", () => {
+  // Obsidian and PDF++ both encode the commas in some links. Read raw, the
+  // four numbers fail the digit test, the selection is dropped, and the target
+  // degrades to page-only — where it collides in dedupe with every other
+  // page-only highlight on that page, losing distinct reader highlights.
+  assert.deepEqual(pl.parsePdfSubpath("#page=3&selection=1%2C2%2C3%2C4"), {
+    page: 3,
+    selection: { beginIndex: 1, beginOffset: 2, endIndex: 3, endOffset: 4 },
+  });
+});
+
+test("parsePdfSubpath decodes a percent-encoded rect and color", () => {
+  assert.deepEqual(pl.parsePdfSubpath("#page=3&rect=1%2C2%2C3%2C4"), { page: 3, rect: [1, 2, 3, 4] });
+  assert.equal(pl.parsePdfSubpath("#page=3&color=255%2C208%2C0").color, "255,208,0");
+});
+
+test("an encoded and a plain selection are the same highlight", () => {
+  const a = pl.parsePdfSubpath("#page=3&selection=1%2C2%2C3%2C4");
+  const b = pl.parsePdfSubpath("#page=3&selection=1,2,3,4");
+  assert.equal(pl.highlightKey(a), pl.highlightKey(b));
+  // And neither collides with the page-only target it used to degrade into.
+  assert.notEqual(pl.highlightKey(a), pl.highlightKey(pl.parsePdfSubpath("#page=3")));
+});
+
+test("parsePdfSubpath decodes an encoded annotation id", () => {
+  assert.equal(pl.parsePdfSubpath("#page=3&annotation=a%20b").annotation, "a b");
+});
+
+test("a malformed selection or rect refuses the link rather than degrading it", () => {
+  // Degrading to page-only is the dangerous answer: the truncated target is a
+  // valid-looking one that merges with unrelated highlights on the same page.
+  // Refusing it leaves the reader's link alone instead.
+  assert.equal(pl.parsePdfSubpath("#page=3&selection=oops"), null);
+  assert.equal(pl.parsePdfSubpath("#page=3&selection=1,2,3"), null);
+  assert.equal(pl.parsePdfSubpath("#page=3&rect=a,b,c,d"), null);
+});
+
+test("an invalid percent escape falls back to the raw value, never throws", () => {
+  // decodeURIComponent throws on "%zz"; a malformed link must not take the
+  // whole scan down with it.
+  assert.equal(pl.parsePdfSubpath("#page=3&color=%zz").color, "%zz");
+  assert.deepEqual(pl.parsePdfSubpath("#page=%zz"), null);
+});
+
+test("an ordinary unencoded subpath is unchanged by decoding", () => {
+  assert.deepEqual(pl.parsePdfSubpath("#page=4&selection=2,0,33,19&color=yellow"), {
+    page: 4,
+    selection: { beginIndex: 2, beginOffset: 0, endIndex: 33, endOffset: 19 },
+    color: "yellow",
+  });
+});

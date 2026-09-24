@@ -1364,3 +1364,248 @@ test("renderWikiNote's class schema writes bullets under Highlights", () => {
     `---\nclass: HBIO250\n---\n\n## Summary\nS.\n\n## Highlights\n\n- Some highlight text [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|p.4]]\n`,
   );
 });
+
+// ---- fenced code blocks are not section boundaries
+//
+// A page may quote its own format in a fenced block, so a `## ` line inside a
+// fence is text the reader wrote, not a heading. Treating one as a boundary
+// splits the fence or files highlights under a heading that does not exist.
+
+test("mergeWikiHighlights appends after a fenced ## heading, not inside the fence", () => {
+  const existing = [
+    "# T",
+    "",
+    "## Highlights",
+    "",
+    `- Some highlight text [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|p.4]]`,
+    "",
+    "```md",
+    "## Example",
+    "code the user wrote",
+    "```",
+    "",
+    "more section text",
+    "",
+    "## Related topics",
+    "",
+  ].join("\n");
+  const newHighlight = wikiHighlight({
+    id: "H02",
+    key: "page=6&selection=0,0,3,0",
+    page: 6,
+    target: { page: 6, selection: { beginIndex: 0, beginOffset: 0, endIndex: 3, endOffset: 0 }, color: "yellow" },
+    text: "New text",
+  });
+  const result = tn.mergeWikiHighlights(existing, PDF_BASENAME, "HBIO250", [newHighlight], { schema: "class" });
+  assert.equal(result.added, 1);
+  assert.ok(result.md.includes("```md\n## Example\ncode the user wrote\n```"), "the fence survives intact");
+  const newLinkIdx = result.md.indexOf("page=6&selection=0,0,3,0");
+  assert.ok(newLinkIdx > result.md.indexOf("more section text"), "the new row lands at the section's end");
+  assert.ok(newLinkIdx < result.md.indexOf("## Related topics"), "and still inside ## Highlights");
+});
+
+test("mergeWikiHighlights ignores a fenced ## Highlights above the real one", () => {
+  const existing = [
+    "# T",
+    "",
+    "## Format",
+    "",
+    "~~~markdown",
+    "## Highlights",
+    "",
+    "- example [[X.pdf#page=1|p.1]]",
+    "~~~",
+    "",
+    "## Highlights",
+    "",
+    `- Some highlight text [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|p.4]]`,
+    "",
+    "## Related topics",
+    "",
+  ].join("\n");
+  const newHighlight = wikiHighlight({
+    id: "H02",
+    key: "page=6&selection=0,0,3,0",
+    page: 6,
+    target: { page: 6, selection: { beginIndex: 0, beginOffset: 0, endIndex: 3, endOffset: 0 }, color: "yellow" },
+    text: "New text",
+  });
+  const result = tn.mergeWikiHighlights(existing, PDF_BASENAME, "HBIO250", [newHighlight], { schema: "class" });
+  assert.equal(result.added, 1);
+  const newLinkIdx = result.md.indexOf("page=6&selection=0,0,3,0");
+  assert.ok(newLinkIdx > result.md.lastIndexOf("## Highlights"), "the row goes under the real heading");
+  assert.ok(result.md.includes("~~~markdown\n## Highlights\n\n- example [[X.pdf#page=1|p.1]]\n~~~"), "the fenced example is untouched");
+});
+
+test("mergeTopicHighlights ignores a fenced ## Highlights above the real one", () => {
+  const existing = [
+    "# T",
+    "",
+    "## Format",
+    "",
+    "```md",
+    "## Highlights",
+    "```",
+    "",
+    "## Highlights",
+    "",
+    "> [!PDF|yellow] [[Other.pdf#page=1|Other, p.1]]",
+    "> > Kept.",
+    "",
+    "## Related topics",
+    "",
+  ].join("\n");
+  const result = tn.mergeTopicHighlights(existing, PDF_BASENAME, [{ key: "page=6", page: 6, target: { page: 6 }, text: "New text" }]);
+  assert.equal(result.added, 1);
+  const newIdx = result.md.indexOf("New text");
+  assert.ok(newIdx > result.md.indexOf("Kept."), "appended to the real section");
+  assert.ok(newIdx < result.md.indexOf("## Related topics"));
+  assert.ok(result.md.includes("```md\n## Highlights\n```"), "the fenced example is untouched");
+});
+
+test("parseTopicNote reads the real ## Summary, not a fenced one", () => {
+  const md = [
+    "# T",
+    "",
+    "## Example",
+    "",
+    "```md",
+    "## Summary",
+    "",
+    "fenced placeholder",
+    "```",
+    "",
+    "## Summary",
+    "",
+    "The real summary.",
+    "",
+    "## Related topics",
+    "",
+  ].join("\n");
+  assert.equal(tn.parseTopicNote(md).summary, "The real summary.");
+});
+
+test("parseTopicNote reads highlights past a fenced ## heading inside the section", () => {
+  const md = [
+    "# T",
+    "",
+    "## Highlights",
+    "",
+    "```md",
+    "## Not a heading",
+    "```",
+    "",
+    `- Some highlight text [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|p.4]]`,
+    "",
+    "## Related topics",
+    "",
+  ].join("\n");
+  assert.deepEqual(
+    tn.parseTopicNote(md).highlights.map((h) => h.page),
+    [4],
+  );
+});
+
+test("insertBeforeTrailing anchors on the real trailing heading, not a fenced one", () => {
+  const body = [
+    "# T",
+    "",
+    "## Format",
+    "",
+    "```md",
+    "## Related topics",
+    "```",
+    "",
+    "## Prose",
+    "",
+    "Body.",
+    "",
+    "## Related topics",
+    "",
+    "- [[A]]",
+    "",
+  ].join("\n");
+  const out = tn.insertBeforeTrailing(body, "## New\n\n- row");
+  assert.ok(out.indexOf("## New") > out.indexOf("Body."), "placed after the reader's prose");
+  assert.ok(out.indexOf("## New") < out.lastIndexOf("## Related topics"));
+  assert.ok(out.includes("```md\n## Related topics\n```"), "the fenced example is untouched");
+});
+
+test("spliceIntoSection appends past a fenced ## heading inside the section", () => {
+  const body = ["## Notes", "", "```md", "## Fake", "```", "", "tail line", "", "## After", ""].join("\n");
+  const found = tn.findSection(body, "Notes");
+  const out = tn.spliceIntoSection(body, found.end, "- added");
+  assert.ok(out.indexOf("- added") > out.indexOf("tail line"));
+  assert.ok(out.indexOf("- added") < out.indexOf("## After"));
+  assert.ok(out.includes("```md\n## Fake\n```"));
+});
+
+test("an unclosed fence swallows every ## heading after it", () => {
+  const md = ["# T", "", "## Summary", "", "The real summary.", "", "```", "## Related topics", ""].join("\n");
+  assert.equal(tn.parseTopicNote(md).summary, "The real summary.\n\n```\n## Related topics");
+});
+
+// The write path in src/digest.ts and src/suggest.ts re-runs the plan's merge
+// inside `vault.process` against the file as it reads at write time, instead
+// of writing back the string merged before the model call. That is only a
+// correct substitution because the merge is replayable: re-running it over a
+// page the reader has since edited must keep their edit and still add exactly
+// the highlights that are genuinely missing. These two pin that property.
+test("re-running a merge over an edited page keeps the edit and still appends the new highlight", () => {
+  const newHighlight = {
+    id: "H06",
+    key: "page=5&selection=10,0,12,8",
+    page: 5,
+    kind: "selection",
+    color: "yellow",
+    target: { page: 5, selection: { beginIndex: 10, beginOffset: 0, endIndex: 12, endOffset: 8 }, color: "yellow" },
+    text: "The better the fit, the higher the affinity",
+    before: "",
+    after: "",
+    origins: ["classes/HBIO250/Pharmacology.md"],
+  };
+
+  // What the planner merged against, minutes ago.
+  const planned = tn.mergeTopicHighlights(LITERAL_NOTE, PDF_BASENAME, [SELECTION_HIGHLIGHT, newHighlight]);
+
+  // Meanwhile the reader typed a sentence into ## Summary and added an alias.
+  const edited = LITERAL_NOTE.replace(
+    "## Summary\n",
+    "## Summary\nAffinity is not efficacy: a high-affinity antagonist binds tightly and transduces nothing.\n",
+  );
+
+  const replayed = tn.mergeTopicHighlights(edited, PDF_BASENAME, [SELECTION_HIGHLIGHT, newHighlight]);
+
+  // The reader's sentence survives, which the stale `planned.md` would have erased.
+  assert.ok(replayed.md.includes("Affinity is not efficacy"));
+  assert.ok(!planned.md.includes("Affinity is not efficacy"));
+
+  // And the highlight the run was for still lands, exactly once.
+  assert.equal(replayed.added, 1);
+  assert.equal(replayed.skipped, 1);
+  assert.equal(replayed.md.split("page=5&selection=10,0,12,8").length - 1, 1);
+});
+
+test("replaying a merge over its own output adds nothing: the highlights are already there", () => {
+  const newHighlight = {
+    id: "H06",
+    key: "page=5&selection=10,0,12,8",
+    page: 5,
+    kind: "selection",
+    color: "yellow",
+    target: { page: 5, selection: { beginIndex: 10, beginOffset: 0, endIndex: 12, endOffset: 8 }, color: "yellow" },
+    text: "The better the fit, the higher the affinity",
+    before: "",
+    after: "",
+    origins: ["classes/HBIO250/Pharmacology.md"],
+  };
+
+  const once = tn.mergeTopicHighlights(LITERAL_NOTE, PDF_BASENAME, [SELECTION_HIGHLIGHT, newHighlight]);
+  const twice = tn.mergeTopicHighlights(once.md, PDF_BASENAME, [SELECTION_HIGHLIGHT, newHighlight]);
+
+  // Idempotent: a reader who pasted the same highlight in by hand during the
+  // preview gets it recognised, not duplicated.
+  assert.equal(twice.added, 0);
+  assert.equal(twice.skipped, 2);
+  assert.equal(twice.md, once.md);
+});
