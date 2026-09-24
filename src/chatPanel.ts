@@ -315,7 +315,7 @@ export class ChatPanel {
       new LintReportModal(
         this.plugin.app,
         rendered,
-        { deadLinksFixable: links.fixable.length, deadLinksUnresolved: links.unresolved.length, schemaViolations },
+        { deadLinksFixable: links.fixable.length, deadLinksUnresolved: links.unresolved.length, schemaViolations, schemaSuggestions: 0 },
         { onFixDeadLinks: () => void this.applyLinkFixes(links.fixable) },
         links.fixable,
         canSuggest ? () => this.openFixPlan(plan, infos, ctx) : undefined,
