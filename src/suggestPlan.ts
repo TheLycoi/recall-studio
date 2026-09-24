@@ -42,6 +42,10 @@ export interface VerifiedSpan {
   page: number;
   quote: string;
   label: string;
+  /** The model's digested text for the span; "" for a verbatim span, and for a draft written before passages existed. */
+  passage: string;
+  /** Whether the page keeps the quote itself rather than the passage. True whenever there is no passage. */
+  verbatim: boolean;
   noteTitle: string;
   noteKind: "concept" | "entity";
   /** The `##` heading of the note this span goes under, or "" for the note as a whole. */
@@ -141,6 +145,8 @@ export function verifySpans(draft: SuggestDraft, maps: Map<number, PageMap>, opt
       page,
       quote: s.quote,
       label: s.label,
+      passage: (s.text ?? "").trim(),
+      verbatim: s.verbatim === true || !(s.text ?? "").trim(),
       noteTitle: safeTitle(s.note_title ?? ""),
       noteKind: s.note_kind,
       noteSection: safeHeading(s.note_section ?? ""),
@@ -179,7 +185,7 @@ export function toManifestHighlights(
     // way the page reads.
     const text = normalizeWs((map ? selectionText(items, s.sel) : null) ?? s.quote);
     const { before, after } = contextFor(pageText(items), text, contextChars);
-    return {
+    const row: ManifestHighlight = {
       id: "",
       key: s.key,
       page: s.page,
@@ -191,6 +197,13 @@ export function toManifestHighlights(
       after,
       origins: ["ai suggestion"],
     };
+    // What the page prints for this span (src/topicNote.ts renderHighlightRow):
+    // the label as the link text and the passage as the row, or the quote as
+    // a callout when the model kept it verbatim.
+    if (s.label.trim()) row.label = s.label.trim();
+    if (s.passage) row.passage = s.passage;
+    row.verbatim = s.verbatim;
+    return row;
   });
   return sortAndAssignIds(rows, "S");
 }

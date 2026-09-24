@@ -659,3 +659,39 @@ test("a new karpathy page renders its related sections from the planner, not the
   assert.ok(md.includes("## Related Concepts\n- [[concepts/pharmacology|Pharmacology]]"), md);
   assert.ok(md.includes("- [[concepts/receptors|Receptors]]"));
 });
+
+// ---- 2.0: the suggester writes passages too, not only verbatim spans
+
+test("a span with digested text carries passage, label and verbatim onto its row, and prints as a labelled bullet", () => {
+  const m = maps();
+  const draft = draftOf([
+    { ...span(1, "Albumin is an inert binding protein.", "Pharmacology", "concept", "Albumin binds, never transduces"), text: "Albumin carries drugs in the blood but never transduces a signal, which is what separates a carrier from a receptor.", verbatim: false },
+    { ...span(1, "Affinity rises with structural fit.", "Pharmacology", "concept", "Affinity and fit"), text: "", verbatim: true },
+  ]);
+  const res = sp.verifySpans(draft, m, opts());
+  assert.equal(res.spans.length, 2);
+  assert.equal(res.spans[0].passage, "Albumin carries drugs in the blood but never transduces a signal, which is what separates a carrier from a receptor.");
+  assert.equal(res.spans[0].verbatim, false);
+  assert.equal(res.spans[1].verbatim, true);
+  const rows = sp.toManifestHighlights(res.spans, m);
+  assert.equal(rows[0].passage, res.spans[0].passage);
+  assert.equal(rows[0].label, "Albumin binds, never transduces");
+  assert.equal(rows[0].verbatim, false);
+  assert.equal(rows[1].passage, undefined);
+  assert.equal(rows[1].verbatim, true);
+
+  const out = sp.planWikiNotes(res.spans, rows, [], [], { classCode: CLASS_CODE, pdfBasename: PDF_BASENAME, conceptsFolder: "wiki/concepts", entitiesFolder: "wiki/entities" });
+  const md = out.notes[0].content;
+  assert.ok(md.includes("|Albumin binds, never transduces]]: Albumin carries drugs in the blood but never transduces a signal"), md);
+  assert.ok(md.includes("> > Affinity rises with structural fit."), md);
+});
+
+test("a span with no text is verbatim, as before, so older drafts still plan", () => {
+  const m = maps();
+  const res = sp.verifySpans(draftOf([span(1, "Albumin is an inert binding protein.")]), m, opts());
+  assert.equal(res.spans[0].verbatim, true);
+  assert.equal(res.spans[0].passage, "");
+  const rows = sp.toManifestHighlights(res.spans, m);
+  assert.equal(rows[0].verbatim, true);
+  assert.equal(rows[0].passage, undefined);
+});

@@ -215,7 +215,17 @@ export const SuggestOut = z.object({
       quote: z
         .string()
         .describe("The span itself, copied verbatim from that page, character for character, punctuation included; no ellipsis, no paraphrase."),
-      label: z.string().describe("At most six words naming the fact this span carries."),
+      label: z.string().describe("At most six words naming the fact this span carries; it becomes the text of the link that opens the PDF there."),
+      text: z
+        .string()
+        .describe(
+          "One to three sentences of digested knowledge in your own words, drawn from the span and the page around it and from nothing outside the paper: what a reader revising later wants under that link. Empty when verbatim is true.",
+        ),
+      verbatim: z
+        .boolean()
+        .describe(
+          "True when the span's exact wording is itself what the page should keep — a formula, a definition, a list of criteria — in which case the plugin quotes it and ignores text.",
+        ),
       note_title: z
         .string()
         .describe("The note this span belongs in: an existing title copied exactly, or the title of one of your new_notes."),

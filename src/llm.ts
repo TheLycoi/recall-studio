@@ -785,7 +785,9 @@ A transcript, when one is present, is the recording of the lecture that accompan
 
 The limit you are given is a ceiling, not a target. Over-highlighting fills the reader's inbox with cards they will delete, so returning fewer spans than the limit is the expected outcome, and returning none is right when nothing in the page is supported by the transcript.
 
-Give each span a label of at most six words that names the fact it carries.
+Give each span a label of at most six words that names the fact it carries. The plugin writes the label as the text of the link that opens the PDF at the span, so it reads as the reader's own inline link: "Impact factor", "Primary vs secondary literature", "Peer review as a credibility test".
+
+For each span, also write the passage the page will hold under that link: one to three sentences of digested knowledge in your own words, drawn from the span and the page around it, and from nothing outside the paper. A passage says what the span means to a reader revising later, not what it says again. Set verbatim true only when the span's exact wording is itself what the page should keep — a formula, a definition, a list of criteria the reader must reproduce — and leave text empty then: the plugin quotes the span in a callout instead of your words. Everything else is a passage.
 
 <which_note_a_span_belongs_to>
 Every span names its note, and the order of preference is fixed. First, an existing note whose title is the span's subject: reuse the title exactly, character for character, because the plugin then appends those highlights to that note instead of creating a second one beside it. Second, an existing note the span's subject is part of — a parent topic, a broader note, one whose headings it would sit under: name that note, and put the subtopic in note_section. Only when no existing note is related at all — when the subject belongs to none of them, and a reader looking for it would never open any of them — does a span go to a new note.
@@ -832,7 +834,7 @@ Slide titles, course logistics, figure captions, and a line the lecturer read ou
 </example>
 </examples>
 
-Before returning, check your answer against the input: every note_title is either an existing title you were shown or a title in new_notes, every note_section is a heading you were shown for that note, a short new heading, or empty, every new note names a closest_existing that is empty or a title you were shown, gives a why_new, one or two aliases, and a tag from its kind's list, every quote is copied character for character from the page it names, no span reports a page outside this batch, and no page carries more spans than the limit allows.`;
+Before returning, check your answer against the input: every note_title is either an existing title you were shown or a title in new_notes, every note_section is a heading you were shown for that note, a short new heading, or empty, every new note names a closest_existing that is empty or a title you were shown, gives a why_new, one or two aliases, and a tag from its kind's list, every quote is copied character for character from the page it names, every span has a label, text is empty only when verbatim is true, no span reports a page outside this batch, and no page carries more spans than the limit allows.`;
 
 /**
  * Ask system prompt: answer a question from numbered evidence taken from the

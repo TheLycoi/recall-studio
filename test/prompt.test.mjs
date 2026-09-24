@@ -610,8 +610,8 @@ test("buildSuggestMessage cuts an already-selected passage to eighty characters"
 test("SuggestOut accepts a draft of spans and new notes", () => {
   const draft = {
     spans: [
-      { page: 3, quote: "Doping is defined in the Code.", label: "Definition of doping", note_title: "Doping", note_kind: "concept", note_section: "Definitions" },
-      { page: 4, quote: "WADA was founded in 1999.", label: "WADA founded 1999", note_title: "WADA", note_kind: "entity", note_section: "" },
+      { page: 3, quote: "Doping is defined in the Code.", label: "Definition of doping", text: "", verbatim: true, note_title: "Doping", note_kind: "concept", note_section: "Definitions" },
+      { page: 4, quote: "WADA was founded in 1999.", label: "WADA founded 1999", text: "The agency that polices doping dates from 1999.", verbatim: false, note_title: "WADA", note_kind: "entity", note_section: "" },
     ],
     new_notes: [{ title: "WADA", kind: "entity", summary: "One. Two. Three.", closest_existing: "", why_new: "No listed note is about the agency.", aliases: ["World Anti-Doping Agency"], tag: "organization" }],
   };
@@ -692,7 +692,7 @@ test("buildSuggestMessage lists each existing note's sections under its title", 
 
 test("SuggestOut requires note_section on every span", () => {
   const draft = {
-    spans: [{ page: 3, quote: "Q.", label: "L", note_title: "Doping", note_kind: "concept" }],
+    spans: [{ page: 3, quote: "Q.", label: "L", text: "", verbatim: true, note_title: "Doping", note_kind: "concept" }],
     new_notes: [],
   };
   assert.equal(schemas.SuggestOut.safeParse(draft).success, false, "a span without note_section does not parse");
