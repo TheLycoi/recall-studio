@@ -53,19 +53,19 @@ and `/help` in the chat prints it.
 | **AI-highlight this note and write cards** | `ai` | needs an open note |
 | **AI-highlight this note with instructions…** | `ai-instruct` | needs an open note |
 | **Ingest source: read this markdown into the wiki** | `ingest`, `read-source` | needs an open note |
-| **Ingest folder: read every note in a folder into the wiki** | `read-folder` | always |
+| **Ingest folder: read every note in a folder into the wiki** | `ingest-folder`, `read-folder` | always |
 | **Cancel the running AI highlight or ingest** | `cancel`, `stop-run` | while a run is in progress |
 | **Add transcript for document highlighting** | `transcript` | needs an open note |
 | **Extract PDF highlights to manifest** | `extract` | needs an open PDF |
 | **Digest PDF highlights into topic notes…** | `digest` | needs an open PDF, a manifest note, or a note with PDF++ links |
 | **AI-highlight this PDF into the wiki…** | `suggest` | needs an open PDF |
 | **Open chat: ask the notes** | `chat`, `ask` | always |
-| **Lint wiki: find gaps, dead links and ungrounded quotes** | `lint` | always |
+| **Lint wiki: find gaps, dead links and ungrounded quotes** | `lint`, `wiki` | always |
 | **Open inbox** | `inbox` | always |
 | **Export all reviewed cards to Anki** | `export` | always |
 | **Retry failed highlights** | `retry` | always |
 | **Open the schema note** | `schema` | always |
-| **Review schema suggestions** | `schema-review` | always |
+| **Review schema suggestions** | `suggestions` | always |
 
 What the capture commands do: **Send selection to inbox** takes the selection
 (or the paragraph under the cursor; in reading view, the selected text) and
@@ -550,6 +550,10 @@ Do not make up anything that is not in the evidence. Nothing downstream checks y
 
 The conversation so far, when there is one, is there so that a follow-up makes sense: it tells you what "it" refers to and what has already been said. It is not evidence. Nothing said in an earlier turn may be asserted in this one unless the evidence in front of you now states it.
 </answer_from_the_evidence>
+
+<pages_are_context>
+When a pages block is present, it holds what the notes the evidence came from say about themselves: a summary and the headings under which the reader filed things. Use it to see how the evidence fits together — that two pieces sit under one subtopic, that a page is about the mechanism the question names — and to answer in the shape the reader's own notes take. It is not evidence: nothing in a page's summary may be asserted unless the numbered evidence states it, and only evidence numbers go in used.
+</pages_are_context>
 
 <when_the_notes_do_not_cover_it>
 Saying the notes do not answer the question is a correct answer, and often the most useful one: it tells the reader their notes have a hole in them, which is exactly what they want to know before an exam. It is never a failure to reach for.
