@@ -143,7 +143,7 @@ async function draftFromModel(
       pdfTitle: manifest.pdfBasename,
       classCode,
       paperText,
-      highlights: manifest.highlights.map((h) => ({ id: h.id, page: h.page, text: h.text })),
+      highlights: manifest.highlights.map((h) => ({ id: h.id, page: h.page, text: h.text, heading: h.heading, notes: h.notes })),
       existingNotes: toDigestExisting(pages),
       maxNotes: s.digestMaxNotes,
       standingInstructions: s.digestInstructions,
@@ -341,6 +341,8 @@ export async function digestPdf(plugin: WikiLmPlugin, source: TFile, opts: Diges
       `${alreadyPresent} skipped as present`,
     ];
     if (queued > 0) bits.push(`${queued} flashcard${queued === 1 ? "" : "s"} queued`);
+    const named = finalPlan.namedIds.length;
+    if (named > 0) bits.push(`${named} slide title${named === 1 ? "" : "s"} left out`);
     new Notice(`WikiLM: ${bits.join(", ")}.`, 8000);
   } catch (e) {
     console.error("WikiLM: digest failed", e);

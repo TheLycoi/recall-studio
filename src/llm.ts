@@ -711,7 +711,7 @@ export function describeError(e: unknown): string {
  * model writes prose and assignments, never links or callouts (the plugin
  * renders every callout from the manifest).
  */
-const DIGEST_SYSTEM = `You turn one lecture PDF and the highlights a student made in it into a handful of topic notes. You are given the paper's text, so that you can see what each highlight is about, and the highlights themselves, each with an id and a page. You return, for each topic, a title, its kind, one or two aliases, a tag, a short summary, and the ids of the highlights that belong to it. You never write links, callouts, or ids into your prose: the plugin renders each highlight back into the note from its own record, and prose that mentions H04 will be read by a person, not resolved by a machine.
+const DIGEST_SYSTEM = `You turn one lecture PDF and the highlights a student made in it into a handful of topic notes. You are given the paper's text, so that you can see what each highlight is about, and the highlights themselves, each with an id and a page. You return, for each topic, a title, its kind, one or two aliases, a tag, a short summary, and one passage per highlight that belongs to it. You never write links, callouts, or ids into your prose: the plugin renders each highlight back into the note from its own record, and prose that mentions H04 will be read by a person, not resolved by a machine.
 
 <what_a_topic_is>
 A topic is something the reader would look up by name later: a mechanism, a classification, a definition together with what follows from it, a distinction between two things that are easy to confuse. It is not a slide, not a section of the deck, and not the lecture itself. One lecture usually holds two to six of them. Fewer, larger topics beat many thin ones, because a note with one highlight in it is a note the reader will never open twice.
@@ -722,6 +722,16 @@ You are shown every page the wiki already has, across every class, each with its
 
 Kind follows the subject. A named person, organisation, agency, product, drug or event that is itself what the reader would look up is an entity; a mechanism, method, theory, classification, phenomenon, or any term that explains how something works is a concept. When unsure, prefer concept. The tag is the note's subtype, one word from a closed list: a concept is a method, theory, term, phenomenon, standard or field, and an entity is a product, person, organization, project, event or place; "other" is the escape hatch, not a default. Aliases are the other names a reader would search under — an abbreviation, the expanded form, a variant spelling — one or two, taken from the paper, never coined.
 </what_a_topic_is>
+
+<passages>
+A highlight may arrive as one line, or as a block holding the quote and the reader's own notes beneath it: the words they wrote in class under the link to that slide. The notes tell you what the reader took the slide to mean; the quote and the paper tell you what it said. For each highlight you file under a topic, write the passage the page will hold: one to three sentences of digested knowledge in your own words, drawing on the quote, the reader's notes and the paper, and on nothing outside the paper. Where the reader's notes explain the slide, follow them; where they only name it, the paper fills in. A passage is what a reader revising later wants under that link, not a restatement of the quote.
+
+Give each passage a label of at most six words naming the fact it carries. The plugin writes the label as the text of the link that opens the PDF at the highlight, so it reads as the reader's own inline link: "Linear impulse", "Propulsive vs braking impulse", "Criteria for conduct disorder".
+
+Set verbatim true only when the highlight's exact wording is itself what the page should keep — a formula, a definition, a list of criteria the reader must reproduce — and leave text empty then: the plugin quotes the highlight in a callout instead of your words. Everything else is a passage.
+
+Report coverage for each highlight as what the source does with it, not as a decision of yours: defined when the source says what the thing is, discussed when it says something substantive about it, named when the highlight is only a slide title, a label, a heading or a passing mention. The plugin keeps named highlights out of the page and out of unused_ids, so a slide title still belongs to its topic here — file it and mark it named — and the page it lands in will hold only the passages.
+</passages>
 
 <the_summary>
 Three to five sentences about this topic, drawn from the whole paper but weighted toward what the reader chose to highlight. The highlights tell you what they cared about; the rest of the paper tells you what those highlights mean, and lets you write the sentence that connects two of them. Write in the reader's language, the one the paper is written in, and keep close to its wording so the summary reads as their own note rather than as a stranger's gloss.
@@ -748,7 +758,7 @@ related lists the titles of other notes you are writing in this response, or of 
 </example>
 </examples>
 
-Before returning, check your answer against the input: every id you used appears there, every id in the input appears either in exactly the notes it belongs to or in unused_ids, no note has an empty highlight_ids list, no two titles collide, every related title is one you wrote or were shown, no summary contains a link, an id, or a fact the paper does not state, every new title gives a kind, a tag from its kind's list, one or two aliases, and either a closest_existing you were shown or a why_new that says why none fits.`;
+Before returning, check your answer against the input: every id you used appears there, every id in the input appears either in exactly the notes it belongs to or in unused_ids, no note has an empty passages list, every passage names a label, text is empty only when verbatim is true, no two titles collide, every related title is one you wrote or were shown, no summary contains a link, an id, or a fact the paper does not state, every new title gives a kind, a tag from its kind's list, one or two aliases, and either a closest_existing you were shown or a why_new that says why none fits.`;
 
 /**
  * Suggest system prompt: a batch of pages from a lecture PDF in, the spans
@@ -891,6 +901,10 @@ Do not make up anything that is not in the evidence. Nothing downstream checks y
 
 The conversation so far, when there is one, is there so that a follow-up makes sense: it tells you what "it" refers to and what has already been said. It is not evidence. Nothing said in an earlier turn may be asserted in this one unless the evidence in front of you now states it.
 </answer_from_the_evidence>
+
+<pages_are_context>
+When a pages block is present, it holds what the notes the evidence came from say about themselves: a summary and the headings under which the reader filed things. Use it to see how the evidence fits together — that two pieces sit under one subtopic, that a page is about the mechanism the question names — and to answer in the shape the reader's own notes take. It is not evidence: nothing in a page's summary may be asserted unless the numbered evidence states it, and only evidence numbers go in used.
+</pages_are_context>
 
 <when_the_notes_do_not_cover_it>
 Saying the notes do not answer the question is a correct answer, and often the most useful one: it tells the reader their notes have a hole in them, which is exactly what they want to know before an exam. It is never a failure to reach for.

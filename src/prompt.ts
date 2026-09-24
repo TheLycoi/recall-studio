@@ -43,6 +43,10 @@ export interface DigestHighlightIn {
   id: string;
   page: number;
   text: string;
+  /** The heading the reader filed this highlight under in their own note, when it came from one. */
+  heading?: string;
+  /** The reader's own words under the link, when there are any (src/pdflink.ts `PdfReference.notes`). */
+  notes?: string;
 }
 
 /** One page the digest may file highlights into, as the prompt lists it. */
@@ -93,9 +97,7 @@ export function buildDigestMessage(a: DigestMessageArgs): string {
     .join("\n");
   const standing = a.standingInstructions.trim();
   const instruction = a.instruction.trim();
-  const highlights = a.highlights
-    .map((h) => `<highlight id="${h.id}" page="${h.page}">${h.text}</highlight>`)
-    .join("\n");
+  const highlights = a.highlights.map(renderDigestHighlight).join("\n");
   return [
     paper ? `<paper title="${a.pdfTitle}" class="${a.classCode}">\n${paper}\n</paper>` : "",
     `<highlights>\n${highlights}\n</highlights>`,
@@ -106,6 +108,20 @@ export function buildDigestMessage(a: DigestMessageArgs): string {
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+/**
+ * One highlight as the model reads it. A highlight the reader wrote nothing
+ * under is one line, as before. One with notes is a block: the quote, then the
+ * reader's own words in their own markup, so the model sees both what the
+ * slide said and what the reader made of it, and can tell the two apart.
+ */
+function renderDigestHighlight(h: DigestHighlightIn): string {
+  const heading = h.heading?.trim();
+  const attrs = `id="${h.id}" page="${h.page}"${heading ? ` heading="${heading.replace(/"/g, "&quot;")}"` : ""}`;
+  const notes = h.notes?.trim();
+  if (!notes) return `<highlight ${attrs}>${h.text}</highlight>`;
+  return [`<highlight ${attrs}>`, `<quote>${h.text}</quote>`, "<reader_notes>", notes, "</reader_notes>", "</highlight>"].join("\n");
 }
 
 /** One numbered piece of evidence for Ask. `page` is null for a claim that carries no page. */
@@ -121,11 +137,20 @@ export interface AskHistoryTurn {
   text: string;
 }
 
+/** One page shown beside the evidence: what it is about and its subtopic headings. Context, never a citation target. */
+export interface AskPageIn {
+  title: string;
+  summary: string;
+  sections: string[];
+}
+
 export interface AskMessageArgs {
   question: string;
   evidence: AskEvidenceIn[];
   history: AskHistoryTurn[];
   standingInstructions: string;
+  /** The pages the top evidence came from, when the caller loaded them. */
+  pages?: AskPageIn[];
 }
 
 /**
@@ -147,7 +172,17 @@ export function buildAskMessage(a: AskMessageArgs): string {
   const lines = askEvidenceLines(a.evidence);
   const history = a.history.map((t) => `${t.role === "user" ? "User" : "Assistant"}: ${t.text}`).join("\n\n");
   const standing = a.standingInstructions.trim();
+  // The pages go first: they are the longest input and the widest frame, and
+  // the evidence that may be cited is read against them.
+  const pages = (a.pages ?? [])
+    .map((pg) =>
+      [`Page: ${pg.title.trim()}`, pg.summary.trim() ? `Summary: ${pg.summary.trim()}` : "", pg.sections.length ? `Sections: ${pg.sections.join("; ")}` : ""]
+        .filter(Boolean)
+        .join("\n"),
+    )
+    .join("\n\n");
   return [
+    pages ? `<pages>\n${pages}\n</pages>` : "",
     `<evidence>\n${lines}\n</evidence>`,
     history ? `<history>\n${history}\n</history>` : "",
     standing ? `Standing instructions: ${standing}` : "",

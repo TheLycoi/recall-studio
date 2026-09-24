@@ -180,6 +180,19 @@ test("ask puts the evidence first and the question last of the input blocks", ()
   assert.equal(blocks.at(-2), "Question: What distinguishes a receptor from albumin?", "the question is the last input block");
 });
 
+test("pages, when given, come before the evidence as title, summary and sections; absent otherwise", () => {
+  const withPages = p.buildAskMessage({
+    ...askBase,
+    pages: [
+      { title: "Receptors", summary: "Receptors bind drugs and transduce a signal.", sections: ["Affinity", "Signal transduction"] },
+      { title: "Albumin", summary: "", sections: [] },
+    ],
+  });
+  assert.ok(withPages.startsWith("<pages>\nPage: Receptors\nSummary: Receptors bind drugs and transduce a signal.\nSections: Affinity; Signal transduction\n\nPage: Albumin\n</pages>\n\n<evidence>"), withPages);
+  const without = p.buildAskMessage({ ...askBase });
+  assert.ok(!without.includes("<pages>"), "no pages block when no pages were loaded");
+});
+
 test("an evidence line reads [n] (Note title, p.N) text", () => {
   const msg = p.buildAskMessage({ ...askBase });
   assert.ok(
@@ -262,13 +275,33 @@ test("the ask message ends with the answer-then-cite instruction, after the ques
 
 // --- schemas ----------------------------------------------------------------
 
-test("DigestOut accepts a well-formed draft and rejects a note without highlight_ids", () => {
+const PASSAGE = { highlight_id: "H01", label: "Receptor affinity", text: "Receptors bind drugs with high affinity.", verbatim: false, coverage: "defined" };
+
+test("a highlight with reader notes renders as a block with the quote, the notes and the heading", () => {
+  const msg = p.buildDigestMessage({
+    ...digestBase,
+    highlights: [{ id: "H01", page: 23, text: "Conduct Disorder (CD)", heading: "Attachment Disorders, \"CD\", ODD", notes: "- Little regard for others\n\t- Bullying, fighting" }],
+  });
+  assert.ok(
+    msg.includes(
+      '<highlight id="H01" page="23" heading="Attachment Disorders, &quot;CD&quot;, ODD">\n<quote>Conduct Disorder (CD)</quote>\n<reader_notes>\n- Little regard for others\n\t- Bullying, fighting\n</reader_notes>\n</highlight>',
+    ),
+    msg,
+  );
+});
+
+test("a highlight with a heading but no notes stays one line and keeps the heading", () => {
+  const msg = p.buildDigestMessage({ ...digestBase, highlights: [{ id: "H01", page: 2, text: "Q", heading: "Kinetics", notes: "  " }] });
+  assert.ok(msg.includes('<highlight id="H01" page="2" heading="Kinetics">Q</highlight>'), msg);
+});
+
+test("DigestOut accepts a well-formed draft and rejects a note without passages", () => {
   const ok = schemas.DigestOut.safeParse({
     notes: [
       {
         title: "T",
         summary: "S",
-        highlight_ids: ["H01"],
+        passages: [PASSAGE],
         related: [],
         kind: "concept",
         aliases: ["T2"],
@@ -282,14 +315,14 @@ test("DigestOut accepts a well-formed draft and rejects a note without highlight
   assert.equal(ok.success, true, "a complete note parses");
 
   const missing = schemas.DigestOut.safeParse({ notes: [{ title: "T", summary: "S", related: [] }], unused_ids: [] });
-  assert.equal(missing.success, false, "highlight_ids is required, not optional");
+  assert.equal(missing.success, false, "passages is required, not optional");
 
   const noUnused = schemas.DigestOut.safeParse({ notes: [] });
   assert.equal(noUnused.success, false, "unused_ids is required too");
 });
 
 test("DigestOut requires kind, aliases, tag, closest_existing and why_new on every note", () => {
-  const note = { title: "T", summary: "S", highlight_ids: ["H01"], related: [] };
+  const note = { title: "T", summary: "S", passages: [PASSAGE], related: [] };
   assert.equal(schemas.DigestOut.safeParse({ notes: [note], unused_ids: [] }).success, false);
   const full = { ...note, kind: "concept", aliases: ["T2"], tag: "term", closest_existing: "", why_new: "Nothing listed holds it." };
   assert.equal(schemas.DigestOut.safeParse({ notes: [full], unused_ids: [] }).success, true);
