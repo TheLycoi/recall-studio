@@ -36,7 +36,13 @@ export type Intent =
   | { kind: "help" }
   | { kind: "command"; id: string }
   | { kind: "ambiguous"; verb: "digest" | "highlight"; words: string; candidates: Target[] }
-  | { kind: "question" };
+  | {
+      kind: "question";
+      /** The class the question is scoped to, when the phrase named one: "ask HBIO408 …", "… in HBIO408". */
+      classCode?: string;
+      /** The question with the scope words removed; absent for an unscoped question. */
+      text?: string;
+    };
 
 /** One page of the retrieval index, as the matcher needs to see it. */
 export interface IntentPage {
@@ -202,7 +208,33 @@ export function matchIntent(text: string, ctx: IntentContext): Intent {
       return { kind: "command", id: c.id };
     }
   }
-  return { kind: "question" };
+  return scopedQuestion(text, ctx) ?? { kind: "question" };
+}
+
+/**
+ * A question that names its class: "ask HBIO408 what is impulse", "what is
+ * impulse in HBIO408", "in HBIO408, what is impulse". The code has to be one
+ * some page carries, or the words are left as an ordinary question — "in the
+ * cell" is not a scope. The question keeps its own casing; only the scope
+ * words and a trailing question mark are removed.
+ */
+function scopedQuestion(text: string, ctx: IntentContext): Intent | null {
+  const raw = text.trim().replace(/^\/+/, "").replace(new RegExp(POLITENESS.source, "i"), "").trim();
+  const scoped = (codeWords: string, rest: string): Intent | null => {
+    const code = classFor(codeWords, ctx);
+    const question = rest.trim().replace(/[?!.]+$/, "").trim();
+    return code && question ? { kind: "question", classCode: code, text: question } : null;
+  };
+  let m = /^ask\s+(\S+)\s+(.+)$/i.exec(raw);
+  if (m) return scoped(m[1], m[2]);
+  m = /^in\s+(\S+?),?\s+(.+)$/i.exec(raw);
+  if (m) {
+    const hit = scoped(m[1], m[2]);
+    if (hit) return hit;
+  }
+  m = /^(.+?)\s+in\s+(\S+?)\s*[?!.]*$/i.exec(raw);
+  if (m) return scoped(m[2], m[1]);
+  return null;
 }
 
 /** What the box understands, one phrase per line. Shown for "help". */
@@ -216,6 +248,6 @@ export function renderHelp(): string {
     "- **inbox** — open the inbox",
     "- while a quiz runs: **hint**, **skip**, **stop**",
     "",
-    "Anything else is a question for your notes.",
+    "Anything else is a question for your notes. **ask HBIO250 …** or **… in HBIO250** keeps it to one class.",
   ].join("\n");
 }

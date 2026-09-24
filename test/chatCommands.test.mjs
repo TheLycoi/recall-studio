@@ -181,3 +181,27 @@ test("renderHelp lists phrases, not slash commands", () => {
   assert.ok(help.includes("**highlight**"));
   assert.ok(!help.includes("/quiz"), "no slash grammar is documented");
 });
+
+// ---- 2.0: a question scoped to a class
+
+const SCOPE_CTX = {
+  pages: [
+    { path: "wiki/concepts/Kinetics.md", title: "Kinetics", aliases: [], classCodes: ["HBIO408"], hasPdfLinks: true },
+    { path: "wiki/concepts/Stages of Change.md", title: "Stages of Change", aliases: [], classCodes: ["PHED163"], hasPdfLinks: true },
+  ],
+  pdfs: [],
+  manifests: [],
+  commands: [],
+};
+
+test("'ask HBIO408 what is impulse' and 'what is impulse in HBIO408' are questions scoped to that class", () => {
+  assert.deepEqual(cc.matchIntent("ask HBIO408 what is impulse", SCOPE_CTX), { kind: "question", classCode: "HBIO408", text: "what is impulse" });
+  assert.deepEqual(cc.matchIntent("What is impulse in hbio408?", SCOPE_CTX), { kind: "question", classCode: "HBIO408", text: "What is impulse" });
+  assert.deepEqual(cc.matchIntent("in PHED163, what is decisional balance", SCOPE_CTX), { kind: "question", classCode: "PHED163", text: "what is decisional balance" });
+});
+
+test("a code no page carries, or a bare 'ask', is an ordinary question", () => {
+  assert.deepEqual(cc.matchIntent("ask BIOL101 what is impulse", SCOPE_CTX), { kind: "question" });
+  assert.deepEqual(cc.matchIntent("what happens in the cell", SCOPE_CTX), { kind: "question" });
+  assert.deepEqual(cc.matchIntent("ask", SCOPE_CTX), { kind: "question" });
+});

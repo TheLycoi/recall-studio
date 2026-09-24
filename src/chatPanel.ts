@@ -10,7 +10,10 @@ import {
   expandWithGraph,
   rankByKeywords,
   mergeEvidence,
+  lexicalIsStrong,
+  pageContextFor,
 } from "./retrieval";
+import { renderSavedAnswer, savedAnswerPath } from "./savedAnswer";
 import type { Graph } from "./graph";
 import { lintVault, renderVaultLint, WIKI_SCHEMA, type LintPage } from "./vaultLint";
 import { planLinkFixes, applyFixesToNote, type LinkFix } from "./vaultFix";
@@ -50,7 +53,7 @@ import type { AskHistoryTurn } from "./prompt";
 import { pdfFileName, renderPdfSubpath, findAllPdfReferences } from "./pdflink";
 import { parseTopicNote, noteAliases } from "./topicNote";
 import { isPdfFile, pdfsLinkedFrom } from "./pdf";
-import { isManifestNote } from "./pdfHighlights";
+import { frontmatterClasses, isManifestNote } from "./pdfHighlights";
 import { digestPdf } from "./digest";
 import type { GateDecision } from "./digestGate";
 import { suggestPdfHighlights } from "./suggest";
@@ -105,6 +108,12 @@ interface ChatTurn {
   evidence?: EvidenceUnit[];
   error?: string;
   report?: GroundingReport;
+  /** Which retrieval route found the evidence — "notes", "notes + graph", "notes + keywords" — or "general knowledge"; shown on the grounding line. */
+  route?: string;
+  /** The class the question was scoped to, when it was. */
+  scope?: string;
+  /** The page this answer was saved as, once it has been. */
+  savedTo?: string;
   chips?: { prompt: string; options: Array<{ label: string; run: () => void }> };
   quiz?: {
     kind: "question" | "grade" | "retry" | "summary";
@@ -113,6 +122,13 @@ interface ChatTurn {
     misses?: QuizMiss[];
     unverified?: boolean;
   };
+}
+
+/** Local calendar date, `YYYY-MM-DD`, for a saved answer's `created`. */
+function localDate(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 /**
@@ -142,6 +158,8 @@ export class ChatPanel {
   private status = "";
   /** The topic-folder index, built on the first question and kept until the vault changes under that folder. */
   private index: EvidenceUnit[] | null = null;
+  /** Each indexed note's text, for the page context an answer is given (src/retrieval.ts pageContextFor). Filled with the index, cleared with it. */
+  private mdByPath = new Map<string, string>();
   /** The wikilink graph over the same folder, invalidated with the index. */
   private graph: Graph | null = null;
   private eventsRegistered = false;
@@ -213,8 +231,10 @@ export class ChatPanel {
     const files = this.plugin.app.vault.getMarkdownFiles().filter((f: TFile) => f.path.startsWith(prefix));
     files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
     const meta: IntentPage[] = [];
+    this.mdByPath = new Map();
     for (const file of files) {
       const md = await this.plugin.app.vault.cachedRead(file);
+      this.mdByPath.set(file.path, md);
       units.push(...indexNote(file.path, md));
       // The same read serves the intent matcher: what a page is called, what
       // else it answers to, which class it belongs to, and whether it cites a
@@ -436,11 +456,24 @@ export class ChatPanel {
    * Every stage appends; none reorders or drops what lexical search found, so
    * widening can only ever add evidence to an answer.
    */
-  private async widenEvidence(q: string, units: EvidenceUnit[], lexical: EvidenceUnit[], k: number): Promise<EvidenceUnit[]> {
-    if (lexical.length >= k) return lexical;
+  private async widenEvidence(
+    q: string,
+    units: EvidenceUnit[],
+    lexical: EvidenceUnit[],
+    k: number,
+  ): Promise<{ evidence: EvidenceUnit[]; route: string }> {
+    let route = lexical.length > 0 ? "notes" : "none";
+    if (lexical.length >= k) return { evidence: lexical, route };
 
     let out = expandWithGraph(lexical, units, this.buildGraphIndex(), k);
-    if (out.length >= k || !this.plugin.settings.askKeywordExpansion) return out;
+    if (out.length > lexical.length) route = "notes + graph";
+
+    // The model call is paid for only when the words themselves failed —
+    // upstream's gate (gd4ai/obsidian-llm-wiki, select-seeds.ts): a match is
+    // weak by what the best hit covers, not by how many slots are empty. A
+    // question the notes plainly answer used to cost a second round trip
+    // whenever the vault set the evidence count high.
+    if (lexicalIsStrong(q, lexical) || !this.plugin.settings.askKeywordExpansion) return { evidence: out, route };
 
     // The terms are worth asking for even when nothing matched at all: that
     // is the case they exist for, a question phrased in words the notes never
@@ -452,13 +485,80 @@ export class ChatPanel {
       const titles = [...new Set(units.map((u) => u.noteTitle))];
       const { keywords } = await this.plugin.llm.keywords({ question: q, noteTitles: titles });
       const byKeyword = rankByKeywords(units, keywords, k);
-      out = mergeEvidence(out, byKeyword, k);
+      const merged = mergeEvidence(out, byKeyword, k);
+      if (merged.length > out.length || (out.length === 0 && merged.length > 0)) route = lexical.length > 0 ? "notes + keywords" : "keywords";
       // Neighbours of anything the new terms turned up.
-      out = expandWithGraph(out, units, this.buildGraphIndex(), k);
+      out = expandWithGraph(merged, units, this.buildGraphIndex(), k);
     } catch (e) {
       console.debug("[wikilm] keyword expansion failed:", e);
     }
-    return out;
+    return { evidence: out, route: out.length > 0 ? route : "none" };
+  }
+
+  /** The smallest class worth answering from alone; below it the whole vault is searched. */
+  private static readonly MIN_SCOPE_NOTES = 5;
+
+  /**
+   * The units a question is answered from, and a label for the status line.
+   * A class code narrows to its notes when it holds enough of them; otherwise
+   * the whole vault stands, and the label says why.
+   */
+  private scopeUnits(all: EvidenceUnit[], code: string | null): { units: EvidenceUnit[]; scope: string } {
+    if (!code) return { units: all, scope: "" };
+    const inScope = all.filter((u) => u.classCodes.includes(code));
+    const notes = new Set(inScope.map((u) => u.notePath)).size;
+    if (notes >= ChatPanel.MIN_SCOPE_NOTES) return { units: inScope, scope: `in ${code}` };
+    return { units: all, scope: `the whole vault (${code} has ${notes} note${notes === 1 ? "" : "s"})` };
+  }
+
+  /** The first class code of the note the reader is looking at, or null. */
+  private activeClass(): string | null {
+    const file = this.plugin.app.workspace.getActiveFile();
+    if (!file || file.extension.toLowerCase() !== "md") return null;
+    return frontmatterClasses(this.plugin, file.path)[0] ?? null;
+  }
+
+  /**
+   * Save an answer as a page under the topic folder's `answers/`: the
+   * question, the answer, the sources rendered as PDF++ rows by code
+   * (src/savedAnswer.ts). A page that already exists is never overwritten;
+   * the new one takes the next free name.
+   */
+  private async saveAnswer(turn: ChatTurn): Promise<void> {
+    if (turn.savedTo || !turn.text.trim()) return;
+    const question = this.questionBefore(turn);
+    const report = turn.report;
+    const evidence = turn.evidence ?? [];
+    const sources = report ? report.sources.map((s) => ({ unit: evidence[s.n - 1], why: s.why })).filter((s) => !!s.unit) : [];
+    const md = renderSavedAnswer({
+      question,
+      answer: turn.text,
+      classCode: (turn.scope?.startsWith("in ") ? turn.scope.slice(3) : "") || this.activeClass() || "",
+      created: localDate(),
+      route: turn.route,
+      sources,
+    });
+    const folder = this.plugin.settings.topicFolder.replace(/\/+$/, "");
+    const base = savedAnswerPath(folder, question);
+    let path = base;
+    for (let n = 2; this.plugin.app.vault.getAbstractFileByPath(path); n++) path = base.replace(/\.md$/, ` (${n}).md`);
+    try {
+      const dir = path.slice(0, path.lastIndexOf("/"));
+      if (!(await this.plugin.app.vault.adapter.exists(dir))) await this.plugin.app.vault.createFolder(dir); // obsidian.d.ts:7404
+      await this.plugin.app.vault.create(path, md); // obsidian.d.ts:7386
+      turn.savedTo = path;
+      this.pushSystem(`Saved to [[${path.replace(/\.md$/, "")}]].`);
+      void this.plugin.app.workspace.openLinkText(path, "", true);
+    } catch (e) {
+      this.pushSystem(`Could not save the answer: ${describeError(e)}`);
+    }
+  }
+
+  /** The user turn this answer replied to: the nearest one above it in the log. */
+  private questionBefore(turn: ChatTurn): string {
+    const at = this.turns.indexOf(turn);
+    for (let i = at - 1; i >= 0; i--) if (this.turns[i].role === "user") return this.turns[i].text;
+    return "Question";
   }
 
   /**
@@ -592,7 +692,7 @@ export class ChatPanel {
     this.draft = "";
     if (intent.kind === "question") {
       this.restartArmed = false;
-      await this.askQuestion(q);
+      await this.askQuestion(intent.text ?? q, intent.classCode);
       return;
     }
     // What the reader typed goes in the log like any other line of theirs: a
@@ -852,7 +952,7 @@ export class ChatPanel {
    * or failed, because the sources are the part the reader can still use when
    * there is no provider configured.
    */
-  private async askQuestion(question: string): Promise<void> {
+  private async askQuestion(question: string, classCode?: string): Promise<void> {
     const q = question.trim();
     if (!q || this.busy) return;
 
@@ -864,27 +964,38 @@ export class ChatPanel {
     this.rerender();
 
     let evidence: EvidenceUnit[] = [];
+    let route = "";
+    let scope = "";
     try {
-      const units = await this.buildIndex();
-      // `prepareSimpleSearch` (obsidian.d.ts:5260) returns null for no match and
-      // a `SearchResult` whose `score` (:5593) `rankEvidence` reads as
-      // higher-is-better (src/retrieval.ts:128-134).
+      const all = await this.buildIndex();
+
+      // An empty index is a misconfigured folder, not an unanswerable
+      // question: "your notes don't cover this" would blame the notes for a
+      // setting. Name the folder that was searched so it can be corrected.
+      if (all.length === 0) {
+        const { answer, report } = emptyIndexAnswer(this.folderPrefix());
+        this.turns.push({ role: "assistant", text: answer, evidence: [], report });
+        return;
+      }
+
+      // Scope: the class the phrase named, else the class of the note the
+      // reader is looking at. A class with too few notes to answer from falls
+      // back to the whole vault, and the status line says which happened.
+      const scoped = this.scopeUnits(all, classCode ?? this.activeClass());
+      const units = scoped.units;
+      scope = scoped.scope;
+      this.status = scope ? `searching ${scope}…` : "searching…";
+      this.rerender();
+
       // Weighted by how rare each word is in this vault, so the term that
       // names the topic outranks the one every note happens to use.
       const scorer = questionScorer(q, units);
       const k = this.plugin.settings.askEvidenceCount;
       evidence = rankEvidence(units, q, scorer, k);
 
-      // An empty index is a misconfigured folder, not an unanswerable
-      // question: "your notes don't cover this" would blame the notes for a
-      // setting. Name the folder that was searched so it can be corrected.
-      if (units.length === 0) {
-        const { answer, report } = emptyIndexAnswer(this.folderPrefix());
-        this.turns.push({ role: "assistant", text: answer, evidence: [], report });
-        return;
-      }
-
-      evidence = await this.widenEvidence(q, units, evidence, k);
+      const widened = await this.widenEvidence(q, units, evidence, k);
+      evidence = widened.evidence;
+      route = widened.route;
 
       // Retrieval found nothing. Either say so and stop, or let the model
       // answer from what it knows behind a warning — upstream's choice
@@ -893,7 +1004,7 @@ export class ChatPanel {
       // prompt's "two honest options" rule is what decides the reply, not this.
       if (evidence.length === 0 && !this.plugin.settings.askGeneralKnowledge) {
         const { answer, report } = noEvidenceAnswer(q);
-        this.turns.push({ role: "assistant", text: answer, evidence: [], report });
+        this.turns.push({ role: "assistant", text: answer, evidence: [], report, route, scope });
         return;
       }
 
@@ -904,14 +1015,16 @@ export class ChatPanel {
       const draft = await this.plugin.llm.ask({
         question: q,
         evidence: numbered,
+        pages: pageContextFor(evidence, (path) => this.mdByPath.get(path) ?? null),
         history: this.history(),
         standingInstructions: this.plugin.settings.askInstructions,
       });
 
       const { answer, report } = checkAnswer(draft, numbered);
-      this.turns.push({ role: "assistant", text: answer, evidence, report });
+      if (report.fromGeneralKnowledge) route = "general knowledge";
+      this.turns.push({ role: "assistant", text: answer, evidence, report, route, scope });
     } catch (e) {
-      this.turns.push({ role: "assistant", text: "", evidence, error: describeError(e) });
+      this.turns.push({ role: "assistant", text: "", evidence, error: describeError(e), route, scope });
     } finally {
       this.busy = false;
       this.status = "";
@@ -1412,11 +1525,19 @@ export class ChatPanel {
     }
 
     const report = turn.report;
-    if (report && this.plugin.settings.askShowGrounding) this.renderGrounding(el, report);
+    if (report && this.plugin.settings.askShowGrounding) this.renderGrounding(el, report, turn);
 
     const evidence = turn.evidence ?? [];
-    if (evidence.length === 0 || !report) return;
-    this.renderSources(el, evidence, report);
+    if (evidence.length > 0 && report) this.renderSources(el, evidence, report);
+    if (report && !turn.error && turn.text.trim()) this.renderSaveAction(el, turn);
+  }
+
+  /** "Save answer" under an answer: writes the page once, then reads as saved. */
+  private renderSaveAction(el: HTMLElement, turn: ChatTurn): void {
+    const row = el.createDiv({ cls: "wikilm-chat-offer" });
+    const save = row.createEl("button", { text: turn.savedTo ? "Saved" : "Save answer" });
+    save.disabled = this.busy || !!turn.savedTo;
+    save.addEventListener("click", () => void this.saveAnswer(turn));
   }
 
   /**
@@ -1480,9 +1601,15 @@ export class ChatPanel {
    * reader who had not asked for the first. What is left is the part that
    * changes what they do next: whether their notes answered the question.
    */
-  private renderGrounding(el: HTMLElement, report: GroundingReport): void {
+  private renderGrounding(el: HTMLElement, report: GroundingReport, turn?: ChatTurn): void {
     const line = el.createDiv({ cls: `wikilm-chat-grounding${report.coverage === "none" ? " is-unverified" : ""}` });
-    line.createSpan({ text: renderGroundingLine(report) });
+    // The route says which stage found the evidence — the notes' own words,
+    // the graph around them, or the model's keywords — and the scope, when
+    // the question was kept to one class. Upstream shows the same as a chip.
+    const bits = [renderGroundingLine(report)];
+    const route = turn?.route && turn.route !== "none" ? turn.route : "";
+    if (route) bits.push(route + (turn?.scope?.startsWith("in ") ? ` ${turn.scope}` : ""));
+    line.createSpan({ text: bits.join(" · ") });
   }
 
   /**

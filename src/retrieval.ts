@@ -6,7 +6,8 @@
 // this module — or its test bundle — ever resolving `obsidian`.
 import { basenameNoExt } from "./util";
 import { parsePdfSubpath, renderCallout, splitLinktext, type PdfTarget } from "./pdflink";
-import { execHeading, nextHeadingAfter, parseTopicNote } from "./topicNote";
+import { execHeading, nextHeadingAfter, noteSections, parseTopicNote } from "./topicNote";
+import { truncateTranscript } from "./util";
 import type { AskEvidenceIn } from "./prompt";
 import { isGraphUsable, pprFromSeeds, type Graph, type PPROptions } from "./graph";
 
@@ -538,4 +539,96 @@ export function mergeEvidence(primary: EvidenceUnit[], extra: EvidenceUnit[], k:
     out.push(u);
   }
   return out;
+}
+
+// ---- the lexical gate and page context (2.0) ---------------------------------
+
+/**
+ * Whether lexical search alone found enough to answer from, so the keyword
+ * model call can be skipped.
+ *
+ * The old gate fired the call whenever fewer than `askEvidenceCount` units
+ * matched, which in a vault that sets the count to 12 meant nearly every
+ * question paid for a second model round trip. Upstream's rule
+ * (gd4ai/obsidian-llm-wiki, select-seeds.ts) is about signal, not count: a
+ * match is strong when the best hit actually covers the question. Here that
+ * is at least two hits, and a top hit carrying at least half of the
+ * question's significant words; a one-word question needs only one hit,
+ * since one word cannot be half-covered.
+ */
+export function lexicalIsStrong(question: string, ranked: EvidenceUnit[]): boolean {
+  const tokens = [...new Set(significantTokens(question))];
+  if (ranked.length === 0) return false;
+  if (tokens.length <= 1) return true;
+  if (ranked.length < 2) return false;
+  const have = new Set(significantTokens(ranked[0].text));
+  let hits = 0;
+  for (const w of tokens) if (have.has(w)) hits++;
+  return hits * 2 >= tokens.length;
+}
+
+/** One page as the Ask prompt sees it beside the evidence: what it is about and what it holds. */
+export interface AskPageContext {
+  title: string;
+  summary: string;
+  sections: string[];
+}
+
+/** Sections that are furniture rather than subtopics: they say nothing about what the page covers. */
+const FURNITURE_SECTIONS = /^(Summary|Highlights|Related topics|Related Concepts|Related Entities|Flashcard Seeds|Key claims|Mentions in Source)$/i;
+
+/**
+ * The pages the top evidence came from, as context for the answer.
+ *
+ * Evidence is a handful of sentences, and an answer that has to synthesise
+ * across a page — why two of its rows sit under one heading, what the page
+ * is about — cannot see that from the rows alone. Upstream loads whole pages
+ * (gd4ai/obsidian-llm-wiki, load-pages.ts); this loads what a page says about
+ * itself: its Summary, or its first paragraph of prose when it has none, and
+ * its own subtopic headings. Pages come in the order the evidence ranked
+ * them, one entry per page, at most `maxPages`. The summary is cut at a
+ * sentence or word boundary near `maxChars`. A page that cannot be read
+ * contributes nothing rather than a hole.
+ */
+export function pageContextFor(
+  evidence: EvidenceUnit[],
+  read: (path: string) => string | null,
+  opts: { maxPages?: number; maxChars?: number } = {},
+): AskPageContext[] {
+  const maxPages = opts.maxPages ?? 2;
+  const maxChars = opts.maxChars ?? 600;
+  const out: AskPageContext[] = [];
+  const seen = new Set<string>();
+  for (const u of evidence) {
+    if (out.length >= maxPages) break;
+    if (seen.has(u.notePath)) continue;
+    seen.add(u.notePath);
+    const md = read(u.notePath);
+    if (!md) continue;
+    const parsed = parseTopicNote(md);
+    const summary = parsed.summary.trim() || firstProse(raw(md));
+    out.push({
+      title: parsed.title || u.noteTitle,
+      summary: truncateTranscript(summary.replace(/\s+/g, " ").trim(), maxChars).text,
+      sections: noteSections(md).filter((h) => !FURNITURE_SECTIONS.test(h)),
+    });
+  }
+  return out;
+}
+
+/** The first line of prose in a note body: not a heading, a callout, an embed, a list item or a rule. */
+function firstProse(body: string): string {
+  let fenced = false;
+  for (const rawLine of body.split("\n")) {
+    const line = rawLine.trim();
+    if (/^(```|~~~)/.test(line)) {
+      fenced = !fenced;
+      continue;
+    }
+    if (fenced || !line) continue;
+    if (/^(#|>|!\[\[|[-*+]\s|\d+[.)]\s|(-{3,}|\*{3,}|_{3,})$)/.test(line)) continue;
+    const text = cleanProse(line);
+    if (text.length >= 12) return text;
+  }
+  return "";
 }

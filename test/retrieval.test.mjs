@@ -561,3 +561,45 @@ test("indexNote ignores a fenced ## Key claims above the real one", () => {
     [["A claim about clearance.", 3]],
   );
 });
+
+// ---- 2.0: the lexical gate and page context for Ask
+
+test("lexicalIsStrong: two hits whose best covers half the question's words is strong; a thin or missing match is not", () => {
+  const unit = (text) => ({ id: text, notePath: "n.md", noteTitle: "N", pdfBasename: null, target: null, page: null, text, kind: "claim", classCodes: [] });
+  const strong = [unit("Linear impulse is the area under the force-time curve"), unit("Impulse equals change in momentum")];
+  assert.equal(rt.lexicalIsStrong("what is linear impulse", strong), true);
+  assert.equal(rt.lexicalIsStrong("what is linear impulse", strong.slice(0, 1)), false, "one hit is not enough to skip widening");
+  const thin = [unit("The curve of the road"), unit("Another curve")];
+  assert.equal(rt.lexicalIsStrong("how is linear impulse computed from the force curve", thin), false, "the best hit shares one word of four");
+  assert.equal(rt.lexicalIsStrong("what is linear impulse", []), false);
+  assert.equal(rt.lexicalIsStrong("impulse", [unit("Impulse equals change in momentum")]), true, "a one-word question needs one hit");
+});
+
+test("pageContextFor returns the summary and headings of the pages the top evidence came from, in evidence order, capped", () => {
+  const units = [...rt.indexNote(KINETICS_PATH, KINETICS_MD), ...rt.indexNote(RECEPTORS_PATH, RECEPTORS_MD)];
+  const kinetics = units.find((u) => u.notePath === KINETICS_PATH);
+  const receptors = units.find((u) => u.notePath === RECEPTORS_PATH);
+  const md = new Map([
+    [KINETICS_PATH, KINETICS_MD],
+    [RECEPTORS_PATH, RECEPTORS_MD],
+  ]);
+  const pages = rt.pageContextFor([kinetics, receptors, kinetics], (p) => md.get(p) ?? null, { maxPages: 2, maxChars: 40 });
+  assert.equal(pages.length, 2);
+  assert.equal(pages[0].title, "Pharmacokinetics");
+  assert.equal(pages[1].title, "Receptors");
+  assert.ok(pages[0].summary.startsWith("What the body does to the drug"), pages[0].summary);
+  assert.ok(pages[0].summary.length <= 41, "capped at a sentence or word boundary near maxChars");
+  assert.ok(!pages[0].sections.includes("Highlights") && !pages[0].sections.includes("Related topics") && !pages[0].sections.includes("Flashcard Seeds"), pages[0].sections.join(","));
+  assert.deepEqual(rt.pageContextFor([kinetics], () => null), [], "a page that cannot be read contributes nothing");
+  const one = rt.pageContextFor([kinetics, receptors], (p) => md.get(p) ?? null, { maxPages: 1 });
+  assert.equal(one.length, 1);
+});
+
+test("pageContextFor falls back to the first prose paragraph of a page with no Summary section", () => {
+  const md = "---\nclass: HBIO408\n---\n## [[Deck.pdf#page=1|Linear Impulse]]\n[[Deck.pdf#page=1&selection=1,0,1,4|The effect of a force]]: over time.\n\n- a bullet\n## Linear Momentum\nMomentum is mass times velocity.\n";
+  const unit = { id: "x", notePath: "wiki/concepts/Kinetics.md", noteTitle: "Kinetics", pdfBasename: null, target: null, page: null, text: "t", kind: "claim", classCodes: [] };
+  const [page] = rt.pageContextFor([unit], () => md);
+  assert.equal(page.title, "Kinetics");
+  assert.equal(page.summary, "The effect of a force: over time.");
+  assert.deepEqual(page.sections, ["Linear Impulse", "Linear Momentum"]);
+});
