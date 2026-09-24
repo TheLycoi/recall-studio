@@ -603,3 +603,48 @@ test("pageContextFor falls back to the first prose paragraph of a page with no S
   assert.equal(page.summary, "The effect of a force: over time.");
   assert.deepEqual(page.sections, ["Linear Impulse", "Linear Momentum"]);
 });
+
+// ---- 2.0 fix: an inferred class narrows only when the question belongs to it
+
+test("scopeFor: a class the reader named is binding, even when it holds nothing for the question", () => {
+  const u = (path, cls, text) => ({ id: `${path}:${text}`, notePath: path, noteTitle: path, pdfBasename: null, target: null, page: null, text, kind: "claim", classCodes: [cls] });
+  const all = [
+    u("a.md", "PSYC360", "Culture sets the baseline for what counts as normal"),
+    u("b.md", "PSYC360", "MRI shows structure while fMRI shows function"),
+    u("c.md", "HBIO408", "Linear impulse is the area under the force-time curve"),
+    u("d.md", "HBIO408", "Impulse equals the change in momentum"),
+  ];
+  const named = rt.scopeFor(all, "what is linear impulse", { named: "PSYC360" }, { minNotes: 2 });
+  assert.equal(named.scope, "in PSYC360", "a named class is obeyed");
+  assert.equal(named.units.length, 2);
+});
+
+test("scopeFor: a class inferred from the open note is dropped when the question matches nothing in it", () => {
+  const u = (path, cls, text) => ({ id: `${path}:${text}`, notePath: path, noteTitle: path, pdfBasename: null, target: null, page: null, text, kind: "claim", classCodes: [cls] });
+  const all = [
+    u("a.md", "PSYC360", "Culture sets the baseline for what counts as normal"),
+    u("b.md", "PSYC360", "MRI shows structure while fMRI shows function"),
+    u("c.md", "HBIO408", "Linear impulse is the area under the force-time curve"),
+    u("d.md", "HBIO408", "Impulse equals the change in momentum"),
+  ];
+  // The reader is looking at a PSYC360 note and asks an HBIO408 question.
+  const away = rt.scopeFor(all, "what is linear impulse", { inferred: "PSYC360" }, { minNotes: 2 });
+  assert.equal(away.scope, "", "the inferred class is abandoned, so the whole vault answers");
+  assert.equal(away.units.length, 4);
+
+  // The same note, a question its own class covers: the scope holds.
+  const home = rt.scopeFor(all, "how does culture set what counts as normal", { inferred: "PSYC360" }, { minNotes: 2 });
+  assert.equal(home.scope, "in PSYC360");
+  assert.equal(home.units.length, 2);
+
+  // No class at all is the whole vault, silently.
+  assert.deepEqual(rt.scopeFor(all, "anything", {}, { minNotes: 2 }), { units: all, scope: "" });
+});
+
+test("scopeFor: a named class too thin to answer from falls back to the vault and says so", () => {
+  const u = (path, cls, text) => ({ id: path, notePath: path, noteTitle: path, pdfBasename: null, target: null, page: null, text, kind: "claim", classCodes: [cls] });
+  const all = [u("a.md", "PHED163", "Decisional balance weighs pros against cons"), u("b.md", "HBIO408", "Impulse equals the change in momentum")];
+  const thin = rt.scopeFor(all, "what is decisional balance", { named: "PHED163" }, { minNotes: 5 });
+  assert.equal(thin.units.length, 2, "the whole vault stands in");
+  assert.ok(thin.scope.startsWith("the whole vault (PHED163 has 1 note"), thin.scope);
+});

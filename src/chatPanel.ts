@@ -12,6 +12,7 @@ import {
   mergeEvidence,
   lexicalIsStrong,
   pageContextFor,
+  scopeFor,
 } from "./retrieval";
 import { renderSavedAnswer, savedAnswerPath } from "./savedAnswer";
 import type { Graph } from "./graph";
@@ -498,19 +499,6 @@ export class ChatPanel {
   /** The smallest class worth answering from alone; below it the whole vault is searched. */
   private static readonly MIN_SCOPE_NOTES = 5;
 
-  /**
-   * The units a question is answered from, and a label for the status line.
-   * A class code narrows to its notes when it holds enough of them; otherwise
-   * the whole vault stands, and the label says why.
-   */
-  private scopeUnits(all: EvidenceUnit[], code: string | null): { units: EvidenceUnit[]; scope: string } {
-    if (!code) return { units: all, scope: "" };
-    const inScope = all.filter((u) => u.classCodes.includes(code));
-    const notes = new Set(inScope.map((u) => u.notePath)).size;
-    if (notes >= ChatPanel.MIN_SCOPE_NOTES) return { units: inScope, scope: `in ${code}` };
-    return { units: all, scope: `the whole vault (${code} has ${notes} note${notes === 1 ? "" : "s"})` };
-  }
-
   /** The first class code of the note the reader is looking at, or null. */
   private activeClass(): string | null {
     const file = this.plugin.app.workspace.getActiveFile();
@@ -981,7 +969,7 @@ export class ChatPanel {
       // Scope: the class the phrase named, else the class of the note the
       // reader is looking at. A class with too few notes to answer from falls
       // back to the whole vault, and the status line says which happened.
-      const scoped = this.scopeUnits(all, classCode ?? this.activeClass());
+      const scoped = scopeFor(all, q, { named: classCode ?? null, inferred: this.activeClass() }, { minNotes: ChatPanel.MIN_SCOPE_NOTES });
       const units = scoped.units;
       scope = scoped.scope;
       this.status = scope ? `searching ${scope}…` : "searching…";

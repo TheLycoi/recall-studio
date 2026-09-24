@@ -632,3 +632,57 @@ function firstProse(body: string): string {
   }
   return "";
 }
+
+/** Where a class code came from. A code the reader typed is an instruction; one read off the open note is a guess. */
+export interface ScopeRequest {
+  /** A class named in the phrase: "ask HBIO408 …", "… in HBIO408". */
+  named?: string | null;
+  /** The class of the note the reader happens to be looking at. */
+  inferred?: string | null;
+}
+
+export interface ScopeResult {
+  units: EvidenceUnit[];
+  /** What the status line says: "in HBIO408", a sentence about the fallback, or nothing. */
+  scope: string;
+}
+
+/**
+ * The units a question is answered from.
+ *
+ * A class the reader typed is obeyed even when it holds nothing for the
+ * question: they asked for that class, and "your notes don't cover this" is a
+ * true and useful answer about it. A class merely inferred from the note on
+ * screen is a guess, and a wrong guess is worse than none — asking about
+ * linear impulse with a psychopathology note open searched only
+ * psychopathology and reported the vault had nothing on impulse, which was
+ * false. So an inferred class narrows only when the question actually matches
+ * something inside it; otherwise it is dropped silently and the whole vault
+ * answers.
+ *
+ * Either way, a class with too few notes to answer from falls back to the
+ * vault and the line says why.
+ */
+export function scopeFor(
+  all: EvidenceUnit[],
+  question: string,
+  req: ScopeRequest,
+  opts: { minNotes?: number } = {},
+): ScopeResult {
+  const minNotes = opts.minNotes ?? 5;
+  const code = req.named ?? req.inferred ?? null;
+  if (!code) return { units: all, scope: "" };
+
+  const inScope = all.filter((u) => u.classCodes.includes(code));
+  const notes = new Set(inScope.map((u) => u.notePath)).size;
+  if (notes < minNotes) {
+    return { units: all, scope: `the whole vault (${code} has ${notes} note${notes === 1 ? "" : "s"})` };
+  }
+
+  if (!req.named) {
+    // Inferred: keep it only when the question finds something here.
+    const hit = rankEvidence(inScope, question, questionScorer(question, inScope), 1);
+    if (hit.length === 0) return { units: all, scope: "" };
+  }
+  return { units: inScope, scope: `in ${code}` };
+}
