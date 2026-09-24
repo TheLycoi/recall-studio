@@ -63,10 +63,12 @@ Receptors bind drugs with high affinity and transduce a signal, which is what se
 
 ## Highlights
 
-> [!PDF|yellow] [[HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=4&selection=2,0,33,19&color=yellow|p.4]]
-> > Receptors have 2 important properties: 1. They bind ligands (or drugs) with relatively high affinity, and after they bind a drug… 2. They transduce a signal to produce a biological effect (this property distinguishes receptors from inert binding sites – e.g., albumin – a blood protein that binds/carries many drugs but does not transduce a signal)
+> [!PDF|yellow] [[HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=4&selection=2,0,33,19&color=yellow|HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.4]]
+> > Receptors have 2 important properties:
+> > 1. They bind ligands (or drugs) with relatively high affinity, and after they bind a drug…
+> > 2. They transduce a signal to produce a biological effect (this property distinguishes receptors from inert binding sites – e.g., albumin – a blood protein that binds/carries many drugs but does not transduce a signal)
 
-![[HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=4&rect=13,55,713,222|p.4]]
+![[HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=4&rect=13,55,713,222|HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.4]]
 
 ## Related topics
 - [[Pharmacology]]
@@ -102,7 +104,7 @@ test("parseTopicNote(renderTopicNote(x)) returns the same title, summary, and hi
   );
 });
 
-test("renderTopicNote groups by ### Page N headings when highlights span more than one page", () => {
+test("renderTopicNote lists rows in page order, without page headings", () => {
   const p5 = {
     ...SELECTION_HIGHLIGHT,
     id: "H06",
@@ -131,13 +133,12 @@ test("renderTopicNote groups by ### Page N headings when highlights span more th
     tag: "term",
     aliases: [],
   });
-  assert.ok(rendered.includes("### Page 4\n"));
-  assert.ok(rendered.includes("### Page 5\n"));
-  assert.ok(rendered.includes("### Page 6\n"));
-  const idx4 = rendered.indexOf("### Page 4");
-  const idx5 = rendered.indexOf("### Page 5");
-  const idx6 = rendered.indexOf("### Page 6");
-  assert.ok(idx4 < idx5 && idx5 < idx6);
+  assert.ok(!rendered.includes("### Page"), "no per-page headings");
+  const idx4 = rendered.indexOf("page=4&");
+  const idx5 = rendered.indexOf("page=5&");
+  const idx6 = rendered.indexOf("page=6&");
+  assert.ok(idx4 !== -1 && idx4 < idx5 && idx5 < idx6, rendered);
+  assert.ok(rendered.includes(`> [!PDF|yellow] [[${PDF_BASENAME}.pdf#page=5&selection=10,0,12,8&color=yellow|${PDF_BASENAME}, p.5]]\n> > The better the fit, the higher the affinity`), rendered);
 });
 
 test("mergeTopicHighlights adds only the new highlight, skips the existing one", () => {
@@ -642,12 +643,15 @@ S.
 
 ## Highlights
 
-- Page two text [[${PDF_BASENAME}.pdf#page=2&selection=1,0,5,0&color=yellow|p.2]]
-- Page four text [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|p.4]]
+> [!PDF|yellow] [[${PDF_BASENAME}.pdf#page=2&selection=1,0,5,0&color=yellow|${PDF_BASENAME}, p.2]]
+> > Page two text
+
+> [!PDF|yellow] [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|${PDF_BASENAME}, p.4]]
+> > Page four text
 `;
   assert.equal(rendered, expected);
-  // Two rows are one list: consecutive lines, no blank line splitting them.
-  assert.ok(!rendered.includes("p.2]]\n\n- Page four"));
+  // Two callouts are two blocks: a blank line between them, or markdown runs them together.
+  assert.ok(rendered.includes("Page two text\n\n> [!PDF"));
 });
 
 test("renderWikiNote omits the Summary section when summary is empty", () => {
@@ -681,7 +685,7 @@ Some prose here. [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|$
   assert.equal(result.added, 1);
   assert.equal(result.skipped, 1);
 
-  const expectedNewCallout = `- Brand new text [[${PDF_BASENAME}.pdf#page=6&selection=0,0,3,0&color=yellow|p.6]]`;
+  const expectedNewCallout = `> [!PDF|yellow] [[${PDF_BASENAME}.pdf#page=6&selection=0,0,3,0&color=yellow|${PDF_BASENAME}, p.6]]\n> > Brand new text`;
   const expectedTail = `\n\n## Highlights\n\n${expectedNewCallout}\n`;
   assert.ok(result.md.endsWith(expectedTail));
 
@@ -929,7 +933,7 @@ test("a karpathy merge appends under Mentions in Source, not Highlights", () => 
   assert.equal(r.added, 1);
   assert.ok(r.md.includes("## Mentions in Source"));
   assert.ok(!r.md.includes("## Highlights"), "a second section would not match the page's own schema");
-  assert.ok(r.md.includes("- span a [[Paper.pdf#page=2&selection=0,0,0,4&color=yellow|p.2]]"));
+  assert.ok(r.md.includes("> [!PDF|yellow] [[Paper.pdf#page=2&selection=0,0,0,4&color=yellow|Paper, p.2]]\n> > span a"), r.md);
 });
 
 test("a merge keeps created and moves updated", () => {
@@ -1089,7 +1093,7 @@ Receptor text.
   const newLink = r.md.indexOf("page=6&selection=0,0,0,4");
   const highlights = r.md.indexOf("## Highlights");
   assert.ok(receptors < newLink && newLink < highlights, "the callout sits inside Receptors, ahead of Highlights");
-  assert.ok(r.md.includes("Receptor text.\n\n- span b [["), "appended after the section's own text");
+  assert.ok(r.md.includes("Receptor text.\n\n> [!PDF"), "appended after the section's own text");
   assert.ok(r.md.includes("## Dosing\nDose text.\n\n## Receptors"), "the sections before it are untouched");
 });
 
@@ -1113,7 +1117,7 @@ Receptor text.
   const cox = r.md.indexOf(`## [[${PDF_BASENAME}.pdf#page=19|COX Inhibitors and NSAIDs]]`);
   const highlights = r.md.indexOf("## Highlights");
   assert.ok(cox >= 0 && receptors < cox && cox < highlights, "a new subtopic sits with the subtopics, ahead of the highlights");
-  assert.ok(r.md.includes(`## [[${PDF_BASENAME}.pdf#page=19|COX Inhibitors and NSAIDs]]\n\n- span c [[`), r.md);
+  assert.ok(r.md.includes(`## [[${PDF_BASENAME}.pdf#page=19|COX Inhibitors and NSAIDs]]\n\n> [!PDF`), r.md);
 });
 
 test("a karpathy merge with a new section places it before Related Concepts and still dates the page", () => {
@@ -1235,16 +1239,38 @@ test("parseTopicNote reads a class list and keeps classCode as the first", () =>
   assert.equal(inline.classCode, "HBIO250");
 });
 
-// ---- rows as bullets: the slide link on the heading, the quote as a list ----
+// ---- rows: a passage is a bullet whose link text is its label; a verbatim quote is a Title-and-page callout ----
 
-test("a selection row renders as a bullet with a short page link, not a callout", () => {
-  const md = tn.renderHighlightRow(PDF_BASENAME, wikiHighlight());
-  assert.equal(md, `- Some highlight text [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|p.4]]`);
+const SEL = `${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow`;
+
+test("a row with a passage renders as a bullet: the label as the link's text, then the passage", () => {
+  const md = tn.renderHighlightRow(
+    PDF_BASENAME,
+    wikiHighlight({ passage: "Receptors bind drugs with high affinity and pass the signal on.", label: "Receptor affinity", verbatim: false }),
+  );
+  assert.equal(md, `- [[${SEL}|Receptor affinity]]: Receptors bind drugs with high affinity and pass the signal on.`);
   assert.ok(!md.includes("[!PDF"));
-  assert.ok(!md.includes(`${PDF_BASENAME}, p.4`), "the sixty-character filename never appears as display text");
 });
 
-test("an inline bullet run inside a quote becomes a nested list under the lead", () => {
+test("a verbatim row, or one with no passage, is a PDF++ callout whose link text is Title and page", () => {
+  assert.equal(tn.renderHighlightRow(PDF_BASENAME, wikiHighlight()), `> [!PDF|yellow] [[${SEL}|${PDF_BASENAME}, p.4]]\n> > Some highlight text`);
+  const v = wikiHighlight({ passage: "ignored when verbatim", label: "Momentum", verbatim: true, text: "L = m * v" });
+  assert.equal(tn.renderHighlightRow(PDF_BASENAME, v), `> [!PDF|yellow] [[${SEL}|${PDF_BASENAME}, p.4]]\n> > L = m * v`);
+  const uncoloured = wikiHighlight({ color: null, target: { page: 4, selection: { beginIndex: 2, beginOffset: 0, endIndex: 33, endOffset: 19 } } });
+  assert.equal(tn.renderHighlightRow(PDF_BASENAME, uncoloured), `> [!PDF] [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19|${PDF_BASENAME}, p.4]]\n> > Some highlight text`);
+});
+
+test("a label falls back to the quote when it is short, to its first clause when it is long, and never holds link syntax", () => {
+  assert.equal(tn.renderHighlightRow(PDF_BASENAME, wikiHighlight({ text: "Linear Impulse", passage: "The effect of a force over time.", verbatim: false })), `- [[${SEL}|Linear Impulse]]: The effect of a force over time.`);
+  const long = wikiHighlight({ text: "Receptors have 2 important properties: they bind ligands and transduce a signal, which albumin never does.", passage: "Two properties.", verbatim: false });
+  assert.equal(tn.renderHighlightRow(PDF_BASENAME, long), `- [[${SEL}|Receptors have 2 important properties]]: Two properties.`);
+  const piped = wikiHighlight({ label: "a | b [c]", passage: "P", verbatim: false });
+  assert.equal(tn.renderHighlightRow(PDF_BASENAME, piped), `- [[${SEL}|a b c]]: P`);
+  const multi = wikiHighlight({ label: "Impulse", passage: "One line.\nTwo lines.", verbatim: false });
+  assert.equal(tn.renderHighlightRow(PDF_BASENAME, multi), `- [[${SEL}|Impulse]]: One line. Two lines.`);
+});
+
+test("an inline bullet run inside a verbatim quote becomes list lines inside the callout", () => {
   const h = wikiHighlight({
     page: 20,
     key: "page=20&selection=1,0,9,4",
@@ -1254,48 +1280,98 @@ test("an inline bullet run inside a quote becomes a nested list under the lead",
   assert.equal(
     tn.renderHighlightRow(PDF_BASENAME, h),
     [
-      `- Therefore, the pharmacokinetics of a drug involves 4 factors: [[${PDF_BASENAME}.pdf#page=20&selection=1,0,9,4&color=yellow|p.20]]`,
-      "  - Absorption",
-      "  - Distribution",
-      "  - Metabolism",
-      "  - Elimination",
+      `> [!PDF|yellow] [[${PDF_BASENAME}.pdf#page=20&selection=1,0,9,4&color=yellow|${PDF_BASENAME}, p.20]]`,
+      "> > Therefore, the pharmacokinetics of a drug involves 4 factors:",
+      "> > - Absorption",
+      "> > - Distribution",
+      "> > - Metabolism",
+      "> > - Elimination",
     ].join("\n"),
   );
 });
 
-test("a numbered run keeps its numbers as an ordered nested list, and a lone number is not a list", () => {
+test("a numbered run keeps its numbers inside the callout, and a lone number is not a list", () => {
+  const header = `> [!PDF|yellow] [[${SEL}|${PDF_BASENAME}, p.4]]`;
   const h = wikiHighlight({
     text: "1. Enteral = Oral (sublingual, buccal, GI tract) & via other mucous membranes (rectal) 2. “ Parenteral ” (par - outside or beyond intestine)",
   });
   assert.equal(
     tn.renderHighlightRow(PDF_BASENAME, h),
-    [
-      `- [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|p.4]]`,
-      "  1. Enteral = Oral (sublingual, buccal, GI tract) & via other mucous membranes (rectal)",
-      "  2. “ Parenteral ” (par - outside or beyond intestine)",
-    ].join("\n"),
+    [header, "> > 1. Enteral = Oral (sublingual, buccal, GI tract) & via other mucous membranes (rectal)", "> > 2. “ Parenteral ” (par - outside or beyond intestine)"].join("\n"),
   );
-  // "2 important properties: 1. They bind…" has one numbered item after a
-  // lead and a "2." glued to the prose — it is a sentence, not a list.
-  // A run that continues from the previous slide keeps its own numbers.
   const cont = wikiHighlight({ text: "4. Fat solubility of the drug (is it oil-based?) 5. Physio-chemical reaction with the contents of the GI tract" });
   assert.equal(
     tn.renderHighlightRow(PDF_BASENAME, cont),
-    [`- [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|p.4]]`, "  4. Fat solubility of the drug (is it oil-based?)", "  5. Physio-chemical reaction with the contents of the GI tract"].join("\n"),
+    [header, "> > 4. Fat solubility of the drug (is it oil-based?)", "> > 5. Physio-chemical reaction with the contents of the GI tract"].join("\n"),
   );
-  // Numbers that do not run in sequence are prose: a date and a section number are not a list.
   const gaps = wikiHighlight({ text: "Adopted in 2004. Section 7. applies, and 12. is repealed" });
-  assert.equal(tn.renderHighlightRow(PDF_BASENAME, gaps), `- Adopted in 2004. Section 7. applies, and 12. is repealed [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|p.4]]`);
+  assert.equal(tn.renderHighlightRow(PDF_BASENAME, gaps), `${header}\n> > Adopted in 2004. Section 7. applies, and 12. is repealed`);
   const prose = wikiHighlight({ text: "Receptors have 2 important properties: they bind ligands and transduce a signal." });
-  assert.equal(tn.renderHighlightRow(PDF_BASENAME, prose), `- Receptors have 2 important properties: they bind ligands and transduce a signal. [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|p.4]]`);
+  assert.equal(tn.renderHighlightRow(PDF_BASENAME, prose), `${header}\n> > Receptors have 2 important properties: they bind ligands and transduce a signal.`);
 });
 
 test("newlines in a quote split it the same way as inline bullets", () => {
   const h = wikiHighlight({ text: "involves 4 factors:\n• Absorption\n• Distribution" });
   assert.equal(
     tn.renderHighlightRow(PDF_BASENAME, h),
-    [`- involves 4 factors: [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|p.4]]`, "  - Absorption", "  - Distribution"].join("\n"),
+    [`> [!PDF|yellow] [[${SEL}|${PDF_BASENAME}, p.4]]`, "> > involves 4 factors:", "> > - Absorption", "> > - Distribution"].join("\n"),
   );
+});
+
+test("a passage row reads back with the passage as its text, and a callout row with its quote", () => {
+  const md = `---\nclass: HBIO250\n---\n# T\n\n## Highlights\n\n- [[${SEL}|Receptor affinity]]: Receptors bind drugs with high affinity.\n> [!PDF|yellow] [[${PDF_BASENAME}.pdf#page=5&selection=1,0,1,4&color=yellow|${PDF_BASENAME}, p.5]]\n> > L = m * v\n`;
+  const parsed = tn.parseTopicNote(md);
+  assert.equal(parsed.highlights.length, 2);
+  assert.equal(parsed.highlights[0].text, "Receptors bind drugs with high affinity.");
+  assert.equal(parsed.highlights[1].text, "L = m * v");
+});
+
+test("planTopicNotes files highlights from passages, carries them onto the rows, and keeps named ones out", () => {
+  const draft = {
+    notes: [
+      {
+        title: "Receptors",
+        summary: "S",
+        related: [],
+        passages: [
+          { highlight_id: "H01", label: "Receptor affinity", text: "Receptors bind drugs with high affinity.", verbatim: false, coverage: "defined" },
+          { highlight_id: "H02", label: "Slide title", text: "", verbatim: false, coverage: "named" },
+        ],
+      },
+    ],
+    unused_ids: [],
+  };
+  const manifest = manifestFor([{ ...SELECTION_HIGHLIGHT, id: "H01" }, { ...RECT_HIGHLIGHT, id: "H02", text: "Types of receptors" }]);
+  const result = tn.planTopicNotes(draft, manifest, { classCode: "HBIO250", topicFolder: "classes", created: "2026-09-10", pages: [] });
+  assert.equal(result.notes.length, 1);
+  assert.equal(result.notes[0].highlights.length, 1);
+  const [row] = result.notes[0].highlights;
+  assert.equal(row.id, "H01");
+  assert.equal(row.passage, "Receptors bind drugs with high affinity.");
+  assert.equal(row.label, "Receptor affinity");
+  assert.equal(row.verbatim, false);
+  assert.equal(row.coverage, "defined");
+  assert.deepEqual(result.namedIds, ["H02"]);
+  assert.deepEqual(result.unassignedIds, [], "a named highlight is neither unassigned nor unused");
+  assert.ok(result.notes[0].content.includes("|Receptor affinity]]: Receptors bind drugs with high affinity."), result.notes[0].content);
+  assert.equal(manifest.highlights[0].passage, undefined, "the manifest's own row is untouched");
+});
+
+test("a passage with empty text renders verbatim, and a pre-2.0 draft with highlight_ids still plans", () => {
+  const manifest = manifestFor([{ ...SELECTION_HIGHLIGHT, id: "H01" }]);
+  const opts = { classCode: "HBIO250", topicFolder: "classes", created: "2026-09-10", pages: [] };
+  const blank = tn.planTopicNotes(
+    { notes: [{ title: "Receptors", summary: "S", related: [], passages: [{ highlight_id: "H01", label: "", text: "   ", verbatim: false, coverage: "discussed" }] }], unused_ids: [] },
+    manifest,
+    opts,
+  );
+  assert.equal(blank.notes[0].highlights[0].verbatim, true);
+  assert.equal(blank.notes[0].highlights[0].passage, undefined);
+  assert.ok(blank.notes[0].content.includes("> [!PDF|yellow]"), blank.notes[0].content);
+  const legacy = tn.planTopicNotes({ notes: [{ title: "Receptors", summary: "S", related: [], highlight_ids: ["H01"] }], unused_ids: [] }, manifest, opts);
+  assert.equal(legacy.notes.length, 1);
+  assert.equal(legacy.notes[0].highlights[0].verbatim, true);
+  assert.deepEqual(legacy.namedIds, []);
 });
 
 test("a rect row with no text is still the bare embed, and a mention row is still its line", () => {
@@ -1310,7 +1386,7 @@ test("a section the merge creates carries a link to its first slide in the headi
   assert.equal(r.added, 2);
   assert.deepEqual(r.section, { heading: "COX Inhibitors and NSAIDs", created: true });
   const heading = `## [[${PDF_BASENAME}.pdf#page=19|COX Inhibitors and NSAIDs]]`;
-  assert.ok(r.md.includes(`${heading}\n\n- span a [[${PDF_BASENAME}.pdf#page=19&selection=0,0,0,4&color=yellow|p.19]]\n- span b [[`), r.md);
+  assert.ok(r.md.includes(`${heading}\n\n> [!PDF|yellow] [[${PDF_BASENAME}.pdf#page=19&selection=0,0,0,4&color=yellow|${PDF_BASENAME}, p.19]]\n> > span a\n\n> [!PDF`), r.md);
   assert.ok(r.md.indexOf(heading) < r.md.indexOf("## Highlights"), "the new section sits ahead of the highlights");
 
   // The linked heading is still the section on the next merge: matched by
@@ -1320,14 +1396,14 @@ test("a section the merge creates carries a link to its first slide in the headi
   assert.equal(again.skipped, 1);
   assert.deepEqual(again.section, { heading: "COX Inhibitors and NSAIDs", created: false });
   assert.equal(again.md.split(heading).length, 2, "the heading is written once");
-  assert.ok(again.md.includes("- span b [[") && again.md.indexOf("- span c [[") < again.md.indexOf("## Highlights"));
+  assert.ok(again.md.includes("> > span b") && again.md.indexOf("> > span c") < again.md.indexOf("## Highlights"));
   assert.deepEqual(tn.noteSections(again.md), ["Receptors", "COX Inhibitors and NSAIDs", "Highlights", "Related topics"]);
 });
 
 test("an existing heading the reader wrote is never rewritten with a link", () => {
   const existing = `---\nclass: HBIO250\n---\n\n## Receptors\nReceptor text.\n\n## Highlights\n\n`;
   const r = tn.mergeWikiHighlights(existing, PDF_BASENAME, "HBIO250", [HL(6, "b")], { section: "Receptors" });
-  assert.ok(r.md.includes("## Receptors\nReceptor text.\n\n- span b [["), r.md);
+  assert.ok(r.md.includes("## Receptors\nReceptor text.\n\n> [!PDF"), r.md);
   assert.ok(!r.md.includes("## [["));
 });
 
@@ -1357,11 +1433,11 @@ test("parseTopicNote reads a bullet row's text, nested items included, without t
   );
 });
 
-test("renderWikiNote's class schema writes bullets under Highlights", () => {
+test("renderWikiNote's class schema writes a quote callout under Highlights", () => {
   const rendered = tn.renderWikiNote({ classCode: "HBIO250", pdfBasename: PDF_BASENAME, summary: "S.", highlights: [wikiHighlight()] });
   assert.equal(
     rendered,
-    `---\nclass: HBIO250\n---\n\n## Summary\nS.\n\n## Highlights\n\n- Some highlight text [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|p.4]]\n`,
+    `---\nclass: HBIO250\n---\n\n## Summary\nS.\n\n## Highlights\n\n> [!PDF|yellow] [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|${PDF_BASENAME}, p.4]]\n> > Some highlight text\n`,
   );
 });
 

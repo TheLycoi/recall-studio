@@ -219,7 +219,7 @@ test("planWikiNotes merges into an existing wiki note", () => {
   assert.ok(note.content.includes(existingCallout));
   // Ends with the Highlights section and the newly added row: the quote, then its page link.
   assert.ok(/## Highlights\n\n[\s\S]*\n$/.test(note.content));
-  assert.ok(/\n- Affinity rises with structural fit\. \[\[[^\]]+\|p\.1\]\]\n$/.test(note.content), note.content);
+  assert.ok(/\n> \[!PDF\|yellow\] \[\[[^\]]+\|HBIO 250[^\]]*, p\.1\]\]\n> > Affinity rises with structural fit\.\n$/.test(note.content), note.content);
 });
 
 // Rebuild the subpath the same way pdflink does, so the fixture's existing
@@ -449,7 +449,7 @@ test("a proposed note that names a closest existing note is filed there as a new
   const note = out.notes[0];
   assert.equal(note.exists, true);
   assert.equal(note.path, PHARMACOLOGY.path);
-  assert.ok(/## \[\[[^\]]+\|COX Inhibitors\]\]\n\n- /.test(note.content), "the proposal became a heading inside the home, linked to its slide");
+  assert.ok(/## \[\[[^\]]+\|COX Inhibitors\]\]\n\n> \[!PDF/.test(note.content), "the proposal became a heading inside the home, linked to its slide");
   assert.deepEqual(out.routed, [{ from: "COX Inhibitors", to: "Pharmacology", heading: "COX Inhibitors", why: "NSAIDs are a subtopic of pharmacology" }]);
   assert.deepEqual(note.routed.map((r) => [r.from, r.heading, r.keys.length]), [["COX Inhibitors", "COX Inhibitors", 1]]);
   assert.deepEqual(out.orphanTitles, [], "a routed title is not an orphan");
@@ -465,7 +465,7 @@ test("a proposed title that is already a heading of an existing note goes under 
   assert.equal(out.notes.length, 1);
   assert.equal(out.notes[0].path, PHARMACOLOGY.path);
   assert.equal(out.routed[0].heading, "Receptors", "the note's own spelling of the heading is used");
-  assert.ok(/## Receptors\n\nA receptor binds and transduces\.\n\n- /.test(out.notes[0].content), "appended inside the existing section");
+  assert.ok(/## Receptors\n\nA receptor binds and transduces\.\n\n> \[!PDF/.test(out.notes[0].content), "appended inside the existing section");
 });
 
 test("a proposed title that is an alias of an existing note goes to the note as a whole", () => {
@@ -478,7 +478,7 @@ test("a proposed title that is an alias of an existing note goes to the note as 
   assert.equal(out.notes[0].path, PHARMACOLOGY.path);
   assert.equal(out.routed[0].heading, "", "another name for the note is the note, not a section of it");
   assert.ok(!out.notes[0].content.includes("## Drug Action"));
-  assert.ok(/## Highlights\n\n- /.test(out.notes[0].content), "so the span lands under Highlights");
+  assert.ok(/## Highlights\n\n> \[!PDF/.test(out.notes[0].content), "so the span lands under Highlights");
 });
 
 test("at the wall — nothing related — a proposed note is created as before", () => {
@@ -504,7 +504,7 @@ test("a proposed title that specializes an existing heading goes under that head
   assert.equal(out.notes.length, 1);
   assert.equal(out.notes[0].path, PHARMACOLOGY.path);
   assert.equal(out.routed[0].heading, "Receptors");
-  assert.ok(/## Receptors\n\nA receptor binds and transduces\.\n\n- /.test(out.notes[0].content));
+  assert.ok(/## Receptors\n\nA receptor binds and transduces\.\n\n> \[!PDF/.test(out.notes[0].content));
 });
 
 test("sharing a word with a heading is not specializing it", () => {
@@ -527,7 +527,7 @@ test("a proposed title that specializes an existing note's title becomes a headi
   assert.equal(out.notes.length, 1);
   assert.equal(out.notes[0].path, PHARMACOLOGY.path);
   assert.deepEqual(out.routed, [{ from: "Clinical Pharmacology", to: "Pharmacology", heading: "Clinical Pharmacology", why: "“Clinical Pharmacology” is a kind of Pharmacology" }]);
-  assert.ok(/## \[\[[^\]]+\|Clinical Pharmacology\]\]\n\n- /.test(out.notes[0].content));
+  assert.ok(/## \[\[[^\]]+\|Clinical Pharmacology\]\]\n\n> \[!PDF/.test(out.notes[0].content));
 });
 
 test("a title the reader kept as its own note is not routed, whatever it names", () => {

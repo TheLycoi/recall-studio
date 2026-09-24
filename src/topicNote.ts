@@ -2,7 +2,7 @@
 // import (see src/lint.ts:1-6); bundled standalone and exercised with
 // node --test (test/topicNote.test.mjs).
 import { splitFrontmatter } from "./util";
-import { findAllPdfReferences, highlightKey, pdfFileName, renderCallout, renderPdfLink, type PdfTarget } from "./pdflink";
+import { calloutHeader, findAllPdfReferences, highlightKey, pdfFileName, renderCallout, renderPdfLink, type PdfTarget } from "./pdflink";
 import type { ManifestHighlight, Manifest } from "./manifest";
 import type { DigestDraft } from "./schemas";
 import { routeProposed, type WikiNoteIn } from "./suggestPlan";
@@ -192,24 +192,8 @@ export interface RenderTopicNoteArgs {
 }
 
 function highlightsBody(pdfBasename: string, highlights: ManifestHighlight[]): string {
-  const pages = Array.from(new Set(highlights.map((h) => h.page)));
-  const multiPage = pages.length > 1;
-
-  const parts: string[] = [];
-  let lastPage: number | null = null;
-  for (const h of highlights) {
-    if (multiPage && h.page !== lastPage) {
-      parts.push(`### Page ${h.page}`);
-      parts.push("");
-      lastPage = h.page;
-    }
-    parts.push(renderCallout(pdfBasename, h.target, `p.${h.page}`, h.text));
-    parts.push("");
-  }
-  // Drop the trailing blank line after the last callout; the caller adds
-  // exactly one blank line before the next section.
-  if (parts.length > 0 && parts[parts.length - 1] === "") parts.pop();
-  return parts.join("\n");
+  const sorted = highlights.slice().sort((a, b) => a.page - b.page);
+  return joinRows(sorted.map((h) => rowMarkdown(pdfBasename, h)));
 }
 
 export function renderTopicNote(args: RenderTopicNoteArgs): string {
@@ -283,6 +267,9 @@ function bulletRowText(lines: string[], at: number): string {
   const head = (lines[at] ?? "")
     .replace(/!?\[\[[^\]]*\.pdf#[^\]]*\]\]/gi, "")
     .replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "")
+    // A passage row is `- [[link|label]]: passage`; with the link gone, the
+    // colon that joined them is not part of the text.
+    .replace(/^\s*[:—–-]\s*/, "")
     .replace(/\s+/g, " ")
     .trim();
   const items: string[] = [];
@@ -425,8 +412,8 @@ function mergeTopicHighlightsBody(existingMd: string, pdfBasename: string, highl
     const trailingBlanks = trailingBlanksMatch ? trailingBlanksMatch[0] : "";
     const sectionCore = trailingBlanks ? section.slice(0, section.length - trailingBlanks.length) : section;
 
-    const newCallouts = toAdd.map((h) => renderCallout(pdfBasename, h.target, `p.${h.page}`, h.text));
-    const appended = sectionCore.length > 0 ? `${sectionCore}\n\n${newCallouts.join("\n\n")}` : newCallouts.join("\n\n");
+    const newRows = joinRows(toAdd.map((h) => rowMarkdown(pdfBasename, h)));
+    const appended = sectionCore.length > 0 ? `${sectionCore}\n\n${newRows}` : newRows;
 
     const newMd = existingMd.slice(0, headingEnd) + appended + trailingBlanks + existingMd.slice(sectionEnd);
     return { md: newMd, added: toAdd.length, skipped };
@@ -434,8 +421,7 @@ function mergeTopicHighlightsBody(existingMd: string, pdfBasename: string, highl
 
   // No `## Highlights` heading: build the section fresh and insert it.
   const toAdd = highlights.slice().sort((a, b) => a.page - b.page);
-  const newCallouts = toAdd.map((h) => renderCallout(pdfBasename, h.target, `p.${h.page}`, h.text));
-  const sectionText = `## Highlights\n\n${newCallouts.join("\n\n")}`;
+  const sectionText = `## Highlights\n\n${joinRows(toAdd.map((h) => rowMarkdown(pdfBasename, h)))}`;
 
   const relatedMatch = execHeading(existingMd, /^##\s+Related topics\s*$/m);
   let newMd: string;
@@ -516,13 +502,68 @@ export interface PlanTopicNotesResult {
   notes: PreparedNote[];
   unknownIds: string[];
   unassignedIds: string[];
+  /** Highlights the model filed but marked as only named by the source; left out of every page. */
+  namedIds: string[];
   droppedNotes: number;
 }
 
-export function planTopicNotes(draft: DigestDraft, manifest: Manifest, opts: PlanTopicNotesOptions): PlanTopicNotesResult {
+/**
+ * One passage of a draft note, as the planner reads it. The strict schema
+ * (`DigestOut`) always supplies every field; a draft written before 2.0, or
+ * a test, may supply only the id, and a passage with no text is a verbatim
+ * row.
+ */
+export interface DraftPassage {
+  highlight_id: string;
+  label?: string;
+  text?: string;
+  verbatim?: boolean;
+  coverage?: string;
+}
+
+/** A draft note as the planner needs it: `passages` from the 2.0 schema, or `highlight_ids` from a pre-2.0 draft. */
+export type PlannerNote = Omit<DigestDraft["notes"][number], "passages"> & {
+  passages?: DraftPassage[];
+  highlight_ids?: string[];
+};
+
+export interface PlannerDraft {
+  notes: PlannerNote[];
+  unused_ids: string[];
+}
+
+/** The passages of a draft note, a pre-2.0 id list read as verbatim rows. */
+function passagesOf(note: PlannerNote): DraftPassage[] {
+  if (Array.isArray(note.passages)) return note.passages;
+  if (Array.isArray(note.highlight_ids)) return note.highlight_ids.map((id) => ({ highlight_id: id }));
+  return [];
+}
+
+/**
+ * The manifest row as this note will print it: a copy carrying the model's
+ * passage, label, verbatim flag and coverage. A copy, because one highlight
+ * may be filed under two notes with two passages, and because the manifest
+ * is the record of what the reader highlighted, not of what was written.
+ */
+function rowFor(h: ManifestHighlight, p: DraftPassage): ManifestHighlight {
+  const row: ManifestHighlight = { ...h };
+  const label = (p.label ?? "").trim();
+  const text = (p.text ?? "").trim();
+  if (label) row.label = label;
+  if (text) row.passage = text;
+  row.verbatim = p.verbatim === true || !text;
+  if (p.coverage === "defined" || p.coverage === "discussed") row.coverage = p.coverage;
+  return row;
+}
+
+export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: PlanTopicNotesOptions): PlanTopicNotesResult {
   const byId = new Map(manifest.highlights.map((h) => [h.id, h]));
   const unknownIds: string[] = [];
   const seenIds = new Set<string>();
+  // Highlights the model filed but reported as only named by the source — a
+  // slide title, a heading — which no page should hold. Kept apart from
+  // unused_ids, which is the model's own list.
+  const namedIds: string[] = [];
 
   interface Group {
     title: string;
@@ -539,14 +580,19 @@ export function planTopicNotes(draft: DigestDraft, manifest: Manifest, opts: Pla
     const groupKey = title.toLowerCase();
 
     const validHighlights: ManifestHighlight[] = [];
-    for (const id of note.highlight_ids) {
+    for (const p of passagesOf(note)) {
+      const id = p.highlight_id;
       seenIds.add(id);
       const h = byId.get(id);
       if (!h) {
         if (!unknownIds.includes(id)) unknownIds.push(id);
         continue;
       }
-      validHighlights.push(h);
+      if (p.coverage === "named") {
+        if (!namedIds.includes(id)) namedIds.push(id);
+        continue;
+      }
+      validHighlights.push(rowFor(h, p));
     }
 
     if (validHighlights.length === 0) continue;
@@ -566,12 +612,13 @@ export function planTopicNotes(draft: DigestDraft, manifest: Manifest, opts: Pla
   }
 
   const droppedNotes = draft.notes.filter((note) => {
-    const validCount = note.highlight_ids.filter((id) => byId.has(id)).length;
+    const validCount = passagesOf(note).filter((p) => byId.has(p.highlight_id) && p.coverage !== "named").length;
     return validCount === 0;
   }).length;
 
   // Unassigned: highlights that appear in no note and are not in unused_ids.
-  const unusedSet = new Set(draft.unused_ids);
+  // A named highlight was filed and set aside on purpose, so it is neither.
+  const unusedSet = new Set([...draft.unused_ids, ...namedIds]);
   const assignedIds = new Set<string>();
   for (const groupKey of groupOrder) {
     const group = groups.get(groupKey)!;
@@ -757,7 +804,7 @@ export function planTopicNotes(draft: DigestDraft, manifest: Manifest, opts: Pla
     for (const g of note.groups) if (!seen.groups.includes(g)) seen.groups.push(g);
   }
 
-  return { notes: coalesced, unknownIds, unassignedIds, droppedNotes };
+  return { notes: coalesced, unknownIds, unassignedIds, namedIds, droppedNotes };
 }
 
 /** One row of the digest preview as the reader left it: the row it was, and the title in its box. */
@@ -779,11 +826,11 @@ export interface DigestChoice {
  * coalescing makes `path` the unique key of a row, so two groups can share a
  * title or a path, and only the group says which proposal a reader unticked.
  */
-export function applyDigestChoices(
-  draft: DigestDraft,
+export function applyDigestChoices<D extends PlannerDraft>(
+  draft: D,
   planned: PreparedNote[],
   chosen: DigestChoice[],
-): { draft: DigestDraft; keepAsNew: string[] } {
+): { draft: D; keepAsNew: string[] } {
   const byPath = new Map(planned.map((n) => [n.path, n]));
   const keptGroups = new Set<string>();
   const renamed = new Map<string, string>();
@@ -869,24 +916,73 @@ export function splitInlineList(text: string): { lead: string; items: string[]; 
 }
 
 /**
- * One highlight as a page prints it.
+ * One highlight as a page prints it, by the reader's rule of 2026-09-24.
  *
  * A note-sourced row is its citation line; a rectangle with no text is the
- * bare embed, so the figure draws. Everything else is a bullet: the quote,
- * then a short `p.N` link that opens the PDF at the selection. The link's
- * display used to be the full "<basename>, p.N" that PDF++ copies, which put
- * a sixty-character filename on every line of a note; the page number is
- * what a reader wants to see, and the filename is in the link for the click.
- * A quote that was a list on the slide is a list here, nested under its lead.
+ * bare embed, so the figure draws. A row the digest wrote a passage for is a
+ * bullet whose link text is the label — the same shape the reader's own
+ * class notes use, `[[slide|phrase]]: what it means` — and whose body is the
+ * passage. Everything else is a direct quote, and a direct quote is a PDF++
+ * callout whose link text is the file's title and page, the way PDF++ itself
+ * copies one. A quote that was a list on the slide is a list inside the
+ * callout.
  */
 export function renderHighlightRow(pdfBasename: string, h: ManifestHighlight): string {
   if (h.mention) return h.mention;
   if (h.target.rect && !h.text) return renderCallout(pdfBasename, h.target, wikiDisplay(pdfBasename, h.page), h.text);
-  const link = renderPdfLink(pdfBasename, h.target, `p.${h.page}`);
+  const passage = h.verbatim ? "" : (h.passage ?? "").replace(/\s*\n+\s*/g, " ").replace(/\s+/g, " ").trim();
+  if (passage) return `- ${renderPdfLink(pdfBasename, h.target, rowLabel(h))}: ${passage}`;
+  return renderQuoteCallout(pdfBasename, h);
+}
+
+/** The most a label may run to before the quote's first clause stands in for it. */
+const LABEL_MAX = 60;
+
+/**
+ * The link text of a passage row: the model's label when it gave one, else
+ * the quote when it is short enough to read as one, else the quote's first
+ * clause. Never link syntax — a pipe or a bracket inside the display text
+ * would end the link early.
+ */
+export function rowLabel(h: ManifestHighlight): string {
+  const clean = (s: string) => s.replace(/[|[\]]/g, "").replace(/\s+/g, " ").trim();
+  const label = clean(h.label ?? "");
+  if (label) return label;
+  const text = clean(h.text);
+  if (text.length <= LABEL_MAX) return text;
+  const clause = text.split(/[.;:—–]\s|,\s/)[0].trim();
+  if (clause.length > 0 && clause.length <= LABEL_MAX) return clause;
+  return `${text.slice(0, LABEL_MAX - 1).replace(/\s+\S*$/, "")}…`;
+}
+
+/** A direct quote as PDF++ writes one: the callout header with the Title-and-page link, the quote beneath, a list kept as a list. */
+function renderQuoteCallout(pdfBasename: string, h: ManifestHighlight): string {
+  const link = renderPdfLink(pdfBasename, h.target, wikiDisplay(pdfBasename, h.page));
+  const lines = [`> ${calloutHeader(h.color ?? h.target.color ?? null)} ${link}`];
   const { lead, items, ordered, start } = splitInlineList(h.text);
-  const first = lead ? `- ${lead} ${link}` : `- ${link}`;
-  const rest = items.map((item, i) => `${NESTED_INDENT}${ordered ? `${start + i}.` : "-"} ${item}`);
-  return [first, ...rest].join("\n");
+  if (lead) lines.push(`> > ${lead}`);
+  items.forEach((item, i) => lines.push(`> > ${ordered ? `${start + i}.` : "-"} ${item}`));
+  if (!lead && items.length === 0) lines.push(`> > ${h.text.replace(/\s+/g, " ").trim()}`);
+  return lines.join("\n");
+}
+
+/**
+ * What the card writer is told about a highlight the digest filed: which
+ * page took it, the label it wears there, the passage the page holds for it,
+ * and the reader's own notes. The card is a view of the note — the passage
+ * is the knowledge — but the highlight stays the source it must be true to,
+ * so cloze grounding still checks against the slide's words.
+ */
+export function renderRowInstruction(h: ManifestHighlight, pageTitle: string): string {
+  const lines = [`This highlight was digested into the wiki page "${pageTitle}", filed as: ${rowLabel(h)}.`];
+  const passage = h.verbatim ? "" : (h.passage ?? "").trim();
+  if (passage) lines.push(`The page's passage for it:\n${passage}`);
+  else lines.push("The page keeps the highlight's own wording, verbatim.");
+  if (h.notes?.trim()) lines.push(`The reader's own notes under it:\n${h.notes.trim()}`);
+  lines.push(
+    "Card what the page says about this highlight. Everything the card asserts has to be in the highlight itself; where the passage or the notes go further than the highlight does, follow the highlight.",
+  );
+  return lines.join("\n");
 }
 
 /** One highlight as a page prints it: the note-sourced citation line when it has one, else the bullet row. */

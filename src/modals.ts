@@ -1,6 +1,7 @@
 import { App, ButtonComponent, Component, FuzzySuggestModal, MarkdownRenderer, Modal, Notice, Setting, SuggestModal, TFile, TFolder } from "obsidian";
 import type { TranscriptRecord } from "./model";
 import type { PreparedNote } from "./topicNote";
+import { rowLabel } from "./topicNote";
 import type { ManifestHighlight } from "./manifest";
 import type { FixPage, LinkFix } from "./vaultFix";
 import type { Fix, FixKind } from "./fixPlan";
@@ -586,8 +587,11 @@ export class SuggestPreviewModal extends Modal {
           this.checked[i][j] = checkbox.checked;
           this.updateWriteButton();
         });
-        li.createEl("strong", { text: `p.${h.page} ` });
-        const cut = h.text.length > 120 ? `${h.text.slice(0, 120)}…` : h.text;
+        // A row the model wrote a passage for previews as the page will print
+        // it: the label, then the passage. A verbatim row previews its quote.
+        const shown = h.verbatim === false && h.passage ? h.passage : h.text;
+        li.createEl("strong", { text: `${h.label ? rowLabel(h) : `p.${h.page}`} ` });
+        const cut = shown.length > 120 ? `${shown.slice(0, 120)}…` : shown;
         li.createSpan({ text: cut });
         // Where in the note this one lands, when it is going under a heading
         // rather than into the highlights: the reader is choosing per span,

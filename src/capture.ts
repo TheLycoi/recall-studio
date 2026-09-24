@@ -16,6 +16,7 @@ import {
 } from "./util";
 import { describeError } from "./llm";
 import type { Manifest, ManifestHighlight } from "./manifest";
+import { renderRowInstruction } from "./topicNote";
 import { renderPdfSubpath } from "./pdflink";
 import { missTitle, renderMissInstruction, type QuizMiss } from "./quiz";
 
@@ -393,6 +394,11 @@ export function captureManifestHighlights(
       subpath: renderPdfSubpath(item.target),
       topicPath: topicPath ?? undefined,
       origin: "pdf",
+      // A row the digest wrote carries its passage and label: the card is a
+      // view of the note, so the writer is told what the page says about this
+      // highlight (src/topicNote.ts renderRowInstruction). A raw manifest row
+      // — the flashcards-only product — carries nothing extra.
+      instruction: item.verbatim !== undefined || item.passage ? renderRowInstruction(item, noteTitle) : "",
     });
     plugin.store.add(h);
     plugin.generator.enqueue(h);
