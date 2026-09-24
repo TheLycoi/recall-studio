@@ -19,6 +19,17 @@ export interface PdfReference {
   quote: string | null;
   line: number;
   calloutColor: string | null;
+  /**
+   * The reader's own words attached to a bare link (one not inside a PDF++
+   * callout): the rest of the link's line, then every line beneath it up to
+   * the next heading or the next line holding a PDF++ link, blank lines
+   * dropped, markup kept. Null for a callout reference and when nothing is
+   * there. This is what a class note holds under each slide link, and it is
+   * what the digest reads alongside the highlight itself.
+   */
+  notes: string | null;
+  /** The nearest heading at or above a bare link, as it reads; null for a callout reference. */
+  heading: string | null;
 }
 
 /** Reference with the PDF basename attached, for findAllPdfReferences. */
@@ -182,6 +193,56 @@ function stripQuotePrefix(line: string): string {
   return s;
 }
 
+const HEADING_RE = /^\s{0,3}#{1,6}\s+(.*)$/;
+/** A line that holds a PDF++ link or embed: where one reference's notes end and the next begins. */
+const PDF_LINK_LINE_RE = /!?\[\[[^\]]*\.pdf#[^\]]*\]\]/i;
+
+/** A heading as a reader reads it: markup, wikilink brackets and a trailing colon are not part of its name. */
+function headingText(raw: string): string {
+  return raw
+    .replace(/!?\[\[([^\]]+)\]\]/g, (_m, inner: string) => {
+      const s = String(inner);
+      const pipe = s.lastIndexOf("|");
+      return pipe >= 0 ? s.slice(pipe + 1) : s.replace(/#.*$/, "");
+    })
+    .replace(/==|\*\*|__|`/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/[\s:]+$/, "")
+    .trim();
+}
+
+function headingAbove(lines: string[], lineIdx: number): string | null {
+  for (let i = lineIdx; i >= 0; i--) {
+    const m = HEADING_RE.exec(lines[i]);
+    if (m) return headingText(m[1]) || null;
+  }
+  return null;
+}
+
+/**
+ * The reader's notes for a bare link: its own line with the link cut out (a
+ * link on a heading line contributes nothing, the heading is its name), then
+ * the lines beneath until the next heading or the next PDF++ link. Trailing
+ * whitespace is dropped per line; indentation and list markers stay, so the
+ * model sees the nesting the reader wrote.
+ */
+function readerNotes(lines: string[], lineIdx: number, col: number, linkLength: number): string | null {
+  const out: string[] = [];
+  const own = lines[lineIdx];
+  if (!HEADING_RE.test(own)) {
+    const rest = (own.slice(0, col) + own.slice(col + linkLength)).replace(/[ \t]+$/, "");
+    // A bare list marker left behind is not a note.
+    if (!/^\s*(?:[-*+]|\d+[.)])?\s*$/.test(rest)) out.push(rest);
+  }
+  for (let i = lineIdx + 1; i < lines.length; i++) {
+    const l = lines[i];
+    if (HEADING_RE.test(l) || PDF_LINK_LINE_RE.test(l)) break;
+    if (l.trim() === "") continue;
+    out.push(l.replace(/[ \t]+$/, ""));
+  }
+  return out.length ? out.join("\n") : null;
+}
+
 /**
  * Find every PDF++ link/embed in `markdown` whose path (folders stripped)
  * equals `pdfFilename` (e.g. "Foo.pdf", as in TFile.name) case-insensitively
@@ -242,6 +303,13 @@ export function findAllPdfReferences(markdown: string): PdfReferenceAny[] {
       quote = normalizeWs(quoteLines.join(" "));
     }
 
+    let notes: string | null = null;
+    let heading: string | null = null;
+    if (!headerMatch) {
+      heading = headingAbove(lines, lineIdx);
+      notes = readerNotes(lines, lineIdx, m.index - lineStarts[lineIdx], m[0].length);
+    }
+
     out.push({
       target,
       embed,
@@ -249,6 +317,8 @@ export function findAllPdfReferences(markdown: string): PdfReferenceAny[] {
       quote,
       line: lineIdx,
       calloutColor,
+      notes,
+      heading,
       pdfBasename: baseNoExt,
     });
   }

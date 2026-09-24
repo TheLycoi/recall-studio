@@ -265,3 +265,83 @@ test("an ordinary unencoded subpath is unchanged by decoding", () => {
     color: "yellow",
   });
 });
+
+// ---- 2.0: the reader's notes under a bare link
+
+const CLASS_NOTE = `---
+class: PSYC360
+---
+## Attachment Disorders, Conduct Disorder, and Oppositional Defiant Disorder
+[[Chapter 5 -1.pdf#page=23&selection=0,0,2,33&color=note|Chapter 5 -1, p.23]]
+
+- **Oppositional Defiant Disorder**
+	- A pattern of angry/irritable mood lasting 6 months
+		- "About control"
+	- Defiance but no aggression
+- Conduct Disorder (CD) [[Chapter 5 -1.pdf#page=30&selection=0,0,0,30&color=yellow|Chapter 5 -1, p.30]]
+	- CD is associated with smaller gray matter volume
+	- Harsh parental discipline and aggression (environmental)
+## Autism Spectrum Disorder (ASD)
+[[Chapter 5 -1.pdf#page=31&selection=0,0,0,30&color=yellow|Chapter 5 -1, p.31]]
+`;
+
+test("a bare link under a heading carries the heading and the lines beneath it as notes", () => {
+  const refs = pl.findPdfReferences(CLASS_NOTE, "Chapter 5 -1.pdf");
+  assert.equal(refs.length, 3);
+  const [first] = refs;
+  assert.equal(first.quote, null, "a bare link has no callout quote");
+  assert.equal(first.heading, "Attachment Disorders, Conduct Disorder, and Oppositional Defiant Disorder");
+  assert.equal(
+    first.notes,
+    [
+      "- **Oppositional Defiant Disorder**",
+      "\t- A pattern of angry/irritable mood lasting 6 months",
+      '\t\t- "About control"',
+      "\t- Defiance but no aggression",
+    ].join("\n"),
+    "notes stop at the next line holding a PDF++ link",
+  );
+});
+
+test("a link inline in a bullet keeps the bullet's own words and the nested lines under it", () => {
+  const refs = pl.findPdfReferences(CLASS_NOTE, "Chapter 5 -1.pdf");
+  const cd = refs[1];
+  assert.equal(cd.target.page, 30);
+  assert.equal(cd.heading, "Attachment Disorders, Conduct Disorder, and Oppositional Defiant Disorder");
+  assert.equal(
+    cd.notes,
+    ["- Conduct Disorder (CD)", "\t- CD is associated with smaller gray matter volume", "\t- Harsh parental discipline and aggression (environmental)"].join("\n"),
+    "the link is removed from its own line; the notes stop at the next heading",
+  );
+});
+
+test("a link with nothing under it has null notes and the heading above it", () => {
+  const refs = pl.findPdfReferences(CLASS_NOTE, "Chapter 5 -1.pdf");
+  const asd = refs[2];
+  assert.equal(asd.heading, "Autism Spectrum Disorder (ASD)");
+  assert.equal(asd.notes, null);
+});
+
+test("a link on a heading line takes that heading as its own, and the lines under it as notes", () => {
+  const md = [
+    "## [[Lab 4.pdf#page=1&selection=38,0,38,10|Linear Impulse]]",
+    "[[Lab 4.pdf#page=1&selection=40,0,41,12|The effect of a force on a system]]: the net force acting over time",
+    "",
+    "- Propulsive > braking => increase in velocity",
+    "## Linear Momentum",
+  ].join("\n");
+  const refs = pl.findPdfReferences(md, "Lab 4.pdf");
+  assert.equal(refs.length, 2);
+  assert.equal(refs[0].heading, "Linear Impulse");
+  assert.equal(refs[0].notes, null, "the next line holds a PDF++ link, so nothing is left for the heading link");
+  assert.equal(refs[1].heading, "Linear Impulse");
+  assert.equal(refs[1].notes, ": the net force acting over time\n- Propulsive > braking => increase in velocity");
+});
+
+test("a callout reference keeps its quote and carries no notes", () => {
+  const md = "> [!PDF|yellow] [[Deck.pdf#page=4&selection=2,0,3,1|Deck, p.4]]\n> > Receptors bind ligands\n\n- a bullet after the callout";
+  const [ref] = pl.findPdfReferences(md, "Deck.pdf");
+  assert.equal(ref.quote, "Receptors bind ligands");
+  assert.equal(ref.notes, null);
+  assert.equal(ref.heading, null);
+});
