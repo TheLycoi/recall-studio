@@ -27,33 +27,25 @@ export const DigestOut = z.object({
       summary: z
         .string()
         .describe(
-          "Three to five sentences about this topic drawn from the paper, weighted toward the reader's highlights; no links, ids, or citations.",
+          "The page's opening: two to five sentences defining or describing the topic, drawn from the highlights, the reader's notes and the paper. Cite a highlight after the sentence it supports as [H03] or [H03, H04]; mention another page as {{Its Title}} copied exactly; never write brackets or links yourself.",
         ),
-      passages: z
+      sections: z
         .array(
           z.object({
-            highlight_id: z.string().describe('The id of one highlight that belongs to this topic, e.g. "H03". Every id must appear in the input.'),
-            label: z
-              .string()
-              .describe("At most six words naming the fact this highlight carries; it becomes the text of the link that opens the PDF there."),
-            text: z
+            heading: z.string().describe("A subtopic of this page, a short noun phrase in Title Case; unique within the note."),
+            prose: z
               .string()
               .describe(
-                "One to three sentences of digested knowledge in your own words, drawing on the highlight, the reader's notes under it and the paper, and on nothing outside the paper. Empty when verbatim is true.",
+                "Two to six sentences of digested knowledge about the subtopic in your own words, drawn from the highlights filed here, the reader's notes under them and the paper, and from nothing outside the paper. Cite a highlight after each sentence it supports as [H03]; mention another page as {{Its Title}}.",
               ),
-            verbatim: z
-              .boolean()
+            quote_ids: z
+              .array(z.string())
               .describe(
-                "True when the highlight's exact wording is itself what the page should keep — a formula, a definition, a list of criteria — in which case the plugin quotes it and ignores text.",
-              ),
-            coverage: z
-              .enum(["defined", "discussed", "named"])
-              .describe(
-                "How the source treats this highlight: defined when it says what the thing is, discussed when it says something substantive about it, named when it is only a title, a label or a passing mention. A named highlight is kept out of the page.",
+                'The highlights this section quotes verbatim beneath its prose, e.g. ["H03","H04"]: every highlight filed under this page goes in exactly one section, except slide titles and logistics, which go in unused_ids.',
               ),
           }),
         )
-        .describe("The highlights that belong to this topic, one entry each. At least one."),
+        .describe("One to four sections, each a subtopic with prose and the highlights it rests on. At least one."),
       related: z.array(z.string()).describe("Titles of other notes in this response or of the existing notes listed. Empty when none."),
       kind: z
         .enum(["concept", "entity"])

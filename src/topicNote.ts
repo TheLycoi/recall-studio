@@ -6,6 +6,7 @@ import { calloutHeader, findAllPdfReferences, highlightKey, pdfFileName, renderC
 import type { ManifestHighlight, Manifest } from "./manifest";
 import type { DigestDraft } from "./schemas";
 import { routeProposed, type WikiNoteIn } from "./suggestPlan";
+import { resolveProseLinks, type LinkablePage } from "./proseLinks";
 
 /** Strip characters illegal in vault filenames, collapse whitespace, "Untitled" when empty. */
 export function safeTitle(title: string): string {
@@ -189,6 +190,8 @@ export interface RenderTopicNoteArgs {
   tag: string;
   /** Every class the page belongs to; defaults to `[classCode]`. */
   classCodes?: string[];
+  /** The body in the article shape; when absent the older Summary / Highlights body is written. */
+  article?: Article;
 }
 
 function highlightsBody(pdfBasename: string, highlights: ManifestHighlight[]): string {
@@ -215,6 +218,10 @@ export function renderTopicNote(args: RenderTopicNoteArgs): string {
   lines.push("");
   lines.push(`# ${title}`);
   lines.push("");
+  if (args.article) {
+    lines.push(renderArticleBody(pdfBasename, args.kind, args.article, related));
+    return lines.join("\n").replace(/\n*$/, "") + "\n";
+  }
   lines.push("## Summary");
   lines.push(summary);
   lines.push("");
@@ -296,7 +303,7 @@ export function parseTopicNote(md: string): ParsedTopicNote {
   const title = titleMatch ? titleMatch[1].trim() : "";
 
   let summary = "";
-  const summaryHeadingMatch = execHeading(raw, /^##\s+Summary\s*$/m);
+  const summaryHeadingMatch = execHeading(raw, /^##\s+(?:Summary|Definition|Description)\s*$/m);
   if (summaryHeadingMatch) {
     const headingEnd = summaryHeadingMatch.index + summaryHeadingMatch[0].length;
     summary = raw.slice(headingEnd, nextHeadingAfter(raw, headingEnd)).trim();
@@ -504,6 +511,10 @@ export interface PlanTopicNotesResult {
   unassignedIds: string[];
   /** Highlights the model filed but marked as only named by the source; left out of every page. */
   namedIds: string[];
+  /** Page names the prose mentioned that no page answers to; left as plain words. */
+  orphans: string[];
+  /** Ids the prose cited that the manifest does not hold; the citations were dropped. */
+  droppedIds: string[];
   droppedNotes: number;
 }
 
@@ -521,8 +532,20 @@ export interface DraftPassage {
   coverage?: string;
 }
 
-/** A draft note as the planner needs it: `passages` from the 2.0 schema, or `highlight_ids` from a pre-2.0 draft. */
-export type PlannerNote = Omit<DigestDraft["notes"][number], "passages"> & {
+/** One section of a draft note: a subtopic, its prose, and the highlights it quotes beneath. */
+export interface DraftSection {
+  heading: string;
+  prose: string;
+  quote_ids: string[];
+}
+
+/**
+ * A draft note as the planner needs it: `sections` from the article schema,
+ * or the shapes drafts took before it — `passages` (each one section's worth
+ * of prose over one quote) or a bare `highlight_ids` list (quotes only).
+ */
+export type PlannerNote = Omit<DigestDraft["notes"][number], "sections"> & {
+  sections?: DraftSection[];
   passages?: DraftPassage[];
   highlight_ids?: string[];
 };
@@ -532,28 +555,176 @@ export interface PlannerDraft {
   unused_ids: string[];
 }
 
-/** The passages of a draft note, a pre-2.0 id list read as verbatim rows. */
-function passagesOf(note: PlannerNote): DraftPassage[] {
-  if (Array.isArray(note.passages)) return note.passages;
-  if (Array.isArray(note.highlight_ids)) return note.highlight_ids.map((id) => ({ highlight_id: id }));
-  return [];
+/** The sections of a draft note, older shapes read as unnamed sections; `named` lists passage ids a pre-article draft marked as only named by the source. */
+function sectionsOf(note: PlannerNote): { sections: DraftSection[]; named: string[] } {
+  if (Array.isArray(note.sections)) return { sections: note.sections, named: [] };
+  if (Array.isArray(note.passages)) {
+    const named = note.passages.filter((p) => p.coverage === "named").map((p) => p.highlight_id);
+    const sections = note.passages
+      .filter((p) => p.coverage !== "named")
+      .map((p) => ({ heading: "", prose: p.verbatim ? "" : (p.text ?? "").trim(), quote_ids: [p.highlight_id] }));
+    return { sections, named };
+  }
+  if (Array.isArray(note.highlight_ids)) return { sections: [{ heading: "", prose: "", quote_ids: note.highlight_ids }], named: [] };
+  return { sections: [], named: [] };
+}
+
+/** One section of an article as the page prints it: the heading, the resolved prose, and the highlights quoted beneath it. */
+export interface ArticleSection {
+  heading: string;
+  prose: string;
+  highlights: ManifestHighlight[];
+}
+
+/** A page's body in the article shape: the opening, the sections, and the figures. */
+export interface Article {
+  definition: string;
+  sections: ArticleSection[];
+  /** Rectangle highlights with no text: figures, rendered as embeds under their own heading. */
+  figures: ManifestHighlight[];
+}
+
+/** Prose with its wikilinks reduced to their display text, for a card writer or a "have we said this" check. */
+function plainProse(prose: string): string {
+  return prose
+    .replace(/!?\[\[([^\]]+)\]\]/g, (_m, inner: string) => {
+      const t = String(inner);
+      const pipe = t.lastIndexOf("|");
+      return pipe >= 0 ? t.slice(pipe + 1) : t.replace(/#.*$/, "");
+    })
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Whether a rectangle row is a figure: geometry only, no words. */
+function isFigure(h: ManifestHighlight): boolean {
+  return !!h.target.rect && !h.text;
 }
 
 /**
- * The manifest row as this note will print it: a copy carrying the model's
- * passage, label, verbatim flag and coverage. A copy, because one highlight
- * may be filed under two notes with two passages, and because the manifest
- * is the record of what the reader highlighted, not of what was written.
+ * The article body: the opening under Definition (a concept) or Description
+ * (an entity), then each section's prose with the highlights it quotes as
+ * PDF++ callouts beneath, figures under their own heading, and the related
+ * pages last. Unnamed sections — older drafts — sit under the opening.
  */
-function rowFor(h: ManifestHighlight, p: DraftPassage): ManifestHighlight {
-  const row: ManifestHighlight = { ...h };
-  const label = (p.label ?? "").trim();
-  const text = (p.text ?? "").trim();
-  if (label) row.label = label;
-  if (text) row.passage = text;
-  row.verbatim = p.verbatim === true || !text;
-  if (p.coverage === "defined" || p.coverage === "discussed") row.coverage = p.coverage;
-  return row;
+function renderArticleBody(pdfBasename: string, kind: WikiKind, article: Article, related: string[]): string {
+  const lines: string[] = [];
+  const callouts = (hs: ManifestHighlight[]) => joinRows(hs.filter((h) => !isFigure(h)).map((h) => renderQuoteCallout(pdfBasename, h)));
+
+  lines.push(kind === "entity" ? "## Description" : "## Definition");
+  if (article.definition.trim()) lines.push(article.definition.trim());
+  for (const sec of article.sections.filter((x) => !x.heading)) {
+    if (sec.prose.trim()) lines.push("", sec.prose.trim());
+    const rows = callouts(sec.highlights);
+    if (rows) lines.push("", rows);
+  }
+  lines.push("");
+
+  for (const sec of article.sections.filter((x) => x.heading)) {
+    lines.push(`## ${sec.heading}`);
+    if (sec.prose.trim()) lines.push(sec.prose.trim());
+    const rows = callouts(sec.highlights);
+    if (rows) lines.push(sec.prose.trim() ? "" : "", rows);
+    lines.push("");
+  }
+
+  if (article.figures.length) {
+    lines.push("## Figures");
+    for (const f of article.figures) lines.push(renderCallout(pdfBasename, f.target, wikiDisplay(pdfBasename, f.page), f.text));
+    lines.push("");
+  }
+
+  lines.push("## Related topics");
+  for (const r of related) lines.push(`- [[${r}]]`);
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n");
+}
+
+export interface ArticleMergeResult extends MergeResult {
+  /** Every section the merge wrote into or created, with the keys of the highlights it placed there. */
+  sections: Array<{ heading: string; keys: string[]; created: boolean }>;
+}
+
+/**
+ * Merge an article into a page that already exists. Each section goes under
+ * the page's heading of that name, or a new heading placed with the other
+ * subtopics; prose the page already holds is not written twice, and a
+ * highlight already on the page (by key) is not quoted again. With
+ * `opts.section`, the whole article is filed under that one heading of the
+ * page — the case where the model's proposal was a subtopic of a page the
+ * reader already has — with each section's heading as a lead line. The
+ * page's own opening is never touched: it already says what the page is.
+ */
+export function mergeArticle(
+  existingMd: string,
+  pdfBasename: string,
+  article: Article,
+  opts: { section?: string; classCode?: string } = {},
+): ArticleMergeResult {
+  const existingKeys = new Set(findAllPdfReferences(existingMd).map((r) => highlightKey(r.target)));
+  // Links reduced to their words on both sides, so prose that was written
+  // with its citations rendered still reads as already present.
+  const existingText = foldQuote(plainProse(existingMd));
+  let body = existingMd;
+  let added = 0;
+  let skipped = 0;
+  const filed: ArticleMergeResult["sections"] = [];
+
+  const blockFor = (secs: ArticleSection[], leadLines: boolean): { text: string; keys: string[]; firstPage: number | null } => {
+    const parts: string[] = [];
+    const keys: string[] = [];
+    let firstPage: number | null = null;
+    for (const sec of secs) {
+      const prose = sec.prose.trim() && !existingText.includes(foldQuote(plainProse(sec.prose))) ? sec.prose.trim() : "";
+      const fresh = sec.highlights.filter((h) => !isFigure(h) && !existingKeys.has(h.key));
+      skipped += sec.highlights.filter((h) => !isFigure(h)).length - fresh.length;
+      if (!prose && fresh.length === 0) continue;
+      added += fresh.length;
+      for (const h of fresh) {
+        existingKeys.add(h.key);
+        keys.push(h.key);
+        if (firstPage === null) firstPage = h.page;
+      }
+      const chunk: string[] = [];
+      if (leadLines && sec.heading) chunk.push(`**${sec.heading}**`);
+      if (prose) chunk.push(prose);
+      if (fresh.length) chunk.push(joinRows(fresh.map((h) => renderQuoteCallout(pdfBasename, h))));
+      parts.push(chunk.join("\n\n"));
+    }
+    return { text: parts.join("\n\n"), keys, firstPage };
+  };
+
+  const place = (heading: string, text: string, keys: string[], firstPage: number | null) => {
+    if (!heading) {
+      body = insertBeforeTrailing(body, text);
+      filed.push({ heading: "", keys, created: false });
+      return;
+    }
+    const found = findSection(body, heading);
+    if (found) {
+      body = spliceIntoSection(body, found.end, text);
+      filed.push({ heading: found.heading, keys, created: false });
+      return;
+    }
+    // A created heading links to the slide its first quote came from, as the
+    // row merge does; one the reader wrote is matched, never rewritten.
+    const link = firstPage !== null ? renderPdfLink(pdfBasename, { page: firstPage }, heading) : heading;
+    body = insertBeforeTrailing(body, `## ${link}\n\n${text}`);
+    filed.push({ heading, keys, created: true });
+  };
+
+  if (opts.section) {
+    const secs: ArticleSection[] = [{ heading: "", prose: article.definition, highlights: [] }, ...article.sections];
+    const { text, keys, firstPage } = blockFor(secs, true);
+    if (text) place(safeHeading(opts.section), text, keys, firstPage);
+    return { md: opts.classCode ? addClassCode(body, opts.classCode) : body, added, skipped, sections: filed };
+  }
+
+  for (const sec of article.sections) {
+    const { text, keys, firstPage } = blockFor([sec], false);
+    if (!text) continue;
+    place(safeHeading(sec.heading), text, keys, firstPage);
+  }
+  return { md: opts.classCode ? addClassCode(body, opts.classCode) : body, added, skipped, sections: filed };
 }
 
 export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: PlanTopicNotesOptions): PlanTopicNotesResult {
@@ -570,51 +741,106 @@ export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: Pl
     summary: string;
     highlights: ManifestHighlight[];
     related: string[];
+    /** The page's opening, links resolved. */
+    definition: string;
+    sections: ArticleSection[];
   }
   // Merge duplicate titles (case-insensitive after safeTitle).
   const groups = new Map<string, Group>();
   const groupOrder: string[] = [];
+  const orphans: string[] = [];
+  const droppedIds: string[] = [];
+  let droppedNotes = 0;
+
+  // What a marker or a citation may resolve to: the pages the model was
+  // shown, then the notes of this draft at the paths they would be written
+  // to, so a page may mention another page born in the same run.
+  const linkable: LinkablePage[] = [
+    ...opts.pages.map((pg) => ({ path: pg.path, title: pg.title, aliases: pg.aliases })),
+    ...draft.notes.map((n) => ({ path: `${opts.topicFolder}/${opts.classCode}/${safeTitle(n.title)}.md`, title: safeTitle(n.title), aliases: n.aliases ?? [] })),
+  ];
+  const citable = manifest.highlights.map((h) => ({ id: h.id, page: h.page, target: h.target }));
+  const resolve = (text: string) =>
+    resolveProseLinks(text ?? "", linkable, citable, manifest.pdfBasename, (page) => wikiDisplay(manifest.pdfBasename, page));
 
   for (const note of draft.notes) {
     const title = safeTitle(note.title);
     const groupKey = title.toLowerCase();
 
     const validHighlights: ManifestHighlight[] = [];
-    for (const p of passagesOf(note)) {
-      const id = p.highlight_id;
+    const cited = new Set<string>();
+    const noteOrphans = new Set<string>();
+    const take = (r: ReturnType<typeof resolve>) => {
+      for (const o of r.orphans) noteOrphans.add(o);
+      for (const d of r.droppedIds) {
+        seenIds.add(d);
+        if (!droppedIds.includes(d)) droppedIds.push(d);
+        if (!unknownIds.includes(d)) unknownIds.push(d);
+      }
+      for (const id of r.citedIds) {
+        seenIds.add(id);
+        cited.add(id);
+      }
+    };
+
+    const definition = resolve(note.summary ?? "");
+    take(definition);
+
+    const shaped = sectionsOf(note);
+    for (const id of shaped.named) {
       seenIds.add(id);
+      if (!namedIds.includes(id)) namedIds.push(id);
+    }
+    const sections: ArticleSection[] = [];
+    for (const sec of shaped.sections) {
+      const prose = resolve(sec.prose ?? "");
+      take(prose);
+      const quoted: ManifestHighlight[] = [];
+      for (const id of sec.quote_ids ?? []) {
+        seenIds.add(id);
+        const h = byId.get(id);
+        if (!h) {
+          if (!unknownIds.includes(id)) unknownIds.push(id);
+          continue;
+        }
+        // A copy: the manifest records what the reader highlighted, the row
+        // records what the page did with it. The prose around the quote rides
+        // along for the card writer.
+        const row: ManifestHighlight = { ...h, verbatim: true };
+        if (prose.prose) row.passage = plainProse(prose.prose);
+        if (!quoted.some((x) => x.key === h.key)) quoted.push(row);
+        if (!validHighlights.some((x) => x.key === h.key)) validHighlights.push(row);
+      }
+      if (prose.prose || quoted.length) sections.push({ heading: safeHeading(sec.heading ?? ""), prose: prose.prose, highlights: quoted });
+    }
+    // A highlight cited in prose but quoted nowhere still belongs to the page.
+    for (const id of cited) {
       const h = byId.get(id);
-      if (!h) {
-        if (!unknownIds.includes(id)) unknownIds.push(id);
-        continue;
-      }
-      if (p.coverage === "named") {
-        if (!namedIds.includes(id)) namedIds.push(id);
-        continue;
-      }
-      validHighlights.push(rowFor(h, p));
+      if (h && !validHighlights.some((x) => x.key === h.key)) validHighlights.push({ ...h, verbatim: true });
     }
 
-    if (validHighlights.length === 0) continue;
+    if (validHighlights.length === 0) {
+      droppedNotes++;
+      continue;
+    }
+    for (const o of noteOrphans) if (!orphans.includes(o)) orphans.push(o);
 
     let group = groups.get(groupKey);
     if (!group) {
-      group = { title, summary: note.summary, highlights: [], related: [] };
+      group = { title, summary: plainProse(definition.prose) || (note.summary ?? ""), highlights: [], related: [], definition: definition.prose, sections: [] };
       groups.set(groupKey, group);
       groupOrder.push(groupKey);
+    } else if (!group.definition && definition.prose) {
+      group.definition = definition.prose;
     }
     for (const h of validHighlights) {
       if (!group.highlights.some((existing) => existing.key === h.key)) group.highlights.push(h);
     }
+    group.sections.push(...sections);
     for (const r of note.related) {
       if (!group.related.includes(r)) group.related.push(r);
     }
   }
-
-  const droppedNotes = draft.notes.filter((note) => {
-    const validCount = passagesOf(note).filter((p) => byId.has(p.highlight_id) && p.coverage !== "named").length;
-    return validCount === 0;
-  }).length;
 
   // Unassigned: highlights that appear in no note and are not in unused_ids.
   // A named highlight was filed and set aside on purpose, so it is neither.
@@ -681,9 +907,15 @@ export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: Pl
 
     const draftNote = draft.notes.find((n) => safeTitle(n.title).toLowerCase() === groupKey);
 
+    const article: Article = {
+      definition: group.definition,
+      sections: group.sections,
+      figures: group.highlights.filter(isFigure),
+    };
+
     const home = byName.get(group.title.toLowerCase());
     if (home) {
-      const merged = mergeTopicHighlights(mdOf(home), manifest.pdfBasename, group.highlights, { classCode: opts.classCode });
+      const merged = mergeArticle(mdOf(home), manifest.pdfBasename, article, { classCode: opts.classCode });
       latest.set(home.path, merged.md);
       notes.push({
         title: home.title,
@@ -696,6 +928,7 @@ export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: Pl
         added: merged.added,
         skipped: merged.skipped,
         kind: home.kind,
+        sections: merged.sections.length ? merged.sections : undefined,
         groups: [group.title],
       });
       continue;
@@ -720,10 +953,7 @@ export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: Pl
     );
     if (route) {
       const target = opts.pages.find((p) => p.path === route.to.path)!;
-      const merged = mergeTopicHighlights(mdOf(target), manifest.pdfBasename, group.highlights, {
-        classCode: opts.classCode,
-        section: route.heading || undefined,
-      });
+      const merged = mergeArticle(mdOf(target), manifest.pdfBasename, article, { section: route.heading || undefined, classCode: opts.classCode });
       latest.set(target.path, merged.md);
       notes.push({
         title: target.title,
@@ -736,9 +966,7 @@ export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: Pl
         added: merged.added,
         skipped: merged.skipped,
         kind: target.kind,
-        sections: merged.section
-          ? [{ heading: merged.section.heading, keys: group.highlights.map((h) => h.key), created: merged.section.created }]
-          : undefined,
+        sections: merged.sections.length ? merged.sections : undefined,
         routed: [{ from: group.title, heading: route.heading, why: route.why, keys: group.highlights.map((h) => h.key) }],
         groups: [group.title],
       });
@@ -764,6 +992,7 @@ export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: Pl
         kind,
         aliases: draftNote?.aliases ?? [],
         tag: draftNote?.tag ?? "other",
+        article,
       }),
       added: group.highlights.length,
       skipped: 0,
@@ -804,7 +1033,7 @@ export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: Pl
     for (const g of note.groups) if (!seen.groups.includes(g)) seen.groups.push(g);
   }
 
-  return { notes: coalesced, unknownIds, unassignedIds, namedIds, droppedNotes };
+  return { notes: coalesced, unknownIds, unassignedIds, namedIds, orphans, droppedIds, droppedNotes };
 }
 
 /** One row of the digest preview as the reader left it: the row it was, and the title in its box. */

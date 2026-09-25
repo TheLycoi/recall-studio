@@ -236,38 +236,47 @@ manifest** overwrites the manifest; it never touches a topic note
 (default topic folder `classes`; the class code comes from
 `sources/class notes/<code>/` or is asked for once). Frontmatter links the
 PDF, then a title, a short model-written summary, and every highlight
-assigned to that topic as a row in page order. The summary, and the
-passage and label on each row, come from the model; every link and callout
-is rendered by code straight from the manifest. A verbatim highlight and a
-rectangle on one page render exactly like this (`src/topicNote.ts`):
+assigned to that topic. The page is written the way the upstream wiki
+(gd4ai/obsidian-llm-wiki) writes one: an opening under `## Definition`
+(or `## Description` for an entity), then one to four sections, each a
+subtopic with prose in the model's own words, and beneath each section's
+prose the highlights it rests on, verbatim, as PDF++ callouts. The model
+writes the prose; every link in it is rendered by code — a citation
+`[H03]` becomes the PDF++ link that opens the source at that highlight,
+with the file's title and page as its text, and a mention `{{Kinetics}}`
+becomes a wikilink only when a page answers to that name (`resolveProseLinks`,
+`src/proseLinks.ts`). A page with one section and one figure renders like
+this (`renderTopicNote`, `src/topicNote.ts`):
 
 ````markdown
 ---
-type: topic
+type: concept
 class: HBIO250
 created: 2026-09-10
 source_file: "[[HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf]]"
-tags: [hbio250]
+tags: [term]
+aliases:
+  - "Drug Receptors"
 ---
 
 # Receptors
 
-## Summary
-Receptors bind drugs with high affinity and transduce a signal, which is what separates them from inert binding proteins such as albumin; the better the structural fit, the higher the affinity.
+## Definition
+Receptors are the proteins a drug binds to, and binding is only half of what makes one [[HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=4&selection=2,0,33,19&color=yellow|HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.4]]. They sit at the centre of [[classes/HBIO250/Pharmacology|Pharmacology]].
 
-## Highlights
+## Two Properties
+A receptor binds a ligand with high affinity and then transduces a signal; albumin binds many drugs and transduces nothing, which is what separates a carrier from a receptor [[HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=4&selection=2,0,33,19&color=yellow|HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.4]].
 
 > [!PDF|yellow] [[HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=4&selection=2,0,33,19&color=yellow|HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.4]]
 > > Receptors have 2 important properties:
 > > 1. They bind ligands (or drugs) with relatively high affinity, and after they bind a drug…
 > > 2. They transduce a signal to produce a biological effect (this property distinguishes receptors from inert binding sites – e.g., albumin – a blood protein that binds/carries many drugs but does not transduce a signal)
 
+## Figures
 ![[HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=4&rect=13,55,713,222|HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.4]]
 
 ## Related topics
 - [[Pharmacology]]
-
-## Flashcard Seeds
 ````
 
 **The reader's notes are input.** A class note is usually a heading, a
@@ -281,39 +290,33 @@ together, in one `<highlight>` block per highlight (`buildDigestMessage`,
 `src/prompt.ts`). What the reader wrote under a slide is what the page
 should say about it.
 
-**Passages.** For each highlight it files, the model returns a *passage*
-(`DigestOut.notes[].passages`, `src/schemas.ts`): a label of at most six
-words naming the fact, one to three sentences of digested text drawn from
-the quote, the reader's notes and the paper, a `verbatim` flag for wording
-worth keeping exactly (a formula, a definition, a list of criteria), and
-`coverage` — `defined`, `discussed`, or `named`. A highlight the source
-only *names* (a slide title, a heading) is filed by the model and kept out
-of the page by code (`planTopicNotes`, `src/topicNote.ts`), reported as
-"N slide titles left out".
+**What the model returns** (`DigestOut`, `src/schemas.ts`): per page, a
+`summary` — the opening, two to five sentences — and `sections`, each a
+`heading`, `prose` of two to six sentences, and `quote_ids`, the highlights
+quoted verbatim beneath that prose. Every highlight filed under a page goes
+in exactly one section's `quote_ids`; slide titles and logistics go in
+`unused_ids`. Prose cites by id after the sentence it supports and mentions
+other pages in double braces; it never writes a bracket. An id the manifest
+lacks is dropped from the prose and counted; a name no page answers to is
+left as plain words and reported as an orphan. No stub page is ever created.
 
-**How a row prints** (`renderHighlightRow`, `src/topicNote.ts`), by the
-reader's rule of 2026-09-24: a passage is a bullet whose link text is the
-label — the same shape a hand-written class note uses —
-
-```markdown
-- [[HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=4&selection=2,0,33,19&color=yellow|Receptor affinity]]: Receptors bind drugs with high affinity and pass the signal on, which is what separates them from albumin.
-```
-
-and a verbatim quote, or any row with no passage, is a PDF++ callout whose
-link text is the file's title and page, the way PDF++ copies one, with a
-list on the slide kept as a list inside the callout. A rectangle with no
-text is still the bare embed. Reading is symmetric: `parseTopicNote` takes
-a passage row's text from the line with its link and the colon removed, so
-Ask's evidence index and the quiz see the passage.
+**Merging into a page that exists** (`mergeArticle`, `src/topicNote.ts`):
+each section goes under the page's heading of that name, or a new heading
+placed with the other subtopics, linked to the slide its first quote came
+from. Prose the page already holds is not written twice, a highlight already
+on the page is not quoted again, and the page's own opening is never
+touched. When the model's proposal was a subtopic of a page the reader has
+(`closest_existing`), the whole article is filed under that one heading,
+with each section's name as a bold lead line.
 
 **Product: Notes / Flashcards / Both.** Every digest run asks which product
 to build (default **Notes**). **Flashcards** skips the model call entirely
 and queues every highlight with text straight into the inbox, where the
 usual writer, critique, and lint chain handles cards. **Both** writes the
-topic notes and also queues each written row into the inbox with the
-page's label and passage as the card writer's instruction
+topic notes and also queues each quoted highlight into the inbox with the
+prose written around it as the card writer's instruction
 (`renderRowInstruction`, `src/topicNote.ts`): the card is a view of the
-note, while the highlight stays the verbatim source the cloze check reads
+page, while the highlight stays the verbatim source the cloze check reads
 against. (`src/digest.ts`, `src/capture.ts` — `captureManifestHighlights`.)
 
 **Never overwritten.** Writing into a topic note that already exists only

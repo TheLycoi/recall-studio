@@ -275,7 +275,7 @@ test("the ask message ends with the answer-then-cite instruction, after the ques
 
 // --- schemas ----------------------------------------------------------------
 
-const PASSAGE = { highlight_id: "H01", label: "Receptor affinity", text: "Receptors bind drugs with high affinity.", verbatim: false, coverage: "defined" };
+const SECTION = { heading: "Affinity", prose: "Receptors bind drugs with high affinity [H01].", quote_ids: ["H01"] };
 
 test("a highlight with reader notes renders as a block with the quote, the notes and the heading", () => {
   const msg = p.buildDigestMessage({
@@ -295,13 +295,13 @@ test("a highlight with a heading but no notes stays one line and keeps the headi
   assert.ok(msg.includes('<highlight id="H01" page="2" heading="Kinetics">Q</highlight>'), msg);
 });
 
-test("DigestOut accepts a well-formed draft and rejects a note without passages", () => {
+test("DigestOut accepts a well-formed draft and rejects a note without sections", () => {
   const ok = schemas.DigestOut.safeParse({
     notes: [
       {
         title: "T",
         summary: "S",
-        passages: [PASSAGE],
+        sections: [SECTION],
         related: [],
         kind: "concept",
         aliases: ["T2"],
@@ -315,14 +315,14 @@ test("DigestOut accepts a well-formed draft and rejects a note without passages"
   assert.equal(ok.success, true, "a complete note parses");
 
   const missing = schemas.DigestOut.safeParse({ notes: [{ title: "T", summary: "S", related: [] }], unused_ids: [] });
-  assert.equal(missing.success, false, "passages is required, not optional");
+  assert.equal(missing.success, false, "sections is required, not optional");
 
   const noUnused = schemas.DigestOut.safeParse({ notes: [] });
   assert.equal(noUnused.success, false, "unused_ids is required too");
 });
 
 test("DigestOut requires kind, aliases, tag, closest_existing and why_new on every note", () => {
-  const note = { title: "T", summary: "S", passages: [PASSAGE], related: [] };
+  const note = { title: "T", summary: "S", sections: [SECTION], related: [] };
   assert.equal(schemas.DigestOut.safeParse({ notes: [note], unused_ids: [] }).success, false);
   const full = { ...note, kind: "concept", aliases: ["T2"], tag: "term", closest_existing: "", why_new: "Nothing listed holds it." };
   assert.equal(schemas.DigestOut.safeParse({ notes: [full], unused_ids: [] }).success, true);

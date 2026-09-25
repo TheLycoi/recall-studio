@@ -1326,52 +1326,107 @@ test("a passage row reads back with the passage as its text, and a callout row w
   assert.equal(parsed.highlights[1].text, "L = m * v");
 });
 
-test("planTopicNotes files highlights from passages, carries them onto the rows, and keeps named ones out", () => {
+test("planTopicNotes writes an article: resolved prose, quotes as callouts under their section, figures, related", () => {
   const draft = {
     notes: [
       {
         title: "Receptors",
-        summary: "S",
-        related: [],
-        passages: [
-          { highlight_id: "H01", label: "Receptor affinity", text: "Receptors bind drugs with high affinity.", verbatim: false, coverage: "defined" },
-          { highlight_id: "H02", label: "Slide title", text: "", verbatim: false, coverage: "named" },
+        summary: "Receptors are the proteins drugs bind to [H01]. They are studied within {{Pharmacology}} and mentioned by {{Nobody Home}}.",
+        related: ["Pharmacology"],
+        kind: "concept",
+        aliases: ["Drug receptors"],
+        tag: "term",
+        closest_existing: "",
+        why_new: "no page holds it",
+        sections: [
+          { heading: "Two Properties", prose: "A receptor binds with high affinity and then transduces a signal [H01]; albumin does neither [H09].", quote_ids: ["H01"] },
+          { heading: "Figures Only", prose: "", quote_ids: ["H02"] },
         ],
       },
     ],
     unused_ids: [],
   };
-  const manifest = manifestFor([{ ...SELECTION_HIGHLIGHT, id: "H01" }, { ...RECT_HIGHLIGHT, id: "H02", text: "Types of receptors" }]);
-  const result = tn.planTopicNotes(draft, manifest, { classCode: "HBIO250", topicFolder: "classes", created: "2026-09-10", pages: [] });
+  const manifest = manifestFor([{ ...SELECTION_HIGHLIGHT, id: "H01" }, { ...RECT_HIGHLIGHT, id: "H02" }]);
+  const pages = [{ path: "classes/HBIO250/Pharmacology.md", title: "Pharmacology", kind: "concept", aliases: [], classCodes: ["HBIO250"], md: "---\nclass: HBIO250\n---\n# Pharmacology\n" }];
+  const result = tn.planTopicNotes(draft, manifest, { classCode: "HBIO250", topicFolder: "classes", created: "2026-09-10", pages });
   assert.equal(result.notes.length, 1);
-  assert.equal(result.notes[0].highlights.length, 1);
-  const [row] = result.notes[0].highlights;
-  assert.equal(row.id, "H01");
-  assert.equal(row.passage, "Receptors bind drugs with high affinity.");
-  assert.equal(row.label, "Receptor affinity");
-  assert.equal(row.verbatim, false);
-  assert.equal(row.coverage, "defined");
-  assert.deepEqual(result.namedIds, ["H02"]);
-  assert.deepEqual(result.unassignedIds, [], "a named highlight is neither unassigned nor unused");
-  assert.ok(result.notes[0].content.includes("|Receptor affinity]]: Receptors bind drugs with high affinity."), result.notes[0].content);
+  const md = result.notes[0].content;
+  const cite = `[[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|${PDF_BASENAME}, p.4]]`;
+  assert.ok(md.includes(`## Definition\nReceptors are the proteins drugs bind to ${cite}. They are studied within [[classes/HBIO250/Pharmacology|Pharmacology]] and mentioned by Nobody Home.`), md);
+  assert.ok(md.includes(`## Two Properties\nA receptor binds with high affinity and then transduces a signal ${cite}; albumin does neither.\n\n> [!PDF|yellow] ${cite}\n> > Receptors have 2 important properties:`), md);
+  assert.ok(md.includes(`## Figures\n![[${PDF_BASENAME}.pdf#page=4&rect=13,55,713,222|${PDF_BASENAME}, p.4]]`), md);
+  assert.ok(md.includes("## Related topics\n- [[Pharmacology]]"), md);
+  assert.ok(!md.includes("## Summary") && !md.includes("## Highlights") && !md.includes("## Flashcard Seeds"), "the article shape replaces the old body");
+  assert.ok(!md.includes("{{") && !md.includes("[H0"), "no marker survives to disk");
+  assert.deepEqual(result.orphans, ["Nobody Home"]);
+  assert.deepEqual(result.droppedIds, ["H09"]);
+  assert.deepEqual(result.unknownIds, ["H09"]);
+  assert.equal(result.notes[0].highlights.length, 2);
+  assert.equal(result.notes[0].highlights[0].verbatim, true);
+  assert.equal(result.notes[0].highlights[0].passage, "A receptor binds with high affinity and then transduces a signal Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.4; albumin does neither.".replace("Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.4", `${PDF_BASENAME}, p.4`), "the card writer gets the prose around the quote");
   assert.equal(manifest.highlights[0].passage, undefined, "the manifest's own row is untouched");
 });
 
-test("a passage with empty text renders verbatim, and a pre-2.0 draft with highlight_ids still plans", () => {
+test("a pre-article draft with passages or highlight_ids still plans: unnamed sections under the opening", () => {
   const manifest = manifestFor([{ ...SELECTION_HIGHLIGHT, id: "H01" }]);
   const opts = { classCode: "HBIO250", topicFolder: "classes", created: "2026-09-10", pages: [] };
-  const blank = tn.planTopicNotes(
-    { notes: [{ title: "Receptors", summary: "S", related: [], passages: [{ highlight_id: "H01", label: "", text: "   ", verbatim: false, coverage: "discussed" }] }], unused_ids: [] },
+  const passages = tn.planTopicNotes(
+    { notes: [{ title: "Receptors", summary: "S", related: [], passages: [{ highlight_id: "H01", label: "Receptor affinity", text: "Receptors bind drugs with high affinity.", verbatim: false, coverage: "defined" }] }], unused_ids: [] },
     manifest,
     opts,
   );
-  assert.equal(blank.notes[0].highlights[0].verbatim, true);
-  assert.equal(blank.notes[0].highlights[0].passage, undefined);
-  assert.ok(blank.notes[0].content.includes("> [!PDF|yellow]"), blank.notes[0].content);
+  const md = passages.notes[0].content;
+  assert.ok(md.includes("## Definition\nS\n\nReceptors bind drugs with high affinity.\n\n> [!PDF|yellow]"), md);
+  assert.equal(passages.notes[0].highlights[0].verbatim, true);
   const legacy = tn.planTopicNotes({ notes: [{ title: "Receptors", summary: "S", related: [], highlight_ids: ["H01"] }], unused_ids: [] }, manifest, opts);
   assert.equal(legacy.notes.length, 1);
-  assert.equal(legacy.notes[0].highlights[0].verbatim, true);
-  assert.deepEqual(legacy.namedIds, []);
+  assert.ok(legacy.notes[0].content.includes("## Definition\nS\n\n> [!PDF|yellow]"), legacy.notes[0].content);
+  const named = tn.planTopicNotes(
+    { notes: [{ title: "Receptors", summary: "S", related: [], passages: [{ highlight_id: "H01", label: "", text: "", verbatim: false, coverage: "named" }] }], unused_ids: [] },
+    manifest,
+    opts,
+  );
+  assert.deepEqual(named.namedIds, ["H01"]);
+  assert.equal(named.notes.length, 0);
+});
+
+test("mergeArticle appends a section's prose and new quotes under the page's heading, creates a missing one, and never repeats", () => {
+  const cite = `[[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|${PDF_BASENAME}, p.4]]`;
+  const existing = `---\nclass: HBIO250\n---\n# Receptors\n\n## Definition\nOld opening.\n\n## Two Properties\nOld prose.\n\n## Related topics\n- [[Pharmacology]]\n`;
+  const article = {
+    definition: "A new opening the page must not gain.",
+    sections: [
+      { heading: "Two Properties", prose: `Binding and transduction ${cite}.`, highlights: [wikiHighlight({ verbatim: true })] },
+      { heading: "Albumin Contrast", prose: "Albumin binds but never transduces.", highlights: [] },
+    ],
+    figures: [],
+  };
+  const r = tn.mergeArticle(existing, PDF_BASENAME, article);
+  assert.equal(r.added, 1);
+  assert.equal(r.skipped, 0);
+  assert.ok(r.md.includes(`## Two Properties\nOld prose.\n\nBinding and transduction ${cite}.\n\n> [!PDF|yellow] ${cite}\n> > Some highlight text`), r.md);
+  assert.ok(r.md.includes("## Albumin Contrast\n\nAlbumin binds but never transduces."), r.md);
+  assert.ok(r.md.indexOf("## Albumin Contrast") < r.md.indexOf("## Related topics"), "a new section sits with the subtopics");
+  assert.ok(r.md.includes("## Definition\nOld opening.\n\n## Two Properties"), "the page's own opening is untouched");
+  assert.deepEqual(r.sections.map((x) => [x.heading, x.created]), [["Two Properties", false], ["Albumin Contrast", true]]);
+
+  const again = tn.mergeArticle(r.md, PDF_BASENAME, article);
+  assert.equal(again.added, 0);
+  assert.equal(again.skipped, 1);
+  assert.equal(again.md, r.md, "nothing is written twice");
+});
+
+test("mergeArticle with a section files the whole article under that heading, section names as lead lines", () => {
+  const existing = `---\nclass: HBIO250\n---\n# Pharmacology\n\n## Dosing\nDose text.\n\n## Related topics\n- [[x]]\n`;
+  const article = { definition: "Receptors are what drugs bind to.", sections: [{ heading: "Two Properties", prose: "Bind, then transduce.", highlights: [wikiHighlight({ verbatim: true })] }], figures: [] };
+  const r = tn.mergeArticle(existing, PDF_BASENAME, article, { section: "Receptors" });
+  assert.ok(r.md.includes(`## [[${PDF_BASENAME}.pdf#page=4|Receptors]]\n\nReceptors are what drugs bind to.\n\n**Two Properties**\n\nBind, then transduce.\n\n> [!PDF|yellow]`), r.md);
+  assert.deepEqual(r.sections, [{ heading: "Receptors", keys: ["page=4&selection=2,0,33,19"], created: true }]);
+});
+
+test("parseTopicNote reads the opening from Definition or Description as it did from Summary", () => {
+  assert.equal(tn.parseTopicNote("---\nclass: X\n---\n# T\n\n## Definition\nThe opening.\n\n## Next\nmore\n").summary, "The opening.");
+  assert.equal(tn.parseTopicNote("---\nclass: X\n---\n# T\n\n## Description\nAn entity.\n").summary, "An entity.");
 });
 
 test("a rect row with no text is still the bare embed, and a mention row is still its line", () => {
