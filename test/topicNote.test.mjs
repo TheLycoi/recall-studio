@@ -1794,3 +1794,16 @@ test("planTopicNotes passes the coverage check per target page and flags rows a 
   assert.ok(fresh.notes[0].content.includes("> > Receptors have 2"), "but a new page still quotes it: the row belongs there");
   assert.ok(seen.some(([p]) => p === null), "the class-wide check was asked with no page");
 });
+
+test("the coverage check sees prose without its citation text, so a file's title cannot dilute the claim", () => {
+  const cite = `[[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|${PDF_BASENAME}, p.4]]`;
+  const seen = [];
+  const covered = (text) => {
+    seen.push(text);
+    return false;
+  };
+  const existing = "---\nclass: HBIO250\n---\n# R\n\n## Definition\nOld.\n";
+  tn.mergeArticle(existing, PDF_BASENAME, { definition: "", sections: [{ heading: "S", prose: `Receptors bind ligands ${cite}. They also link to [[classes/HBIO250/Pharmacology|Pharmacology]].`, highlights: [] }], figures: [] }, { covered });
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0], "Receptors bind ligands. They also link to Pharmacology.");
+});

@@ -652,6 +652,15 @@ function plainProse(prose: string): string {
     .trim();
 }
 
+/**
+ * Prose as a claim to check for coverage: PDF++ citations removed outright
+ * (their display text is a file title and a page, which would dilute the
+ * claim's words), other wikilinks reduced to their words.
+ */
+function proseWords(prose: string): string {
+  return plainProse(prose.replace(/\s*!?\[\[[^\]]*\.pdf#[^\]]*\]\]/gi, "")).replace(/\s+([.,;:!?])/g, "$1");
+}
+
 /** Whether a rectangle row is a figure: geometry only, no words. */
 function isFigure(h: ManifestHighlight): boolean {
   return !!h.target.rect && !h.text;
@@ -738,7 +747,7 @@ export function mergeArticle(
     let firstPage: number | null = null;
     for (const sec of secs) {
       let prose = sec.prose.trim() && !existingText.includes(foldQuote(plainProse(sec.prose))) ? sec.prose.trim() : "";
-      if (prose && covered(plainProse(prose))) {
+      if (prose && covered(proseWords(prose))) {
         said++;
         prose = "";
       }

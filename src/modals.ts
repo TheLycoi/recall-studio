@@ -371,7 +371,10 @@ export class DigestPreviewModal extends Modal {
     private resolve: (v: PreparedNote[] | null) => void,
   ) {
     super(app);
-    this.checked = notes.map((n) => !(n.exists && n.added === 0));
+    // A merge that adds no quote may still add prose — an article section
+    // written into a page — and `sections` records where it went, so such a
+    // row is ticked; a row that would change nothing is not.
+    this.checked = notes.map((n) => !(n.exists && n.added === 0 && !(n.sections && n.sections.length)));
     this.titles = notes.map((n) => n.title);
   }
 
