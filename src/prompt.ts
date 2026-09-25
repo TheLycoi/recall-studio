@@ -59,6 +59,8 @@ export interface DigestExistingNote {
   /** The first sentence of its summary, or "". */
   summary: string;
   classCodes: string[];
+  /** For a page in the run's class: each heading with the first sentence beneath it, so the model sees what the page already says. */
+  outline?: Array<{ heading: string; lead: string }>;
 }
 
 export interface DigestMessageArgs {
@@ -90,7 +92,11 @@ export function buildDigestMessage(a: DigestMessageArgs): string {
       if (n.aliases.length) parts.push(`aliases: ${n.aliases.join(", ")}`);
       if (n.classCodes.length) parts.push(`class ${n.classCodes.join(", ")}`);
       const lines = [`${n.title.trim()} (${parts.join("; ")})`];
-      for (const s of n.sections.slice(0, 20)) lines.push(`  ## ${s}`);
+      const leads = new Map((n.outline ?? []).map((o) => [o.heading, o.lead.trim()]));
+      for (const s of n.sections.slice(0, 20)) {
+        const lead = leads.get(s);
+        lines.push(lead ? `  ## ${s} — ${lead}` : `  ## ${s}`);
+      }
       if (n.summary.trim()) lines.push(`  summary: ${n.summary.trim()}`);
       return lines.join("\n");
     })

@@ -18,7 +18,8 @@ import { collectPdfHighlights, readManifestNote, writeManifest } from "./pdfHigh
 import { isPdfFile } from "./pdf";
 import type { DigestDraft } from "./schemas";
 import { suggestPdfHighlights } from "./suggest";
-import { applyDigestChoices, mergeTopicHighlights, noteAliases, noteSections, parseTopicNote, planTopicNotes, type ExistingPage, type PreparedNote } from "./topicNote";
+import { applyDigestChoices, mergeTopicHighlights, noteAliases, noteOutline, noteSections, parseTopicNote, planTopicNotes, type ExistingPage, type PreparedNote } from "./topicNote";
+import { coveredBy, indexNote, type EvidenceUnit } from "./retrieval";
 import type { DigestExistingNote } from "./prompt";
 
 /** Local calendar date, `YYYY-MM-DD`, for the topic note's `created` field. */
@@ -117,7 +118,7 @@ async function existingPages(plugin: WikiLmPlugin, topicFolder: string): Promise
 }
 
 /** The same pages as the prompt lists them: what each is, what it is also called, and what is already under it. */
-function toDigestExisting(pages: ExistingPage[]): DigestExistingNote[] {
+function toDigestExisting(pages: ExistingPage[], classCode: string): DigestExistingNote[] {
   return pages.map((p) => ({
     title: p.title,
     kind: p.kind,
@@ -125,7 +126,39 @@ function toDigestExisting(pages: ExistingPage[]): DigestExistingNote[] {
     sections: noteSections(p.md).filter((s) => !/^(Summary|Highlights|Related topics|Flashcard Seeds|Key claims)$/i.test(s)),
     summary: (parseTopicNote(p.md).summary.split(/(?<=[.!?])\s/)[0] ?? "").trim(),
     classCodes: p.classCodes,
+    // A page of this class is shown with what it already says under each
+    // heading, so the model can tell a highlight that adds from one that
+    // repeats. Other classes stay a title and a line: routing needs the
+    // name, not the contents.
+    outline: p.classCodes.includes(classCode) ? noteOutline(p.md) : undefined,
   }));
+}
+
+/**
+ * The coverage check the planner and the merge use: whether a page — or any
+ * page of the class, with `pagePath` null — already states a thing in other
+ * words. Built once per run from the pages' evidence units, the same units
+ * Ask retrieves over (src/retrieval.ts indexNote, coveredBy).
+ */
+function coverageCheck(pages: ExistingPage[], classCode: string): (pagePath: string | null, text: string) => boolean {
+  const units = new Map<string, EvidenceUnit[]>();
+  const unitsOf = (p: ExistingPage) => {
+    let u = units.get(p.path);
+    if (!u) {
+      u = indexNote(p.path, p.md);
+      units.set(p.path, u);
+    }
+    return u;
+  };
+  const inClass = pages.filter((p) => p.classCodes.includes(classCode));
+  return (pagePath, text) => {
+    if (!text.trim()) return false;
+    if (pagePath) {
+      const page = pages.find((p) => p.path === pagePath);
+      return page ? coveredBy(text, unitsOf(page)).covered : false;
+    }
+    return inClass.some((p) => coveredBy(text, unitsOf(p)).covered);
+  };
 }
 
 /** Ask the model for a draft; null when the call failed (the Notice is raised here). */
@@ -144,7 +177,7 @@ async function draftFromModel(
       classCode,
       paperText,
       highlights: manifest.highlights.map((h) => ({ id: h.id, page: h.page, text: h.text, heading: h.heading, notes: h.notes })),
-      existingNotes: toDigestExisting(pages),
+      existingNotes: toDigestExisting(pages, classCode),
       maxNotes: s.digestMaxNotes,
       standingInstructions: s.digestInstructions,
       instruction,
@@ -266,8 +299,9 @@ export async function digestPdf(plugin: WikiLmPlugin, source: TFile, opts: Diges
     if (!draft) return;
 
     const created = today();
+    const covered = coverageCheck(pages, classCode);
     const plan = async (d: DigestDraft, keepAsNew: string[] = []) =>
-      planTopicNotes(d, manifest, { classCode, topicFolder, created, pages, keepAsNew });
+      planTopicNotes(d, manifest, { classCode, topicFolder, created, pages, keepAsNew, coveredBy: covered });
 
     const planned = await plan(draft);
     if (planned.notes.length === 0) {
@@ -305,6 +339,7 @@ export async function digestPdf(plugin: WikiLmPlugin, source: TFile, opts: Diges
     let written = 0;
     let appended = 0;
     let alreadyPresent = 0;
+    let said = 0;
     let queued = 0;
     for (const note of toWrite) {
       const path = normalizePath(note.path);
@@ -332,6 +367,7 @@ export async function digestPdf(plugin: WikiLmPlugin, source: TFile, opts: Diges
       written++;
       appended += note.added;
       alreadyPresent += note.skipped;
+      said += note.said ?? 0;
       if (product === "both") queued += captureManifestHighlights(plugin, manifest, note.highlights, note.title, path).added;
     }
 
@@ -340,6 +376,7 @@ export async function digestPdf(plugin: WikiLmPlugin, source: TFile, opts: Diges
       `${appended} highlight${appended === 1 ? "" : "s"} appended`,
       `${alreadyPresent} skipped as present`,
     ];
+    if (said > 0) bits.push(`${said} already said`);
     if (queued > 0) bits.push(`${queued} flashcard${queued === 1 ? "" : "s"} queued`);
     const named = finalPlan.namedIds.length;
     if (named > 0) bits.push(`${named} slide title${named === 1 ? "" : "s"} left out`);

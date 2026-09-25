@@ -143,6 +143,53 @@ export function noteSections(md: string): string[] {
   return out;
 }
 
+/** One heading of a page and the first sentence of prose beneath it: what the page already says there. */
+export interface OutlineEntry {
+  heading: string;
+  lead: string;
+}
+
+/** The most of a lead sentence that is shown. */
+const LEAD_MAX = 160;
+
+/**
+ * Each `##` heading of a page with the first sentence of prose under it,
+ * links reduced to their words. This is what the digest is shown for a page
+ * in the run's class, in place of one summary sentence: enough to tell that
+ * a page already states a fact, without sending the page.
+ */
+export function noteOutline(md: string): OutlineEntry[] {
+  const body = md.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
+  const out: OutlineEntry[] = [];
+  let current: OutlineEntry | null = null;
+  let fenced = false;
+  for (const raw of body.split("\n")) {
+    const line = raw.trim();
+    if (/^(```|~~~)/.test(line)) {
+      fenced = !fenced;
+      continue;
+    }
+    if (fenced) continue;
+    const h = /^##\s+(.*)$/.exec(line);
+    if (h) {
+      current = { heading: headingDisplay(h[1]), lead: "" };
+      out.push(current);
+      continue;
+    }
+    if (/^#/.test(line)) {
+      current = null;
+      continue;
+    }
+    if (!current || current.lead || !line) continue;
+    if (/^(>|!\[\[|[-*+]\s|\d+[.)]\s|(-{3,}|\*{3,}|_{3,})$)/.test(line)) continue;
+    const words = plainProse(line);
+    if (!words) continue;
+    const sentence = (/^[\s\S]*?[.!?](?=\s|$)/.exec(words)?.[0] ?? words).trim();
+    current.lead = sentence.length > LEAD_MAX ? `${sentence.slice(0, LEAD_MAX - 1).replace(/\s+\S*$/, "")}…` : sentence;
+  }
+  return out;
+}
+
 /**
  * The `aliases:` of a note's frontmatter, inline (`[a, b]`) or as a block
  * list, unquoted. Another name a reader gave the note is another name the
@@ -456,6 +503,13 @@ export interface ExistingPage {
 }
 
 export interface PlanTopicNotesOptions {
+  /**
+   * Whether a page — or, with `pagePath` null, any page of the class —
+   * already states `text` in other words (src/retrieval.ts coveredBy, over
+   * the page's evidence units). Injected by the caller, which has the
+   * index; the planner stays pure.
+   */
+  coveredBy?: (pagePath: string | null, text: string) => boolean;
   classCode: string;
   topicFolder: string;
   created: string;
@@ -479,6 +533,8 @@ export interface PreparedNote {
   content: string;
   added: number;
   skipped: number;
+  /** Quotes and paragraphs the page already stated in other words, left out. */
+  said?: number;
   /**
    * For an existing note, the sections its highlights were filed under and
    * which of them the merge created, keyed back to the highlights by `key` so
@@ -642,6 +698,8 @@ function renderArticleBody(pdfBasename: string, kind: WikiKind, article: Article
 export interface ArticleMergeResult extends MergeResult {
   /** Every section the merge wrote into or created, with the keys of the highlights it placed there. */
   sections: Array<{ heading: string; keys: string[]; created: boolean }>;
+  /** Quotes and paragraphs the page already stated in other words, left out (see src/retrieval.ts coveredBy). */
+  said: number;
 }
 
 /**
@@ -658,15 +716,20 @@ export function mergeArticle(
   existingMd: string,
   pdfBasename: string,
   article: Article,
-  opts: { section?: string; classCode?: string } = {},
+  opts: { section?: string; classCode?: string; covered?: (text: string) => boolean } = {},
 ): ArticleMergeResult {
   const existingKeys = new Set(findAllPdfReferences(existingMd).map((r) => highlightKey(r.target)));
   // Links reduced to their words on both sides, so prose that was written
   // with its citations rendered still reads as already present.
   const existingText = foldQuote(plainProse(existingMd));
+  // Whether the page already states a thing in other words: the caller's
+  // check, from the page's own evidence units. Without one, only exact
+  // repeats are caught.
+  const covered = opts.covered ?? (() => false);
   let body = existingMd;
   let added = 0;
   let skipped = 0;
+  let said = 0;
   const filed: ArticleMergeResult["sections"] = [];
 
   const blockFor = (secs: ArticleSection[], leadLines: boolean): { text: string; keys: string[]; firstPage: number | null } => {
@@ -674,9 +737,20 @@ export function mergeArticle(
     const keys: string[] = [];
     let firstPage: number | null = null;
     for (const sec of secs) {
-      const prose = sec.prose.trim() && !existingText.includes(foldQuote(plainProse(sec.prose))) ? sec.prose.trim() : "";
-      const fresh = sec.highlights.filter((h) => !isFigure(h) && !existingKeys.has(h.key));
-      skipped += sec.highlights.filter((h) => !isFigure(h)).length - fresh.length;
+      let prose = sec.prose.trim() && !existingText.includes(foldQuote(plainProse(sec.prose))) ? sec.prose.trim() : "";
+      if (prose && covered(plainProse(prose))) {
+        said++;
+        prose = "";
+      }
+      const quotable = sec.highlights.filter((h) => !isFigure(h));
+      const unseen = quotable.filter((h) => !existingKeys.has(h.key));
+      skipped += quotable.length - unseen.length;
+      const fresh = unseen.filter((h) => {
+        if (!covered(h.text)) return true;
+        h.covered = true;
+        said++;
+        return false;
+      });
       if (!prose && fresh.length === 0) continue;
       added += fresh.length;
       for (const h of fresh) {
@@ -716,7 +790,7 @@ export function mergeArticle(
     const secs: ArticleSection[] = [{ heading: "", prose: article.definition, highlights: [] }, ...article.sections];
     const { text, keys, firstPage } = blockFor(secs, true);
     if (text) place(safeHeading(opts.section), text, keys, firstPage);
-    return { md: opts.classCode ? addClassCode(body, opts.classCode) : body, added, skipped, sections: filed };
+    return { md: opts.classCode ? addClassCode(body, opts.classCode) : body, added, skipped, said, sections: filed };
   }
 
   for (const sec of article.sections) {
@@ -724,7 +798,7 @@ export function mergeArticle(
     if (!text) continue;
     place(safeHeading(sec.heading), text, keys, firstPage);
   }
-  return { md: opts.classCode ? addClassCode(body, opts.classCode) : body, added, skipped, sections: filed };
+  return { md: opts.classCode ? addClassCode(body, opts.classCode) : body, added, skipped, said, sections: filed };
 }
 
 export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: PlanTopicNotesOptions): PlanTopicNotesResult {
@@ -912,10 +986,11 @@ export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: Pl
       sections: group.sections,
       figures: group.highlights.filter(isFigure),
     };
+    const coveredIn = (path: string | null) => (opts.coveredBy ? (text: string) => opts.coveredBy!(path, text) : undefined);
 
     const home = byName.get(group.title.toLowerCase());
     if (home) {
-      const merged = mergeArticle(mdOf(home), manifest.pdfBasename, article, { classCode: opts.classCode });
+      const merged = mergeArticle(mdOf(home), manifest.pdfBasename, article, { classCode: opts.classCode, covered: coveredIn(home.path) });
       latest.set(home.path, merged.md);
       notes.push({
         title: home.title,
@@ -927,6 +1002,7 @@ export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: Pl
         content: merged.md,
         added: merged.added,
         skipped: merged.skipped,
+        said: merged.said,
         kind: home.kind,
         sections: merged.sections.length ? merged.sections : undefined,
         groups: [group.title],
@@ -953,7 +1029,7 @@ export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: Pl
     );
     if (route) {
       const target = opts.pages.find((p) => p.path === route.to.path)!;
-      const merged = mergeArticle(mdOf(target), manifest.pdfBasename, article, { section: route.heading || undefined, classCode: opts.classCode });
+      const merged = mergeArticle(mdOf(target), manifest.pdfBasename, article, { section: route.heading || undefined, classCode: opts.classCode, covered: coveredIn(target.path) });
       latest.set(target.path, merged.md);
       notes.push({
         title: target.title,
@@ -965,6 +1041,7 @@ export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: Pl
         content: merged.md,
         added: merged.added,
         skipped: merged.skipped,
+        said: merged.said,
         kind: target.kind,
         sections: merged.sections.length ? merged.sections : undefined,
         routed: [{ from: group.title, heading: route.heading, why: route.why, keys: group.highlights.map((h) => h.key) }],
@@ -974,6 +1051,19 @@ export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: Pl
     }
 
     const kind: WikiKind = draftNote?.kind ?? "concept";
+    // A new page quotes every highlight filed under it — they belong there —
+    // but a row some page of the class already states is flagged, so the
+    // preview can say so and no card is written for it.
+    const classWide = coveredIn(null);
+    let saidElsewhere = 0;
+    if (classWide) {
+      for (const h of group.highlights) {
+        if (!isFigure(h) && classWide(h.text)) {
+          h.covered = true;
+          saidElsewhere++;
+        }
+      }
+    }
     notes.push({
       title: group.title,
       path: `${opts.topicFolder}/${opts.classCode}/${group.title}.md`,
@@ -996,6 +1086,7 @@ export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: Pl
       }),
       added: group.highlights.length,
       skipped: 0,
+      said: saidElsewhere,
       kind,
       whyNew: draftNote?.why_new ?? "",
       groups: [group.title],
@@ -1027,6 +1118,7 @@ export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: Pl
     seen.content = note.content;
     seen.added += note.added;
     seen.skipped += note.skipped;
+    if (note.said) seen.said = (seen.said ?? 0) + note.said;
     if (note.sections?.length) seen.sections = [...(seen.sections ?? []), ...note.sections];
     if (note.routed?.length) seen.routed = [...(seen.routed ?? []), ...note.routed];
     for (const r of note.related) if (!seen.related.includes(r)) seen.related.push(r);

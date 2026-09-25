@@ -811,3 +811,17 @@ test("ALIASES_SYSTEM says how many aliases and what other is for", () => {
   assert.ok(src.includes("one or two"), "the number of aliases is stated");
   assert.ok(src.includes("other is the escape hatch"), "other is named as the escape hatch, not a default");
 });
+
+// ---- coverage: the digest sees what each page already says
+
+test("an existing note with an outline prints each heading with its lead; without one, headings alone", () => {
+  const msg = p.buildDigestMessage({
+    ...digestBase,
+    existingNotes: [
+      { title: "Kinetics", kind: "concept", aliases: [], sections: ["Definition", "Linear Impulse"], summary: "Forces that cause motion.", classCodes: ["HBIO408"], outline: [{ heading: "Definition", lead: "The study of forces that cause motion." }, { heading: "Linear Impulse", lead: "" }] },
+      { title: "Other", kind: "concept", aliases: [], sections: ["A"], summary: "", classCodes: ["PSYC360"] },
+    ],
+  });
+  assert.ok(msg.includes("Kinetics (concept; class HBIO408)\n  ## Definition — The study of forces that cause motion.\n  ## Linear Impulse\n  summary: Forces that cause motion.\n"), msg);
+  assert.ok(msg.includes("Other (concept; class PSYC360)\n  ## A\n"), msg);
+});

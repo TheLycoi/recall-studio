@@ -686,3 +686,54 @@ export function scopeFor(
   }
   return { units: inScope, scope: `in ${code}` };
 }
+
+// ---- coverage: does a page already say this? ---------------------------------
+
+export interface Coverage {
+  covered: boolean;
+  /** Fraction of the claim's significant words found in the best single unit. */
+  score: number;
+  /** The unit that covered it best, for a report; null when nothing matched. */
+  best: EvidenceUnit | null;
+}
+
+/** The bar for a longer claim: this share of its words in one passage, and at least `MIN_SHARED` of them. */
+const COVERED_SHARE = 0.6;
+const MIN_SHARED = 4;
+/** Up to this many significant words, every word has to match: one word off a short claim is a different claim. */
+const SHORT_CLAIM = 5;
+
+/**
+ * Whether a page already states a claim.
+ *
+ * The digest used to file a highlight into a page without reading the
+ * page, so a fact the page already held was written a second time in other
+ * words. This is the read: the claim's significant words against each
+ * evidence unit of the page, scored by the best single unit — one passage
+ * has to say it, not the page as a whole, or a page that mentions every
+ * word somewhere would count as saying everything.
+ *
+ * The bar is restatement, not topic. Wozniak's interference rule (the wiki's
+ * "Combating interference") is that near-twins are what hurt, while the same
+ * fact from a different angle is redundancy worth having, so a claim that
+ * shares most of its words with one passage is treated as already said, and
+ * one that merely shares the subject is not.
+ */
+export function coveredBy(claim: string, units: EvidenceUnit[]): Coverage {
+  const tokens = [...new Set(significantTokens(claim))];
+  if (tokens.length === 0 || units.length === 0) return { covered: false, score: 0, best: null };
+  let best: EvidenceUnit | null = null;
+  let bestHits = 0;
+  for (const u of units) {
+    const have = new Set(significantTokens(u.text));
+    let hits = 0;
+    for (const w of tokens) if (have.has(w)) hits++;
+    if (hits > bestHits) {
+      bestHits = hits;
+      best = u;
+    }
+  }
+  const score = bestHits / tokens.length;
+  const covered = tokens.length <= SHORT_CLAIM ? bestHits === tokens.length : score >= COVERED_SHARE && bestHits >= MIN_SHARED;
+  return { covered, score, best };
+}

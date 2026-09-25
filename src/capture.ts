@@ -373,7 +373,10 @@ export function captureManifestHighlights(
   let skipped = 0;
   for (const item of items) {
     const text = item.text.trim();
-    if (text.length < 3) {
+    // A row a page of the class already states is knowledge the reader has
+    // on a page already, and a card for it would be a near-twin of one they
+    // may hold; the planner flagged it, and it is not carded here.
+    if (text.length < 3 || item.covered) {
       skipped++;
       continue;
     }

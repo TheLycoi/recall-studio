@@ -695,3 +695,25 @@ test("a span with no text is verbatim, as before, so older drafts still plan", (
   assert.equal(rows[0].verbatim, true);
   assert.equal(rows[0].passage, undefined);
 });
+
+// ---- coverage: a span the target page already states is dropped, with a count
+
+test("planWikiNotes drops a span its page already states and counts it as covered", () => {
+  const m = maps();
+  const res = sp.verifySpans(draftOf([span(1, "Albumin is an inert binding protein."), span(1, "Affinity rises with structural fit.")]), m, opts());
+  const rows = sp.toManifestHighlights(res.spans, m);
+  const md = `---\nclass: ${CLASS_CODE}\n---\n\n## Receptors\n\nAlbumin is an inert protein that binds drugs.\n`;
+  const coveredBy = (path, text) => path === "wiki/concepts/Pharmacology.md" && /albumin/i.test(text);
+  const out = sp.planWikiNotes(res.spans, rows, [], [{ title: "Pharmacology", kind: "concept", path: "wiki/concepts/Pharmacology.md", md }], {
+    classCode: CLASS_CODE,
+    pdfBasename: PDF_BASENAME,
+    conceptsFolder: "wiki/concepts",
+    entitiesFolder: "wiki/entities",
+    coveredBy,
+  });
+  assert.equal(out.covered, 1);
+  assert.equal(out.notes.length, 1);
+  assert.equal(out.notes[0].added, 1);
+  assert.ok(out.notes[0].content.includes("> > Affinity rises with structural fit."), out.notes[0].content);
+  assert.ok(!out.notes[0].content.includes("> > Albumin is an inert binding protein."), out.notes[0].content);
+});

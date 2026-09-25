@@ -421,8 +421,8 @@ export class DigestPreviewModal extends Modal {
       // tells them apart, and a page created fresh says what it is and why it
       // had to be one.
       const badgeText = note.exists
-        ? `${note.routed?.length ? "filed" : "merge"}: +${note.added}, ${note.skipped} skipped`
-        : `new ${note.kind ?? "concept"}${note.whyNew ? ` — ${note.whyNew}` : ""}`;
+        ? `${note.routed?.length ? "filed" : "merge"}: +${note.added}, ${note.skipped} skipped${note.said ? `, ${note.said} already said` : ""}`
+        : `new ${note.kind ?? "concept"}${note.said ? ` (${note.said} already said elsewhere)` : ""}${note.whyNew ? ` — ${note.whyNew}` : ""}`;
       head.createSpan({ text: badgeText, cls: "wikilm-badge wikilm-preview-badge" });
 
       card.createEl("div", { text: note.path, cls: "wikilm-muted" });
@@ -500,6 +500,8 @@ export interface SuggestPreviewExtras {
   alreadyPresent: number;
   /** Proposed notes the planner filed into existing ones instead of creating. */
   routed: number;
+  /** Spans left out because their page already states them in other words. */
+  covered?: number;
 }
 
 export interface SuggestPreviewChoice {
@@ -549,6 +551,7 @@ export class SuggestPreviewModal extends Modal {
     if (this.extras.routed > 0) {
       countsText += ` · ${this.extras.routed} proposed note${this.extras.routed === 1 ? "" : "s"} filed into existing ones`;
     }
+    if (this.extras.covered) countsText += ` · ${this.extras.covered} already said by the page`;
     if (this.extras.flashcards > 0) countsText += ` · ${this.extras.flashcards} flashcards will be queued`;
     contentEl.createEl("p", { text: countsText, cls: "wikilm-muted wikilm-preview-counts" });
 
@@ -571,7 +574,7 @@ export class SuggestPreviewModal extends Modal {
         const kind = parent.endsWith("entities") ? "entity" : "concept";
         badgeText = `new (${kind})`;
       } else {
-        badgeText = `exists: +${note.added}, ${note.skipped} skipped`;
+        badgeText = `exists: +${note.added}, ${note.skipped} skipped${note.said ? `, ${note.said} already said` : ""}`;
       }
       head.createSpan({ text: badgeText, cls: "wikilm-badge wikilm-preview-badge" });
 

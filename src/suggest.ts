@@ -21,6 +21,7 @@ import type { SuggestExistingNote } from "./prompt";
 import { SUGGEST_PER_PAGE } from "./settings";
 import { applyPreviewChoices, batchPages, planWikiNotes, toManifestHighlights, verifySpans, type VerifiedSpan, type WikiNoteIn } from "./suggestPlan";
 import { mergeWikiHighlights, noteSections, safeTitle, type PreparedNote, type WikiSchema } from "./topicNote";
+import { coveredBy, indexNote, type EvidenceUnit } from "./retrieval";
 
 /** How much of an already-selected passage the prompt shows (src/prompt.ts:267). */
 const ALREADY_SELECTED_CHARS = 80;
@@ -246,6 +247,20 @@ export async function suggestPdfHighlights(
 
     // (5) The notes the model may assign spans to by name.
     const wiki = await wikiNotes(plugin, classCode, manifest.sources);
+    // Read before writing: a span the target page already states in other
+    // words is dropped by the planner and counted for the preview.
+    const unitsByPath = new Map<string, EvidenceUnit[]>();
+    const covered = (pagePath: string | null, text: string): boolean => {
+      if (!pagePath || !text.trim()) return false;
+      const page = wiki.find((w) => w.path === pagePath);
+      if (!page) return false;
+      let units = unitsByPath.get(pagePath);
+      if (!units) {
+        units = indexNote(pagePath, page.md);
+        unitsByPath.set(pagePath, units);
+      }
+      return coveredBy(text, units).covered;
+    };
 
     // (6) One request per page batch, each told what the previous ones took.
     const perPage = SUGGEST_PER_PAGE[s.suggestGranularity];
@@ -321,6 +336,7 @@ export async function suggestPdfHighlights(
       conceptsFolder: s.wikiConceptsFolder,
       entitiesFolder: s.wikiEntitiesFolder,
       schema: s.wikiSchema,
+      coveredBy: covered,
     };
     const plan = planWikiNotes(accepted, highlights, newNotes, wiki, planOpts);
     const alreadyPresent = plan.notes.reduce((n, x) => n + x.skipped, 0);
@@ -329,7 +345,7 @@ export async function suggestPdfHighlights(
     const choices = await previewSuggestions(
       plugin.app,
       plan.notes,
-      { flashcards, unlocated, orphanTitles: plan.orphanTitles, alreadyPresent, routed: plan.routed.length },
+      { flashcards, unlocated, orphanTitles: plan.orphanTitles, alreadyPresent, routed: plan.routed.length, covered: plan.covered },
       manifest.pdfBasename,
     );
     if (choices === null) return;

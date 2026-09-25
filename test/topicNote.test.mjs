@@ -1740,3 +1740,57 @@ test("replaying a merge over its own output adds nothing: the highlights are alr
   assert.equal(twice.skipped, 2);
   assert.equal(twice.md, once.md);
 });
+
+// ---- coverage: the digest reads the page before it writes
+
+test("noteOutline lists each heading with the first sentence of prose beneath it, links reduced to words", () => {
+  const md = "---\nclass: HBIO408\n---\n# Kinetics\n\n## Definition\nThe study of forces that cause motion [[Deck.pdf#page=1|Deck, p.1]]. A second sentence.\n\n## [[Lab.pdf#page=1&selection=38,0,38,10|Linear Impulse]]\n[[Lab.pdf#page=1&selection=40,0,41,12|The effect of a force on a system]]: the net force acting over time\n\n> [!PDF] [[Lab.pdf#page=1|Lab, p.1]]\n> > quote\n\n## Empty\n\n## Related topics\n- [[x]]\n";
+  assert.deepEqual(tn.noteOutline(md), [
+    { heading: "Definition", lead: "The study of forces that cause motion Deck, p.1." },
+    { heading: "Linear Impulse", lead: "The effect of a force on a system: the net force acting over time" },
+    { heading: "Empty", lead: "" },
+    { heading: "Related topics", lead: "" },
+  ]);
+});
+
+test("mergeArticle with a coverage check does not quote or restate what the page already says, and counts it", () => {
+  const cite = `[[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|${PDF_BASENAME}, p.4]]`;
+  const existing = `---\nclass: HBIO250\n---\n# Receptors\n\n## Definition\nReceptors bind ligands with high affinity and transduce a signal.\n\n## Related topics\n- [[x]]\n`;
+  const covered = (text) => /transduce a signal/i.test(text);
+  const article = {
+    definition: "",
+    sections: [
+      { heading: "Two Properties", prose: `Receptors bind with high affinity and transduce a signal ${cite}.`, highlights: [wikiHighlight({ verbatim: true, text: "They bind ligands and transduce a signal" })] },
+      { heading: "Albumin", prose: "Albumin binds drugs but transduces nothing.", highlights: [wikiHighlight({ verbatim: true, key: "page=5&selection=1,0,1,4", target: { page: 5, selection: { beginIndex: 1, beginOffset: 0, endIndex: 1, endOffset: 4 }, color: "yellow" }, page: 5, text: "Albumin is inert" })] },
+    ],
+    figures: [],
+  };
+  const r = tn.mergeArticle(existing, PDF_BASENAME, article, { covered });
+  assert.equal(r.said, 2, "one quote and one prose paragraph the page already states");
+  assert.equal(r.added, 1);
+  assert.ok(!r.md.includes("## Two Properties"), "a section with nothing new is not created");
+  assert.ok(r.md.includes("## [[" + PDF_BASENAME + ".pdf#page=5|Albumin]]\n\nAlbumin binds drugs but transduces nothing."), r.md);
+  assert.ok(r.md.includes("> > Albumin is inert"), r.md);
+  assert.equal(tn.mergeArticle(existing, PDF_BASENAME, article).said, 0, "no check, nothing counted");
+});
+
+test("planTopicNotes passes the coverage check per target page and flags rows a new page's class already states", () => {
+  const manifest = manifestFor([{ ...SELECTION_HIGHLIGHT, id: "H01" }]);
+  const home = { path: "classes/HBIO250/Receptors.md", title: "Receptors", kind: "concept", aliases: [], classCodes: ["HBIO250"], md: "---\nclass: HBIO250\n---\n# Receptors\n\n## Definition\nOld.\n" };
+  const seen = [];
+  const coveredBy = (path, text) => {
+    seen.push([path, text.slice(0, 20)]);
+    return /Receptors have 2 important properties/.test(text);
+  };
+  const draft = { notes: [{ title: "Receptors", summary: "S", related: [], sections: [{ heading: "Props", prose: "Two properties [H01].", quote_ids: ["H01"] }] }], unused_ids: [] };
+  const merged = tn.planTopicNotes(draft, manifest, { classCode: "HBIO250", topicFolder: "classes", created: "2026-09-10", pages: [home], coveredBy });
+  assert.equal(merged.notes[0].said, 1, "the quote the page already states is counted, not written");
+  assert.ok(seen.some(([p]) => p === home.path), "the check was asked about the target page");
+  assert.ok(!merged.notes[0].content.includes("> > Receptors have 2"), merged.notes[0].content);
+
+  const fresh = tn.planTopicNotes({ ...draft, notes: [{ ...draft.notes[0], title: "Brand New" }] }, manifest, { classCode: "HBIO250", topicFolder: "classes", created: "2026-09-10", pages: [home], coveredBy });
+  assert.equal(fresh.notes[0].exists, false);
+  assert.equal(fresh.notes[0].highlights[0].covered, true, "a new page's row is flagged when the class already says it");
+  assert.ok(fresh.notes[0].content.includes("> > Receptors have 2"), "but a new page still quotes it: the row belongs there");
+  assert.ok(seen.some(([p]) => p === null), "the class-wide check was asked with no page");
+});

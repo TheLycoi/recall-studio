@@ -648,3 +648,36 @@ test("scopeFor: a named class too thin to answer from falls back to the vault an
   assert.equal(thin.units.length, 2, "the whole vault stands in");
   assert.ok(thin.scope.startsWith("the whole vault (PHED163 has 1 note"), thin.scope);
 });
+
+// ---- coverage: does a page already say this?
+
+test("coveredBy: a claim the page restates is covered; one it only touches is not", () => {
+  const units = rt.indexNote("wiki/concepts/Linear Kinematics.md", [
+    "---",
+    "class: HBIO408",
+    "---",
+    "[[Deck.pdf#page=34&selection=5,0,6,1|Velocity (m/s):]] Change in position in a given change in time (x/t) Speed & Direction (vector)",
+    "[[Deck.pdf#page=34&selection=12,0,15,1|Acceleration (m/s2):]] Change in velocity in given change in time (Vx/t)",
+    "[[Deck.pdf#page=54&selection=0,0,0,31|First Central Difference Method]]",
+    "Numerical method used to approximate derivatives (i.e., slope)",
+  ].join("\n"));
+  // The same fact in other words, from another deck.
+  assert.equal(rt.coveredBy("Velocity is the change in position over a change in time, a vector with speed and direction", units).covered, true);
+  // A fact the page names but never states: the heading is there, the explanation is not.
+  const cdm = rt.coveredBy("The first central difference method estimates the derivative at frame i from frames i+1 and i-1, halving the noise of consecutive-frame differencing", units);
+  assert.equal(cdm.covered, false);
+  assert.ok(cdm.score < 0.6, `score ${cdm.score}`);
+  // Nothing in common at all.
+  assert.equal(rt.coveredBy("Conduct disorder involves little regard for others", units).covered, false);
+  // Empty inputs are never covered.
+  assert.equal(rt.coveredBy("", units).covered, false);
+  assert.equal(rt.coveredBy("Velocity is change in position", []).covered, false);
+});
+
+test("coveredBy: a short claim needs all of its words matched; the best unit is reported", () => {
+  const units = rt.indexNote("n.md", "---\nclass: X\n---\n- Impulse equals the change in momentum\n- Sarcomeres are the contractile units of muscle\n");
+  const hit = rt.coveredBy("Impulse equals change in momentum", units);
+  assert.equal(hit.covered, true);
+  assert.ok(hit.best && hit.best.text.startsWith("Impulse equals"), hit.best && hit.best.text);
+  assert.equal(rt.coveredBy("Impulse equals change in energy", units).covered, false, "one word off a four-word claim is a different claim");
+});

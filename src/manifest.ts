@@ -43,6 +43,8 @@ export interface ManifestHighlight {
   label?: string;
   verbatim?: boolean;
   coverage?: "defined" | "discussed" | "named";
+  /** Set by the planner: a page in the class already states this highlight, so it is reported as already said and not carded. */
+  covered?: boolean;
 }
 
 export interface Manifest {

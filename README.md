@@ -300,6 +300,22 @@ other pages in double braces; it never writes a bracket. An id the manifest
 lacks is dropped from the prose and counted; a name no page answers to is
 left as plain words and reported as an orphan. No stub page is ever created.
 
+**The digest reads before it writes** (`coveredBy`, `src/retrieval.ts`).
+Every page of the run's class is indexed into the same evidence units Ask
+retrieves over, and a highlight or a paragraph is *already said* when one
+passage of the target page holds most of its significant words — sixty
+percent and at least four of them for a longer claim, every word for a
+short one. The bar is restatement, not topic: the wiki's interference rule
+is that near-twins are what hurt, and the same fact from another angle is
+redundancy worth keeping. What is already said is not quoted or written
+again, is counted in the preview ("already said") and the notice, and is
+not queued as a flashcard. A new page still quotes every highlight filed
+under it, but a row some page of the class already states is flagged. The
+model sees the same thing from its side: for each page of the class, the
+first sentence under every heading, so it can write about what is new.
+The suggester drops a span its target page already states, before the
+merge, and the preview counts those too.
+
 **Merging into a page that exists** (`mergeArticle`, `src/topicNote.ts`):
 each section goes under the page's heading of that name, or a new heading
 placed with the other subtopics, linked to the slide its first quote came

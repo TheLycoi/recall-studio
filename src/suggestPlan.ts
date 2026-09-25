@@ -230,6 +230,8 @@ export interface PlanWikiOptions {
   keepAsNew?: string[];
   /** Random source for the related-links walk; tests seed it. */
   ppr?: PPROptions;
+  /** Whether the page at `pagePath` already states `text` in other words; a span it does is dropped and counted (src/retrieval.ts coveredBy). */
+  coveredBy?: (pagePath: string | null, text: string) => boolean;
 }
 
 /** A proposed note filed into an existing one instead of being created. */
@@ -245,6 +247,8 @@ export interface PlanWikiResult {
   notes: PreparedNote[];
   orphanTitles: string[];
   routed: RoutedNote[];
+  /** Spans left out because their page already states them in other words. */
+  covered: number;
 }
 
 function joinPath(folder: string, file: string): string {
@@ -466,13 +470,23 @@ export function planWikiNotes(
   }
 
   const notes: PreparedNote[] = [];
+  let covered = 0;
   for (const key of order) {
     const group = groups.get(key)!;
     if (group.rows.length === 0) continue;
-    const rows = group.rows.slice().sort((a, b) => a.page - b.page);
+    let rows = group.rows.slice().sort((a, b) => a.page - b.page);
 
     const existing = wikiByTitle.get(key);
     if (existing) {
+      // The page is read before it is written to: a span it already states
+      // in other words is not a highlight worth adding, so it is dropped here
+      // and counted, before the merge sees it.
+      if (opts.coveredBy) {
+        const kept = rows.filter((r) => !opts.coveredBy!(existing.path, r.text));
+        covered += rows.length - kept.length;
+        rows = kept;
+        if (rows.length === 0) continue;
+      }
       const bySection = new Map<string, ManifestHighlight[]>();
       for (const row of rows) {
         const section = group.sectionByKey.get(row.key) ?? "";
@@ -551,7 +565,7 @@ export function planWikiNotes(
     });
   }
 
-  return { notes, orphanTitles, routed };
+  return { notes, orphanTitles, routed, covered };
 }
 
 /**
