@@ -681,22 +681,30 @@ function proseWords(prose: string): string {
  * paragraph still reads in context. `said` is how many were dropped; an
  * empty `text` means the whole paragraph was.
  */
-function pruneSaid(prose: string, covered: (text: string) => boolean): { text: string; said: number } {
+function pruneSaid(prose: string, covered: (text: string) => boolean): { text: string; said: number; total: number } {
   const sentences = prose
     .split(/(?<=[.!?])\s+/)
     .map((x) => x.trim())
     .filter(Boolean);
   const kept: string[] = [];
   let said = 0;
+  let total = 0;
   for (const sentence of sentences) {
     const words = proseWords(sentence);
-    if (words.length >= 20 && covered(words)) {
+    // Only a sentence long enough to carry a claim is judged; a fragment is
+    // neither counted nor dropped.
+    if (words.length < 20) {
+      kept.push(sentence);
+      continue;
+    }
+    total++;
+    if (covered(words)) {
       said++;
       continue;
     }
     kept.push(sentence);
   }
-  return { text: kept.join(" "), said };
+  return { text: kept.join(" "), said, total };
 }
 
 /** Whether a rectangle row is a figure: geometry only, no words. */
@@ -792,7 +800,18 @@ export function mergeArticle(
       if (prose) {
         const pruned = pruneSaid(prose, covered);
         said += pruned.said;
-        prose = pruned.text;
+        // A section the page has mostly said already is a restatement of what
+        // the reader wrote, and the sentence or two the check let through is
+        // not worth a heading of its own beside theirs. The whole section is
+        // dropped, and its count says so.
+        // Half is enough. A section the page has already said half of is a
+        // rewrite of the reader's own words, and the rest of it is the model
+        // filling around what it just restated; measured on a real PSYC360
+        // run, the sentences that survived at half were the weakest in the
+        // draft.
+        const mostlySaid = pruned.total >= 2 && pruned.said * 2 >= pruned.total;
+        prose = mostlySaid ? "" : pruned.text;
+        if (mostlySaid) said += pruned.total - pruned.said;
       }
       const quotable = sec.highlights.filter((h) => !isFigure(h));
       const unseen = quotable.filter((h) => !existingKeys.has(h.key));
@@ -832,6 +851,18 @@ export function mergeArticle(
     if (found) {
       body = spliceIntoSection(body, found.end, text);
       filed.push({ heading: found.heading, keys, created: false });
+      return;
+    }
+    // Before founding a heading, look for one the page already has that
+    // covers the same ground: the model renames freely ("Conduct Disorder and
+    // Oppositional Defiant Disorder" for a section the reader called
+    // "Attachment Disorders, Conduct Disorder, and Oppositional Defiant
+    // Disorder"), and two headings about one subject is the duplication this
+    // merge exists to avoid.
+    const near = nearestHeading(body, heading);
+    if (near) {
+      body = spliceIntoSection(body, near.end, text);
+      filed.push({ heading: near.heading, keys, created: false });
       return;
     }
     // A created heading links to the slide its first quote came from, as the
@@ -1732,6 +1763,36 @@ export function spliceIntoSection(body: string, headingEnd: number, text: string
   const appended = sectionCore.length > 0 ? `${sectionCore}${gap}${text}` : text;
 
   return body.slice(0, headingEnd) + appended + trailingBlanks + body.slice(sectionEnd);
+}
+
+/** Words of a heading worth matching on: the significant ones, folded. */
+function headingWords(heading: string): Set<string> {
+  const stop = new Set(["and", "or", "the", "of", "in", "a", "an", "for", "with", "to", "disorder", "disorders"]);
+  return new Set(
+    headingDisplay(heading)
+      .toLowerCase()
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter((w) => w.length >= 3 && !stop.has(w)),
+  );
+}
+
+/**
+ * A heading the page already has that covers the same subject as `wanted`:
+ * one whose significant words are a subset of the other's, in either
+ * direction. "Conduct Disorder and Oppositional Defiant Disorder" finds the
+ * reader's "Attachment Disorders, Conduct Disorder, and Oppositional Defiant
+ * Disorder"; "Treatment" does not match "Causes". Null when nothing fits.
+ */
+export function nearestHeading(body: string, wanted: string): HeadingLine | null {
+  const want = headingWords(wanted);
+  if (want.size === 0) return null;
+  for (const h of scanHeadings(body)) {
+    const have = headingWords(h.heading);
+    if (have.size === 0) continue;
+    const shared = [...want].filter((w) => have.has(w)).length;
+    if (shared === want.size || shared === have.size) return h;
+  }
+  return null;
 }
 
 /** The `##` heading in `body` that names `wanted`, compared as a reader would. */

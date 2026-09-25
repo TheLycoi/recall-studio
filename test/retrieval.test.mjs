@@ -681,3 +681,10 @@ test("coveredBy: a short claim needs all of its words matched; the best unit is 
   assert.ok(hit.best && hit.best.text.startsWith("Impulse equals"), hit.best && hit.best.text);
   assert.equal(rt.coveredBy("Impulse equals change in energy", units).covered, false, "one word off a four-word claim is a different claim");
 });
+
+test("coveredBy matches across word forms, so a restatement is not missed by an inflection", () => {
+  const units = rt.indexNote("n.md", "---\nclass: X\n---\n- CD is defined by persistent, repetitive behavior showing little regard for others such as bullying, fighting, stealing and sexual assault, spilling into school failure and damaged relationships against stressful homes\n");
+  const restated = "The DSM requires that conduct disorder behavior be persistent and repetitive rather than a single episode, and the clinical picture is one of little regard for others: bullying, fighting, stealing and sexual assault, spilling over into school failure and damaged relationships, often against a background of stressful homes";
+  const r = rt.coveredBy(restated, units);
+  assert.equal(r.covered, true, `scored ${r.score.toFixed(2)}`);
+});

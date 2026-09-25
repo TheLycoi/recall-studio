@@ -1812,10 +1812,19 @@ test("sentences the page already states are dropped from a paragraph and counted
   const existing = "---\nclass: HBIO408\n---\n# K\n\n## Definition\nOld.\n";
   const cite = "[[Lab.pdf#page=1&selection=1,0,1,4|Lab, p.1]]";
   const mostly = `Linear impulse is the area under the force-time curve ${cite}. It equals the change in momentum of the object ${cite}. A dive needs both linear and angular impulse ${cite}.`;
+  // Two of three already said is "mostly": the leftover sentence does not earn
+  // a heading beside the reader's own, so the section is dropped whole and
+  // every sentence in it is counted.
   const r1 = tn.mergeArticle(existing, "Lab", { definition: "", sections: [{ heading: "Impulse", prose: mostly, highlights: [] }], figures: [] }, { covered });
-  assert.equal(r1.said, 2, "two sentences the page already states");
-  assert.ok(r1.md.includes(`## Impulse\n\nA dive needs both linear and angular impulse ${cite}.\n`), r1.md);
-  assert.ok(!r1.md.includes("It equals the change"), r1.md);
+  assert.equal(r1.said, 3, "the section was mostly restatement, so all three are counted");
+  assert.ok(!r1.md.includes("## Impulse"), r1.md);
+
+  // One of three is under half: the section is created with the two new sentences.
+  const someNew = `Linear impulse is the area under the force-time curve ${cite}. Propulsive impulse above braking impulse raises velocity ${cite}. A dive needs both linear and angular impulse ${cite}.`;
+  const r3 = tn.mergeArticle(existing, "Lab", { definition: "", sections: [{ heading: "Impulse", prose: someNew, highlights: [] }], figures: [] }, { covered });
+  assert.equal(r3.said, 1);
+  assert.ok(r3.md.includes("## Impulse\n\nPropulsive impulse above braking impulse raises velocity"), r3.md);
+  assert.ok(!r3.md.includes("Linear impulse is the area"), r3.md);
   const all = `Linear impulse is the area under the force-time curve ${cite}. It equals the change in momentum ${cite}.`;
   const r2 = tn.mergeArticle(existing, "Lab", { definition: "", sections: [{ heading: "Impulse", prose: all, highlights: [] }], figures: [] }, { covered });
   assert.equal(r2.said, 2);
@@ -1886,4 +1895,25 @@ test("a quote whose slide the page does not mention still lands at the end of th
   const r = tn.mergeArticle(existing, PDF_BASENAME, { definition: "", sections: [{ heading: "Binding", prose: "", highlights: [h] }], figures: [] });
   const lines = r.md.split("\n");
   assert.ok(lines.findIndex((l) => l.includes("> > Some highlight text")) > lines.findIndex((l) => l.includes("my own note")), r.md);
+});
+
+test("a section whose sentences are nearly all already said is not created at all", () => {
+  // Three of four sentences already on the page: the leftover does not earn a new heading.
+  const covered = (t) => /already one|already two|already three/i.test(t);
+  const existing = "---\nclass: X\n---\n# P\n\n## Definition\nOld.\n\n## Related topics\n- [[x]]\n";
+  const prose = "This sentence is already one of the page's own. This sentence is already two of them. This sentence is already three of them. A fourth sentence that is genuinely new here.";
+  const r = tn.mergeArticle(existing, "Deck", { definition: "", sections: [{ heading: "Mostly Said", prose, highlights: [] }], figures: [] }, { covered });
+  assert.equal(r.said, 4, "the section is dropped whole, so all four of its sentences are counted");
+  assert.ok(!r.md.includes("## Mostly Said"), `a section that is three-quarters restatement is dropped:\n${r.md}`);
+});
+
+test("a new section is never created under a heading the page already has, however it is worded", () => {
+  const existing = "---\nclass: X\n---\n# P\n\n## Attachment Disorders, Conduct Disorder, and Oppositional Defiant Disorder\nMy own notes.\n\n## Related topics\n- [[x]]\n";
+  const r = tn.mergeArticle(existing, "Deck", {
+    definition: "",
+    sections: [{ heading: "Conduct Disorder and Oppositional Defiant Disorder", prose: "Something new about CD and ODD.", highlights: [] }],
+    figures: [],
+  });
+  assert.ok(!r.md.includes("## Conduct Disorder and Oppositional Defiant Disorder"), `folded into the existing heading:\n${r.md}`);
+  assert.ok(r.md.includes("My own notes.\n\nSomething new about CD and ODD."), r.md);
 });
