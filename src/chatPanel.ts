@@ -192,13 +192,16 @@ export class ChatPanel {
   }
 
   /**
-   * Is this note one of the wiki's pages? Under the topic folder, and not the
-   * schema notes, which live inside it by default (`wiki/sources/schema`) but
-   * are house rules, not knowledge: they are not evidence for Ask, not nodes
-   * of the graph, and lint would only ever call them orphans.
+   * Is this note one of the wiki's pages? Under the topic folder, and neither
+   * a schema note nor a transcript. Both live inside the wiki by default
+   * (`wiki/sources/schema`, `wiki/sources/wispr`) but are not knowledge: the
+   * schema is house rules and a transcript is a lens on a PDF, never a
+   * source. Neither is evidence for Ask or a node of the graph, and lint
+   * would only ever call them orphans and off-schema.
    */
   private isWikiPage(path: string): boolean {
-    return path.startsWith(this.folderPrefix()) && !isUnderFolder(path, this.plugin.settings.schemaFolder);
+    const s = this.plugin.settings;
+    return path.startsWith(this.folderPrefix()) && !isUnderFolder(path, s.schemaFolder) && !isUnderFolder(path, s.transcriptFolder);
   }
 
   /**
