@@ -663,20 +663,32 @@ function proseWords(prose: string): string {
 
 
 /**
- * Whether a paragraph is already said: sentence by sentence, because the
- * check compares a claim with one passage of the page, and a paragraph of
- * four sentences never matches one passage even when the page states three
- * of them. Most of its sentences said means the paragraph is.
+ * A paragraph with the sentences the page already states removed.
+ *
+ * The check compares one claim with one passage of the page, so it is run
+ * sentence by sentence; a sentence the page already states is dropped, and
+ * the rest are kept, with their citations. The dropped sentence is usually
+ * the topic sentence — the one the model restated from the page — and the
+ * page's own version sits directly above in the same section, so the
+ * paragraph still reads in context. `said` is how many were dropped; an
+ * empty `text` means the whole paragraph was.
  */
-function paragraphCovered(prose: string, covered: (text: string) => boolean): boolean {
-  const sentences = proseWords(prose)
+function pruneSaid(prose: string, covered: (text: string) => boolean): { text: string; said: number } {
+  const sentences = prose
     .split(/(?<=[.!?])\s+/)
     .map((x) => x.trim())
-    .filter((x) => x.length >= 20);
-  if (sentences.length === 0) return false;
-  // Two sentences of three is most; integer arithmetic so the boundary holds.
-  const said = sentences.filter((x) => covered(x)).length;
-  return said * 3 >= sentences.length * 2;
+    .filter(Boolean);
+  const kept: string[] = [];
+  let said = 0;
+  for (const sentence of sentences) {
+    const words = proseWords(sentence);
+    if (words.length >= 20 && covered(words)) {
+      said++;
+      continue;
+    }
+    kept.push(sentence);
+  }
+  return { text: kept.join(" "), said };
 }
 
 /** Whether a rectangle row is a figure: geometry only, no words. */
@@ -765,9 +777,10 @@ export function mergeArticle(
     let firstPage: number | null = null;
     for (const sec of secs) {
       let prose = sec.prose.trim() && !existingText.includes(foldQuote(plainProse(sec.prose))) ? sec.prose.trim() : "";
-      if (prose && paragraphCovered(prose, covered)) {
-        said++;
-        prose = "";
+      if (prose) {
+        const pruned = pruneSaid(prose, covered);
+        said += pruned.said;
+        prose = pruned.text;
       }
       const quotable = sec.highlights.filter((h) => !isFigure(h));
       const unseen = quotable.filter((h) => !existingKeys.has(h.key));

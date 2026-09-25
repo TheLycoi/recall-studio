@@ -1807,15 +1807,17 @@ test("the coverage check sees prose without its citation text, so a file's title
   assert.deepEqual(seen, ["Receptors bind ligands.", "They also link to Pharmacology."], "one sentence at a time, citations gone, links reduced to words");
 });
 
-test("a paragraph is already said when most of its sentences are, judged one sentence at a time", () => {
+test("sentences the page already states are dropped from a paragraph and counted; the rest are kept with their citations", () => {
   const covered = (text) => /impulse is the area|equals the change in momentum/i.test(text);
   const existing = "---\nclass: HBIO408\n---\n# K\n\n## Definition\nOld.\n";
-  const mostly = "Linear impulse is the area under the force-time curve. It equals the change in momentum of the object. A dive needs both linear and angular impulse.";
+  const cite = "[[Lab.pdf#page=1&selection=1,0,1,4|Lab, p.1]]";
+  const mostly = `Linear impulse is the area under the force-time curve ${cite}. It equals the change in momentum of the object ${cite}. A dive needs both linear and angular impulse ${cite}.`;
   const r1 = tn.mergeArticle(existing, "Lab", { definition: "", sections: [{ heading: "Impulse", prose: mostly, highlights: [] }], figures: [] }, { covered });
-  assert.equal(r1.said, 1, "two of three sentences are on the page already");
-  assert.ok(!r1.md.includes("## Impulse"), r1.md);
-  const barely = "Linear impulse is the area under the force-time curve. Propulsive impulse exceeding braking impulse raises velocity. A dive needs both linear and angular impulse.";
-  const r2 = tn.mergeArticle(existing, "Lab", { definition: "", sections: [{ heading: "Impulse", prose: barely, highlights: [] }], figures: [] }, { covered });
-  assert.equal(r2.said, 0, "one of three is not most");
-  assert.ok(r2.md.includes("## Impulse\n\nLinear impulse"), r2.md);
+  assert.equal(r1.said, 2, "two sentences the page already states");
+  assert.ok(r1.md.includes(`## Impulse\n\nA dive needs both linear and angular impulse ${cite}.\n`), r1.md);
+  assert.ok(!r1.md.includes("It equals the change"), r1.md);
+  const all = `Linear impulse is the area under the force-time curve ${cite}. It equals the change in momentum ${cite}.`;
+  const r2 = tn.mergeArticle(existing, "Lab", { definition: "", sections: [{ heading: "Impulse", prose: all, highlights: [] }], figures: [] }, { covered });
+  assert.equal(r2.said, 2);
+  assert.ok(!r2.md.includes("## Impulse"), "nothing new, no section");
 });
