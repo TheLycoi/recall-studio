@@ -1,5 +1,6 @@
 import { App, ButtonComponent, Component, FuzzySuggestModal, MarkdownRenderer, Modal, Notice, Setting, SuggestModal, TFile, TFolder } from "obsidian";
 import type { TranscriptRecord } from "./model";
+import { orderTranscriptFiles } from "./util";
 import type { PreparedNote } from "./topicNote";
 import { rowLabel } from "./topicNote";
 import type { ManifestHighlight } from "./manifest";
@@ -122,18 +123,23 @@ class TranscriptFileSuggestModal extends FuzzySuggestModal<TFile> {
 
   constructor(
     app: App,
+    private folder: string,
     private resolve: (v: TFile | null) => void,
   ) {
     super(app);
-    this.setPlaceholder("Transcript file (md, txt, vtt, srt)");
+    this.setPlaceholder(folder ? `Transcript file — ${folder} first, newest on top` : "Transcript file (md, txt, vtt, srt)");
   }
 
   getItems(): TFile[] {
     const exts = new Set(["md", "txt", "vtt", "srt"]);
-    return this.app.vault
-      .getFiles()
-      .filter((f) => exts.has(f.extension.toLowerCase()))
-      .sort((a, b) => a.path.localeCompare(b.path));
+    const files = this.app.vault.getFiles().filter((f) => exts.has(f.extension.toLowerCase()));
+    // The lecture you just exported is the one you want: the transcript
+    // folder comes first, newest first, and the rest of the vault after.
+    const order = orderTranscriptFiles(
+      files.map((f) => ({ path: f.path, mtime: f.stat.mtime, file: f })), // obsidian.d.ts:7332 (stat)
+      this.folder,
+    );
+    return order.map((o) => o.file);
   }
 
   getItemText(item: TFile): string {
@@ -165,6 +171,7 @@ export class TranscriptModal extends Modal {
   constructor(
     app: App,
     private current: TranscriptRecord | undefined,
+    private folder: string,
     private resolve: (v: TranscriptChoice | null) => void,
   ) {
     super(app);
@@ -213,7 +220,7 @@ export class TranscriptModal extends Modal {
 
     new Setting(contentEl).addButton((b) =>
       b.setButtonText("Choose a file from the vault…").onClick(() => {
-        new TranscriptFileSuggestModal(this.app, async (file) => {
+        new TranscriptFileSuggestModal(this.app, this.folder, async (file) => {
           if (!file) return;
           const text = await this.app.vault.cachedRead(file);
           this.value = text;
@@ -261,8 +268,8 @@ export class TranscriptModal extends Modal {
   }
 }
 
-export function askTranscript(app: App, current: TranscriptRecord | undefined): Promise<TranscriptChoice | null> {
-  return new Promise((resolve) => new TranscriptModal(app, current, resolve).open());
+export function askTranscript(app: App, current: TranscriptRecord | undefined, folder = ""): Promise<TranscriptChoice | null> {
+  return new Promise((resolve) => new TranscriptModal(app, current, folder, resolve).open());
 }
 
 /** What a digest run should produce. */

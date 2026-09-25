@@ -59,7 +59,7 @@ import { digestPdf } from "./digest";
 import type { GateDecision } from "./digestGate";
 import { suggestPdfHighlights } from "./suggest";
 import { askTranscript } from "./modals";
-import { normalizeTranscript, truncateTranscript } from "./util";
+import { isUnderFolder, normalizeTranscript, truncateTranscript } from "./util";
 
 /** The linktext that opens a unit's PDF at the page and selection it came from. */
 function pdfLinktext(u: EvidenceUnit): string {
@@ -192,6 +192,16 @@ export class ChatPanel {
   }
 
   /**
+   * Is this note one of the wiki's pages? Under the topic folder, and not the
+   * schema notes, which live inside it by default (`wiki/sources/schema`) but
+   * are house rules, not knowledge: they are not evidence for Ask, not nodes
+   * of the graph, and lint would only ever call them orphans.
+   */
+  private isWikiPage(path: string): boolean {
+    return path.startsWith(this.folderPrefix()) && !isUnderFolder(path, this.plugin.settings.schemaFolder);
+  }
+
+  /**
    * Vault events invalidate the index rather than patching it: rebuilding is a
    * `cachedRead` per topic note, which is cheaper than keeping a correct
    * incremental index across renames. Registered through the view
@@ -201,7 +211,7 @@ export class ChatPanel {
     if (this.eventsRegistered) return;
     this.eventsRegistered = true;
     const vault = this.plugin.app.vault;
-    const touched = (path: string) => path.startsWith(this.folderPrefix());
+    const touched = (path: string) => this.isWikiPage(path);
     const invalidate = (file: TAbstractFile) => {
       if (touched(file.path)) {
         this.index = null;
@@ -226,10 +236,9 @@ export class ChatPanel {
   private async buildIndex(): Promise<EvidenceUnit[]> {
     if (this.index) return this.index;
     this.registerVaultEvents();
-    const prefix = this.folderPrefix();
     const units: EvidenceUnit[] = [];
     // obsidian.d.ts:7543 (getMarkdownFiles), :7420 (cachedRead).
-    const files = this.plugin.app.vault.getMarkdownFiles().filter((f: TFile) => f.path.startsWith(prefix));
+    const files = this.plugin.app.vault.getMarkdownFiles().filter((f: TFile) => this.isWikiPage(f.path));
     files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
     const meta: IntentPage[] = [];
     this.mdByPath = new Map();
@@ -288,7 +297,7 @@ export class ChatPanel {
     this.rerender();
     try {
       const prefix = this.folderPrefix();
-      const files = this.plugin.app.vault.getMarkdownFiles().filter((f: TFile) => f.path.startsWith(prefix));
+      const files = this.plugin.app.vault.getMarkdownFiles().filter((f: TFile) => this.isWikiPage(f.path));
       if (files.length === 0) {
         this.pushSystem(`No notes under “${prefix.replace(/\/$/, "")}”. Set the topic notes folder in WikiLM's settings.`);
         return;
@@ -305,6 +314,7 @@ export class ChatPanel {
       const sources = new Map<string, string>();
       for (const file of this.plugin.app.vault.getMarkdownFiles()) {
         if (file.path.startsWith(prefix) && !file.path.startsWith(`${prefix}sources/`)) continue;
+        if (isUnderFolder(file.path, this.plugin.settings.schemaFolder)) continue;
         sources.set(file.path, await this.plugin.app.vault.cachedRead(file));
       }
 
@@ -560,11 +570,10 @@ export class ChatPanel {
    */
   private buildGraphIndex(): Graph {
     if (this.graph) return this.graph;
-    const prefix = this.folderPrefix();
     const resolved = this.plugin.app.metadataCache.resolvedLinks;
     const nodes = this.plugin.app.vault
       .getMarkdownFiles()
-      .filter((f: TFile) => f.path.startsWith(prefix))
+      .filter((f: TFile) => this.isWikiPage(f.path))
       .map((f: TFile) => f.path);
     const known = new Set(nodes);
 
@@ -867,7 +876,7 @@ export class ChatPanel {
         {
           label: "Paste transcript or study guide",
           run: () => {
-            void askTranscript(this.plugin.app, this.plugin.store.getTranscript(pdf.path)).then((choice) => {
+            void askTranscript(this.plugin.app, this.plugin.store.getTranscript(pdf.path), this.plugin.settings.transcriptFolder).then((choice) => {
               if (choice === null || choice.action === "clear") {
                 resolve("skip");
                 return;
@@ -1399,7 +1408,7 @@ export class ChatPanel {
 
     const prefix = this.folderPrefix();
     if (this.turns.length === 0) {
-      const hasNotes = this.plugin.app.vault.getMarkdownFiles().some((f: TFile) => f.path.startsWith(prefix));
+      const hasNotes = this.plugin.app.vault.getMarkdownFiles().some((f: TFile) => this.isWikiPage(f.path));
       log.createDiv({
         cls: "wikilm-muted",
         text: hasNotes

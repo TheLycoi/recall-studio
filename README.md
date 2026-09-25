@@ -180,6 +180,15 @@ The **Transcript size limit** setting (default 150,000 characters) caps how
 much of the transcript is sent to the highlighter; longer transcripts are
 cut at a sentence boundary rather than mid-sentence.
 
+A lecture note exported by a notetaker such as Wispr Flow works as a
+transcript as it is: choose it with **Choose a file from the vault…**. The
+picker lists the **Transcript folder** (default `wiki/sources/wispr`) first,
+newest note on top, then the rest of the vault. The export's YAML
+frontmatter, its `> [!summary]` callout wrapper and the trailing pointer to
+its companion transcript file are stripped; the summary text, headings and
+bullets go to the highlighter. The note is a lens on the PDF, never a source:
+every highlight still points at a slide.
+
 Once a transcript is attached, both **AI-highlight this note and write
 cards** and **AI-highlight this note with instructions…** pick it up
 automatically, with no separate step, and the notice they show changes to
@@ -919,7 +928,8 @@ Before you return, check that your verdict rests on what the evidence states and
 | setting | default | effect |
 | --- | --- | --- |
 | Topic notes folder | `classes` | topic notes go to `<folder>/<class code>/<title>.md` |
-| Schema folder | `schema` | where `wikilm.md` and `wikilm-suggestions.md` live |
+| Schema folder | `wiki/sources/schema` | where `wikilm.md` and `wikilm-suggestions.md` live; not indexed, linted or graphed as pages |
+| Transcript folder | `wiki/sources/wispr` | where lecture notes and transcripts live; the transcript picker lists it first, newest on top |
 | Propose schema rules from my edits | **on** | watches your card edits and proposes a rule when the same correction repeats |
 | Max topic notes per PDF | 6 | caps how many topics the model may return per digest |
 | Paper text limit | 60,000 characters | how much of the PDF's text is sent for the summary, cut at a sentence boundary |

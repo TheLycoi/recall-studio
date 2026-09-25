@@ -31,6 +31,8 @@ export interface WikiLmSettings {
   highlighterInstructions: string;
   maxAiHighlights: number;
   transcriptMaxChars: number;
+  /** Where lecture notes and transcripts (Wispr Flow exports) live; the transcript picker lists this folder first. */
+  transcriptFolder: string;
   concurrency: number;
   notifyWhenReady: boolean;
 
@@ -133,6 +135,7 @@ export const DEFAULT_SETTINGS: WikiLmSettings = {
   highlighterInstructions: "",
   maxAiHighlights: 12,
   transcriptMaxChars: 150000,
+  transcriptFolder: "wiki/sources/wispr",
   concurrency: 2,
   notifyWhenReady: true,
 
@@ -157,7 +160,7 @@ export const DEFAULT_SETTINGS: WikiLmSettings = {
   exportFolder: "wikilm-exports",
 
   topicFolder: "classes",
-  schemaFolder: "schema",
+  schemaFolder: "wiki/sources/schema",
   digestMaxNotes: 6,
   digestInstructions: "",
   paperTextMaxChars: 60000,
@@ -225,6 +228,18 @@ export class WikiLmSettingTab extends PluginSettingTab {
       .addText((t) =>
         t.setValue(s.schemaFolder).onChange((v) => {
           s.schemaFolder = v.trim() || DEFAULT_SETTINGS.schemaFolder;
+          save();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Transcript folder")
+      .setDesc(
+        "Where your lecture notes and transcripts live (Wispr Flow exports, for instance). The transcript picker lists this folder first, newest note on top.",
+      )
+      .addText((t) =>
+        t.setValue(s.transcriptFolder).onChange((v) => {
+          s.transcriptFolder = v.trim() || DEFAULT_SETTINGS.transcriptFolder;
           save();
         }),
       );

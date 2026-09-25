@@ -250,8 +250,15 @@ const VTT_TAGS = /<\/?v(?:\s[^>]*)?>|<\/?c>|<\/?b>|<\/?i>/g;
  */
 export function normalizeTranscript(raw: string): string {
   let text = raw.replace(/\r\n/g, "\n");
+  // A note exported by a notetaker (Wispr Flow) opens with YAML frontmatter
+  // — an id, timestamps, the app's name — that says nothing about the lecture.
+  text = text.replace(/^---\n[\s\S]*?\n---\n?/, "");
 
   const lines = text.split("\n");
+  // The same export ends with a bare pointer to its companion transcript
+  // file, the note's own name with `-transcript` appended. Not content.
+  while (lines.length > 0 && lines[lines.length - 1].trim() === "") lines.pop();
+  if (lines.length > 0 && /^\S.*-transcript$/.test(lines[lines.length - 1].trim())) lines.pop();
   // Drop a leading WEBVTT header line (and anything after it on that line).
   if (lines.length > 0 && /^WEBVTT\b/.test(lines[0])) lines.shift();
 
@@ -273,7 +280,11 @@ export function normalizeTranscript(raw: string): string {
       continue;
     }
 
-    let cleaned = line.replace(LEADING_BRACKET_TS, "");
+    // An Obsidian callout header (`> [!summary]- Flow Summary`) is a wrapper,
+    // dropped; the quoted lines inside it are the summary itself, unwrapped.
+    if (/^>\s*\[![^\]]*\][+-]?/.test(line.trim())) continue;
+    let cleaned = line.replace(/^\s*>\s?/, "");
+    cleaned = cleaned.replace(LEADING_BRACKET_TS, "");
     cleaned = cleaned.replace(VTT_TAGS, "");
     cleaned = cleaned.replace(/[ \t]+/g, " ").trim();
     out.push(cleaned);
@@ -320,4 +331,24 @@ export function contentHash(text: string): string {
     h = Math.imul(h, 0x01000193) >>> 0;
   }
   return h.toString(16).padStart(8, "0");
+}
+
+/** Is `path` inside `folder` (a real segment boundary, so `wiki/schemas` is not under `wiki/schema`)? An empty folder holds nothing. */
+export function isUnderFolder(path: string, folder: string): boolean {
+  const f = folder.replace(/^\/+|\/+$/g, "");
+  if (!f) return false;
+  return path === f || path.startsWith(`${f}/`);
+}
+
+/**
+ * The order the transcript picker lists files in: the transcript folder's
+ * notes first, newest first — the lecture you just exported is the one you
+ * want — then everything else by path. An empty folder setting is plain path
+ * order.
+ */
+export function orderTranscriptFiles<T extends { path: string; mtime: number }>(files: T[], folder: string): T[] {
+  const byPath = (a: T, b: T) => a.path.localeCompare(b.path);
+  const inside = files.filter((f) => isUnderFolder(f.path, folder)).sort((a, b) => b.mtime - a.mtime || byPath(a, b));
+  const outside = files.filter((f) => !isUnderFolder(f.path, folder)).sort(byPath);
+  return [...inside, ...outside];
 }

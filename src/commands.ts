@@ -151,7 +151,7 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
     run: (p) => {
       const file = p.app.workspace.getActiveFile();
       if (!file || (file.extension !== "md" && !isPdfFile(file))) return;
-      void askTranscript(p.app, p.store.getTranscript(file.path)).then((choice) => {
+      void askTranscript(p.app, p.store.getTranscript(file.path), p.settings.transcriptFolder).then((choice) => {
         if (choice === null) return;
         if (choice.action === "clear") {
           p.store.clearTranscript(file.path);

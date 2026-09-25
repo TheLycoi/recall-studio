@@ -218,3 +218,55 @@ test("contentHash is stable, distinct for different text, and eight hex characte
   assert.match(u.contentHash(""), /^[0-9a-f]{8}$/);
   assert.match(u.contentHash("a much longer note body\nwith lines"), /^[0-9a-f]{8}$/);
 });
+
+test("normalizeTranscript strips a Wispr note's frontmatter, callout wrapper and trailing pointer line", () => {
+  const wispr = [
+    "---",
+    "wispr_id: efc2088d-374f-4c48-b85c-a82e6a138710",
+    "title: Childhood and Adolescent-Onset Disorders",
+    "source: wispr-flow",
+    "---",
+    "",
+    "> [!summary]- Flow Summary",
+    "> Class lecture on ADHD and learning disabilities.",
+    "",
+    "### ADHD Presentation and Treatment",
+    "- Stimulants redirect energy toward focus",
+    "    - Effect on people who need them is night-and-day",
+    "",
+    "Childhood and Adolescent-Onset Disorders-2026-09-24_16-22-42-transcript",
+  ].join("\n");
+  const out = u.normalizeTranscript(wispr);
+  assert.ok(!out.includes("wispr_id"), out);
+  assert.ok(!out.includes("[!summary]"), out);
+  assert.ok(out.startsWith("Class lecture on ADHD and learning disabilities."), out);
+  assert.ok(out.includes("### ADHD Presentation and Treatment\n- Stimulants redirect energy toward focus\n- Effect on people"), out);
+  assert.ok(!out.includes("-transcript"), out);
+});
+
+test("normalizeTranscript leaves a plain pasted transcript alone", () => {
+  assert.equal(u.normalizeTranscript("Today we cover impulse.\n\nIt is force times time."), "Today we cover impulse.\n\nIt is force times time.");
+});
+
+test("orderTranscriptFiles puts the transcript folder first, newest first, then the rest by path", () => {
+  const files = [
+    { path: "notes/a.md", mtime: 5 },
+    { path: "wiki/sources/wispr/old.md", mtime: 1 },
+    { path: "clippings/b.txt", mtime: 9 },
+    { path: "wiki/sources/wispr/new.md", mtime: 3 },
+  ];
+  assert.deepEqual(
+    u.orderTranscriptFiles(files, "wiki/sources/wispr").map((f) => f.path),
+    ["wiki/sources/wispr/new.md", "wiki/sources/wispr/old.md", "clippings/b.txt", "notes/a.md"],
+  );
+  // An empty folder setting keeps the plain path order.
+  assert.deepEqual(u.orderTranscriptFiles(files, "").map((f) => f.path), ["clippings/b.txt", "notes/a.md", "wiki/sources/wispr/new.md", "wiki/sources/wispr/old.md"]);
+});
+
+test("isUnderFolder is a path-segment test, not a string prefix", () => {
+  assert.equal(u.isUnderFolder("wiki/schema/wikilm.md", "wiki/schema"), true);
+  assert.equal(u.isUnderFolder("wiki/schema/wikilm.md", "wiki/schema/"), true);
+  assert.equal(u.isUnderFolder("wiki/schemas/x.md", "wiki/schema"), false);
+  assert.equal(u.isUnderFolder("wiki/concepts/Kinetics.md", "wiki/schema"), false);
+  assert.equal(u.isUnderFolder("anything.md", ""), false);
+});
