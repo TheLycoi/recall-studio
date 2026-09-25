@@ -1821,3 +1821,22 @@ test("sentences the page already states are dropped from a paragraph and counted
   assert.equal(r2.said, 2);
   assert.ok(!r2.md.includes("## Impulse"), "nothing new, no section");
 });
+
+test("a planned merge row carries its article and the heading it was filed under, so the write can replay it", () => {
+  const manifest = manifestFor([{ ...SELECTION_HIGHLIGHT, id: "H01" }]);
+  const home = { path: "classes/HBIO250/Receptors.md", title: "Receptors", kind: "concept", aliases: [], classCodes: ["HBIO250"], md: "---\nclass: HBIO250\n---\n# Receptors\n\n## Definition\nOld.\n" };
+  const parent = { path: "classes/HBIO250/Pharmacology.md", title: "Pharmacology", kind: "concept", aliases: [], classCodes: ["HBIO250"], md: "---\nclass: HBIO250\n---\n# Pharmacology\n\n## Definition\nDrugs.\n" };
+  const note = (title, extra = {}) => ({ title, summary: "S", related: [], kind: "concept", aliases: [], tag: "term", closest_existing: "", why_new: "", sections: [{ heading: "Props", prose: "Two properties [H01].", quote_ids: ["H01"] }], ...extra });
+  const opts = { classCode: "HBIO250", topicFolder: "classes", created: "2026-09-10", pages: [home, parent] };
+  const merged = tn.planTopicNotes({ notes: [note("Receptors")], unused_ids: [] }, manifest, opts);
+  assert.ok(merged.notes[0].article, "home merge carries the article");
+  assert.equal(merged.notes[0].articleSection, undefined);
+  assert.equal(merged.notes[0].article.sections[0].heading, "Props");
+  const routed = tn.planTopicNotes({ notes: [note("Receptor Subtypes", { closest_existing: "Pharmacology", why_new: "part of it" })], unused_ids: [] }, manifest, opts);
+  const filed = routed.notes.find((n) => n.path === parent.path);
+  assert.ok(filed && filed.article, "a routed merge carries the article");
+  assert.equal(filed.articleSection, "Receptor Subtypes");
+  // Replaying against the page as written yields the same page: nothing is appended twice.
+  const again = tn.mergeArticle(merged.notes[0].content, PDF_BASENAME, merged.notes[0].article, { classCode: "HBIO250" });
+  assert.equal(again.md, merged.notes[0].content);
+});

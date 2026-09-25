@@ -18,7 +18,7 @@ import { collectPdfHighlights, readManifestNote, writeManifest } from "./pdfHigh
 import { isPdfFile } from "./pdf";
 import type { DigestDraft } from "./schemas";
 import { suggestPdfHighlights } from "./suggest";
-import { applyDigestChoices, mergeTopicHighlights, noteAliases, noteOutline, noteSections, parseTopicNote, planTopicNotes, type ExistingPage, type PreparedNote } from "./topicNote";
+import { applyDigestChoices, mergeArticle, mergeTopicHighlights, noteAliases, noteOutline, noteSections, parseTopicNote, planTopicNotes, type ExistingPage, type PreparedNote } from "./topicNote";
 import { coveredBy, indexNote, type EvidenceUnit } from "./retrieval";
 import type { DigestExistingNote } from "./prompt";
 
@@ -208,7 +208,24 @@ async function draftFromModel(
  * grouping is rebuilt from it: anything not named there belongs in the page's
  * own `## Highlights` section, which is what the planner's default branch did.
  */
-function remergeNote(current: string, pdfBasename: string, classCode: string, note: PreparedNote): string {
+function remergeNote(
+  current: string,
+  pdfBasename: string,
+  classCode: string,
+  note: PreparedNote,
+  covered?: (pagePath: string | null, text: string) => boolean,
+): string {
+  // An article row replays the article merge — the sections, the prose, the
+  // quotes — against the page as it reads now, with the same coverage check
+  // the plan used. Replaying the row merge here instead threw the prose away
+  // and appended the quotes a second time under ## Highlights.
+  if (note.article) {
+    return mergeArticle(current, pdfBasename, note.article, {
+      classCode,
+      section: note.articleSection,
+      covered: covered ? (text) => covered(note.path, text) : undefined,
+    }).md;
+  }
   const sectionOf = new Map<string, string>();
   for (const s of note.sections ?? []) {
     for (const key of s.keys) sectionOf.set(key, s.heading);
@@ -353,7 +370,7 @@ export async function digestPdf(plugin: WikiLmPlugin, source: TFile, opts: Diges
         // inside `process` (read-modify-write under a lock,
         // obsidian.d.ts:7510) so the highlights land in the page as it reads
         // at write time, not as it read minutes earlier.
-        await plugin.app.vault.process(file, (data) => remergeNote(data, manifest.pdfBasename, classCode, note));
+        await plugin.app.vault.process(file, (data) => remergeNote(data, manifest.pdfBasename, classCode, note, covered));
       } else {
         // A merge may land in another class's folder, so each note names its
         // own parent. Same folder-creation pattern as the Anki export in

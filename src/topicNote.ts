@@ -542,6 +542,14 @@ export interface PreparedNote {
    */
   sections?: Array<{ heading: string; keys: string[]; created: boolean }>;
   /**
+   * The article this row was planned from, so the write can replay the same
+   * merge against the page as it reads at write time (src/digest.ts
+   * remergeNote). `articleSection` is the one heading the whole article was
+   * filed under, when the proposal was a subtopic of an existing page.
+   */
+  article?: Article;
+  articleSection?: string;
+  /**
    * Notes the model proposed that the planner filed into this one instead of
    * creating: what each was called, the heading it became (empty when it was
    * another name for this note), why, and which highlights it brought.
@@ -1045,6 +1053,7 @@ export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: Pl
         said: merged.said,
         kind: home.kind,
         sections: merged.sections.length ? merged.sections : undefined,
+        article,
         groups: [group.title],
       });
       continue;
@@ -1084,6 +1093,8 @@ export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: Pl
         said: merged.said,
         kind: target.kind,
         sections: merged.sections.length ? merged.sections : undefined,
+        article,
+        articleSection: route.heading || undefined,
         routed: [{ from: group.title, heading: route.heading, why: route.why, keys: group.highlights.map((h) => h.key) }],
         groups: [group.title],
       });
