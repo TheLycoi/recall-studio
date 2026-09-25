@@ -310,3 +310,14 @@ export const AliasesTagsOut = z.object({
 });
 
 export type AliasesTagsDraft = z.infer<typeof AliasesTagsOut>;
+
+export const DuplicatesOut = z.object({
+  pairs: z.array(
+    z.object({
+      n: z.number().int().describe("The pair's number, copied exactly from the input."),
+      same: z.boolean().describe("true only when both pages are about one subject under two names; false for related, overlapping, or part-and-whole pages."),
+      reason: z.string().describe("One sentence: what in the excerpts decided it."),
+    }),
+  ),
+});
+export type DuplicatesDraft = z.infer<typeof DuplicatesOut>;

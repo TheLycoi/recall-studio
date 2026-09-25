@@ -23,6 +23,7 @@
  * the tests bundle it standalone and a plan can be built without a vault.
  */
 import type { VaultIssue } from "./vaultLint";
+import { pairKey } from "./duplicates";
 import type { FixPage, LinkFix, FixConfidence } from "./vaultFix";
 import { applyLinkFix, buildReplacement, unwrapDeadLink } from "./vaultFix";
 import { findAllPdfReferences, highlightKey, parsePdfSubpath, renderCallout } from "./pdflink";
@@ -57,6 +58,8 @@ export interface Fix {
   needsTarget?: boolean;
   /** The dead link a repoint row is about, carried rather than parsed back out of the label. */
   target?: string;
+  /** The two pages a cross-link row joins, as `pairKey` spells them, so a verdict on the pair finds both rows. */
+  pair?: string;
   /** Pure; returns `content` unchanged when there is nothing to do. */
   apply: (content: string) => string;
 }
@@ -449,12 +452,39 @@ export function planCrossLinks(issues: VaultIssue[], pages: Map<string, FixPageI
         path: from.path,
         label,
         enabled: true,
+        pair: pairKey(a.path, b.path),
         apply: (content) => addRelatedLink(content, linkPathOf(to.path, wikiPrefix), shown(to), from.schema, to.kind),
       });
     }
   }
   return fixes;
 }
+
+/**
+ * The plan after the model has judged the duplicate pairs: the cross-link rows
+ * of a pair it cleared as merely related are withdrawn, and nothing else
+ * moves. Confirmed pairs keep their rows; a pair the model did not answer is
+ * left as the lint found it.
+ */
+/** What the model said about the duplicate pairs, as the plan consumes it. */
+export interface DuplicateVerdicts {
+  /** Cross-link rows for look-alike pairs the model confirmed as one subject. */
+  rows: Fix[];
+  /** `pairKey`s of the pairs it cleared as merely related. */
+  cleared: string[];
+  /** Pairs that got a verdict at all. */
+  checked: number;
+  /** Of those, how many it confirmed. */
+  confirmed: number;
+}
+
+export function applyDuplicateVerdicts(fixes: Fix[], cleared: string[]): Fix[] {
+  const gone = new Set(cleared);
+  if (gone.size === 0) return fixes;
+  return fixes.filter((f) => !(f.kind === "cross-link" && f.pair !== undefined && gone.has(f.pair)));
+}
+
+export { pairKey };
 
 /** The dead links the link fixer already resolved, as rows a reader can untick. */
 export function planRelinks(fixable: LinkFix[]): Fix[] {

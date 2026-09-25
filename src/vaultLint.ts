@@ -19,7 +19,7 @@ import { indexNote, type EvidenceUnit } from "./retrieval";
 import { linkKey, noteLinks } from "./graph";
 import { noteAliases } from "./topicNote";
 import { highlightKey } from "./pdflink";
-import { findDuplicates, type DuplicatePage } from "./duplicates";
+import { findDuplicates, type DuplicateFinding, type DuplicatePage } from "./duplicates";
 
 export type VaultIssueId =
   | "empty-note"
@@ -78,6 +78,13 @@ export interface VaultLintReport {
   notes: number;
   units: number;
   issues: VaultIssue[];
+  /**
+   * Pairs of pages spelled alike (`findDuplicates` pass `similar`). Not
+   * findings: a report that accused two pages on spelling would be wrong
+   * about Kinetics and Kinematics. The fix plan offers them to the model, and
+   * only a pair the model confirms becomes a finding with cross-link rows.
+   */
+  candidates: DuplicateFinding[];
 }
 
 export interface LintPage {
@@ -382,7 +389,12 @@ export function lintVault(pages: LintPage[], options: LintOptions = {}): VaultLi
     else if (inn === 0) issues.push({ id: "unlinked", path: page.path, title });
   }
 
+  const candidates: DuplicateFinding[] = [];
   for (const dup of findDuplicates(dupPages)) {
+    if (dup.pass === "similar") {
+      candidates.push(dup);
+      continue;
+    }
     issues.push({ id: "duplicate-pages", path: dup.a, title: titleOf(dup.a), target: dup.b, detail: dup.detail });
   }
 
@@ -396,7 +408,7 @@ export function lintVault(pages: LintPage[], options: LintOptions = {}): VaultLi
       a.id.localeCompare(b.id) ||
       (a.detail ?? "").localeCompare(b.detail ?? ""),
   );
-  return { notes: pages.length, units, issues };
+  return { notes: pages.length, units, issues, candidates };
 }
 
 /** What each issue means, in the order a reader should care about it. */
@@ -445,6 +457,7 @@ export function renderVaultLint(report: VaultLintReport, limit = 8): string {
   const lines = [`**Wiki check** — ${report.notes} notes, ${report.units} passages Ask can quote.`];
   if (report.issues.length === 0) {
     lines.push("", "Nothing to fix: every note holds evidence and is reachable through the wiki.");
+    lines.push(...candidatesLine(report));
     return lines.join("\n");
   }
 
@@ -461,5 +474,14 @@ export function renderVaultLint(report: VaultLintReport, limit = 8): string {
     }
     if (found.length > limit) lines.push(`- …and ${found.length - limit} more`);
   }
+  lines.push(...candidatesLine(report));
   return lines.join("\n");
+}
+
+/** The look-alike pairs the report holds back, named as such so their absence from the findings is not a silence. */
+function candidatesLine(report: VaultLintReport): string[] {
+  // Tolerant of a report built by hand without the field.
+  const n = report.candidates?.length ?? 0;
+  if (n === 0) return [];
+  return ["", `${n} pair${n === 1 ? "" : "s"} spelled alike, not reported: **Suggest fixes** → **Check duplicates with the model** decides them.`];
 }

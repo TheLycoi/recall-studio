@@ -792,3 +792,17 @@ test("an unticked repoint leaves its unwrap free to run", () => {
   const out = fp.applyFixesToNote(body, fp.groupByNote(rows).get("wiki/a.md"));
   assert.equal(out, "See Missing here.\n");
 });
+
+test("a cross-link row names its pair, and applyDuplicateVerdicts drops only the rows of pairs the model cleared", () => {
+  const issues = [
+    { id: "duplicate-pages", path: "wiki/concepts/coaching-communication.md", title: "Coaching Communication", target: "wiki/concepts/empowering-behavior-change.md" },
+  ];
+  const fixes = fp.planCrossLinks(issues, PAGES(), "wiki/");
+  const key = fp.pairKey("wiki/concepts/empowering-behavior-change.md", "wiki/concepts/coaching-communication.md");
+  assert.equal(key, "wiki/concepts/coaching-communication.md\x00wiki/concepts/empowering-behavior-change.md", "the lesser path first, however the pair was given");
+  assert.ok(fixes.every((f) => f.pair === key), "both directions carry the same pair key");
+  const other = { id: "aliases:x:0", kind: "aliases", path: "x.md", label: "x", enabled: true, apply: (c) => c };
+  const kept = fp.applyDuplicateVerdicts([...fixes, other], [key]);
+  assert.deepEqual(kept, [other], "a cleared pair loses both rows; unrelated rows stay");
+  assert.equal(fp.applyDuplicateVerdicts([...fixes, other], ["a\x00b"]).length, 3, "an unknown key clears nothing");
+});

@@ -9,6 +9,7 @@ import type { BloomLevel, Card, Highlight } from "./model";
 import type {
   AliasesMessageArgs,
   AskMessageArgs,
+  DuplicatesMessageArgs,
   KeywordsMessageArgs,
   DigestMessageArgs,
   QuizGradeMessageArgs,
@@ -18,6 +19,7 @@ import type {
 import {
   buildAliasesMessage,
   buildAskMessage,
+  buildDuplicatesMessage,
   buildKeywordsMessage,
   KEYWORDS_SYSTEM,
   buildDigestMessage,
@@ -29,13 +31,14 @@ import {
 import {
   AliasesTagsOut as AliasesTagsOutSchema,
   AskOut as AskOutSchema,
+  DuplicatesOut,
   KeywordsOut as KeywordsOutSchema,
   DigestOut as DigestOutSchema,
   QuizGradeOut as QuizGradeOutSchema,
   QuizQuestionOut as QuizQuestionOutSchema,
   SuggestOut as SuggestOutSchema,
 } from "./schemas";
-import type { AliasesTagsDraft, AskDraft, DigestDraft, QuizGradeDraft, QuizQuestionDraft, SuggestDraft } from "./schemas";
+import type { AliasesTagsDraft, AskDraft, DigestDraft, DuplicatesDraft, QuizGradeDraft, QuizQuestionDraft, SuggestDraft } from "./schemas";
 import type { WikiLmSettings } from "./settings";
 
 const CardOut = z.object({
@@ -659,6 +662,24 @@ export class LlmClient {
   }
 
   /**
+   * "duplicates": are two pages about one subject? The lint finds the pairs
+   * (a shared name, a shared PDF span, or names spelled alike) and the model
+   * reads both openings and says same or different. Nothing is merged on a
+   * "same": the fix plan offers a link each way, and a "different" withdraws
+   * the offer. Low effort, as with aliases: recognition, not reasoning.
+   */
+  async verifyDuplicates(args: DuplicatesMessageArgs): Promise<DuplicatesDraft> {
+    return this.backend().complete({
+      system: DUPLICATES_SYSTEM,
+      user: buildDuplicatesMessage(args),
+      schema: DuplicatesOut,
+      label: "duplicates",
+      maxTokens: 4000,
+      effort: "low",
+    });
+  }
+
+  /**
    * "quiz question": one retrieval-practice question written from the pool of
    * evidence a quiz was started on. As with `ask`, nothing is validated here:
    * src/quiz.ts checks the evidence number and the quote before the reader
@@ -865,6 +886,14 @@ Before returning, check your answer against the input: every note_title is eithe
  * is why the excerpt is in front of the model and the instruction is to take
  * the names from it.
  */
+const DUPLICATES_SYSTEM = `You judge whether two pages in a reader's wiki are about one subject. You are shown, for each pair, both pages' titles, kinds, other names, and the opening of their own text, and the fact the reader's tools found them sharing: a name both answer to, a passage of one document both cite, or spellings that look alike.
+
+Two pages are the same subject only when one thing has ended up with two pages: an abbreviation and its expansion, a plural and a singular, a spelling variant, an older name, a translation. Two pages are different subjects when they are related in any other way: a topic and its subtopic, a whole and one of its parts, two things that share a source, a review sheet that lists a concept the other page defines, two measures that are computed from each other. Kinetics and Kinematics are spelled alike and are two subjects. Read the openings; the titles alone decide nothing.
+
+Nothing is merged on your word. A pair you confirm is offered to the reader as a link each way, which they may decline; a pair you clear loses that offer. So a wrong "same" costs the reader a decision and a wrong "different" costs nothing yet, and when the openings leave you unsure, say different.
+
+Return one verdict per pair under the number it was given, with one sentence naming what in the openings decided it.`;
+
 const ALIASES_SYSTEM = `You give a page in a reader's wiki the other names it should be findable under, and the one word that says what kind of thing it is. You are shown each page's title, its kind, and the opening of its own definition. Nothing you return is written to the vault directly: the reader sees every proposal in a list and ticks the ones they want, so a proposal that is merely plausible costs them a decision.
 
 <aliases>

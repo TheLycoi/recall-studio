@@ -622,7 +622,14 @@ withdrawn dead links, hub or neighbour links for unlinked pages, PDF++ callouts 
 only rectangle embeds, and citations for quotes found verbatim in exactly one
 source. Nothing is written until you click **Apply**, and only the rows left
 ticked are written, each note once. Aliases and tags come from the model, and
-only when you click **Ask the model for aliases and tags** inside the plan. A
+only when you click **Ask the model for aliases and tags** inside the plan.
+Duplicate pairs are checked the same way: **Check duplicates with the model**
+reads both pages of every pair the lint found — a shared name, a shared PDF
+span, or two names spelled alike, which the report holds back as candidates
+rather than accuses — and says one subject or merely related. A related pair
+loses its link rows; a confirmed look-alike gains them; nothing is merged
+either way, because two pages about one subject are cross-linked, never
+merged. A
 dead link whose page does not exist is offered two rows, and you choose between
 them: **Point at…** repoints it at a note you name, and **Unlink** strips the
 link back to the words around it, keeping the sentence and dropping only the
@@ -1251,7 +1258,7 @@ Layout, one line per module:
 - `src/commands.ts` — their behaviour half: an `available` predicate and a `run` action per entry, registered by `main.ts` in one loop
 - `src/digest.ts` — digest orchestration: the glue between the highlight collector, the model or a pasted draft, the planner, the preview and the vault
 - `src/digestGate.ts` — whether a source has enough highlights to digest, or needs some made first
-- `src/duplicates.ts` — two pages about one subject, found from a shared name or a PDF span both cite
+- `src/duplicates.ts` — two pages about one subject, found from a shared name or a PDF span both cite; names spelled alike are candidates the model judges, never findings
 - `src/examples.ts` — style examples drawn from your own triage decisions across the inbox
 - `src/fixPlan.ts` — the plan behind **Suggest fixes**: one proposed edit per finding, as a pure text-to-text function
 - `src/fixer.ts` — the vault side of that plan: gathering the facts it needs, and the only place in the feature that writes

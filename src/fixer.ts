@@ -17,7 +17,7 @@
 import { TFile } from "obsidian";
 import type WikiLmPlugin from "./main";
 import type { WikiLmSettings } from "./settings";
-import type { LintPage, VaultLintReport } from "./vaultLint";
+import type { LintPage, VaultLintReport, VaultIssue } from "./vaultLint";
 import { planLinkFixes, type FixPage } from "./vaultFix";
 import {
   groupByNote,
@@ -36,12 +36,14 @@ import {
   type Fix,
   type FixPageInfo,
   type RectText,
+  type DuplicateVerdicts,
 } from "./fixPlan";
 import { buildGraph, isGraphUsable, pprFromSeeds, type Graph } from "./graph";
 import { CONCEPT_TAGS, ENTITY_TAGS, fmList, noteAliases, parseTopicNote } from "./topicNote";
 import { pdfsLinkedFrom } from "./pdf";
 import { collectPdfHighlights } from "./pdfHighlights";
-import { ALIASES_EXCERPT_CHARS, type AliasesPageIn } from "./prompt";
+import { ALIASES_EXCERPT_CHARS, type AliasesPageIn, type DuplicatePageIn, type DuplicatePairIn } from "./prompt";
+import { pairKey } from "./duplicates";
 
 /** What `runVaultLint` already holds when the report is done, handed here whole. */
 export interface FixContext {
@@ -377,6 +379,73 @@ export async function proposeAliases(
   return orderFixes(
     fixes.filter((f) => (f.kind === "aliases" ? wantsAliases.has(f.path) : f.kind === "tag" ? wantsTag.has(f.path) : false)),
   );
+}
+
+/** How many pairs go in one duplicate-verification request. */
+const DUPLICATES_BATCH = 20;
+
+/**
+ * Ask the model whether each duplicate pair is one subject or two.
+ *
+ * The pairs are the lint's `duplicate-pages` findings (a shared name or a
+ * shared PDF span) and its held-back candidates (names spelled alike). Each
+ * side goes as its title, kind, aliases and the opening of its definition, the
+ * same excerpt the aliases request uses. Verdicts are matched back by the
+ * pair's number in its batch, never by position.
+ *
+ * "Same" on a finding changes nothing: its cross-link rows are already in the
+ * plan. "Same" on a candidate makes it a finding and earns it rows. "Different"
+ * on either withdraws the rows. Nothing merges, whatever the model says.
+ */
+export async function verifyDuplicates(
+  plugin: WikiLmPlugin,
+  infos: Map<string, FixPageInfo>,
+  report: VaultLintReport,
+  prefix: string,
+): Promise<DuplicateVerdicts> {
+  type Pair = { a: string; b: string; shared: string; reported: boolean };
+  const pairs: Pair[] = [];
+  for (const issue of report.issues) {
+    if (issue.id === "duplicate-pages" && issue.target) pairs.push({ a: issue.path, b: issue.target, shared: issue.detail ?? "", reported: true });
+  }
+  for (const c of report.candidates ?? []) pairs.push({ a: c.a, b: c.b, shared: c.detail, reported: false });
+  const usable = pairs.filter((p) => infos.has(p.a) && infos.has(p.b));
+  const pageIn = (info: FixPageInfo): DuplicatePageIn => ({
+    title: info.displayTitle || info.title,
+    kind: info.kind,
+    aliases: noteAliases(info.content),
+    excerpt: excerptOf(info.content),
+  });
+  const cleared: string[] = [];
+  const confirmedNew: VaultIssue[] = [];
+  let checked = 0;
+  let confirmed = 0;
+  for (let i = 0; i < usable.length; i += DUPLICATES_BATCH) {
+    const batch = usable.slice(i, i + DUPLICATES_BATCH);
+    const asked: DuplicatePairIn[] = batch.map((p, k) => ({
+      n: k + 1,
+      a: pageIn(infos.get(p.a) as FixPageInfo),
+      b: pageIn(infos.get(p.b) as FixPageInfo),
+      shared: p.shared,
+    }));
+    const draft = await plugin.llm.verifyDuplicates({ pairs: asked });
+    const answered = new Set<number>();
+    for (const v of draft.pairs) {
+      const p = batch[v.n - 1];
+      if (!p || answered.has(v.n)) continue;
+      answered.add(v.n);
+      checked++;
+      if (v.same) {
+        confirmed++;
+        if (!p.reported) {
+          confirmedNew.push({ id: "duplicate-pages", path: p.a, title: titleOf(p.a), target: p.b, detail: `${p.shared}; the model agrees: ${v.reason.trim()}` });
+        }
+      } else {
+        cleared.push(pairKey(p.a, p.b));
+      }
+    }
+  }
+  return { rows: orderFixes(planCrossLinks(confirmedNew, infos, prefix)), cleared, checked, confirmed };
 }
 
 /**

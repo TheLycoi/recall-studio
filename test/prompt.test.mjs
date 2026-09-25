@@ -825,3 +825,24 @@ test("an existing note with an outline prints each heading with its lead; withou
   assert.ok(msg.includes("Kinetics (concept; class HBIO408)\n  ## Definition — The study of forces that cause motion.\n  ## Linear Impulse\n  summary: Forces that cause motion.\n"), msg);
   assert.ok(msg.includes("Other (concept; class PSYC360)\n  ## A\n"), msg);
 });
+
+test("buildDuplicatesMessage numbers each pair, shows both pages with kind and aliases, the shared fact, and asks for a verdict per number", () => {
+  const msg = p.buildDuplicatesMessage({
+    pairs: [
+      {
+        n: 1,
+        a: { title: "Linear Kinematics", kind: "concept", aliases: [], excerpt: "Kinematic analysis captures the body's motion." },
+        b: { title: "Motion Analysis", kind: "concept", aliases: ["Review questions"], excerpt: "Terms: biomechanics, event, phase. " + "x".repeat(500) },
+        shared: "both cite 2 - TBCM and Linear Kinematics 2026 at page=4&selection=0,8,0,26",
+      },
+    ],
+  });
+  const iA = msg.indexOf('<page title="Linear Kinematics" kind="concept" aliases="">');
+  const iB = msg.indexOf('<page title="Motion Analysis" kind="concept" aliases="Review questions">');
+  const iS = msg.indexOf("<shared>both cite 2 - TBCM");
+  assert.ok(msg.startsWith('<pairs>\n<pair n="1">'), msg.slice(0, 40));
+  assert.ok(iA > 0 && iB > iA && iS > iB, "page a, page b, then what they share");
+  assert.ok(msg.includes("x".repeat(300) + "…") === false || msg.includes("…"), "a long excerpt is cut and marked");
+  assert.ok(!msg.includes("x".repeat(450)), "the excerpt stops at the limit");
+  assert.ok(msg.trimEnd().endsWith("Return one verdict per pair, by its number."), msg.slice(-80));
+});

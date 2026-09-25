@@ -5,7 +5,7 @@ import type { PreparedNote } from "./topicNote";
 import { rowLabel } from "./topicNote";
 import type { ManifestHighlight } from "./manifest";
 import type { FixPage, LinkFix } from "./vaultFix";
-import type { Fix, FixKind } from "./fixPlan";
+import { applyDuplicateVerdicts, orderFixes, type DuplicateVerdicts, type Fix, type FixKind } from "./fixPlan";
 import { describeError } from "./llm";
 
 /** Ask for a free-text instruction. Resolves null when cancelled. */
@@ -973,6 +973,8 @@ export interface FixPlanHooks {
   pickTarget: (row: Fix) => Promise<Fix | null>;
   /** Ask the model for the aliases and tags the lint says are missing. Null hides the button. */
   proposeAliases: (() => Promise<Fix[]>) | null;
+  /** Ask the model whether each duplicate pair is one subject or two. Null hides the button. */
+  verifyDuplicates: (() => Promise<DuplicateVerdicts>) | null;
   /** Write the ticked rows. */
   apply: (fixes: Fix[]) => Promise<void>;
 }
@@ -995,6 +997,7 @@ export class FixPlanModal extends Modal {
   private applyBtn!: ButtonComponent;
   private list!: HTMLElement;
   private asking = false;
+  private checking = false;
 
   constructor(
     app: App,
@@ -1023,6 +1026,14 @@ export class FixPlanModal extends Modal {
           .setButtonText("Ask the model for aliases and tags")
           .setTooltip("One request per 20 pages; every proposal becomes a row you can untick")
           .onClick(() => void this.ask(b)),
+      );
+    }
+    if (this.hooks.verifyDuplicates) {
+      row.addButton((b) =>
+        b
+          .setButtonText("Check duplicates with the model")
+          .setTooltip("Reads both pages of every duplicate pair and says one subject or two; a pair that is merely related loses its link rows. Nothing is merged.")
+          .onClick(() => void this.check(b)),
       );
     }
     row.addButton((b) => b.setButtonText("Cancel").onClick(() => this.close()));
@@ -1113,6 +1124,39 @@ export class FixPlanModal extends Modal {
       button.setButtonText("Ask the model for aliases and tags");
     } finally {
       this.asking = false;
+    }
+  }
+
+  /**
+   * The model's verdicts on the duplicate pairs, applied once: a cleared pair
+   * loses its cross-link rows, a confirmed look-alike gains them. The reader
+   * still ticks what is written.
+   */
+  private async check(button: ButtonComponent): Promise<void> {
+    if (this.checking || !this.hooks.verifyDuplicates) return;
+    this.checking = true;
+    button.setDisabled(true);
+    button.setButtonText("checking…");
+    try {
+      const v = await this.hooks.verifyDuplicates();
+      const known = new Set(this.fixes.map((f) => f.id));
+      const added = v.rows.filter((r) => !known.has(r.id));
+      this.fixes = orderFixes(applyDuplicateVerdicts([...added, ...this.fixes], v.cleared));
+      this.draw();
+      this.updateApply();
+      const related = v.cleared.length;
+      new Notice(
+        v.checked === 0
+          ? "No duplicate pair got a verdict."
+          : `${v.checked} pair${v.checked === 1 ? "" : "s"} checked: ${v.confirmed} one subject, ${related} related only.`,
+      );
+      button.setButtonText(`Checked (${v.checked})`);
+    } catch (e) {
+      new Notice(`Could not check duplicates: ${describeError(e)}`);
+      button.setDisabled(false);
+      button.setButtonText("Check duplicates with the model");
+    } finally {
+      this.checking = false;
     }
   }
 

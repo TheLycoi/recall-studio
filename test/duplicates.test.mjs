@@ -78,3 +78,32 @@ test("distinct pages produce nothing, and output is sorted by path", () => {
     ],
   );
 });
+
+test("two names spelled alike are a candidate for the model, not a finding: pass 'similar'", () => {
+  // Kinetics / Kinematics share six of ten character bigrams — exactly the
+  // kind of pair a reader must judge, and exactly the kind a report must not
+  // accuse on spelling alone.
+  const out = d.findDuplicates([
+    pg("wiki/concepts/Kinetics.md", "Kinetics"),
+    pg("wiki/concepts/Kinematics.md", "Kinematics"),
+  ]);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].pass, "similar");
+  assert.match(out[0].detail, /spelled alike/);
+});
+
+test("a pair already found by name is not reported again as similar, and short names never match on spelling", () => {
+  const byName = d.findDuplicates([
+    pg("wiki/concepts/chunking.md", "chunking", ["Chunk Size"]),
+    pg("wiki/concepts/chunk-size.md", "chunk-size", []),
+  ]);
+  assert.deepEqual(byName.map((f) => f.pass), ["name"]);
+  const short = d.findDuplicates([pg("a/ACL.md", "ACL"), pg("a/ACE.md", "ACE")]);
+  assert.deepEqual(short, []);
+});
+
+test("bigramSimilarity is a Jaccard over character pairs, folded", () => {
+  assert.equal(d.bigramSimilarity("Kinetics", "kinetics"), 1);
+  assert.equal(d.bigramSimilarity("Kinetics", "Kinematics"), 0.6);
+  assert.equal(d.bigramSimilarity("Impulse", "Momentum") < 0.2, true);
+});

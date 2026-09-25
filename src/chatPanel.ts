@@ -20,7 +20,7 @@ import { lintVault, renderVaultLint, WIKI_SCHEMA, type LintPage } from "./vaultL
 import { planLinkFixes, applyFixesToNote, type LinkFix } from "./vaultFix";
 import { FixPlanModal, LintReportModal, pickNote } from "./modals";
 import { repointFix, type Fix, type FixPageInfo } from "./fixPlan";
-import { applyPlan, buildPlan, fixPagesFor, pageInfos, proposeAliases, providerReady, type FixContext } from "./fixer";
+import { applyPlan, buildPlan, fixPagesFor, pageInfos, proposeAliases, providerReady, verifyDuplicates, type FixContext } from "./fixer";
 import { checkAnswer, emptyIndexAnswer, noEvidenceAnswer, renderGroundingLine, VERIFY_BANNER, type GroundingReport } from "./askCheck";
 import { matchIntent, renderHelp, type Intent, type IntentContext, type IntentPage, type Target } from "./chatCommands";
 import { WIKILM_COMMANDS, type WikiLmCommand } from "./commands";
@@ -344,7 +344,10 @@ export class ChatPanel {
       const aliasWork = report.issues.some(
         (i) => i.id === "no-aliases" || (i.id === "schema-violation" && i.detail?.startsWith("tag “")),
       );
-      const canSuggest = plan.length > 0 || aliasWork;
+      // Look-alike pairs are not rows yet; the plan is still worth opening
+      // for the button that lets the model decide them.
+      const candidateWork = providerReady(this.plugin.settings) && (ctx.report.candidates?.length ?? 0) > 0;
+      const canSuggest = plan.length > 0 || aliasWork || candidateWork;
 
       new LintReportModal(
         this.plugin.app,
@@ -384,6 +387,11 @@ export class ChatPanel {
       proposeAliases: providerReady(this.plugin.settings)
         ? () => proposeAliases(this.plugin, infos, ctx.report)
         : null,
+      verifyDuplicates:
+        providerReady(this.plugin.settings) &&
+        (ctx.report.issues.some((i) => i.id === "duplicate-pages") || (ctx.report.candidates?.length ?? 0) > 0)
+          ? () => verifyDuplicates(this.plugin, infos, ctx.report, ctx.prefix)
+          : null,
       apply: async (fixes) => {
         try {
           const r = await applyPlan(this.plugin, fixes);

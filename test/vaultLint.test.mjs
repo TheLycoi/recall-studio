@@ -280,3 +280,15 @@ test("a bullet whose link opens the PDF is anchored, never string-checked", () =
   const r = vl.lintVault([p], { sources: SOURCES });
   assert.deepEqual(r.issues.filter((i) => i.id.endsWith("-quote")), []);
 });
+
+test("look-alike pages are held back as candidates for the model, not reported as duplicates", () => {
+  const r = vl.lintVault([
+    { path: "wiki/concepts/Kinetics.md", content: "---\ntype: concept\naliases: [x]\n---\n# Kinetics\n\nForces. [[Kinematics]]" },
+    { path: "wiki/concepts/Kinematics.md", content: "---\ntype: concept\naliases: [y]\n---\n# Kinematics\n\nMotion. [[Kinetics]]" },
+  ]);
+  assert.deepEqual(r.issues.filter((i) => i.id === "duplicate-pages"), []);
+  assert.equal(r.candidates.length, 1);
+  assert.equal(r.candidates[0].pass, "similar");
+  const text = vl.renderVaultLint(r);
+  assert.match(text, /1 pair spelled alike/, text);
+});

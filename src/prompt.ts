@@ -445,6 +445,44 @@ export const ALIASES_EXCERPT_CHARS = 400;
  * rather than as an import, so this module stays free of the plugin's model
  * code and a test can pass its own.
  */
+/** One side of a candidate pair, as the model sees it. */
+export interface DuplicatePageIn {
+  title: string;
+  kind: "concept" | "entity";
+  aliases: string[];
+  excerpt: string;
+}
+
+export interface DuplicatePairIn {
+  /** The number the verdict comes back under. */
+  n: number;
+  a: DuplicatePageIn;
+  b: DuplicatePageIn;
+  /** What the lint found the two pages share, in its own words. */
+  shared: string;
+}
+
+export interface DuplicatesMessageArgs {
+  pairs: DuplicatePairIn[];
+}
+
+/**
+ * Build the user message for the duplicate-verification request: every pair
+ * numbered, both pages with their kind, aliases and the opening of their own
+ * definition (cut at `ALIASES_EXCERPT_CHARS`, the cut marked), then the fact
+ * the lint found them sharing. The verdict is matched back by number, never
+ * by position, so a skipped pair cannot shift the rest.
+ */
+export function buildDuplicatesMessage(a: DuplicatesMessageArgs): string {
+  const page = (pg: DuplicatePageIn): string => {
+    const excerpt = pg.excerpt.trim();
+    const cut = excerpt.length > ALIASES_EXCERPT_CHARS ? `${excerpt.slice(0, ALIASES_EXCERPT_CHARS)}…` : excerpt;
+    return `<page title="${pg.title.trim()}" kind="${pg.kind}" aliases="${pg.aliases.map((x) => x.trim()).filter(Boolean).join(", ")}">\n${cut}\n</page>`;
+  };
+  const pairs = a.pairs.map((p) => `<pair n="${p.n}">\n${page(p.a)}\n${page(p.b)}\n<shared>${p.shared.trim()}</shared>\n</pair>`).join("\n");
+  return [`<pairs>\n${pairs}\n</pairs>`, "Return one verdict per pair, by its number."].join("\n\n");
+}
+
 export function buildAliasesMessage(a: AliasesMessageArgs): string {
   const pages = a.pages
     .map((pg) => {
