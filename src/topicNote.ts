@@ -661,6 +661,24 @@ function proseWords(prose: string): string {
   return plainProse(prose.replace(/\s*!?\[\[[^\]]*\.pdf#[^\]]*\]\]/gi, "")).replace(/\s+([.,;:!?])/g, "$1");
 }
 
+
+/**
+ * Whether a paragraph is already said: sentence by sentence, because the
+ * check compares a claim with one passage of the page, and a paragraph of
+ * four sentences never matches one passage even when the page states three
+ * of them. Most of its sentences said means the paragraph is.
+ */
+function paragraphCovered(prose: string, covered: (text: string) => boolean): boolean {
+  const sentences = proseWords(prose)
+    .split(/(?<=[.!?])\s+/)
+    .map((x) => x.trim())
+    .filter((x) => x.length >= 20);
+  if (sentences.length === 0) return false;
+  // Two sentences of three is most; integer arithmetic so the boundary holds.
+  const said = sentences.filter((x) => covered(x)).length;
+  return said * 3 >= sentences.length * 2;
+}
+
 /** Whether a rectangle row is a figure: geometry only, no words. */
 function isFigure(h: ManifestHighlight): boolean {
   return !!h.target.rect && !h.text;
@@ -747,7 +765,7 @@ export function mergeArticle(
     let firstPage: number | null = null;
     for (const sec of secs) {
       let prose = sec.prose.trim() && !existingText.includes(foldQuote(plainProse(sec.prose))) ? sec.prose.trim() : "";
-      if (prose && covered(proseWords(prose))) {
+      if (prose && paragraphCovered(prose, covered)) {
         said++;
         prose = "";
       }

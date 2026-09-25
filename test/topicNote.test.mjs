@@ -1804,6 +1804,18 @@ test("the coverage check sees prose without its citation text, so a file's title
   };
   const existing = "---\nclass: HBIO250\n---\n# R\n\n## Definition\nOld.\n";
   tn.mergeArticle(existing, PDF_BASENAME, { definition: "", sections: [{ heading: "S", prose: `Receptors bind ligands ${cite}. They also link to [[classes/HBIO250/Pharmacology|Pharmacology]].`, highlights: [] }], figures: [] }, { covered });
-  assert.equal(seen.length, 1);
-  assert.equal(seen[0], "Receptors bind ligands. They also link to Pharmacology.");
+  assert.deepEqual(seen, ["Receptors bind ligands.", "They also link to Pharmacology."], "one sentence at a time, citations gone, links reduced to words");
+});
+
+test("a paragraph is already said when most of its sentences are, judged one sentence at a time", () => {
+  const covered = (text) => /impulse is the area|equals the change in momentum/i.test(text);
+  const existing = "---\nclass: HBIO408\n---\n# K\n\n## Definition\nOld.\n";
+  const mostly = "Linear impulse is the area under the force-time curve. It equals the change in momentum of the object. A dive needs both linear and angular impulse.";
+  const r1 = tn.mergeArticle(existing, "Lab", { definition: "", sections: [{ heading: "Impulse", prose: mostly, highlights: [] }], figures: [] }, { covered });
+  assert.equal(r1.said, 1, "two of three sentences are on the page already");
+  assert.ok(!r1.md.includes("## Impulse"), r1.md);
+  const barely = "Linear impulse is the area under the force-time curve. Propulsive impulse exceeding braking impulse raises velocity. A dive needs both linear and angular impulse.";
+  const r2 = tn.mergeArticle(existing, "Lab", { definition: "", sections: [{ heading: "Impulse", prose: barely, highlights: [] }], figures: [] }, { covered });
+  assert.equal(r2.said, 0, "one of three is not most");
+  assert.ok(r2.md.includes("## Impulse\n\nLinear impulse"), r2.md);
 });
