@@ -37,7 +37,6 @@ const LEARNED_PLACEHOLDER =
 
 export interface DefaultSchemaOptions {
   topicFolder: string;
-  manifestFolder: string;
   schemaPath: string;
   today: string;
 }
@@ -52,7 +51,7 @@ export interface DefaultSchemaOptions {
  * never honour.
  */
 export function renderDefaultSchema(opts: DefaultSchemaOptions): string {
-  const { topicFolder, manifestFolder, schemaPath, today } = opts;
+  const { topicFolder, schemaPath, today } = opts;
   const pageSections = [
     "1. **## Summary** — three to five sentences on the topic, in your language, close to the source's wording.",
     "2. **## Highlights** — one PDF++ callout per highlight, in page order, grouped under `### Page N` when the page spans several.",
@@ -83,7 +82,6 @@ This note governs how WikiLM writes your wiki pages and your flashcards. Every s
 ## Wiki Structure
 
 - Topic pages live under \`${topicFolder}/<CLASS>/\`, one folder per class code.
-- Highlight manifests live under \`${manifestFolder}/\`, one per source PDF. They are the plugin's records; you do not edit them.
 - This file is \`${schemaPath}\`, and proposed rules wait in \`${schemaPath.replace(/\.md$/, "")}-suggestions.md\`.
 - One concept gets one page. A page met in a second class gains that class code rather than being copied.
 

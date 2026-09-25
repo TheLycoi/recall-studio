@@ -1404,7 +1404,7 @@ test("mergeArticle appends a section's prose and new quotes under the page's hea
   const r = tn.mergeArticle(existing, PDF_BASENAME, article);
   assert.equal(r.added, 1);
   assert.equal(r.skipped, 0);
-  assert.ok(r.md.includes(`## Two Properties\nOld prose.\n\nBinding and transduction ${cite}.\n\n> [!PDF|yellow] ${cite}\n> > Some highlight text`), r.md);
+  assert.ok(r.md.includes(`## Two Properties\nOld prose.\n\n> [!PDF|yellow] ${cite}\n> > Some highlight text\n\nBinding and transduction ${cite}.`), r.md);
   assert.ok(r.md.includes("## Albumin Contrast\n\nAlbumin binds but never transduces."), r.md);
   assert.ok(r.md.indexOf("## Albumin Contrast") < r.md.indexOf("## Related topics"), "a new section sits with the subtopics");
   assert.ok(r.md.includes("## Definition\nOld opening.\n\n## Two Properties"), "the page's own opening is untouched");
@@ -1839,4 +1839,51 @@ test("a planned merge row carries its article and the heading it was filed under
   // Replaying against the page as written yields the same page: nothing is appended twice.
   const again = tn.mergeArticle(merged.notes[0].content, PDF_BASENAME, merged.notes[0].article, { classCode: "HBIO250" });
   assert.equal(again.md, merged.notes[0].content);
+});
+
+// ---- folding: a quote lands under the line that already cites it
+
+test("a quote whose slide the page already links sits with that line, not at the end of the section", () => {
+  const sel = "page=4&selection=2,0,33,19&color=yellow";
+  const existing = [
+    "---",
+    "class: HBIO250",
+    "---",
+    "# Receptors",
+    "",
+    "## Binding",
+    `**[[${PDF_BASENAME}.pdf#page=4&selection=0,0,0,16&color=yellow|Two properties]]**`,
+    "- my own note about affinity",
+    "",
+    "Some later paragraph of mine.",
+    "",
+    "## Related topics",
+    "- [[x]]",
+    "",
+  ].join("\n");
+  // A different span of the same slide: the page cites page 4 already, so the
+  // new quote folds in beside that line rather than at the end.
+  const h = wikiHighlight({ verbatim: true });
+  const r = tn.mergeArticle(existing, PDF_BASENAME, {
+    definition: "",
+    sections: [{ heading: "Binding", prose: "Affinity and transduction are the two tests.", highlights: [h] }],
+    figures: [],
+  });
+  assert.equal(r.added, 1, r.md);
+  const lines = r.md.split("\n");
+  const mine = lines.findIndex((l) => l.includes("my own note about affinity"));
+  const quote = lines.findIndex((l) => l.includes("> > Some highlight text"));
+  const later = lines.findIndex((l) => l.includes("Some later paragraph"));
+  assert.ok(mine > 0 && quote > mine && quote < later, `quote should sit between my bullet and my later paragraph:\n${r.md}`);
+  // The prose still goes at the end of the section, where a summary belongs.
+  const prose = lines.findIndex((l) => l.startsWith("Affinity and transduction"));
+  assert.ok(prose > later, `prose at the end:\n${r.md}`);
+});
+
+test("a quote whose slide the page does not mention still lands at the end of the section", () => {
+  const existing = "---\nclass: HBIO250\n---\n# R\n\n## Binding\n- my own note\n\n## Related topics\n- [[x]]\n";
+  const h = wikiHighlight({ verbatim: true });
+  const r = tn.mergeArticle(existing, PDF_BASENAME, { definition: "", sections: [{ heading: "Binding", prose: "", highlights: [h] }], figures: [] });
+  const lines = r.md.split("\n");
+  assert.ok(lines.findIndex((l) => l.includes("> > Some highlight text")) > lines.findIndex((l) => l.includes("my own note")), r.md);
 });

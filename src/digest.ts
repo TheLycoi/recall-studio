@@ -14,7 +14,7 @@ import { decideGate, type GateDecision } from "./digestGate";
 import { describeError } from "./llm";
 import type { Manifest, ManifestHighlight } from "./manifest";
 import { askDigestOptions, askInstruction, previewDigest } from "./modals";
-import { collectPdfHighlights, readManifestNote, writeManifest } from "./pdfHighlights";
+import { collectPdfHighlights } from "./pdfHighlights";
 import { isPdfFile } from "./pdf";
 import type { DigestDraft } from "./schemas";
 import { suggestPdfHighlights } from "./suggest";
@@ -29,66 +29,24 @@ function today(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-/**
- * "Extract PDF highlights to manifest": collect the PDF's highlights (no paper
- * text — the plain extract command does not need it), write the manifest and
- * open it.
- */
-export async function extractPdfHighlights(plugin: WikiLmPlugin, pdf: TFile): Promise<TFile | null> {
-  try {
-    const { manifest, warnings } = await collectPdfHighlights(plugin, pdf, { paperText: false });
-    const file = await writeManifest(plugin, manifest);
-
-    const n = manifest.highlights.length;
-    const s = manifest.sources.length;
-    const bits = `WikiLM: ${n} highlight${n === 1 ? "" : "s"} from ${s} source note${s === 1 ? "" : "s"}.`;
-    if (warnings.length) new Notice(`${bits} ${warnings.join("; ")}`, 8000); // obsidian.d.ts:4613
-    else new Notice(bits);
-
-    // obsidian.d.ts:7892 (getLeaf) and :8257 (openFile).
-    await plugin.app.workspace.getLeaf("tab").openFile(file);
-    return file;
-  } catch (e) {
-    console.error("WikiLM: extracting PDF highlights failed", e);
-    new Notice(`WikiLM: extracting highlights failed. ${describeError(e)}`);
-    return null;
-  }
-}
-
 /** The manifest and the paper text a digest run works from. */
 interface Resolved {
   manifest: Manifest;
   paperText: string;
 }
 
-/**
- * A PDF gives its manifest by extraction (and the manifest is written, so the
- * run is reproducible by hand); a manifest note gives it by parsing, and the
- * paper text is re-extracted from the PDF it names when that file is still
- * there. A missing PDF is not fatal: the highlights carry the material, the
- * paper text only widens the summary.
- */
+/** The highlights and paper text of a PDF, read fresh; anything else is refused. */
 async function resolveSource(plugin: WikiLmPlugin, source: TFile): Promise<Resolved | null> {
-  if (isPdfFile(source)) {
-    const { manifest, paperText } = await collectPdfHighlights(plugin, source, { paperText: true });
-    await writeManifest(plugin, manifest);
-    return { manifest, paperText };
-  }
-
-  const manifest = await readManifestNote(plugin, source);
-  if (!manifest) {
-    new Notice("WikiLM: this note is not a WikiLM manifest. Run “Extract PDF highlights to manifest” on a PDF first.");
+  if (!isPdfFile(source)) {
+    new Notice("WikiLM: open the PDF itself, or a note that holds PDF++ links to it, then digest.");
     return null;
   }
-
-  // obsidian.d.ts:7369.
-  const pdf = plugin.app.vault.getAbstractFileByPath(manifest.pdfPath);
-  if (pdf instanceof TFile) {
-    const { paperText } = await collectPdfHighlights(plugin, pdf, { paperText: true });
-    return { manifest, paperText };
-  }
-  new Notice(`WikiLM: ${manifest.pdfPath} is no longer in the vault; summarising from the highlights alone.`, 8000);
-  return { manifest, paperText: "" };
+  // The highlights are read from the PDF and from the notes that link it,
+  // every run. Nothing is cached on disk: the links in the reader's own notes
+  // are the record, and a folder of manifests beside them was a second copy
+  // of what they had already written.
+  const { manifest, paperText } = await collectPdfHighlights(plugin, source, { paperText: true });
+  return { manifest, paperText };
 }
 
 /** Every page under the topic folder, all classes, minus the hub notes: what the digest may merge into or file under. */

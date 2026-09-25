@@ -20,10 +20,7 @@ import { loadPdfDocument } from "./pdf";
 import { findPdfReferences, highlightKey, splitLinktext, type PdfReference, type PdfTarget } from "./pdflink";
 import {
   MANIFEST_CONTEXT_CHARS,
-  manifestPath,
   mergeHighlights,
-  parseManifest,
-  renderManifest,
   sortAndAssignIds,
   type Manifest,
   type ManifestHighlight,
@@ -125,11 +122,9 @@ interface NoteRefs {
  * the PDF back at it, and re-reading it would double every entry.
  */
 async function backlinkingNotes(plugin: WikiLmPlugin, pdf: TFile): Promise<NoteRefs[]> {
-  const manifestPrefix = `${normalizePath(plugin.settings.manifestFolder)}/`;
   const resolved = plugin.app.metadataCache.resolvedLinks;
   const sourcePaths = Object.keys(resolved)
     .filter((sourcePath) => Object.prototype.hasOwnProperty.call(resolved[sourcePath] ?? {}, pdf.path))
-    .filter((sourcePath) => !sourcePath.startsWith(manifestPrefix))
     .filter((sourcePath) => sourcePath !== pdf.path)
     .sort();
 
@@ -359,37 +354,4 @@ export function frontmatterClasses(plugin: WikiLmPlugin, path: string): string[]
     : typeof value === "string"
       ? [value.trim()]
       : [];
-}
-
-/**
- * Write the manifest to `<manifestFolder>/<pdf basename>.md`, creating the
- * folder on first use and overwriting an existing manifest (re-extracting is
- * meant to be repeatable; hand edits inside the callouts survive only until
- * the next run, as the format note says).
- */
-export async function writeManifest(plugin: WikiLmPlugin, manifest: Manifest): Promise<TFile> {
-  const folder = normalizePath(plugin.settings.manifestFolder);
-  // Same pattern as the Anki export in src/main.ts:343-344.
-  if (!(await plugin.app.vault.adapter.exists(folder))) {
-    await plugin.app.vault.createFolder(folder); // obsidian.d.ts:7404
-  }
-  const path = normalizePath(manifestPath(folder, manifest.pdfBasename));
-  const md = renderManifest(manifest);
-  const existing = plugin.app.vault.getAbstractFileByPath(path);
-  if (existing instanceof TFile) {
-    await plugin.app.vault.modify(existing, md); // obsidian.d.ts:7467
-    return existing;
-  }
-  return await plugin.app.vault.create(path, md); // obsidian.d.ts:7386
-}
-
-/** Whether this note is a manifest, by its `type: wikilm-manifest` frontmatter. */
-export function isManifestNote(plugin: WikiLmPlugin, file: TFile): boolean {
-  return plugin.app.metadataCache.getFileCache(file)?.frontmatter?.type === "wikilm-manifest";
-}
-
-/** Parse a manifest note back into a Manifest; null when it is not one. */
-export async function readManifestNote(plugin: WikiLmPlugin, file: TFile): Promise<Manifest | null> {
-  if (!isManifestNote(plugin, file)) return null;
-  return parseManifest(await plugin.app.vault.cachedRead(file));
 }

@@ -15,8 +15,7 @@ import { COMMAND_TABLE, type CommandSpec } from "./commandTable";
 import { ingestFolder, ingestSourceNote } from "./ingestSource";
 import { aiHighlightNote, captureMarkdownHighlights, capturePdfSelection, captureReadingSelection, captureSelection } from "./capture";
 import { isPdfFile, pdfsLinkedFrom, readPdfSelection } from "./pdf";
-import { isManifestNote } from "./pdfHighlights";
-import { digestPdf, extractPdfHighlights } from "./digest";
+import { digestPdf } from "./digest";
 import { suggestPdfHighlights } from "./suggest";
 import { askInstruction, askTranscript, pickFolder, pickPdf, SchemaSuggestionsModal } from "./modals";
 import { normalizeTranscript, truncateTranscript } from "./util";
@@ -172,25 +171,17 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
       });
     },
   },
-  "extract-pdf-highlights": {
-    available: (p) => isPdfFile(p.app.workspace.getActiveFile()),
-    run: (p) => {
-      const file = p.app.workspace.getActiveFile();
-      if (!isPdfFile(file)) return;
-      void extractPdfHighlights(p, file);
-    },
-  },
   "digest-pdf-highlights": {
     available: (p) => {
       const file = p.app.workspace.getActiveFile();
       if (!file) return false;
       const isMd = file.extension === "md";
-      return isPdfFile(file) || isManifestNote(p, file) || (isMd && pdfsLinkedFrom(p.app, file).length > 0);
+      return isPdfFile(file) || (isMd && pdfsLinkedFrom(p.app, file).length > 0);
     },
     run: async (p) => {
       const file = p.app.workspace.getActiveFile();
       if (!file) return;
-      if (isPdfFile(file) || isManifestNote(p, file)) {
+      if (isPdfFile(file)) {
         await digestPdf(p, file);
         return;
       }

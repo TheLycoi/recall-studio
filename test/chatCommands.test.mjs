@@ -35,7 +35,6 @@ const EXPECTED = [
   ["ingest-folder", "Ingest folder: read every note in a folder into the wiki"],
   ["cancel-ingestion", "Cancel the running AI highlight or ingest"],
   ["add-transcript", "Add transcript for document highlighting"],
-  ["extract-pdf-highlights", "Extract PDF highlights to manifest"],
   ["digest-pdf-highlights", "Digest PDF highlights into topic notes…"],
   ["ai-highlight-pdf", "AI-highlight this PDF into the wiki…"],
   ["open-chat", "Open chat: ask the notes"],
@@ -47,8 +46,8 @@ const EXPECTED = [
   ["review-schema-suggestions", "Review schema suggestions"],
 ];
 
-test("COMMAND_TABLE holds the twenty-one (id, name) pairs verbatim and in order", () => {
-  assert.equal(table.COMMAND_TABLE.length, 21);
+test("COMMAND_TABLE holds the twenty (id, name) pairs verbatim and in order", () => {
+  assert.equal(table.COMMAND_TABLE.length, 20);
   assert.deepEqual(
     table.COMMAND_TABLE.map((c) => [c.id, c.name]),
     EXPECTED,
@@ -142,7 +141,6 @@ test("lint, export, inbox and help are phrases", () => {
 });
 
 test("a palette name or alias typed exactly still runs that command", () => {
-  assert.deepEqual(cc.matchIntent("Extract PDF highlights to manifest", CTX), { kind: "command", id: "extract-pdf-highlights" });
   assert.deepEqual(cc.matchIntent("retry", CTX), { kind: "command", id: "retry-failed" });
   // The schema aliases reach the exact-alias match at the bottom of the
   // matcher rather than being eaten by an earlier verb rule: "suggest" opens

@@ -779,9 +779,13 @@ export function mergeArticle(
   let said = 0;
   const filed: ArticleMergeResult["sections"] = [];
 
-  const blockFor = (secs: ArticleSection[], leadLines: boolean): { text: string; keys: string[]; firstPage: number | null } => {
+  const blockFor = (
+    secs: ArticleSection[],
+    leadLines: boolean,
+  ): { text: string; keys: string[]; firstPage: number | null; quotes: ManifestHighlight[] } => {
     const parts: string[] = [];
     const keys: string[] = [];
+    const quotes: ManifestHighlight[] = [];
     let firstPage: number | null = null;
     for (const sec of secs) {
       let prose = sec.prose.trim() && !existingText.includes(foldQuote(plainProse(sec.prose))) ? sec.prose.trim() : "";
@@ -809,10 +813,13 @@ export function mergeArticle(
       const chunk: string[] = [];
       if (leadLines && sec.heading) chunk.push(`**${sec.heading}**`);
       if (prose) chunk.push(prose);
-      if (fresh.length) chunk.push(joinRows(fresh.map((h) => renderQuoteCallout(pdfBasename, h))));
+      if (fresh.length) {
+        chunk.push(joinRows(fresh.map((h) => renderQuoteCallout(pdfBasename, h))));
+        quotes.push(...fresh);
+      }
       parts.push(chunk.join("\n\n"));
     }
-    return { text: parts.join("\n\n"), keys, firstPage };
+    return { text: parts.join("\n\n"), keys, firstPage, quotes };
   };
 
   const place = (heading: string, text: string, keys: string[], firstPage: number | null) => {
@@ -842,9 +849,33 @@ export function mergeArticle(
   }
 
   for (const sec of article.sections) {
-    const { text, keys, firstPage } = blockFor([sec], false);
+    const { text, keys, firstPage, quotes } = blockFor([sec], false);
     if (!text) continue;
-    place(safeHeading(sec.heading), text, keys, firstPage);
+    const heading = safeHeading(sec.heading);
+    const found = heading ? findSection(body, heading) : null;
+    if (!found) {
+      place(heading, text, keys, firstPage);
+      continue;
+    }
+    // Fold: each quote goes beside the line that already cites its slide;
+    // what has no such line, and the section's prose, go at the end where a
+    // summary belongs.
+    const folded = new Set<string>();
+    for (const h of quotes) {
+      const end = nextHeadingAfter(body, found.end);
+      const next = spliceBesideCitation(body, found.end, end, pdfBasename, h.page, renderQuoteCallout(pdfBasename, h));
+      if (next !== null) {
+        body = next;
+        folded.add(h.key);
+      }
+    }
+    const rest: string[] = [];
+    const loose = quotes.filter((h) => !folded.has(h.key));
+    if (loose.length) rest.push(joinRows(loose.map((h) => renderQuoteCallout(pdfBasename, h))));
+    const prose = sec.prose.trim() ? text.split("\n\n").filter((part) => !part.startsWith("> ")).join("\n\n") : "";
+    if (prose) rest.push(prose);
+    if (rest.length) body = spliceIntoSection(body, found.end, rest.join("\n\n"));
+    filed.push({ heading: found.heading, keys, created: false });
   }
   return { md: opts.classCode ? addClassCode(body, opts.classCode) : body, added, skipped, said, sections: filed };
 }
@@ -1653,6 +1684,40 @@ function touchFrontmatter(md: string, options: MergeWikiOptions): string {
  * keeping whatever blank lines separated that section from the next heading
  * so the page's own spacing survives the edit.
  */
+/**
+ * Insert `text` in a section, directly after the last line that already cites
+ * the same page of the same PDF; null when the section cites it nowhere.
+ *
+ * This is the fold: the reader's own note already links the slide, often as
+ * a heading of their own with their bullets beneath it, and the quote from
+ * that slide belongs there rather than in a block at the end. The insert
+ * goes after the line's own indented continuation lines, so a quote never
+ * splits a list from its lead.
+ */
+export function spliceBesideCitation(body: string, headingEnd: number, sectionEnd: number, pdfBasename: string, page: number, text: string): string | null {
+  const section = body.slice(headingEnd, sectionEnd);
+  const lines = section.split("\n");
+  const wanted = pdfFileName(pdfBasename).toLowerCase();
+  let at = -1;
+  for (let i = 0; i < lines.length; i++) {
+    for (const ref of findAllPdfReferences(lines[i])) {
+      if (`${ref.pdfBasename.toLowerCase()}.pdf` === wanted && ref.target.page === page) at = i;
+    }
+  }
+  if (at < 0) return null;
+  // Past the cited line's own nested lines, so a list stays whole.
+  let end = at;
+  for (let i = at + 1; i < lines.length; i++) {
+    const l = lines[i];
+    if (l.trim() === "") break;
+    if (!/^\s+\S/.test(l) && !/^\s*(?:[-*+]|\d+[.)])\s/.test(l)) break;
+    end = i;
+  }
+  const before = lines.slice(0, end + 1).join("\n").replace(/\n*$/, "");
+  const after = lines.slice(end + 1).join("\n").replace(/^\n*/, "");
+  return body.slice(0, headingEnd) + `${before}\n\n${text}` + (after ? `\n\n${after}` : "\n") + body.slice(sectionEnd);
+}
+
 export function spliceIntoSection(body: string, headingEnd: number, text: string): string {
   const sectionEnd = nextHeadingAfter(body, headingEnd);
   const section = body.slice(headingEnd, sectionEnd);

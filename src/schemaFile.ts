@@ -78,14 +78,13 @@ export class SchemaFile {
     const s = this.plugin.settings;
     const md = renderDefaultSchema({
       topicFolder: s.topicFolder,
-      manifestFolder: s.manifestFolder,
       schemaPath: path,
       today: new Date().toISOString().slice(0, 10),
     });
     return await this.plugin.app.vault.create(path, md); // obsidian.d.ts:7386
   }
 
-  /** Same pattern as `writeManifest` (src/pdfHighlights.ts:369): create the folder on first use only. */
+  /** Create the folder on first use only. */
   private async ensureFolder(): Promise<void> {
     const folder = normalizePath(this.plugin.settings.schemaFolder);
     if (!folder || folder === "/") return;

@@ -54,7 +54,7 @@ import type { AskHistoryTurn } from "./prompt";
 import { pdfFileName, renderPdfSubpath, findAllPdfReferences } from "./pdflink";
 import { parseTopicNote, noteAliases } from "./topicNote";
 import { isPdfFile, pdfsLinkedFrom } from "./pdf";
-import { frontmatterClasses, isManifestNote } from "./pdfHighlights";
+import { frontmatterClasses } from "./pdfHighlights";
 import { digestPdf } from "./digest";
 import type { GateDecision } from "./digestGate";
 import { suggestPdfHighlights } from "./suggest";
@@ -261,7 +261,7 @@ export class ChatPanel {
   /** Everything in the vault a typed target could name. */
   private intentContext(): IntentContext {
     const pdfs = this.plugin.app.vault.getFiles().filter((f) => isPdfFile(f)).map((f) => ({ path: f.path, basename: f.basename }));
-    const manifests = this.plugin.app.vault.getMarkdownFiles().filter((f) => isManifestNote(this.plugin, f)).map((f) => f.path);
+    const manifests: string[] = [];
     return { pages: this.pageMeta, pdfs, manifests, commands: WIKILM_COMMANDS };
   }
 
@@ -782,7 +782,7 @@ export class ChatPanel {
     // A plain boolean rather than `isPdfFile`: that is a `file is TFile` guard,
     // and testing an already-`TFile` binding with it narrows everything below
     // to `never`, which is not what "this is not a PDF" should mean here.
-    const digestible = file.extension.toLowerCase() === "pdf" || isManifestNote(this.plugin, file);
+    const digestible = file.extension.toLowerCase() === "pdf";
     if (digestible) {
       await this.narrate(`Digesting ${file.basename}…`, () => digestPdf(this.plugin, file, { gate: (d) => this.gateChips(d) }));
       return;
@@ -1661,7 +1661,7 @@ export class ChatPanel {
     const isPdf = isPdfFile(active);
     const canDigest =
       isPdf ||
-      (!!active && (isManifestNote(this.plugin, active) || (isNote && pdfsLinkedFrom(this.plugin.app, active).length > 0)));
+      (!!active && isNote && pdfsLinkedFrom(this.plugin.app, active).length > 0);
     const studioButton = (label: string, enabled: boolean, why: string, run: () => void) => {
       const b = studio.createEl("button", { text: label });
       b.disabled = this.busy || !enabled;

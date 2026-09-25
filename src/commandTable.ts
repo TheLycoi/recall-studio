@@ -86,12 +86,6 @@ export const COMMAND_TABLE: CommandSpec[] = [
     hint: "needs an open note",
   },
   {
-    id: "extract-pdf-highlights",
-    name: "Extract PDF highlights to manifest",
-    aliases: ["extract"],
-    hint: "needs an open PDF",
-  },
-  {
     id: "digest-pdf-highlights",
     name: "Digest PDF highlights into topic notes…",
     aliases: ["digest"],

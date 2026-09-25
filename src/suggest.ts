@@ -15,7 +15,7 @@ import { captureManifestHighlights } from "./capture";
 import { describeError } from "./llm";
 import { askDigestOptions, askInstruction, previewSuggestions } from "./modals";
 import { buildPageMap, type PageMap } from "./pageMap";
-import { collectPdfHighlights, frontmatterClasses, writeManifest } from "./pdfHighlights";
+import { collectPdfHighlights, frontmatterClasses } from "./pdfHighlights";
 import type { SuggestDraft } from "./schemas";
 import type { SuggestExistingNote } from "./prompt";
 import { SUGGEST_PER_PAGE } from "./settings";
@@ -202,7 +202,6 @@ export async function suggestPdfHighlights(
 
     // (1) The text layer and the highlights that are already there.
     const { manifest, pages, warnings } = await collectPdfHighlights(plugin, pdf, { paperText: false, pages: true });
-    await writeManifest(plugin, manifest);
     if (warnings.length) new Notice(`WikiLM: ${warnings.join("; ")}`, 8000); // obsidian.d.ts:4613
     // A scanned deck parses fine but every page comes back with no text items,
     // so checking the page count alone would let the run reach the model with

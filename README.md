@@ -56,8 +56,7 @@ and `/help` in the chat prints it.
 | **Ingest folder: read every note in a folder into the wiki** | `ingest-folder`, `read-folder` | always |
 | **Cancel the running AI highlight or ingest** | `cancel`, `stop-run` | while a run is in progress |
 | **Add transcript for document highlighting** | `transcript` | needs an open note |
-| **Extract PDF highlights to manifest** | `extract` | needs an open PDF |
-| **Digest PDF highlights into topic notes…** | `digest` | needs an open PDF, a manifest note, or a note with PDF++ links |
+| **Digest PDF highlights into topic notes…** | `digest` | needs an open PDF, or a note with PDF++ links |
 | **AI-highlight this PDF into the wiki…** | `suggest` | needs an open PDF |
 | **Open chat: ask the notes** | `chat`, `ask` | always |
 | **Lint wiki: find gaps, dead links and ungrounded quotes** | `lint`, `wiki` | always |
@@ -204,12 +203,11 @@ group those highlights by topic, write a short summary for each topic from
 the whole paper, and lay out every highlight underneath it as the same
 PDF++ callout, so clicking it still opens the PDF at that highlight.
 
-Four commands, active on a PDF (or, for the last two, on a manifest note):
+Three commands, active on an open PDF:
 
 | Command | What it does |
 | --- | --- |
-| **Extract PDF highlights to manifest** | Collects every highlight of the active PDF — PDF++ links in notes that back-link to it, plus annotations embedded in the file itself — and writes a manifest, then opens it. |
-| **Digest PDF highlights into topic notes…** | Asks the configured model to group the manifest's highlights into topic notes and write each one's summary, then shows a preview before writing anything. |
+| **Digest PDF highlights into topic notes…** | Asks the configured model to group the PDF's highlights into topic notes and write each one's summary, then shows a preview before writing anything. |
 | **Open chat: ask the notes** | Opens the WikiLM sidebar in Chat mode (`src/main.ts`). |
 
 **Pages are concept or entity pages.** A new page carries `type: concept` or
@@ -222,15 +220,14 @@ filed under a heading there; only a topic with no home becomes a page, and
 the preview says why. The command also runs on a class note that holds PDF++
 links, digesting the PDFs it cites.
 
-**The manifest.** One file per PDF, in the folder set by **Manifest folder**
-(default `wikilm-manifests/`), named after the PDF
-(`<manifestFolder>/<pdf basename>.md`). It lists every highlight in page
-order as a PDF++ callout carrying the same link the note would, plus
-hand-readable fields (`id::`, `page::`, `kind::`, `color::`, `origin::`,
-`before::`, `after::`) that the digest and the pasted-JSON path use to refer
-to a highlight by its `id`. Re-running **Extract PDF highlights to
-manifest** overwrites the manifest; it never touches a topic note
-(`src/manifest.ts`, `src/pdfHighlights.ts`).
+**No manifest on disk.** The highlights are collected fresh on every run —
+the PDF++ links in the notes that cite the PDF, plus any annotations
+embedded in the file — merged by location, and given ids (`H01`, `H02`)
+that live only for that run: the model cites them, and code turns each one
+back into the PDF++ link that opens the source at the span. Earlier
+versions also wrote the collection to a `wikilm-manifests/` folder. It was
+a second copy of links the reader had already written in their own notes,
+so it is gone (`src/pdfHighlights.ts` `collectPdfHighlights`).
 
 **The topic note.** Written to `<topicFolder>/<class code>/<title>.md`
 (default topic folder `classes`; the class code comes from
@@ -284,7 +281,7 @@ PDF++ link in PDF++'s own "Title & page" display form, and the reader's
 bullets beneath it. A bare link like that (one not inside a `[!PDF]`
 callout) carries the heading above it and everything written under it —
 up to the next heading or the next PDF++ link, markup and nesting intact —
-onto the manifest as `heading::` and `notes::` (`findAllPdfReferences`,
+onto the run's highlight rows as `heading` and `notes` (`findAllPdfReferences`,
 `src/pdflink.ts`), and the digest sends the model the quote and the notes
 together, in one `<highlight>` block per highlight (`buildDigestMessage`,
 `src/prompt.ts`). What the reader wrote under a slide is what the page
@@ -296,7 +293,7 @@ should say about it.
 quoted verbatim beneath that prose. Every highlight filed under a page goes
 in exactly one section's `quote_ids`; slide titles and logistics go in
 `unused_ids`. Prose cites by id after the sentence it supports and mentions
-other pages in double braces; it never writes a bracket. An id the manifest
+other pages in double braces; it never writes a bracket. An id the run
 lacks is dropped from the prose and counted; a name no page answers to is
 left as plain words and reported as an orphan. No stub page is ever created.
 
@@ -356,7 +353,7 @@ and "merge into an existing note". Nothing is written until you click
 
 Digesting (above) starts from highlights you already made by hand. **AI-highlight this PDF into the wiki…** goes the other way: it reads a lecture PDF's own text layer and proposes the highlights, each one verified against the page before it's ever offered, assigned to an existing wiki note (and, when it belongs to one of that note's own subtopics, to that `##` heading) or a new one, and written straight into secondbrain-style notes — not a manifest, not a topic-note folder, but `wiki/concepts` and `wiki/entities`, the same notes you write and link by hand.
 
-The command is active on an open PDF and runs in nine steps: it reads the PDF's text page by page and any existing highlights already in a manifest for it; asks for (or reuses) the class code; picks up the transcript attached to the PDF's own path, if any; asks Notes / Flashcards / Both, as the digest does; collects the wiki notes this PDF may write into; sends the pages to the model in batches, each batch told what earlier batches and the manifest already hold; verifies every returned span and turns the survivors into manifest-shaped highlight rows; groups those rows into notes and shows a per-span preview; and, once you confirm (and possibly rename a note or uncheck a span), writes the callouts and queues flashcards if asked.
+The command is active on an open PDF and runs in nine steps: it reads the PDF's text page by page and the highlights the PDF and its backlinking notes already hold; asks for (or reuses) the class code; picks up the transcript attached to the PDF's own path, if any; asks Notes / Flashcards / Both, as the digest does; collects the wiki notes this PDF may write into; sends the pages to the model in batches, each batch told what earlier batches and the manifest already hold; verifies every returned span and turns the survivors into manifest-shaped highlight rows; groups those rows into notes and shows a per-span preview; and, once you confirm (and possibly rename a note or uncheck a span), writes the callouts and queues flashcards if asked.
 
 **Granularity and limits**, under **AI highlights for PDFs** in settings:
 
@@ -382,7 +379,7 @@ The command is active on an open PDF and runs in nine steps: it reads the PDF's 
 - Every span is located in the page's own text by exact string match first, then by a whitespace/case-insensitive fallback that is only accepted when the matched text really is the quote — a fuzzy hit that differs from the quote is rejected outright (`locateInPage`, `src/pageMap.ts`).
 - The located span is converted to a `selection=` range and round-tripped back through `selectionText` — PDF++'s own algorithm for rendering a selection to text — and only kept if that render equals the quote (`selectionFor`, `src/pageMap.ts`).
 - The per-page cap is enforced in the order the model returned spans, so an earlier span wins a page against a later one that would exceed it.
-- Every span is deduped by `highlightKey` (page + selection, ignoring color) against both the PDF's manifest and everything the run itself has already accepted.
+- Every span is deduped by `highlightKey` (page + selection, ignoring color) against both the PDF's existing highlights and everything the run itself has already accepted.
 - Two spans on the same page whose selections overlap are not both kept; the earlier one wins.
 
 **The note shape.** New notes are the secondbrain style — `class:` frontmatter, a `## Summary`, and a `## Highlights` section of bullet rows — with no `## Related topics` and no `## Flashcard Seeds` (those stay specific to the topic-note digest). `renderWikiNote` (`src/topicNote.ts`) emits, for two highlights on pages 2 and 4 of `HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf`:
@@ -921,7 +918,6 @@ Before you return, check that your verdict rests on what the evidence states and
 
 | setting | default | effect |
 | --- | --- | --- |
-| Manifest folder | `wikilm-manifests` | where one manifest file per PDF is written |
 | Topic notes folder | `classes` | topic notes go to `<folder>/<class code>/<title>.md` |
 | Schema folder | `schema` | where `wikilm.md` and `wikilm-suggestions.md` live |
 | Propose schema rules from my edits | **on** | watches your card edits and proposes a rule when the same correction repeats |
@@ -1259,12 +1255,12 @@ Layout, one line per module:
 - `src/lint.ts` — the deterministic post-generation card linter: regex and word counts, no model call
 - `src/llm.ts` — the system prompts, the provider dispatch, and the error text every call shares
 - `src/main.ts` — the plugin class: wiring the store, generator, backends, views, ribbon, status bar and command loop
-- `src/manifest.ts` — the pure manifest model: render and parse the manifest note, and the merge/sort/id helpers behind it
+- `src/manifest.ts` — the pure highlight model: the row shape a run collects, and the merge/sort/id helpers behind it
 - `src/modals.ts` — the modals: instructions, deck picker, digest and suggestion previews, the fix plan
 - `src/model.ts` — the card and highlight records, their statuses, and the Bloom level the critique judges
 - `src/pageMap.ts` — an offset-preserving view of a PDF page's text, so a quote can be inverted back to a `selection=` subpath
 - `src/pdf.ts` — what you have selected in Obsidian's own pdf.js viewer, read straight off the text layer
-- `src/pdfHighlights.ts` — collects one PDF's highlights, from backlinking PDF++ links and embedded annotations, into a manifest
+- `src/pdfHighlights.ts` — collects one PDF's highlights, from backlinking PDF++ links and embedded annotations, for the run
 - `src/pdflink.ts` — pure PDF++ link grammar: parse and render `#page=…&selection|annotation|rect…` subpaths and callouts
 - `src/pdftext.ts` — text extraction over pdf.js page data, ported from PDF++: annotation quads, `selection=` ranges, page text
 - `src/prompt.ts` — message assembly for every call, kept out of `llm.ts` so block order can be tested without a backend
@@ -1275,7 +1271,7 @@ Layout, one line per module:
 - `src/sourceMap.ts` — the markdown analogue of `pageMap.ts`: segment a note by heading and paragraph, and invert an offset back
 - `src/store.ts` — the persistent inbox, kept as `inbox.json` in the plugin folder with debounced writes
 - `src/suggest.ts` — AI highlight suggestion for a PDF: the glue between the text layer, the model, the planner, the preview and the vault
-- `src/suggestPlan.ts` — its pure planning layer: page batches, span verification, manifest rows, and grouping into wiki notes
+- `src/suggestPlan.ts` — its pure planning layer: page batches, span verification, highlight rows, and grouping into wiki notes
 - `src/topicNote.ts` — pure topic-note render, parse and merge by highlight key, and the digest planner
 - `src/util.ts` — pure helpers shared across the plugin, kept free of Obsidian imports
 - `src/vaultFix.ts` — repairs for what the vault lint finds: the dead link that is only a spelling apart from its page, and the unwrap that withdraws one whose page was never written
