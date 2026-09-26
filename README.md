@@ -1048,7 +1048,7 @@ regex- and word-count-based, no model call. Nine checks can fail a card:
 | id | what it catches |
 | --- | --- |
 | `cloze-not-grounded` | a `{{cN::…}}` deletion whose text isn't found in the highlight |
-| `cloze-count` | a cloze card with fewer than 1 or more than 3 distinct deletions |
+| `cloze-count` | a cloze card with fewer than 2 or more than 3 distinct deletions; a one-deletion draft is filed as a question/answer card instead (`demoteSingleCloze`) |
 | `cloze-numbering` | deletion numbers that skip (e.g. 1, 3, no 2) |
 | `cloze-framing` | a deletion body over 6 words, or one containing a linking word like "is"/"which"/"because" — a sign it hides a clause, not a short atom |
 | `qa-empty` | an empty question/answer, or a cloze card with no deletion at all |

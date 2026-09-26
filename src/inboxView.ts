@@ -20,7 +20,7 @@ import { isPdfHighlight, liveCards, makeCard, pendingCards, type Card, type Card
 import { askInstruction, SchemaSuggestionsModal } from "./modals";
 import { countClozes, fmtDate, locateQuote, splitFrontmatter, plainText } from "./util";
 import { describeError } from "./llm";
-import { findCrossInterference, lintCard, LINT_FIX_INSTRUCTIONS, LINT_LABELS } from "./lint";
+import { findCrossInterference, lintCard, LINT_FIX_INSTRUCTIONS, LINT_LABELS, wrapCloze } from "./lint";
 import { DEFAULT_SETTINGS } from "./settings";
 import { ChatPanel } from "./chatPanel";
 
@@ -798,13 +798,38 @@ export class InboxView extends ItemView {
         }
       });
     }
+    // Cloze: wrap what is selected in the sentence box with the next
+    // deletion number. Only shown for a cloze card, since a Q&A card has no
+    // sentence to mark, and it works on the sentence box alone.
+    const clozeSelection = () => {
+      const r = wrapCloze(text.value, text.selectionStart, text.selectionEnd);
+      if (!r) {
+        new Notice("Select the words to hide first.");
+        return;
+      }
+      text.value = r.text;
+      text.setSelectionRange(r.cursor, r.cursor);
+      text.focus();
+    };
+    text.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "c") {
+        e.preventDefault();
+        clozeSelection();
+      }
+    });
     const btns = form.createDiv({ cls: "wikilm-editor-btns" });
+    const clozeBtn = btns.createEl("button", { text: "Cloze" });
+    clozeBtn.title = "Hide the selected words behind the next {{cN::…}} (⌘⇧C)";
+    clozeBtn.addEventListener("click", clozeSelection);
+    const syncCloze = () => clozeBtn.toggle(kindSel.value === "cloze");
+    kindSel.addEventListener("change", syncCloze);
+    syncCloze();
     btns.createEl("button", { text: "Cancel" }).addEventListener("click", cancel);
     const checkBtn = btns.createEl("button", { text: "Check" });
     checkBtn.title = "Run the card rules and the critique against what you have typed, without saving.";
     checkBtn.addEventListener("click", () => void check(checkBtn));
     btns.createEl("button", { text: "Save", cls: "mod-cta" }).addEventListener("click", () => void save());
-    btns.createSpan({ cls: "wikilm-muted", text: "⌘⏎ save · esc cancel" });
+    btns.createSpan({ cls: "wikilm-muted", text: "⌘⏎ save · esc cancel · ⌘⇧C cloze" });
     window.setTimeout(() => (c.kind === "qa" ? front : text).focus(), 10);
   }
 

@@ -3,7 +3,7 @@ import { plainText } from "./util";
 import type WikiLmPlugin from "./main";
 import { makeCard, type Card, type Highlight } from "./model";
 import { describeError } from "./llm";
-import { lintCard, type LintResult } from "./lint";
+import { lintCard, type LintResult, demoteSingleCloze } from "./lint";
 
 /**
  * Background queue: fire a highlight in, come back later to cards in the
@@ -68,7 +68,8 @@ export class Generator {
       // Build the card objects up front but keep them off `h.cards` until the
       // whole chain has run, so a half-applied critique can never be observed
       // by the inbox view mid-pass.
-      const cards = drafts.map((d) =>
+      // One deletion is a basic card, whatever the writer called it.
+      const cards = drafts.map(demoteSingleCloze).map((d) =>
         makeCard(h.id, {
           kind: d.kind,
           front: d.kind === "qa" ? d.front.trim() : "",

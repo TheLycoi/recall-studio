@@ -104,12 +104,12 @@ test("cloze-count: fails with 4 distinct deletions", () => {
   assert.ok(r.failures.includes("cloze-count"), "expected cloze-count for 4 distinct deletions");
 });
 
-test("cloze-count: passes with 1 to 3 distinct deletions, and repeated same-number markers do not inflate the count", () => {
+test("cloze-count: passes with 2 to 3 distinct deletions, and repeated same-number markers do not inflate the count", () => {
   const card = clozeCard(
-    "{{c1::Contemplation}}: the client intends to {{c1::change}} within the next six months.",
+    "{{c1::Contemplation}}: the client intends to {{c2::change}} within the next {{c1::six months}}.",
   );
   const r = l.lintCard(card, highlight, []);
-  assert.ok(!r.failures.includes("cloze-count"), "one distinct number used twice is still one deletion");
+  assert.ok(!r.failures.includes("cloze-count"), "c1 used twice and c2 once is two deletions");
 });
 
 // ---- cloze-numbering (distinct numbers exactly 1..k, no gaps)
@@ -340,7 +340,7 @@ test("a qa card never emits cloze-* failure ids", () => {
 
 test("a well-formed PHED163-style cloze card with no siblings passes clean", () => {
   const card = clozeCard(
-    "Contemplation: the client intends to change within the next {{c1::six months}} and weighs pros and cons.",
+    "Contemplation: the client intends to change within the next {{c1::six months}} and weighs {{c2::pros and cons}}.",
   );
   const r = l.lintCard(card, highlight, []);
   assert.deepEqual(r.failures, [], "expected zero failures");
@@ -510,4 +510,42 @@ test("fix instructions say what to do, not just what is wrong", () => {
   for (const [id, fix] of Object.entries(l.LINT_FIX_INSTRUCTIONS)) {
     assert.notEqual(fix, l.LINT_LABELS[id], `${id} still uses the badge label as its instruction`);
   }
+});
+
+// ---- a single cloze is a basic card ----------------------------------------------
+
+test("demoteSingleCloze turns a one-deletion cloze into a question/answer card with a blank, and leaves others alone", () => {
+  const one = { kind: "cloze", front: "", back: "", text: "Qualitative analysis is a {{c1::non-numerical}}, description of variables of interest." };
+  assert.deepEqual(l.demoteSingleCloze(one), {
+    kind: "qa",
+    front: "Qualitative analysis is a ___, description of variables of interest.",
+    back: "non-numerical",
+    text: "",
+  });
+  const hinted = { kind: "cloze", front: "", back: "", text: "Set {{c1::t = 0::when?}} at movement onset." };
+  assert.deepEqual(l.demoteSingleCloze(hinted).back, "t = 0");
+  const twice = { kind: "cloze", front: "", back: "", text: "{{c1::Alarm}} then {{c1::exhaustion}}." };
+  assert.deepEqual(l.demoteSingleCloze(twice), { kind: "qa", front: "___ then ___.", back: "Alarm; exhaustion", text: "" });
+  const two = { kind: "cloze", front: "", back: "", text: "{{c1::Alarm}} then {{c2::exhaustion}}." };
+  assert.equal(l.demoteSingleCloze(two), two, "two numbers stay a cloze card");
+  const qa = { kind: "qa", front: "Q?", back: "A", text: "" };
+  assert.equal(l.demoteSingleCloze(qa), qa);
+});
+
+test("cloze-count: a single deletion now fails, because one cloze is a basic card", () => {
+  const h = { text: "Qualitative analysis is a non-numerical description." };
+  const r = l.lintCard({ kind: "cloze", text: "Qualitative analysis is a {{c1::non-numerical}} description.", front: "", back: "" }, h, []);
+  assert.ok(r.failures.includes("cloze-count"));
+});
+
+// ---- the Cloze button: wrap the selection with the next number -------------------
+
+test("wrapCloze wraps the selected span with the next deletion number and trims edge whitespace out of the marker", () => {
+  const t = "Qualitative analysis is a non-numerical description.";
+  const s = t.indexOf("non-numerical"), e = s + "non-numerical".length;
+  assert.deepEqual(l.wrapCloze(t, s, e), { text: "Qualitative analysis is a {{c1::non-numerical}} description.", cursor: s + "{{c1::non-numerical}}".length });
+  const t2 = "{{c1::Alarm}} then exhaustion.";
+  const s2 = t2.indexOf(" exhaustion"), e2 = s2 + " exhaustion".length;
+  assert.equal(l.wrapCloze(t2, s2, e2).text, "{{c1::Alarm}} then {{c2::exhaustion}}.");
+  assert.equal(l.wrapCloze(t, 5, 5), null, "nothing selected, nothing wrapped");
 });

@@ -50,9 +50,11 @@ export function lintCard(card: Card, highlight: Highlight, siblings: Card[]): Li
 
     // cloze-count: counts DISTINCT deletion numbers, not raw {{cN::}} matches.
     // {{c1::a}} ... {{c1::b}} is one deletion tested in two places (a
-    // legitimate overlapping-cloze pattern), not two deletions. 1 to 3
-    // distinct numbers inclusive.
-    if (distinctNumbers.length < 1 || distinctNumbers.length > 3) {
+    // legitimate overlapping-cloze pattern), not two deletions. 2 to 3
+    // distinct numbers inclusive: a sentence with one deletion is a basic
+    // card wearing cloze markup (the reader's rule, 2026-09-25), and the
+    // generator demotes such a draft before it gets here.
+    if (distinctNumbers.length < 2 || distinctNumbers.length > 3) {
       failures.push("cloze-count");
     }
 
@@ -211,3 +213,59 @@ export const LINT_FIX_INSTRUCTIONS: Record<LintFailureId | LintWarningId, string
   "shared-answer": "another card on this highlight has the same answer; add the cue that tells the two apart, or test a different fact",
   "cross-interference": "a card on another highlight has this answer; add a cue naming this subject so the two cannot be confused",
 };
+
+/** The four fields of a drafted card, as the writer returns them and the generator files them. */
+interface DraftLike {
+  kind: "qa" | "cloze";
+  front: string;
+  back: string;
+  text: string;
+}
+
+const CLOZE_RE = /\{\{c(\d+)::([\s\S]*?)(?:::[^}]*)?\}\}/g;
+
+/**
+ * A cloze card with one deletion number is a basic card: the reader's rule.
+ * One blank in a sentence tests one thing, and a question/answer card says
+ * so plainly, without cloze markup that Anki would review as a single item
+ * anyway. The sentence becomes the front with the deletion shown as a
+ * blank, and the deleted span the back; a number used twice yields two
+ * blanks and both answers. Two or more numbers, or a qa draft, come back
+ * untouched — the same object, so a caller can test identity.
+ */
+export function demoteSingleCloze<T extends DraftLike>(d: T): T {
+  if (d.kind !== "cloze") return d;
+  const numbers = new Set<string>();
+  const bodies: string[] = [];
+  for (const m of d.text.matchAll(CLOZE_RE)) {
+    numbers.add(m[1]);
+    bodies.push(m[2].trim());
+  }
+  if (numbers.size !== 1) return d;
+  return {
+    ...d,
+    kind: "qa",
+    front: d.text.replace(CLOZE_RE, "___").replace(/[ \t]{2,}/g, " ").trim(),
+    back: bodies.join("; "),
+    text: "",
+  };
+}
+
+/**
+ * The editor's Cloze button: wrap the selected span with the next unused
+ * deletion number. Whitespace at the edges of the selection stays outside
+ * the marker, so "{{c2:: exhaustion}}" cannot happen; an empty selection
+ * wraps nothing. `cursor` is where the caret lands, just after the marker.
+ */
+export function wrapCloze(text: string, start: number, end: number): { text: string; cursor: number } | null {
+  if (end <= start) return null;
+  let a = start;
+  let b = end;
+  while (a < b && /\s/.test(text[a])) a++;
+  while (b > a && /\s/.test(text[b - 1])) b--;
+  if (b <= a) return null;
+  let next = 1;
+  for (const m of text.matchAll(CLOZE_RE)) next = Math.max(next, Number(m[1]) + 1);
+  const marker = `{{c${next}::${text.slice(a, b)}}}`;
+  return { text: text.slice(0, a) + marker + text.slice(b), cursor: a + marker.length };
+}
