@@ -1,6 +1,6 @@
 import type { z } from "zod";
 
-export type ProviderName = "anthropic" | "codex" | "claudecli";
+export type ProviderName = "anthropic" | "gemini" | "codex" | "claudecli";
 
 /** One structured-output request: a system prompt, a user message, and the zod schema the answer must satisfy. */
 export interface CompletionRequest<T> {
@@ -19,6 +19,8 @@ export interface CompletionRequest<T> {
    * come back because every Ask ran at the effort a card critique needs.
    */
   effort?: "low" | "medium" | "high";
+  /** The model for this one call (a role's own choice, src/modelRoles.ts); the provider's configured model otherwise. */
+  model?: string;
 }
 
 /**
@@ -27,8 +29,10 @@ export interface CompletionRequest<T> {
  */
 export interface LlmBackend {
   readonly name: ProviderName;
-  /** One tiny request so the settings tab can say whether the provider works. */
-  probe(): Promise<{ model: string; via: string }>;
+  /** One tiny request so the settings tab can say whether the provider works, on `model` when given. */
+  probe(model?: string): Promise<{ model: string; via: string }>;
+  /** The models this provider offers, for the settings dropdown; may throw when the provider cannot be reached. */
+  listModels(): Promise<string[]>;
   complete<T>(req: CompletionRequest<T>): Promise<T>;
   /** Cancel in-flight work (kills child processes). Resolves once everything has stopped. */
   abort(): Promise<void>;

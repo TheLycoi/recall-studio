@@ -59,21 +59,28 @@ export class AnthropicBackend implements LlmBackend {
     return { client, source };
   }
 
-  async probe(): Promise<{ model: string; via: string }> {
+  async probe(model?: string): Promise<{ model: string; via: string }> {
     const s = this.getSettings();
     const { client, source } = this.clientWithSource();
     const res = await client.messages.create({
-      model: s.model,
+      model: model ?? s.model,
       max_tokens: 5,
       messages: [{ role: "user", content: "Reply with the single word: ready" }],
     });
     return { model: res.model, via: `key from ${source}` };
   }
 
+  async listModels(): Promise<string[]> {
+    const { client } = this.clientWithSource();
+    const ids: string[] = [];
+    for await (const m of client.models.list()) ids.push(m.id);
+    return ids;
+  }
+
   async complete<T>(req: CompletionRequest<T>): Promise<T> {
     const s = this.getSettings();
     const response = await this.client().messages.parse({
-      model: s.model,
+      model: req.model ?? s.model,
       max_tokens: req.maxTokens,
       system: [{ type: "text", text: req.system, cache_control: { type: "ephemeral" } }],
       output_config: { effort: s.effort, format: zodOutputFormat(req.schema) },

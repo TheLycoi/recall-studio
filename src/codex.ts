@@ -1,4 +1,5 @@
 import { execFile, spawn, type ChildProcess } from "child_process";
+import { CODEX_FALLBACK_MODELS, readCodexModels } from "./modelRoles";
 import { accessSync, constants, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { homedir, tmpdir } from "os";
 import { delimiter, join } from "path";
@@ -338,7 +339,7 @@ export class CodexBackend implements LlmBackend {
 
   constructor(private getSettings: () => WikiLmSettings) {}
 
-  async probe(): Promise<{ model: string; via: string }> {
+  async probe(model?: string): Promise<{ model: string; via: string }> {
     const s = this.getSettings();
     const bin = resolveCodexBinary(s.codexPath);
     const status = await runQuick(bin, ["login", "status"]);
@@ -352,14 +353,21 @@ export class CodexBackend implements LlmBackend {
       schema: z.object({ ready: z.boolean() }),
       label: "probe",
       maxTokens: 50,
+      model,
     });
-    return { model: s.codexModel, via: bin };
+    return { model: model ?? s.codexModel, via: bin };
+  }
+
+  async listModels(): Promise<string[]> {
+    const found = readCodexModels(readModelsCache());
+    return found.length > 0 ? found : [...CODEX_FALLBACK_MODELS];
   }
 
   async complete<T>(req: CompletionRequest<T>): Promise<T> {
     const s = this.getSettings();
     const bin = resolveCodexBinary(s.codexPath);
-    const effort = clampEffort(req.effort ?? s.effort, readSupportedEfforts(s.codexModel, readModelsCache()));
+    const model = req.model ?? s.codexModel;
+    const effort = clampEffort(req.effort ?? s.effort, readSupportedEfforts(model, readModelsCache()));
     const dir = mkdtempSync(join(tmpdir(), "wikilm-codex-"));
     try {
       const schemaPath = join(dir, "schema.json");
@@ -377,7 +385,7 @@ export class CodexBackend implements LlmBackend {
         "-C",
         dir,
         "-m",
-        s.codexModel,
+        model,
         "-c",
         `model_reasoning_effort="${effort}"`,
         "--output-schema",

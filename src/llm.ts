@@ -1,9 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { AnthropicBackend } from "./anthropic";
-import type { LlmBackend } from "./backend";
+import type { CompletionRequest, LlmBackend, ProviderName } from "./backend";
 import { ClaudeCliBackend, ClaudeCliError } from "./claudeCli";
 import { CodexBackend, CodexError } from "./codex";
+import { GeminiBackend, GeminiError } from "./gemini";
+import { resolveRole, type ModelRole } from "./modelRoles";
 import { buildExamplesBlock } from "./examples";
 import type { BloomLevel, Card, Highlight } from "./model";
 import type {
@@ -368,6 +370,7 @@ function withRules(message: string, rules: string): string {
  */
 export class LlmClient {
   private anthropic: AnthropicBackend;
+  private gemini: GeminiBackend;
   private codex: CodexBackend;
   private claudeCli: ClaudeCliBackend;
 
@@ -384,6 +387,7 @@ export class LlmClient {
     private getSchema: () => Promise<{ cards: string; wiki: string } | null> = async () => null,
   ) {
     this.anthropic = new AnthropicBackend(getSettings);
+    this.gemini = new GeminiBackend(getSettings);
     this.codex = new CodexBackend(getSettings);
     this.claudeCli = new ClaudeCliBackend(getSettings);
   }
@@ -414,21 +418,48 @@ export class LlmClient {
     }
   }
 
-  private backend(): LlmBackend {
-    const provider = this.getSettings().provider;
+  private backendFor(provider: ProviderName): LlmBackend {
+    if (provider === "gemini") return this.gemini;
     if (provider === "codex") return this.codex;
     if (provider === "claudecli") return this.claudeCli;
     return this.anthropic;
   }
 
-  /** One tiny request, so the settings tab can say whether the provider works. */
+  /** The main provider: what every call runs on unless it names a role. */
+  private backend(): LlmBackend {
+    return this.backendFor(this.getSettings().provider);
+  }
+
+  /**
+   * One request on the provider and model a role resolves to
+   * (src/modelRoles.ts): the role's own when the reader set one, the main
+   * choice otherwise. Lint, query and digest name their role; everything
+   * else runs on the main provider through `backend()`.
+   */
+  private run<T>(role: ModelRole, req: CompletionRequest<T>): Promise<T> {
+    const { provider, model } = resolveRole(this.getSettings(), role);
+    return this.backendFor(provider).complete({ ...req, model });
+  }
+
+  /** One tiny request, so the settings tab can say whether the main provider works. */
   probe(): Promise<{ model: string; via: string }> {
-    return this.backend().probe();
+    const { provider, model } = resolveRole(this.getSettings(), undefined);
+    return this.probeWith(provider, model);
+  }
+
+  /** The same, on any provider and model: the Test button beside a role's row. */
+  probeWith(provider: ProviderName, model: string): Promise<{ model: string; via: string }> {
+    return this.backendFor(provider).probe(model || undefined);
+  }
+
+  /** The models a provider offers, for the settings dropdown. */
+  listModels(provider: ProviderName): Promise<string[]> {
+    return this.backendFor(provider).listModels();
   }
 
   /** Cancel in-flight work on every backend (plugin unload). */
   async abort(): Promise<void> {
-    await Promise.all([this.anthropic.abort(), this.codex.abort(), this.claudeCli.abort()]);
+    await Promise.all([this.anthropic.abort(), this.gemini.abort(), this.codex.abort(), this.claudeCli.abort()]);
   }
 
   /** "write cards": one highlight (plus context) in, a handful of cards out. */
@@ -584,7 +615,7 @@ export class LlmClient {
 
   /** "digest": one lecture PDF's text and its highlights in, a handful of topic notes out. */
   async digest(args: DigestMessageArgs): Promise<DigestDraft> {
-    return this.backend().complete({
+    return this.run("digest", {
       system: DIGEST_SYSTEM,
       // `buildDigestMessage` is pure and ends with the standing instructions
       // and this PDF's instruction; the house rules are appended after it, in
@@ -598,7 +629,7 @@ export class LlmClient {
 
   /** "suggest": a batch of pages in, highlight candidates assigned to wiki notes out. */
   async suggest(args: SuggestMessageArgs): Promise<SuggestDraft> {
-    return this.backend().complete({
+    return this.run("digest", {
       system: SUGGEST_SYSTEM,
       user: withRules(buildSuggestMessage(args), await this.rulesBlock("wiki")),
       schema: SuggestOutSchema,
@@ -613,7 +644,7 @@ export class LlmClient {
    * it and checks the quotes and citations, so nothing is validated here.
    */
   async ask(args: AskMessageArgs): Promise<AskDraft> {
-    return this.backend().complete({
+    return this.run("query", {
       system: ASK_SYSTEM,
       user: buildAskMessage(args),
       schema: AskOutSchema,
@@ -632,7 +663,7 @@ export class LlmClient {
    * search terms — so this stays cheap and cannot invent a claim.
    */
   async keywords(args: KeywordsMessageArgs): Promise<{ keywords: string[] }> {
-    return this.backend().complete({
+    return this.run("query", {
       system: KEYWORDS_SYSTEM,
       user: buildKeywordsMessage(args),
       schema: KeywordsOutSchema,
@@ -651,7 +682,7 @@ export class LlmClient {
    * that is already defined in front of you is recognition, not reasoning.
    */
   async aliasesAndTags(args: AliasesMessageArgs): Promise<AliasesTagsDraft> {
-    return this.backend().complete({
+    return this.run("lint", {
       system: ALIASES_SYSTEM,
       user: buildAliasesMessage(args),
       schema: AliasesTagsOutSchema,
@@ -669,7 +700,7 @@ export class LlmClient {
    * the offer. Low effort, as with aliases: recognition, not reasoning.
    */
   async verifyDuplicates(args: DuplicatesMessageArgs): Promise<DuplicatesDraft> {
-    return this.backend().complete({
+    return this.run("lint", {
       system: DUPLICATES_SYSTEM,
       user: buildDuplicatesMessage(args),
       schema: DuplicatesOut,
@@ -716,6 +747,7 @@ export class LlmClient {
 export function describeError(e: unknown): string {
   if (e instanceof ClaudeCliError) return e.message;
   if (e instanceof CodexError) return e.message;
+  if (e instanceof GeminiError) return e.message;
   if (e instanceof Anthropic.AuthenticationError) return "Invalid Anthropic API key.";
   if (e instanceof Anthropic.RateLimitError) return "Rate limited by the Anthropic API; will retry later.";
   if (e instanceof Anthropic.BadRequestError) return `Bad request: ${e.message}`;

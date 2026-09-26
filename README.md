@@ -944,6 +944,9 @@ Before you return, check that your verdict rests on what the evidence states and
 
 | setting | default | effect |
 | --- | --- | --- |
+| Provider | Anthropic | Anthropic (API key), Google Gemini (API key), Codex (ChatGPT subscription) or Claude Code (Claude subscription). **Test** sends one tiny request and loads that provider's model list |
+| Model (per provider) | the provider's default | a dropdown of the models the last Test found, plus **Other…** to type an id; Claude Code lists its aliases, Codex reads `~/.codex/models_cache.json` |
+| Use different models for lint, query and digest | off | on, **Lint**, **Query** and **Digest** each pick a provider and model with their own Test; card writing, critique, quizzes and highlighting stay on the main provider (`src/modelRoles.ts`) |
 | Topic notes folder | `classes` | topic notes go to `<folder>/<class code>/<title>.md` |
 | Schema folder | `wiki/sources/schema` | where `wikilm.md` and `wikilm-suggestions.md` live; not indexed, linted or graphed as pages |
 | Transcript folder | `wiki/sources/wispr` | where lecture notes and transcripts live; the transcript picker lists it first, newest on top |
@@ -1263,6 +1266,8 @@ Layout, one line per module:
 - `src/chatPanel.ts` — the Chat half of the sidebar: turns, evidence, quizzes, and the lint modal
 - `src/claudeCli.ts` — the Claude Code backend, shelling out to `claude -p` signed in with a Claude subscription
 - `src/codex.ts` — the Codex backend, shelling out to `codex exec` signed in with a ChatGPT subscription
+- `src/gemini.ts` — the Google Gemini backend over the generateContent REST API with an API key
+- `src/modelRoles.ts` — which provider and model a role (lint, query, digest) runs on; the model lists behind the settings dropdowns
 - `src/gemini.ts` — the Gemini backend, calling Google's `generateContent` REST API with an API key
 - `src/commandTable.ts` — the twenty commands as pure data: ids, palette names, chat aliases, availability hints
 - `src/commands.ts` — their behaviour half: an `available` predicate and a `run` action per entry, registered by `main.ts` in one loop

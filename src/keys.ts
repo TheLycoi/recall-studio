@@ -1,8 +1,8 @@
 import { execFileSync } from "child_process";
 
 /**
- * API key resolution, in order: the plugin setting, the ANTHROPIC_API_KEY
- * environment variable, then the macOS keychain under two service names.
+ * API key resolution, in order: the plugin setting, an environment variable,
+ * then the macOS keychain under two service names.
  *
  * The keychain matters here because this vault syncs through iCloud: a key
  * typed into the settings tab lands in data.json and is replicated in
@@ -12,8 +12,10 @@ import { execFileSync } from "child_process";
  * A key value is never logged or included in an error message.
  */
 export const KEYCHAIN_SERVICES = ["WikiLM Anthropic API key", "ANTHROPIC_API_KEY"];
+export const GEMINI_KEYCHAIN_SERVICES = ["WikiLM Gemini API key", "GEMINI_API_KEY"];
 
-let cache: { value: string; at: number } | null = null;
+/** One cache entry per provider: a Gemini lookup must not return a cached Anthropic key. */
+const cache = new Map<string, { value: string; at: number }>();
 const CACHE_MS = 5 * 60 * 1000;
 
 function readKeychain(service: string): string | undefined {
@@ -32,18 +34,26 @@ function readKeychain(service: string): string | undefined {
 
 export type KeySource = "settings" | "environment" | "keychain" | "none";
 
-export function resolveApiKey(settingsKey: string): { key: string; source: KeySource } {
+function resolve(settingsKey: string, envVar: string, services: string[]): { key: string; source: KeySource } {
   if (settingsKey.trim()) return { key: settingsKey.trim(), source: "settings" };
-  const env = typeof process !== "undefined" ? process.env.ANTHROPIC_API_KEY : undefined;
+  const env = typeof process !== "undefined" ? process.env[envVar] : undefined;
   if (env) return { key: env, source: "environment" };
-  if (cache && Date.now() - cache.at < CACHE_MS) return { key: cache.value, source: "keychain" };
-  for (const s of KEYCHAIN_SERVICES) {
+  const hit = cache.get(envVar);
+  if (hit && Date.now() - hit.at < CACHE_MS) return { key: hit.value, source: "keychain" };
+  for (const s of services) {
     const v = readKeychain(s);
     if (v) {
-      cache = { value: v, at: Date.now() };
+      cache.set(envVar, { value: v, at: Date.now() });
       return { key: v, source: "keychain" };
     }
   }
   return { key: "", source: "none" };
 }
 
+export function resolveApiKey(settingsKey: string): { key: string; source: KeySource } {
+  return resolve(settingsKey, "ANTHROPIC_API_KEY", KEYCHAIN_SERVICES);
+}
+
+export function resolveGeminiKey(settingsKey: string): { key: string; source: KeySource } {
+  return resolve(settingsKey, "GEMINI_API_KEY", GEMINI_KEYCHAIN_SERVICES);
+}

@@ -1,4 +1,5 @@
 import { execFile, spawn, type ChildProcess } from "child_process";
+import { CLAUDE_CLI_MODELS } from "./modelRoles";
 import { accessSync, constants } from "fs";
 import { homedir } from "os";
 import { delimiter, join } from "path";
@@ -323,7 +324,7 @@ export class ClaudeCliBackend implements LlmBackend {
     return { path: s.claudeCliPath, model: s.claudeCliModel || "sonnet", effort: s.effort };
   }
 
-  async probe(): Promise<{ model: string; via: string }> {
+  async probe(model?: string): Promise<{ model: string; via: string }> {
     const s = this.settings();
     const bin = resolveClaudeBinary(s.path);
     const status = await runQuick(bin, ["auth", "status"]);
@@ -352,15 +353,21 @@ export class ClaudeCliBackend implements LlmBackend {
       schema: z.object({ ready: z.boolean() }),
       label: "probe",
       maxTokens: 50,
+      model,
     });
-    return { model: s.model, via: bin };
+    return { model: model ?? s.model, via: bin };
+  }
+
+  async listModels(): Promise<string[]> {
+    // The CLI has no model-listing call; these are the aliases it accepts.
+    return [...CLAUDE_CLI_MODELS];
   }
 
   async complete<T>(req: CompletionRequest<T>): Promise<T> {
     const s = this.settings();
     const bin = resolveClaudeBinary(s.path);
     const args = buildClaudeArgs({
-      model: s.model,
+      model: req.model ?? s.model,
       effort: req.effort ?? s.effort,
       schemaJson: JSON.stringify(toStrictSchema(req.schema)),
       system: req.system,
