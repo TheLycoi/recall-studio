@@ -189,10 +189,10 @@ export const DEFAULT_SETTINGS: WikiLmSettings = {
   extraTags: "wikilm",
   includeSourceTag: true,
   includeExtra: true,
-  exportFolder: "wikilm-exports",
+  exportFolder: "wiki/schema/exports",
 
   topicFolder: "classes",
-  schemaFolder: "wiki/sources/schema",
+  schemaFolder: "wiki/schema",
   digestMaxNotes: 6,
   digestInstructions: "",
   paperTextMaxChars: 60000,
@@ -700,7 +700,7 @@ export class WikiLmSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Schema folder")
       .setDesc(
-        "Where WikiLM keeps `wikilm.md`, the note that holds your house rules for pages and cards, and `wikilm-suggestions.md`.",
+        "The plugin's own folder inside the wiki: `wikilm.md` (your house rules for pages and cards), `wikilm-suggestions.md`, and `inbox.json`, the inbox itself. Not indexed, linted or graphed as pages. Reload the plugin after changing it.",
       )
       .addText((t) =>
         t.setValue(s.schemaFolder).onChange((v) => {

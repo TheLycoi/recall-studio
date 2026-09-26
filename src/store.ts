@@ -12,8 +12,11 @@ function timestamp(d: Date): string {
 type Listener = () => void;
 
 /**
- * Persistent inbox. Lives in the plugin folder as inbox.json so the vault's
- * notes stay untouched. Writes are debounced.
+ * Persistent inbox. Lives in the wiki's schema folder as inbox.json, beside
+ * the house rules, so everything the plugin keeps for the reader sits in one
+ * vault folder (the reader's layout, 2026-09-25) and syncs with it. Earlier
+ * versions kept it in the plugin folder; that file is moved in on first
+ * load. Writes are debounced.
  */
 export class InboxStore {
   private data: InboxData = emptyInbox();
@@ -28,14 +31,38 @@ export class InboxStore {
    */
   private readOnly = false;
 
+  private legacyPath: string | null;
+
   constructor(
     private app: App,
-    pluginDir: string,
+    dir: string,
+    legacyDir: string | null = null,
   ) {
-    this.path = normalizePath(`${pluginDir}/inbox.json`);
+    this.path = normalizePath(`${dir}/inbox.json`);
+    this.legacyPath = legacyDir ? normalizePath(`${legacyDir}/inbox.json`) : null;
+  }
+
+  /** The vault path the inbox is kept at. */
+  get filePath(): string {
+    return this.path;
+  }
+
+  /** Move a plugin-folder inbox.json into the schema folder, once, when no inbox is there yet. */
+  private async migrate(): Promise<void> {
+    const adapter = this.app.vault.adapter;
+    const dir = this.path.slice(0, this.path.lastIndexOf("/"));
+    if (dir && !(await adapter.exists(dir))) await adapter.mkdir(dir);
+    if (!this.legacyPath || (await adapter.exists(this.path)) || !(await adapter.exists(this.legacyPath))) return;
+    await adapter.rename(this.legacyPath, this.path);
+    console.log(`WikiLM: inbox moved from the plugin folder to ${this.path}`);
   }
 
   async load(): Promise<void> {
+    try {
+      await this.migrate();
+    } catch (e) {
+      console.error("WikiLM: could not move the inbox into the schema folder", e);
+    }
     try {
       if (await this.app.vault.adapter.exists(this.path)) {
         const raw = await this.app.vault.adapter.read(this.path);

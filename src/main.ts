@@ -29,7 +29,7 @@ export default class WikiLmPlugin extends Plugin {
   async onload(): Promise<void> {
     await this.loadSettings();
     registerWikiLmIcon();
-    this.store = new InboxStore(this.app, this.manifest.dir ?? `${this.app.vault.configDir}/plugins/wikilm`);
+    this.store = new InboxStore(this.app, this.settings.schemaFolder, this.manifest.dir ?? `${this.app.vault.configDir}/plugins/wikilm`);
     await this.store.load();
     // Before the client, which holds a callback into it: the reader's house
     // rules are read on the way to every model call (src/schemaFile.ts).

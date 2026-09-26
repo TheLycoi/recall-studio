@@ -948,7 +948,7 @@ Before you return, check that your verdict rests on what the evidence states and
 | Model (per provider) | the provider's default | a dropdown of the models the last Test found, plus **Other…** to type an id; Claude Code lists its aliases, Codex reads `~/.codex/models_cache.json` |
 | Use different models for lint, query and digest | off | on, **Lint**, **Query** and **Digest** each pick a provider and model with their own Test; card writing, critique, quizzes and highlighting stay on the main provider (`src/modelRoles.ts`) |
 | Topic notes folder | `classes` | topic notes go to `<folder>/<class code>/<title>.md` |
-| Schema folder | `wiki/sources/schema` | where `wikilm.md` and `wikilm-suggestions.md` live; not indexed, linted or graphed as pages |
+| Schema folder | `wiki/schema` | the plugin's own folder inside the wiki: `wikilm.md`, `wikilm-suggestions.md` and `inbox.json`, the inbox itself; not indexed, linted or graphed as pages |
 | Transcript folder | `wiki/sources/wispr` | where lecture notes and transcripts live; the transcript picker lists it first, newest on top |
 | Propose schema rules from my edits | **on** | watches your card edits and proposes a rule when the same correction repeats |
 | Max topic notes per PDF | 6 | caps how many topics the model may return per digest |
@@ -1251,8 +1251,9 @@ npm test               # unit tests for the pure helpers
 npm run install:vault  # build and copy into the vault's .obsidian/plugins/wikilm
 ```
 
-State: settings in `data.json`, the inbox in `inbox.json`, both inside the
-plugin folder. Notes are only touched when you choose to mark highlights.
+State: settings in `data.json` inside the plugin folder; the inbox in
+`inbox.json` inside the schema folder (`wiki/schema`), moved there from the
+plugin folder on first load. Notes are only touched when you choose to mark highlights.
 
 Layout, one line per module:
 
@@ -1301,7 +1302,7 @@ Layout, one line per module:
 - `src/schemas.ts` — the zod output schemas, importing nothing but zod so a test can parse a pasted draft standalone
 - `src/settings.ts` — the settings type, `DEFAULT_SETTINGS`, and the settings tab
 - `src/sourceMap.ts` — the markdown analogue of `pageMap.ts`: segment a note by heading and paragraph, and invert an offset back
-- `src/store.ts` — the persistent inbox, kept as `inbox.json` in the plugin folder with debounced writes
+- `src/store.ts` — the persistent inbox, kept as `inbox.json` in the schema folder with debounced writes
 - `src/suggest.ts` — AI highlight suggestion for a PDF: the glue between the text layer, the model, the planner, the preview and the vault
 - `src/suggestPlan.ts` — its pure planning layer: page batches, span verification, highlight rows, and grouping into wiki notes
 - `src/topicNote.ts` — pure topic-note render, parse and merge by highlight key, and the digest planner
