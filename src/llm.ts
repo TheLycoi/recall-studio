@@ -185,8 +185,8 @@ Write in the language of the highlight unless told otherwise. Keep markdown to *
 <cards>
 cloze | The Dead Sea is a salt lake on the border between {{c1::Israel}} and {{c2::Jordan}}.
 qa | What is the lowest point on the Earth's surface? | the Dead Sea shoreline
-cloze | The Dead Sea shoreline is the lowest point on the Earth's surface, about {{c1::400 m}} below sea level.
-cloze | The Dead Sea is roughly {{c1::seven}} times as salty as the ocean.
+qa | How far below sea level is the Dead Sea shoreline? | about 400 m
+qa | How many times as salty as the ocean is the Dead Sea? | roughly seven times
 qa | Why do swimmers float in the Dead Sea? | its high salt content
 qa | Dead Sea: what can survive its salinity? | only simple organisms
 </cards>
@@ -220,7 +220,7 @@ cloze | {{c1::Bandura}} ({{c2::1997}}) proposed {{c3::Mastery Experiences}} as a
 <example>
 <highlight>Modifiable risk factors for hypertension include obesity, high sodium intake, and physical inactivity; a risk factor is modifiable when the patient can change it.</highlight>
 <cards>
-cloze | {{c1::Modifiable}} risk factors for hypertension include obesity, high sodium intake, and physical inactivity.
+qa | Obesity, high sodium intake, and physical inactivity are what kind of risk factor for hypertension? | modifiable
 qa | What makes a risk factor for hypertension modifiable? | the patient can change it
 </cards>
 <note>"include" marks an open list, so no card asks for the list and no deletion hides a member: the three named factors are a sample, not the set, and they are the cue, not the answer. The first card tests example to category with all three examples visible, in the highlight's own words. A card per example ("is obesity modifiable or non-modifiable?") would be three this-or-that questions with the answer in their own wording and the same answer three times over. The criterion is the fact with lasting use, since it decides cases the highlight never named.</note>
