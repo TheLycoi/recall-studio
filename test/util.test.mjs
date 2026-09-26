@@ -270,3 +270,11 @@ test("isUnderFolder is a path-segment test, not a string prefix", () => {
   assert.equal(u.isUnderFolder("wiki/concepts/Kinetics.md", "wiki/schema"), false);
   assert.equal(u.isUnderFolder("anything.md", ""), false);
 });
+
+test("plainText reduces links to their words: PDF++ and wiki links to their display text, bare links to the note name, embeds dropped", () => {
+  const raw = "Qualitative Analysis: [[2 - TBCM and Linear Kinematics 2026.pdf#page=10&selection=2,0,4,47&color=yellow|Non-numerical, description of variables of interest]]";
+  assert.equal(u.plainText(raw), "Qualitative Analysis: Non-numerical, description of variables of interest");
+  assert.equal(u.plainText("See [[Kinematics]] and [[wiki/concepts/TBCM.md#Definition]]."), "See Kinematics and TBCM.");
+  assert.equal(u.plainText("A figure ![[deck.pdf#page=7&rect=1,2,3,4]] here and [a site](https://x.y) too."), "A figure here and a site too.");
+  assert.equal(u.plainText("plain sentence, no links"), "plain sentence, no links");
+});

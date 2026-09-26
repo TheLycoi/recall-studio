@@ -18,7 +18,7 @@ import {
 } from "./icon";
 import { isPdfHighlight, liveCards, makeCard, pendingCards, type Card, type CardSnapshot, type Highlight } from "./model";
 import { askInstruction, SchemaSuggestionsModal } from "./modals";
-import { countClozes, fmtDate, locateQuote, splitFrontmatter } from "./util";
+import { countClozes, fmtDate, locateQuote, splitFrontmatter, plainText } from "./util";
 import { describeError } from "./llm";
 import { findCrossInterference, lintCard, LINT_FIX_INSTRUCTIONS, LINT_LABELS } from "./lint";
 import { DEFAULT_SETTINGS } from "./settings";
@@ -405,7 +405,8 @@ export class InboxView extends ItemView {
     );
 
     const quote = left.createDiv({ cls: "wikilm-quote" });
-    quote.setText(h.text);
+    // Shown as words; the stored text keeps its links so the note can still be reopened at the passage.
+    quote.setText(plainText(h.text));
     quote.title = "Open in the note";
     quote.addEventListener("click", () => void this.openSource(h));
 
@@ -854,7 +855,7 @@ export class InboxView extends ItemView {
     const notice = new Notice("WikiLM: rewriting…", 0);
     const was = snapshot(c);
     try {
-      const d = await this.plugin.llm.rewriteCard(h, c, instruction);
+      const d = await this.plugin.llm.rewriteCard({ ...h, text: plainText(h.text) }, c, instruction);
       c.kind = d.kind;
       c.front = d.kind === "qa" ? d.front.trim() : "";
       c.back = d.kind === "qa" ? d.back.trim() : "";

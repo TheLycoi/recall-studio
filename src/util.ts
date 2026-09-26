@@ -352,3 +352,28 @@ export function orderTranscriptFiles<T extends { path: string; mtime: number }>(
   const outside = files.filter((f) => !isUnderFolder(f.path, folder)).sort(byPath);
   return [...inside, ...outside];
 }
+
+/**
+ * A passage as words: every link reduced to what a reader sees.
+ *
+ * Notes carry their evidence as PDF++ links — `[[deck.pdf#page=10&selection=…|Non-numerical, description…]]` —
+ * and the text between the brackets is the quote; the rest is an address. On
+ * the back of a card, in the inbox and in front of the card writer the
+ * address is noise, and long enough to hide the words. Embeds (`![[…]]`) have
+ * no words at all and are dropped; a bare `[[Note]]` becomes the note's name;
+ * a markdown link keeps its text.
+ */
+export function plainText(s: string): string {
+  return s
+    .replace(/!\[\[[^\]]*\]\]/g, "")
+    .replace(/\[\[([^\]|]*)\|([^\]]*)\]\]/g, "$2")
+    .replace(/\[\[([^\]]*)\]\]/g, (_m, target: string) => {
+      const noSub = target.split("#")[0].split("^")[0];
+      const base = noSub.split("/").pop() ?? noSub;
+      return base.replace(/\.md$/i, "");
+    })
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/ +([.,;:!?])/g, "$1")
+    .trim();
+}

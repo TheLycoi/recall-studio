@@ -552,7 +552,10 @@ model's note on what the passage contributed as the card writer's
 instruction (`renderAnswerInstruction`, `src/askCheck.ts`). The writer,
 critique and linter chain then turns each into a card whose back links the
 passage's page. The sources shown and the sources sent are the same list
-(`pickSources`). An answer with no source has no button: a card with nothing
+(`pickSources`). Links inside a passage are reduced to their words on the
+card's back, in the inbox and in front of the card writer (`plainText`,
+`src/util.ts`); the stored highlight keeps them so the note can be reopened
+at the passage. An answer with no source has no button: a card with nothing
 to link is the unattributed fact this plugin exists to avoid. Typed, the
 phrase is **send to inbox** (or *card it*, *make flashcards*), which cards
 the most recent answer that has a source.

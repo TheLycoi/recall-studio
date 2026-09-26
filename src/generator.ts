@@ -1,4 +1,5 @@
 import { Notice } from "obsidian";
+import { plainText } from "./util";
 import type WikiLmPlugin from "./main";
 import { makeCard, type Card, type Highlight } from "./model";
 import { describeError } from "./llm";
@@ -52,12 +53,17 @@ export class Generator {
   }
 
   private async run(h: Highlight): Promise<void> {
+    // The writer, the critique and the lint read the passage as words: a
+    // PDF++ link's address is not something a card should quote or a cloze
+    // should be checked against. The stored highlight keeps its links so the
+    // inbox can still reopen the note at the passage.
+    const words: Highlight = { ...h, text: plainText(h.text) };
     h.status = "generating";
     this.plugin.store.touch();
     try {
       const settings = this.plugin.settings;
       const existing = h.cards.filter((c) => c.status !== "deleted");
-      const drafts = await this.plugin.llm.writeCards(h, existing);
+      const drafts = await this.plugin.llm.writeCards(words, existing);
 
       // Build the card objects up front but keep them off `h.cards` until the
       // whole chain has run, so a half-applied critique can never be observed
@@ -76,14 +82,14 @@ export class Generator {
       // inside a single generation. `existing` reaches the critique instead.
       const siblingsOf = (card: Card): Card[] => cards.filter((c) => c !== card);
       const lint = new Map<Card, LintResult>();
-      for (const c of cards) lint.set(c, lintCard(c, h, siblingsOf(c)));
+      for (const c of cards) lint.set(c, lintCard(c, words, siblingsOf(c)));
 
       // Precondition, not a final step: one card that lints clean is not worth
       // a second model call, so the critique is skipped before it is made.
       const trivial = cards.length <= 1 && (cards.length === 0 || lint.get(cards[0])!.failures.length === 0);
       if (settings.critiquePass && !trivial) {
         try {
-          const verdicts = await this.plugin.llm.critiqueCards(h, cards, existing);
+          const verdicts = await this.plugin.llm.critiqueCards(words, cards, existing);
           for (const v of verdicts) {
             // Indices out of range are already filtered out by critiqueCards.
             const card = cards[v.index];
@@ -102,7 +108,7 @@ export class Generator {
               // replaced, so it is re-run against the new fields (invariant 5:
               // grounding is checked mechanically, after the critique, whatever
               // the critique concluded).
-              lint.set(card, lintCard(card, h, siblingsOf(card)));
+              lint.set(card, lintCard(card, words, siblingsOf(card)));
             } else if (v.verdict === "drop") {
               // Never deleted, only flagged: the reviewer decides (invariant 3).
               card.status = "flagged";

@@ -1,7 +1,7 @@
 import { requestUrl } from "obsidian";
 import type { Card, Highlight } from "./model";
 import type { WikiLmSettings } from "./settings";
-import { ankiTag, basenameNoExt, escapeHtml, inlineMarkdownToHtml, slugify } from "./util";
+import { ankiTag, basenameNoExt, escapeHtml, inlineMarkdownToHtml, slugify, plainText } from "./util";
 
 export interface AnkiNote {
   deckName: string;
@@ -81,7 +81,7 @@ export function buildExtra(h: Highlight, ctx: ExportContext): string {
     topic = `<div class="wikilm-topic">Topic: <a href="${topicUri}">${escapeHtml(basenameNoExt(h.topicPath))}</a></div>`;
   }
   return (
-    `<blockquote class="wikilm-highlight">${escapeHtml(h.text).replace(/\n/g, "<br>")}</blockquote>` +
+    `<blockquote class="wikilm-highlight">${escapeHtml(plainText(h.text)).replace(/\n/g, "<br>")}</blockquote>` +
     `<div class="wikilm-source">Source: <a href="${uri}">${escapeHtml(h.sourceTitle)}</a>${where}</div>` +
     topic
   );
