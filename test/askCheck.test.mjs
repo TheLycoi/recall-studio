@@ -155,3 +155,28 @@ test("the flag is refused when the model also named a source", () => {
   assert.equal(report.fromGeneralKnowledge, false);
   assert.deepEqual(report.sources, [{ n: 1, why: "defines it" }]);
 });
+
+// ---- the sources an answer rested on, shared by the rows and the inbox button ----
+
+test("pickSources returns the cited units in citation order, with the model's reason", () => {
+  const ev = ["u1", "u2", "u3"];
+  const report = { coverage: "full", sources: [{ n: 3, why: "defines it" }, { n: 1, why: "" }], dropped: 0 };
+  assert.deepEqual(ac.pickSources(ev, report), [{ unit: "u3", why: "defines it" }, { unit: "u1", why: "" }]);
+});
+
+test("pickSources stands in the best-ranked unit when nothing was cited, but not for a none answer or when every citation was dropped", () => {
+  const ev = ["u1", "u2"];
+  assert.deepEqual(ac.pickSources(ev, { coverage: "partial", sources: [], dropped: 0 }), [{ unit: "u1", why: "" }]);
+  assert.deepEqual(ac.pickSources(ev, { coverage: "none", sources: [], dropped: 0 }), []);
+  assert.deepEqual(ac.pickSources(ev, { coverage: "partial", sources: [], dropped: 2 }), []);
+  assert.deepEqual(ac.pickSources([], { coverage: "partial", sources: [], dropped: 0 }), []);
+});
+
+test("renderAnswerInstruction carries the question, the contribution and the answer, and tells the writer to card the passage", () => {
+  const s = ac.renderAnswerInstruction("What is linear impulse?", "Force times time.", "gives the definition");
+  assert.ok(s.startsWith("The reader asked their notes this question"));
+  assert.ok(s.includes("Question: What is linear impulse?"));
+  assert.ok(s.includes("What this passage contributed: gives the definition"));
+  assert.ok(s.includes("The answer they were given:\nForce times time."));
+  assert.ok(!ac.renderAnswerInstruction("q", "", "  ").includes("contributed"), "blank parts are left out");
+});

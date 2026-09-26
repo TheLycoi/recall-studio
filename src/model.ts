@@ -84,7 +84,7 @@ export interface Highlight {
   generatedAt: string | null;
   exportedAt: string | null;
   cards: Card[];
-  origin: "selection" | "markdown-highlight" | "ai" | "highlighter" | "pdf" | "quiz";
+  origin: "selection" | "markdown-highlight" | "ai" | "highlighter" | "pdf" | "quiz" | "ask";
   /** PDF++ subpath (page=…&selection=…|annotation=…|rect=…) when the highlight came from a PDF++ link; lets the inbox open the exact highlight. */
   subpath?: string;
   /** Vault path of the topic note this highlight was digested into, so the exported card links to its concept and not only to the PDF it came from. */

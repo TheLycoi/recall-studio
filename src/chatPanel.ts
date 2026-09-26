@@ -14,17 +14,16 @@ import {
   pageContextFor,
   scopeFor,
 } from "./retrieval";
-import { renderSavedAnswer, savedAnswerPath } from "./savedAnswer";
 import type { Graph } from "./graph";
 import { lintVault, renderVaultLint, WIKI_SCHEMA, type LintPage } from "./vaultLint";
 import { planLinkFixes, applyFixesToNote, type LinkFix } from "./vaultFix";
 import { FixPlanModal, LintReportModal, pickNote } from "./modals";
 import { repointFix, type Fix, type FixPageInfo } from "./fixPlan";
 import { applyPlan, buildPlan, fixPagesFor, pageInfos, proposeAliases, providerReady, verifyDuplicates, type FixContext } from "./fixer";
-import { checkAnswer, emptyIndexAnswer, noEvidenceAnswer, renderGroundingLine, VERIFY_BANNER, type GroundingReport } from "./askCheck";
+import { checkAnswer, emptyIndexAnswer, noEvidenceAnswer, renderGroundingLine, VERIFY_BANNER, type GroundingReport, pickSources, type PickedSource as PickedSourceOf } from "./askCheck";
 import { matchIntent, renderHelp, type Intent, type IntentContext, type IntentPage, type Target } from "./chatCommands";
 import { WIKILM_COMMANDS, type WikiLmCommand } from "./commands";
-import { captureQuizMisses } from "./capture";
+import { captureAskAnswer, captureQuizMisses } from "./capture";
 import {
   acceptQuestion,
   applyGrade,
@@ -103,6 +102,9 @@ function targetLabel(t: Target): string {
  * that the markdown does not already say: the index for the badge, the verdict
  * for the border colour, the missed units for the summary's chip.
  */
+/** A source under an answer, bound to the panel's evidence type. */
+type PickedSource = PickedSourceOf<EvidenceUnit>;
+
 interface ChatTurn {
   role: "user" | "assistant" | "system";
   text: string;
@@ -113,8 +115,8 @@ interface ChatTurn {
   route?: string;
   /** The class the question was scoped to, when it was. */
   scope?: string;
-  /** The page this answer was saved as, once it has been. */
-  savedTo?: string;
+  /** Set once this answer's sources were queued as cards, so it is not sent twice. */
+  sentToInbox?: boolean;
   chips?: { prompt: string; options: Array<{ label: string; run: () => void }> };
   quiz?: {
     kind: "question" | "grade" | "retry" | "summary";
@@ -123,13 +125,6 @@ interface ChatTurn {
     misses?: QuizMiss[];
     unverified?: boolean;
   };
-}
-
-/** Local calendar date, `YYYY-MM-DD`, for a saved answer's `created`. */
-function localDate(): string {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 /**
@@ -527,42 +522,6 @@ export class ChatPanel {
     return frontmatterClasses(this.plugin, file.path)[0] ?? null;
   }
 
-  /**
-   * Save an answer as a page under the topic folder's `answers/`: the
-   * question, the answer, the sources rendered as PDF++ rows by code
-   * (src/savedAnswer.ts). A page that already exists is never overwritten;
-   * the new one takes the next free name.
-   */
-  private async saveAnswer(turn: ChatTurn): Promise<void> {
-    if (turn.savedTo || !turn.text.trim()) return;
-    const question = this.questionBefore(turn);
-    const report = turn.report;
-    const evidence = turn.evidence ?? [];
-    const sources = report ? report.sources.map((s) => ({ unit: evidence[s.n - 1], why: s.why })).filter((s) => !!s.unit) : [];
-    const md = renderSavedAnswer({
-      question,
-      answer: turn.text,
-      classCode: (turn.scope?.startsWith("in ") ? turn.scope.slice(3) : "") || this.activeClass() || "",
-      created: localDate(),
-      route: turn.route,
-      sources,
-    });
-    const folder = this.plugin.settings.topicFolder.replace(/\/+$/, "");
-    const base = savedAnswerPath(folder, question);
-    let path = base;
-    for (let n = 2; this.plugin.app.vault.getAbstractFileByPath(path); n++) path = base.replace(/\.md$/, ` (${n}).md`);
-    try {
-      const dir = path.slice(0, path.lastIndexOf("/"));
-      if (!(await this.plugin.app.vault.adapter.exists(dir))) await this.plugin.app.vault.createFolder(dir); // obsidian.d.ts:7404
-      await this.plugin.app.vault.create(path, md); // obsidian.d.ts:7386
-      turn.savedTo = path;
-      this.pushSystem(`Saved to [[${path.replace(/\.md$/, "")}]].`);
-      void this.plugin.app.workspace.openLinkText(path, "", true);
-    } catch (e) {
-      this.pushSystem(`Could not save the answer: ${describeError(e)}`);
-    }
-  }
-
   /** The user turn this answer replied to: the nearest one above it in the log. */
   private questionBefore(turn: ChatTurn): string {
     const at = this.turns.indexOf(turn);
@@ -747,7 +706,63 @@ export class ChatPanel {
       case "highlight":
         await this.highlightTarget(intent.target);
         return;
+      case "send-answer":
+        await this.sendLastAnswerToInbox();
+        return;
     }
+  }
+
+  /**
+   * The typed form of the button under an answer: card the most recent one.
+   *
+   * The button is the honest surface here — it sits under the answer it sends,
+   * so there is never a question about which one "it" was. This exists so the
+   * phrase works for a reader who types rather than clicks, and it names the
+   * answer it chose for exactly that reason.
+   */
+  private async sendLastAnswerToInbox(): Promise<void> {
+    // The newest answer is not always the one that can be carded: a reader who
+    // asks a follow-up the notes do not cover, then types the phrase, means the
+    // answer that had sources. Walk back to the last sendable one and name it,
+    // rather than refusing on the turn that happens to be last.
+    let sawUnsendable = false;
+    for (let i = this.turns.length - 1; i >= 0; i--) {
+      const turn = this.turns[i];
+      if (turn.role !== "assistant" || turn.quiz || turn.error || !turn.report) continue;
+      const picked = pickSources(turn.evidence ?? [], turn.report);
+      if (picked.length === 0 || turn.sentToInbox) {
+        sawUnsendable = true;
+        continue;
+      }
+      const question = this.questionBefore(turn);
+      if (question) this.pushSystem(`Carding the answer to “${question}”.`);
+      await this.sendAnswerToInbox(turn, picked);
+      return;
+    }
+    this.pushSystem(
+      sawUnsendable
+        ? "Nothing here to card: those answers are already in the inbox, or have no source to link on a card's back."
+        : "Ask something first: there is no answer to card yet.",
+    );
+  }
+
+  /**
+   * Card the answer: one inbox highlight per source it rested on.
+   *
+   * Reads the turn it was rendered on rather than the panel's last answer —
+   * the log holds every answer of the session, and the button under a question
+   * asked four turns ago has to send that one.
+   */
+  async sendAnswerToInbox(turn: ChatTurn, picked: PickedSource[]): Promise<void> {
+    if (turn.sentToInbox || picked.length === 0) return;
+    const question = this.questionBefore(turn);
+    const { added, skipped } = captureAskAnswer(this.plugin, question, turn.text, picked);
+    turn.sentToInbox = true;
+    this.pushSystem(
+      added === 0
+        ? `Nothing sent${skipped ? ": already in the inbox" : ""}.`
+        : `Sent ${added} source${added === 1 ? "" : "s"} to the inbox${skipped ? `, ${skipped} already there` : ""}. Cards are being written.`,
+    );
   }
 
   /**
@@ -1536,16 +1551,35 @@ export class ChatPanel {
     if (report && this.plugin.settings.askShowGrounding) this.renderGrounding(el, report, turn);
 
     const evidence = turn.evidence ?? [];
-    if (evidence.length > 0 && report) this.renderSources(el, evidence, report);
-    if (report && !turn.error && turn.text.trim()) this.renderSaveAction(el, turn);
+    if (turn.role !== "assistant" || turn.error) return;
+    // The sources shown and the sources sent are the same list, stand-in and
+    // all: a button that queued something other than what is printed above it
+    // would be a different answer than the one the reader read.
+    const picked = report && evidence.length > 0 ? pickSources(evidence, report) : [];
+    if (picked.length > 0) this.renderSources(el, picked);
+    if (report) this.renderAnswerActions(el, turn, picked);
   }
 
-  /** "Save answer" under an answer: writes the page once, then reads as saved. */
-  private renderSaveAction(el: HTMLElement, turn: ChatTurn): void {
+  /**
+   * What the reader can do with an answer: card it.
+   *
+   * Sending is offered only when the answer has a source, because a card's
+   * back is its source link (src/anki.ts, `buildExtra`) and a card with
+   * nothing to link is the kind of unattributed fact this plugin exists to
+   * avoid.
+   */
+  private renderAnswerActions(el: HTMLElement, turn: ChatTurn, picked: PickedSource[]): void {
+    if (turn.quiz || picked.length === 0) return;
     const row = el.createDiv({ cls: "wikilm-chat-offer" });
-    const save = row.createEl("button", { text: turn.savedTo ? "Saved" : "Save answer" });
-    save.disabled = this.busy || !!turn.savedTo;
-    save.addEventListener("click", () => void this.saveAnswer(turn));
+    const send = row.createEl("button", {
+      cls: turn.sentToInbox ? "" : "mod-cta",
+      text: turn.sentToInbox ? "Sent to inbox" : `Send ${picked.length === 1 ? "source" : `${picked.length} sources`} to inbox`,
+    });
+    // The log is rebuilt wholesale on every rerender, so "already sent" has
+    // to live on the turn: a disabled flag set on the button would not
+    // survive the next answer.
+    send.disabled = this.busy || !!turn.sentToInbox;
+    send.addEventListener("click", () => void this.sendAnswerToInbox(turn, picked));
   }
 
   /**
@@ -1561,18 +1595,7 @@ export class ChatPanel {
    * badly) the best-ranked passage is shown instead, so there is always
    * somewhere to click through to.
    */
-  private renderSources(el: HTMLElement, evidence: EvidenceUnit[], report: GroundingReport): void {
-    const picked = report.sources.map((s) => ({ unit: evidence[s.n - 1], why: s.why })).filter((p) => !!p.unit);
-    // The best-ranked passage stands in when the model named nothing. It must
-    // not stand in when the model named sources that all failed verification:
-    // there is no honest source to show, and showing one would dress an
-    // unsupported answer in a citation the model never made.
-    const allCitationsDropped = report.dropped > 0 && report.sources.length === 0;
-    if (picked.length === 0 && report.coverage !== "none" && !allCitationsDropped) {
-      picked.push({ unit: evidence[0], why: "" });
-    }
-    if (picked.length === 0) return;
-
+  private renderSources(el: HTMLElement, picked: PickedSource[]): void {
     el.createDiv({ cls: "wikilm-chat-sources-head", text: picked.length === 1 ? "Source" : "Sources" });
     for (const { unit, why } of picked) {
       const row = el.createDiv({ cls: "wikilm-chat-source" });

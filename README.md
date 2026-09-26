@@ -544,12 +544,18 @@ knowledge* — and the class it was kept to, so a reader can see whether
 the answer came from words their notes use or from a neighbour the graph
 reached.
 
-**Save answer.** A button under an answer writes it as a page,
-`<topic folder>/answers/<question>.md`: the question as the title, the
-answer with any link the model wrote reduced to its words, and the sources
-as PDF++ callouts rendered by code from the evidence (`renderSavedAnswer`,
-`src/savedAnswer.ts`). An existing page is never overwritten; the new one
-takes the next free name.
+**Send to inbox.** A button under an answer, **Send N sources to inbox**,
+queues one inbox highlight per source the answer rested on
+(`captureAskAnswer`, `src/capture.ts`): the verbatim passage as the
+highlight, the question as its title, and the question, the answer and the
+model's note on what the passage contributed as the card writer's
+instruction (`renderAnswerInstruction`, `src/askCheck.ts`). The writer,
+critique and linter chain then turns each into a card whose back links the
+passage's page. The sources shown and the sources sent are the same list
+(`pickSources`). An answer with no source has no button: a card with nothing
+to link is the unattributed fact this plugin exists to avoid. Typed, the
+phrase is **send to inbox** (or *card it*, *make flashcards*), which cards
+the most recent answer that has a source.
 
 **No evidence, no model.** When nothing under the topic folder matches the
 question, the panel answers at once, without a model call: *Your notes
@@ -612,6 +618,7 @@ else is a question for your notes. Three buttons above the box — **Quiz me**,
 | **digest** / **digest Doping** | group the PDF++ highlights of the open file — or the PDF or note you name — into concept and entity pages, filing into pages you already have first |
 | **highlight** / **highlight Ch3** | the model picks spans in a PDF, each checked against the text layer; you can paste a transcript or study guide first |
 | **lint** | check the wiki for wrong quotes, dead links and duplicate pages; **Suggest fixes** proposes a repair per finding |
+| **send to inbox** | card the last answer, one inbox item per source it rested on |
 | **export**, **inbox**, **help** | send reviewed cards to Anki, open the inbox, list these phrases |
 
 **Suggest fixes.** The Wiki check modal offers a plan when any finding can be

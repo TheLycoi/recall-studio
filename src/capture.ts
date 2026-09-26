@@ -19,6 +19,8 @@ import type { Manifest, ManifestHighlight } from "./manifest";
 import { renderRowInstruction } from "./topicNote";
 import { renderPdfSubpath } from "./pdflink";
 import { missTitle, renderMissInstruction, type QuizMiss } from "./quiz";
+import { renderAnswerInstruction } from "./askCheck";
+import type { EvidenceUnit } from "./retrieval";
 
 function stripMarks(s: string): string {
   return s.replace(/==/g, "");
@@ -479,6 +481,92 @@ export function captureQuizMisses(plugin: WikiLmPlugin, misses: QuizMiss[]): { a
     added === 0 && skipped === 0
       ? "WikiLM: nothing to send."
       : `WikiLM: ${added} passage${added === 1 ? "" : "s"} sent to the inbox from the quiz (${skipped} already there).`,
+  );
+  return { added, skipped };
+}
+
+/**
+ * Queue the sources behind a chat answer as inbox highlights, one per cited
+ * source, so the writer / critique / linter chain turns each into a card.
+ *
+ * One highlight per source rather than one carrying a list of them: a card's
+ * back is built from its highlight by `buildExtra` (src/anki.ts), which links
+ * exactly one source. Splitting here is what makes every card's source a real
+ * link without teaching the exporter about answers.
+ *
+ * The passage stays verbatim as the highlight text — the cloze grounding
+ * check needs source text, not model prose — and the question rides as the
+ * title and the writer's instruction, as `captureQuizMisses` does above.
+ *
+ * `topicPath` is set whenever the evidence came from a topic note but the
+ * source resolved to the PDF behind it, so the exported card links its concept
+ * as well as the page it was read on.
+ */
+export function captureAskAnswer(
+  plugin: WikiLmPlugin,
+  question: string,
+  answer: string,
+  cited: Array<{ unit: EvidenceUnit; why: string }>,
+): { added: number; skipped: number } {
+  let added = 0;
+  let skipped = 0;
+  for (const { unit, why } of cited) {
+    const text = unit.text.trim();
+    if (text.length < 3) {
+      skipped++;
+      continue;
+    }
+    let sourcePath: string;
+    let page: number | null;
+    let heading: string | null;
+    let subpath: string | undefined;
+    let topicPath: string | undefined;
+    if (unit.pdfBasename && unit.target) {
+      const pdf = plugin.app.metadataCache.getFirstLinkpathDest(`${unit.pdfBasename}.pdf`, unit.notePath);
+      if (pdf) {
+        sourcePath = pdf.path;
+        page = unit.page;
+        heading = `page ${unit.page}`;
+        subpath = renderPdfSubpath(unit.target);
+        // The note the passage was read out of is the concept it belongs to.
+        topicPath = unit.notePath;
+      } else {
+        sourcePath = unit.notePath;
+        page = null;
+        heading = unit.noteTitle;
+      }
+    } else {
+      sourcePath = unit.notePath;
+      page = null;
+      heading = unit.noteTitle;
+    }
+    if (plugin.store.hasDuplicate(sourcePath, normalizeWs(text))) {
+      skipped++;
+      continue;
+    }
+    const h = makeHighlight({
+      sourcePath,
+      sourceTitle: basenameNoExt(sourcePath),
+      text,
+      before: "",
+      after: "",
+      line: 0,
+      page,
+      heading,
+      title: missTitle({ question }),
+      instruction: renderAnswerInstruction(question, answer, why),
+      subpath,
+      topicPath,
+      origin: "ask",
+    });
+    plugin.store.add(h);
+    plugin.generator.enqueue(h);
+    added++;
+  }
+  new Notice(
+    added === 0 && skipped === 0
+      ? "WikiLM: nothing to send."
+      : `WikiLM: ${added} source${added === 1 ? "" : "s"} sent to the inbox from the answer (${skipped} already there).`,
   );
   return { added, skipped };
 }

@@ -154,3 +154,57 @@ export function renderGroundingLine(r: GroundingReport): string {
         : "Not in your notes";
   return r.dropped > 0 ? `${coverage} · ${r.dropped} bad ${r.dropped === 1 ? "citation" : "citations"} dropped` : coverage;
 }
+
+/**
+ * What to tell the card writer when an answer is sent to the inbox.
+ *
+ * The highlight itself stays the verbatim evidence passage, so the cloze
+ * grounding check (src/lint.ts, `ungroundedClozes`) still has real source text
+ * to check deletions against. The question is what the card should be aimed
+ * at, and that can only ride as an instruction — the same division
+ * `renderMissInstruction` uses for a quiz miss.
+ *
+ * `why` is the model's own few words on what this source contributed
+ * ("defines the term", "gives the formula"). With one highlight per cited
+ * source, it is what keeps two cards off the same fact when an answer rests
+ * on two passages.
+ */
+export function renderAnswerInstruction(question: string, answer: string, why: string): string {
+  const lines = [
+    "The reader asked their notes this question, and this passage is one of the sources the answer rested on.",
+    `Question: ${question.trim()}`,
+  ];
+  if (why.trim()) lines.push(`What this passage contributed: ${why.trim()}`);
+  if (answer.trim()) lines.push(`The answer they were given:\n${answer.trim()}`);
+  lines.push(
+    "Card the part of this passage that answers the question, not whichever other fact the passage happens to carry. Everything the card says has to be in the passage: where the answer above goes further than this passage does, follow the passage. The card is focused on one thing, precise about what it asks, answered the same way every time, and demands real recall: not a yes/no, and not a blank the shape of the sentence fills in.",
+  );
+  return lines.join("\n");
+}
+
+/** One source as it is shown under an answer, and sent to the inbox from it. */
+export interface PickedSource<U = unknown> {
+  unit: U;
+  why: string;
+}
+
+/**
+ * The sources behind an answer: the ones the model named, or the best-ranked
+ * passage standing in when it named none.
+ *
+ * Shared by the source rows and the inbox button so the two can never
+ * disagree about what an answer rested on.
+ *
+ * The stand-in must not appear when the model named sources that all failed
+ * verification: there is no honest source to show, and showing one would
+ * dress an unsupported answer in a citation the model never made.
+ */
+export function pickSources<U>(evidence: U[], report: GroundingReport): Array<PickedSource<U>> {
+  const picked = report.sources
+    .map((s) => ({ unit: evidence[s.n - 1], why: s.why }))
+    .filter((p): p is PickedSource<U> => !!p.unit);
+  if (picked.length > 0) return picked;
+  const allCitationsDropped = report.dropped > 0 && report.sources.length === 0;
+  if (report.coverage === "none" || allCitationsDropped || !evidence[0]) return [];
+  return [{ unit: evidence[0], why: "" }];
+}

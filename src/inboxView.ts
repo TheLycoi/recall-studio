@@ -29,6 +29,18 @@ export const VIEW_TYPE_INBOX = "wikilm-notebook";
 type Filter = "review" | "all" | "exported";
 
 /**
+ * How a highlight got here, for the provenance line. Only the origins worth
+ * naming appear: "selection" and "pdf" are the ordinary ways to capture one,
+ * and labelling them would say nothing the quote does not already show.
+ */
+const ORIGIN_LABELS: Partial<Record<Highlight["origin"], string>> = {
+  highlighter: "highlighter",
+  ai: "AI pick",
+  quiz: "quiz miss",
+  ask: "from a question",
+};
+
+/**
  * The inbox: every highlight grouped under its source note, cards packed
  * densely beside the highlight they came from, built for fast triage.
  */
@@ -402,7 +414,7 @@ export class InboxView extends ItemView {
       [
         isPdfHighlight(h) ? "PDF" : h.heading ? `§ ${h.heading}` : null,
         h.page ? `page ${h.page}` : `line ${h.line + 1}`,
-        h.origin === "highlighter" ? "highlighter" : h.origin === "ai" ? "AI pick" : h.origin === "quiz" ? "quiz miss" : null,
+        ORIGIN_LABELS[h.origin] ?? null,
         fmtDate(h.createdAt),
       ]
         .filter(Boolean)

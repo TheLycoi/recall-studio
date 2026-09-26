@@ -33,6 +33,7 @@ export type Intent =
   | { kind: "lint" }
   | { kind: "export" }
   | { kind: "inbox" }
+  | { kind: "send-answer" }
   | { kind: "help" }
   | { kind: "command"; id: string }
   | { kind: "ambiguous"; verb: "digest" | "highlight"; words: string; candidates: Target[] }
@@ -199,6 +200,12 @@ export function matchIntent(text: string, ctx: IntentContext): Intent {
 
   if (/^(?:lint(?: the)?(?: wiki)?|check the wiki|wiki check|check my wiki)$/.test(t)) return { kind: "lint" };
   if (/^export(?: (?:all|reviewed|cards|the cards|to anki|reviewed cards to anki|reviewed cards|cards to anki))*$/.test(t)) return { kind: "export" };
+  // Before the bare "inbox" rule below, whose phrasing this overlaps. Anchored
+  // whole-line and led by a verb, so a question that merely mentions the words
+  // ("what does the inbox send to the writer?") stays a question.
+  if (/^(?:send (?:it |this |that |the answer )?to (?:the )?inbox|send to inbox|card (?:it|this|that)|make (?:cards|flashcards)|flashcard (?:it|this|that))$/.test(t)) {
+    return { kind: "send-answer" };
+  }
   if (/^(?:open (?:the )?inbox|show (?:the )?inbox|inbox)$/.test(t)) return { kind: "inbox" };
 
   // A palette name or alias typed exactly: unambiguous enough to run.
@@ -246,6 +253,7 @@ export function renderHelp(): string {
     "- **lint** — check the wiki for wrong quotes, dead links and duplicate pages",
     "- **export** — send every reviewed card to Anki",
     "- **inbox** — open the inbox",
+    "- **send to inbox** — card the last answer, one inbox item per source it rested on",
     "- while a quiz runs: **hint**, **skip**, **stop**",
     "",
     "Anything else is a question for your notes. **ask HBIO250 …** or **… in HBIO250** keeps it to one class.",

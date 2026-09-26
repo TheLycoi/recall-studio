@@ -203,3 +203,14 @@ test("a code no page carries, or a bare 'ask', is an ordinary question", () => {
   assert.deepEqual(cc.matchIntent("what happens in the cell", SCOPE_CTX), { kind: "question" });
   assert.deepEqual(cc.matchIntent("ask", SCOPE_CTX), { kind: "question" });
 });
+
+// ---- send the last answer to the inbox ------------------------------------------
+
+test("send to inbox and its plain-language forms card the last answer; a question that mentions the inbox stays a question", () => {
+  for (const phrase of ["send to inbox", "send it to the inbox", "Send the answer to inbox", "card it", "make flashcards", "flashcard this"]) {
+    assert.deepEqual(cc.matchIntent(phrase, CTX), { kind: "send-answer" }, phrase);
+  }
+  assert.equal(cc.matchIntent("inbox", CTX).kind, "inbox", "the bare word still opens the inbox");
+  assert.equal(cc.matchIntent("what does the inbox send to the writer?", CTX).kind, "question");
+  assert.match(cc.renderHelp(), /\*\*send to inbox\*\*/);
+});
