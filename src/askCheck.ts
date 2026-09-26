@@ -156,28 +156,40 @@ export function renderGroundingLine(r: GroundingReport): string {
 }
 
 /**
- * What to tell the card writer when an answer is sent to the inbox.
- *
- * The highlight itself stays the verbatim evidence passage, so the cloze
- * grounding check (src/lint.ts, `ungroundedClozes`) still has real source text
- * to check deletions against. The question is what the card should be aimed
- * at, and that can only ride as an instruction — the same division
- * `renderMissInstruction` uses for a quiz miss.
- *
- * `why` is the model's own few words on what this source contributed
- * ("defines the term", "gives the formula"). With one highlight per cited
- * source, it is what keeps two cards off the same fact when an answer rests
- * on two passages.
+ * The inbox item an answer becomes: the answer itself, then every passage it
+ * rested on, each with its note and page. The whole thing is the highlight
+ * text, so the card writer reads the answer in full and the cloze grounding
+ * check (src/lint.ts, `ungroundedClozes`) can find a deletion in either the
+ * answer's words or a passage's.
  */
-export function renderAnswerInstruction(question: string, answer: string, why: string): string {
+export function renderAnswerHighlight(answer: string, sources: Array<{ noteTitle: string; page: number | null; text: string }>): string {
+  const lines = [answer.trim()];
+  const rows = sources.map((s) => ({ ...s, text: s.text.replace(/\s+/g, " ").trim() })).filter((s) => s.text);
+  if (rows.length > 0) {
+    lines.push("", "Sources:");
+    for (const s of rows) lines.push(`${s.noteTitle}${s.page ? `, p.${s.page}` : ""}: ${s.text}`);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * What to tell the card writer when an answer is sent to the inbox: the
+ * question it answered, and what the model said each source contributed
+ * ("defines the term", "gives the formula"), so cards aim at the question
+ * and two passages do not become two cards on one fact.
+ */
+export function renderAnswerInstruction(question: string, sources: Array<{ noteTitle: string; why: string }>): string {
   const lines = [
-    "The reader asked their notes this question, and this passage is one of the sources the answer rested on.",
+    "The reader asked their notes this question, and the text is the answer they were given, with the passages it rested on listed under it.",
     `Question: ${question.trim()}`,
   ];
-  if (why.trim()) lines.push(`What this passage contributed: ${why.trim()}`);
-  if (answer.trim()) lines.push(`The answer they were given:\n${answer.trim()}`);
+  const said = sources.filter((s) => s.why.trim());
+  if (said.length > 0) {
+    lines.push("What each source contributed:");
+    for (const s of said) lines.push(`- ${s.noteTitle}: ${s.why.trim()}`);
+  }
   lines.push(
-    "Card the part of this passage that answers the question, not whichever other fact the passage happens to carry. Everything the card says has to be in the passage: where the answer above goes further than this passage does, follow the passage. The card is focused on one thing, precise about what it asks, answered the same way every time, and demands real recall: not a yes/no, and not a blank the shape of the sentence fills in.",
+    "Card what answers the question. Every card is grounded in the passages: where the answer goes further than they do, follow the passages. Each card is focused on one thing, precise about what it asks, answered the same way every time, and demands real recall: not a yes/no, and not a blank the shape of the sentence fills in.",
   );
   return lines.join("\n");
 }

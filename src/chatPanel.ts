@@ -756,13 +756,9 @@ export class ChatPanel {
   async sendAnswerToInbox(turn: ChatTurn, picked: PickedSource[]): Promise<void> {
     if (turn.sentToInbox || picked.length === 0) return;
     const question = this.questionBefore(turn);
-    const { added, skipped } = captureAskAnswer(this.plugin, question, turn.text, picked);
+    const { added } = captureAskAnswer(this.plugin, question, turn.text, picked);
     turn.sentToInbox = true;
-    this.pushSystem(
-      added === 0
-        ? `Nothing sent${skipped ? ": already in the inbox" : ""}.`
-        : `Sent ${added} source${added === 1 ? "" : "s"} to the inbox${skipped ? `, ${skipped} already there` : ""}. Cards are being written.`,
-    );
+    this.pushSystem(added === 0 ? "Nothing sent: that answer is already in the inbox, or has no source to link." : "Sent the answer to the inbox, with its sources. Cards are being written.");
   }
 
   /**
@@ -1573,7 +1569,7 @@ export class ChatPanel {
     const row = el.createDiv({ cls: "wikilm-chat-offer" });
     const send = row.createEl("button", {
       cls: turn.sentToInbox ? "" : "mod-cta",
-      text: turn.sentToInbox ? "Sent to inbox" : `Send ${picked.length === 1 ? "source" : `${picked.length} sources`} to inbox`,
+      text: turn.sentToInbox ? "Sent to inbox" : "Send answer to inbox",
     });
     // The log is rebuilt wholesale on every rerender, so "already sent" has
     // to live on the turn: a disabled flag set on the button would not

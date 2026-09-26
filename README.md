@@ -544,14 +544,14 @@ knowledge* — and the class it was kept to, so a reader can see whether
 the answer came from words their notes use or from a neighbour the graph
 reached.
 
-**Send to inbox.** A button under an answer, **Send N sources to inbox**,
-queues one inbox highlight per source the answer rested on
-(`captureAskAnswer`, `src/capture.ts`): the verbatim passage as the
-highlight, the question as its title, and the question, the answer and the
-model's note on what the passage contributed as the card writer's
-instruction (`renderAnswerInstruction`, `src/askCheck.ts`). The writer,
-critique and linter chain then turns each into a card whose back links the
-passage's page. The sources shown and the sources sent are the same list
+**Send to inbox.** A button under an answer, **Send answer to inbox**,
+queues the answer as one inbox item (`captureAskAnswer`, `src/capture.ts`):
+the answer itself with the passages it rested on listed under it
+(`renderAnswerHighlight`, `src/askCheck.ts`) as the highlight text, the
+question as its title, and the question plus what each source contributed
+as the card writer's instruction (`renderAnswerInstruction`). The writer
+sees the whole answer; the critique and linter ground every card in the
+passages; the card's back links the first passage's page. The sources shown and the sources sent are the same list
 (`pickSources`). Links inside a passage are reduced to their words on the
 card's back, in the inbox and in front of the card writer (`plainText`,
 `src/util.ts`); the stored highlight keeps them so the note can be reopened

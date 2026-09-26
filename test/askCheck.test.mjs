@@ -172,11 +172,32 @@ test("pickSources stands in the best-ranked unit when nothing was cited, but not
   assert.deepEqual(ac.pickSources([], { coverage: "partial", sources: [], dropped: 0 }), []);
 });
 
-test("renderAnswerInstruction carries the question, the contribution and the answer, and tells the writer to card the passage", () => {
-  const s = ac.renderAnswerInstruction("What is linear impulse?", "Force times time.", "gives the definition");
+test("renderAnswerHighlight is the answer, then each passage it rested on with its note and page", () => {
+  const text = ac.renderAnswerHighlight("Kinetics is the study of forces that cause motion.", [
+    { noteTitle: "Kinetics", page: 2, text: "Links kinetics (forces) to kinematics (motion) as cause and effect." },
+    { noteTitle: "Linear Kinematics", page: null, text: "Kinematic analysis captures a realistic representation of the body." },
+  ]);
+  assert.equal(
+    text,
+    [
+      "Kinetics is the study of forces that cause motion.",
+      "",
+      "Sources:",
+      "Kinetics, p.2: Links kinetics (forces) to kinematics (motion) as cause and effect.",
+      "Linear Kinematics: Kinematic analysis captures a realistic representation of the body.",
+    ].join("\n"),
+  );
+  assert.equal(ac.renderAnswerHighlight("Just the answer.", []), "Just the answer.");
+});
+
+test("renderAnswerInstruction names the question and what each source contributed, and tells the writer to ground cards in the passages", () => {
+  const s = ac.renderAnswerInstruction("What is linear impulse?", [
+    { noteTitle: "Kinetics", why: "gives the definition" },
+    { noteTitle: "TBCM", why: "" },
+  ]);
   assert.ok(s.startsWith("The reader asked their notes this question"));
   assert.ok(s.includes("Question: What is linear impulse?"));
-  assert.ok(s.includes("What this passage contributed: gives the definition"));
-  assert.ok(s.includes("The answer they were given:\nForce times time."));
-  assert.ok(!ac.renderAnswerInstruction("q", "", "  ").includes("contributed"), "blank parts are left out");
+  assert.ok(s.includes("Kinetics: gives the definition"));
+  assert.ok(!s.includes("TBCM:"), "a source with nothing said about it is not listed");
+  assert.ok(/grounded in the passages/i.test(s));
 });
