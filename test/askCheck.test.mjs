@@ -201,3 +201,39 @@ test("renderAnswerInstruction names the question and what each source contribute
   assert.ok(!s.includes("TBCM:"), "a source with nothing said about it is not listed");
   assert.ok(/grounded in the passages/i.test(s));
 });
+
+// ---- the sentence check's mark on the grounding line (src/answerClaims.ts)
+
+test("renderGroundingLine appends the unmatched sentence count when the check ran and found some", () => {
+  const base = { coverage: "full", sources: [], dropped: 0, fromGeneralKnowledge: false };
+  assert.equal(
+    ac.renderGroundingLine({ ...base, claims: { total: 5, unmatched: ["One.", "Two."] } }),
+    "Answered from your notes · 2 of 5 sentences matched no passage",
+  );
+  // Singular when the answer was a single sentence.
+  assert.equal(
+    ac.renderGroundingLine({ ...base, claims: { total: 1, unmatched: ["One."] } }),
+    "Answered from your notes · 1 of 1 sentence matched no passage",
+  );
+  // It sits after the dropped-citation clause, not instead of it.
+  assert.equal(
+    ac.renderGroundingLine({ ...base, dropped: 1, claims: { total: 3, unmatched: ["One."] } }),
+    "Answered from your notes · 1 bad citation dropped · 1 of 3 sentences matched no passage",
+  );
+});
+
+test("renderGroundingLine says nothing about sentences when every one matched, or when the check did not run", () => {
+  const base = { coverage: "partial", sources: [], dropped: 0, fromGeneralKnowledge: false };
+  assert.equal(ac.renderGroundingLine({ ...base, claims: { total: 4, unmatched: [] } }), "Partly answered from your notes");
+  assert.equal(ac.renderGroundingLine(base), "Partly answered from your notes");
+});
+
+test("renderUnmatchedClaims hands the panel the sentences to list, and nothing when there are none", () => {
+  const base = { coverage: "full", sources: [], dropped: 0, fromGeneralKnowledge: false };
+  assert.deepEqual(
+    ac.renderUnmatchedClaims({ ...base, claims: { total: 3, unmatched: ["Albumin transduces a signal.", "Receptors are enzymes."] } }),
+    ["Albumin transduces a signal.", "Receptors are enzymes."],
+  );
+  assert.deepEqual(ac.renderUnmatchedClaims({ ...base, claims: { total: 3, unmatched: [] } }), []);
+  assert.deepEqual(ac.renderUnmatchedClaims(base), []);
+});

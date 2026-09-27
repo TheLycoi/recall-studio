@@ -846,3 +846,74 @@ test("buildDuplicatesMessage numbers each pair, shows both pages with kind and a
   assert.ok(!msg.includes("x".repeat(450)), "the excerpt stops at the limit");
   assert.ok(msg.trimEnd().endsWith("Return one verdict per pair, by its number."), msg.slice(-80));
 });
+
+// --- relevance message ------------------------------------------------------
+
+const relevanceBase = {
+  question: "What distinguishes a receptor from albumin?",
+  candidates: [
+    { n: 1, noteTitle: "Pharmacology", page: 2, text: "Pharmacology is the study of the action of drugs." },
+    { n: 2, noteTitle: "Receptors", page: 4, text: "Receptors transduce a signal to produce a biological effect." },
+    { n: 3, noteTitle: "Plasma Proteins", page: null, text: "Albumin binds drugs but does not transduce a signal." },
+  ],
+  history: [],
+};
+
+const RELEVANCE_TASK = "Name in relevant the numbers of the passages that bear on the question, best first. Name none if none does.";
+
+test("relevance orders the blocks history, candidates, question, task", () => {
+  const msg = p.buildRelevanceMessage({
+    ...relevanceBase,
+    history: [{ role: "user", text: "What is albumin?" }],
+  });
+  const iH = msg.indexOf("<history>");
+  const iC = msg.indexOf("<candidates>");
+  const iQ = msg.indexOf("Question: ");
+  const iT = msg.indexOf(RELEVANCE_TASK);
+  assert.ok(iH === 0, "the history opens the message");
+  assert.ok(iH < iC && iC < iQ && iQ < iT, msg);
+  const blocks = msg.split("\n\n");
+  assert.equal(blocks.at(-1), RELEVANCE_TASK, "the task line is last");
+  assert.equal(blocks.at(-2), "Question: What distinguishes a receptor from albumin?", "the question is the last input block");
+});
+
+test("relevance shows the candidates as the same numbered lines the drafter sees", () => {
+  const msg = p.buildRelevanceMessage({ ...relevanceBase });
+  assert.ok(msg.includes("[2] (Receptors, p.4) Receptors transduce a signal to produce a biological effect."), msg);
+  // The same rendering as buildAskMessage, so a number means one thing across both calls.
+  const ask = p.buildAskMessage({ ...relevanceBase, evidence: relevanceBase.candidates, standingInstructions: "" });
+  for (const c of relevanceBase.candidates) {
+    const line = `[${c.n}] (${c.noteTitle}${c.page === null ? "" : `, p.${c.page}`}) ${c.text}`;
+    assert.ok(msg.includes(line) && ask.includes(line), line);
+  }
+  assert.ok(msg.includes(`<candidates>\n[1] `), "the block opens with the first candidate line");
+});
+
+test("relevance keeps at most the last two turns of history", () => {
+  const msg = p.buildRelevanceMessage({
+    ...relevanceBase,
+    history: [
+      { role: "user", text: "First question" },
+      { role: "assistant", text: "First answer" },
+      { role: "user", text: "Second question" },
+      { role: "assistant", text: "Second answer" },
+    ],
+  });
+  assert.ok(!msg.includes("First question"), "the oldest turns are cut");
+  assert.ok(!msg.includes("First answer"), "the oldest turns are cut");
+  assert.ok(msg.includes("User: Second question"), msg);
+  assert.ok(msg.includes("Assistant: Second answer"), msg);
+});
+
+test("relevance omits the history block when there is no history", () => {
+  const msg = p.buildRelevanceMessage({ ...relevanceBase });
+  assert.ok(!msg.includes("<history>"), "no empty block");
+  assert.ok(msg.startsWith("<candidates>"), msg.slice(0, 40));
+});
+
+test("RELEVANCE_SYSTEM tells the model to judge, never to answer, and to return nothing rather than the closest miss", () => {
+  assert.equal(typeof p.RELEVANCE_SYSTEM, "string");
+  const lines = p.RELEVANCE_SYSTEM.split("\n").length;
+  assert.ok(lines >= 25 && lines <= 40, `system prompt is ${lines} lines`);
+  assert.ok(/<examples>/.test(p.RELEVANCE_SYSTEM), "it carries worked examples");
+});

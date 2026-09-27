@@ -47,6 +47,8 @@ export interface GroundingReport {
    * label is impossible to miss.
    */
   fromGeneralKnowledge: boolean;
+  /** Sentence check (src/answerClaims.ts): how many sentences the answer had and which matched no passage. Absent when the check did not run. */
+  claims?: { total: number; unmatched: string[] };
 }
 
 /** How many sources are shown under an answer. Two is enough to confirm one; more is a wall. */
@@ -152,7 +154,27 @@ export function renderGroundingLine(r: GroundingReport): string {
       : r.coverage === "partial"
         ? "Partly answered from your notes"
         : "Not in your notes";
-  return r.dropped > 0 ? `${coverage} · ${r.dropped} bad ${r.dropped === 1 ? "citation" : "citations"} dropped` : coverage;
+  const parts = [coverage];
+  if (r.dropped > 0) parts.push(`${r.dropped} bad ${r.dropped === 1 ? "citation" : "citations"} dropped`);
+  // "Matched no passage", never "wrong": the check is token overlap
+  // (src/answerClaims.ts), and a faithful synthesis of two passages can fail a
+  // single-passage bar. The count is the reader's cue to look, not a verdict.
+  const unmatched = r.claims?.unmatched.length ?? 0;
+  if (r.claims && unmatched > 0) {
+    parts.push(`${unmatched} of ${r.claims.total} ${r.claims.total === 1 ? "sentence" : "sentences"} matched no passage`);
+  }
+  return parts.join(" · ");
+}
+
+/**
+ * The sentences to list beneath the grounding line, so the panel makes one
+ * call and cannot disagree with the count on the line about what was found.
+ *
+ * Empty when every sentence matched or the check did not run — there is
+ * nothing to show, and an empty heading over an empty list is noise.
+ */
+export function renderUnmatchedClaims(r: GroundingReport): string[] {
+  return r.claims ? [...r.claims.unmatched] : [];
 }
 
 /**

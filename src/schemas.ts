@@ -285,6 +285,23 @@ export const KeywordsOut = z.object({
 });
 
 /**
+ * Which of the retrieved passages bear on the question.
+ *
+ * Reimplemented from the per-result relevance filter in stanford-oval/WikiChat,
+ * batched into one call: the model is shown the whole numbered pool and names
+ * the numbers worth keeping, best first. Omission is the verdict — a number it
+ * does not name is dropped — so the model never has to write "no" about a
+ * passage, and an empty list is the honest answer when the notes do not cover
+ * what was asked. Numbers only: nothing here can rewrite a passage or put a
+ * model's words between the reader and their own note.
+ */
+export const RelevanceOut = z.object({
+  relevant: z.array(z.number()).describe("Numbers of the passages that bear on the question, best first. Empty when none does."),
+});
+
+export type RelevanceVerdict = z.infer<typeof RelevanceOut>;
+
+/**
  * Aliases and a subtype tag for pages that lack them.
  *
  * The lint finds pages reachable only under their exact title and pages with

@@ -20,7 +20,19 @@ import { planLinkFixes, applyFixesToNote, type LinkFix } from "./vaultFix";
 import { FixPlanModal, LintReportModal, pickNote } from "./modals";
 import { repointFix, type Fix, type FixPageInfo } from "./fixPlan";
 import { applyPlan, buildPlan, fixPagesFor, pageInfos, proposeAliases, providerReady, verifyDuplicates, type FixContext } from "./fixer";
-import { checkAnswer, emptyIndexAnswer, noEvidenceAnswer, renderGroundingLine, VERIFY_BANNER, type GroundingReport, pickSources, type PickedSource as PickedSourceOf } from "./askCheck";
+import {
+  checkAnswer,
+  emptyIndexAnswer,
+  noEvidenceAnswer,
+  renderGroundingLine,
+  renderUnmatchedClaims,
+  VERIFY_BANNER,
+  type GroundingReport,
+  pickSources,
+  type PickedSource as PickedSourceOf,
+} from "./askCheck";
+import { applyRelevance, RELEVANCE_MIN_CANDIDATES } from "./relevance";
+import { checkClaims } from "./answerClaims";
 import { matchIntent, renderHelp, type Intent, type IntentContext, type IntentPage, type Target } from "./chatCommands";
 import { WIKILM_COMMANDS, type WikiLmCommand } from "./commands";
 import { captureAskAnswer, captureQuizMisses } from "./capture";
@@ -967,6 +979,16 @@ export class ChatPanel {
    * also why a vault with no matching notes answers instantly and without a
    * provider error.
    *
+   * Two optional stages sit either side of the drafter. Before it, behind
+   * `askRelevanceFilter`: retrieval runs three times as wide and one model
+   * call names the passages that bear on the question, so the drafter reads a
+   * narrowed list rather than everything the words happened to hit. After it,
+   * behind `askClaimCheck`: each sentence of the answer is matched locally
+   * against the passages it cited, and the ones no passage states are listed
+   * under the answer — marked, never deleted, because a bar made of token
+   * overlap fails faithful sentences too and deleting them was this file's
+   * old failure mode (src/askCheck.ts:8-22).
+   *
    * The evidence is pushed with the assistant turn whether the model answered
    * or failed, because the sources are the part the reader can still use when
    * there is no provider configured.
@@ -1010,11 +1032,49 @@ export class ChatPanel {
       // names the topic outranks the one every note happens to use.
       const scorer = questionScorer(q, units);
       const k = this.plugin.settings.askEvidenceCount;
-      evidence = rankEvidence(units, q, scorer, k);
+      // With the filter on, retrieval runs wide and the model narrows it: the
+      // judge earns its call only when it has more candidates than the
+      // drafter will read. The ceiling is the reader's wait, not the context
+      // — thirty lines is already a long pause for one question.
+      const filtering = this.plugin.settings.askRelevanceFilter;
+      const kPool = filtering ? Math.min(3 * k, 30) : k;
+      evidence = rankEvidence(units, q, scorer, kPool);
 
-      const widened = await this.widenEvidence(q, units, evidence, k);
+      const widened = await this.widenEvidence(q, units, evidence, kPool);
       evidence = widened.evidence;
       route = widened.route;
+
+      // The filter, then the cap. Below the gate there is nothing worth a
+      // round trip to narrow, and with the filter off `kPool` was `k` and the
+      // slice is a no-op — either way the drafter never sees more than `k`,
+      // which is what it saw before this stage existed.
+      const beforeFilter = evidence.length;
+      if (filtering && evidence.length >= RELEVANCE_MIN_CANDIDATES) {
+        this.status = "judging the evidence…";
+        this.rerender();
+        try {
+          const verdict = await this.plugin.llm.relevance({
+            question: q,
+            candidates: numberEvidence(evidence),
+            history: this.history(),
+          });
+          evidence = applyRelevance(evidence, verdict, k).kept;
+        } catch (e) {
+          // As with keyword expansion: a judge that failed is not an error
+          // the reader needs to see, it just leaves the evidence as wide as
+          // the local stages made it, capped where it always was.
+          console.debug("[wikilm] relevance filter failed:", e);
+          evidence = evidence.slice(0, k);
+        }
+      } else {
+        evidence = evidence.slice(0, k);
+      }
+      // Only the narrowing, and only onto a route there is one for: "none" is
+      // the sentinel that prints nothing (renderGrounding, below), so
+      // appending to it would put the word itself under an answer.
+      if (filtering && evidence.length !== beforeFilter && route && route !== "none") {
+        route = `${route} · ${beforeFilter} → ${evidence.length} kept`;
+      }
 
       // Retrieval found nothing. Either say so and stop, or let the model
       // answer from what it knows behind a warning — upstream's choice
@@ -1041,6 +1101,37 @@ export class ChatPanel {
 
       const { answer, report } = checkAnswer(draft, numbered);
       if (report.fromGeneralKnowledge) route = "general knowledge";
+      // The sentence check. Local and instant, so there is no status step: a
+      // rerender nothing awaits would flicker a line the reader cannot read.
+      // Skipped when the answer came from general knowledge (the banner above
+      // it already says every sentence is unverified) and when the notes
+      // covered nothing, where there is no passage to match against anyway.
+      if (this.plugin.settings.askClaimCheck && !report.fromGeneralKnowledge && answer.trim() && report.coverage !== "none") {
+        // What the drafter read, plus the rest of every note it cited: a
+        // sentence may rest on a line next to the one retrieved, and that is
+        // still the reader's own note. Not the whole index — a stray match in
+        // a note the answer never cited is not support for anything.
+        // The check is synchronous on the UI thread, so it gets a ceiling: 200
+        // single-line units is more than a cited page holds.
+        const CLAIM_CHECK_UNIT_CAP = 200;
+        const citedPaths = new Set(report.sources.map((s) => evidence[s.n - 1]?.notePath).filter((p): p is string => !!p));
+        const unitsToCheck: EvidenceUnit[] = [];
+        const seen = new Set<string>();
+        for (const u of evidence) {
+          if (unitsToCheck.length >= CLAIM_CHECK_UNIT_CAP) break;
+          if (seen.has(u.id)) continue;
+          seen.add(u.id);
+          unitsToCheck.push(u);
+        }
+        for (const u of this.index ?? []) {
+          if (unitsToCheck.length >= CLAIM_CHECK_UNIT_CAP) break;
+          if (!citedPaths.has(u.notePath) || seen.has(u.id)) continue;
+          seen.add(u.id);
+          unitsToCheck.push(u);
+        }
+        const verdicts = checkClaims(answer, unitsToCheck);
+        report.claims = { total: verdicts.length, unmatched: verdicts.filter((v) => v.status === "unmatched").map((v) => v.text) };
+      }
       this.turns.push({ role: "assistant", text: answer, evidence, report, route, scope });
     } catch (e) {
       this.turns.push({ role: "assistant", text: "", evidence, error: describeError(e), route, scope });
@@ -1637,6 +1728,15 @@ export class ChatPanel {
     const route = turn?.route && turn.route !== "none" ? turn.route : "";
     if (route) bits.push(route + (turn?.scope?.startsWith("in ") ? ` ${turn.scope}` : ""));
     line.createSpan({ text: bits.join(" · ") });
+
+    // The sentences the local check could not find a passage for, quiet under
+    // the line that counted them. They stay in the answer above, unaltered:
+    // this is a pointer to what to go and look at, not a verdict on it.
+    const unmatched = renderUnmatchedClaims(report);
+    if (unmatched.length === 0) return;
+    const block = el.createDiv({ cls: "wikilm-unmatched" });
+    block.createDiv({ text: "Matched no passage:" });
+    for (const text of unmatched) block.createDiv({ text });
   }
 
   /**

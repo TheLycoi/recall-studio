@@ -405,6 +405,95 @@ export function buildKeywordsMessage(a: KeywordsMessageArgs): string {
   return parts.join("\n\n");
 }
 
+/* --------------------------------------------------- relevance */
+
+/** One question and the pool of passages retrieved for it, for the relevance call. */
+export interface RelevanceArgs {
+  question: string;
+  candidates: AskEvidenceIn[];
+  history: AskHistoryTurn[];
+}
+
+/** Counts entries, so one exchange: the previous question and its answer, which is enough for the judge to resolve a follow-up like "why is that". */
+const RELEVANCE_HISTORY_ENTRIES = 2;
+
+/**
+ * The relevance call's system prompt.
+ *
+ * The judge is shown the same numbered lines the drafter will see and asked
+ * only for numbers, so there is no opening for it to answer the question or
+ * to paraphrase a passage on the way past. The hard part is the empty list:
+ * a model asked "which of these is relevant" will reach for the closest miss
+ * rather than say none, and the closest miss is exactly what makes an answer
+ * look grounded when the notes do not cover the question.
+ */
+export const RELEVANCE_SYSTEM = `You judge which passages from a reader's own notes bear on a question.
+
+The passages are lines from a student's notes and highlights: definitions, claims, formulas, and things they marked while reading. They are not an encyclopedia and they are not complete. Another model will write the answer from whichever passages you keep.
+
+Your job is to judge, and only to judge. Do not answer the question. Do not summarize, rewrite, translate, or correct a passage. Return numbers.
+
+<relevant>
+A passage is relevant when it:
+- states or defines what is asked about,
+- gives the formula, mechanism, cause, or procedure that is asked for,
+- gives an example, value, or case of the thing asked about,
+- or directly bears on the question in some other way, such as contrasting the thing asked about with what it is being distinguished from.
+
+When the question refers back to the conversation — "why is that", "what about the second one" — read it in the light of the history and judge against what it is actually asking.
+</relevant>
+
+<not_relevant>
+- Sharing a word with the question is not relevance. A passage that mentions the term in passing, with nothing said about what was asked, is a miss.
+- A passage about a different sense of the same word is not relevant: "a drug's half-life" does not answer a question about the half-life of an isotope. Being from the right subject area is not enough; the question is the test.
+</not_relevant>
+
+Order the numbers best first: the passage that most directly answers the question comes first.
+
+When nothing bears on the question, return an empty list. Do not fall back on the closest miss. An empty list is what tells the reader their notes do not cover this, which is a true and useful thing to learn; a near-miss dressed up as evidence is not.
+
+Never write a number that is not in the list you were given.
+
+<examples>
+Question: What does albumin do to a drug in the blood?
+[1] (Pharmacology, p.1) Pharmacology is the study of the action of drugs.
+[2] (Plasma Proteins, p.4) Albumin binds drugs in plasma; only the unbound fraction is active.
+[3] (Plasma Proteins, p.5) Bound drug acts as a reservoir and is released as free drug is cleared.
+relevant: [2, 3]. Passage 1 shares the vocabulary of the question and says nothing about albumin or binding, so it is dropped.
+
+Question: What is the therapeutic index?
+[1] (Receptors, p.2) Receptors transduce a signal to produce a biological effect.
+[2] (Receptors, p.3) Affinity is how tightly a ligand binds its receptor.
+[3] (Pharmacology, p.1) Pharmacology is the study of the action of drugs.
+relevant: []. All three are from the right subject and none of them states, defines, or bears on the therapeutic index.
+</examples>`;
+
+/**
+ * Build the user message for a relevance request.
+ *
+ * The candidates are rendered by `askEvidenceLines`, the same function that
+ * renders them for the drafter, so number 7 means one line across both calls
+ * and a verdict can be applied by position. The history comes first and short:
+ * it is there to resolve a question that refers back, not to be reasoned with,
+ * so only the last couple of turns are sent. The question and then the task
+ * read last, as they do in the ask message.
+ */
+export function buildRelevanceMessage(args: RelevanceArgs): string {
+  const history = args.history
+    .slice(-RELEVANCE_HISTORY_ENTRIES)
+    .map((t) => `${t.role === "user" ? "User" : "Assistant"}: ${t.text}`)
+    .join("\n\n");
+  const candidates = askEvidenceLines(args.candidates);
+  return [
+    history ? `<history>\n${history}\n</history>` : "",
+    candidates ? `<candidates>\n${candidates}\n</candidates>` : "",
+    `Question: ${args.question.trim()}`,
+    `Name in relevant the numbers of the passages that bear on the question, best first. Name none if none does.`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 /* --------------------------------------------------- aliases and tags */
 
 /** One page the aliases call is asked about: what it is called, what kind it is, and enough of it to tell. */

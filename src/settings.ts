@@ -99,9 +99,12 @@ export interface WikiLmSettings {
   askEvidenceCount: number;
   askMaxTurns: number;
   askInstructions: string;
-  /** Second model call per question that re-checks each drafted sentence against the evidence it cited. */
   /** When lexical search and the note graph leave an answer short, ask the model for better search terms. */
   askKeywordExpansion: boolean;
+  /** Retrieve three times as many passages, then spend one model call keeping only the ones that bear on the question. */
+  askRelevanceFilter: boolean;
+  /** Match each sentence of the answer against the cited notes locally, and list the ones no passage states. Marks, never deletes. */
+  askClaimCheck: boolean;
   /** When the notes do not cover a question, let the model answer from general knowledge behind a warning. */
   askGeneralKnowledge: boolean;
   /** Show the line under an answer reporting what was kept, removed, verified, and rejected. */
@@ -209,6 +212,8 @@ export const DEFAULT_SETTINGS: WikiLmSettings = {
   askMaxTurns: 10,
   askInstructions: "",
   askKeywordExpansion: true,
+  askRelevanceFilter: true,
+  askClaimCheck: true,
   askGeneralKnowledge: false,
   askShowGrounding: true,
   quizCap: 30,
@@ -879,6 +884,30 @@ export class WikiLmSettingTab extends PluginSettingTab {
       .addToggle((t) =>
         t.setValue(s.askKeywordExpansion).onChange((v) => {
           s.askKeywordExpansion = v;
+          save();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Filter evidence with the model")
+      .setDesc(
+        "Retrieve three times as many passages, then keep only the ones a model judges to bear on the question. One extra model call per question.",
+      )
+      .addToggle((t) =>
+        t.setValue(s.askRelevanceFilter).onChange((v) => {
+          s.askRelevanceFilter = v;
+          save();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Check the answer's sentences")
+      .setDesc(
+        "Match each sentence of the answer against the cited notes. No model call. Sentences that match no passage are listed under the answer; they are not deleted.",
+      )
+      .addToggle((t) =>
+        t.setValue(s.askClaimCheck).onChange((v) => {
+          s.askClaimCheck = v;
           save();
         }),
       );

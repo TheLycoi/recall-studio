@@ -13,6 +13,7 @@ import type {
   AskMessageArgs,
   DuplicatesMessageArgs,
   KeywordsMessageArgs,
+  RelevanceArgs,
   DigestMessageArgs,
   QuizGradeMessageArgs,
   QuizQuestionMessageArgs,
@@ -24,6 +25,8 @@ import {
   buildDuplicatesMessage,
   buildKeywordsMessage,
   KEYWORDS_SYSTEM,
+  buildRelevanceMessage,
+  RELEVANCE_SYSTEM,
   buildDigestMessage,
   buildHighlighterMessage,
   buildQuizGradeMessage,
@@ -35,12 +38,13 @@ import {
   AskOut as AskOutSchema,
   DuplicatesOut,
   KeywordsOut as KeywordsOutSchema,
+  RelevanceOut as RelevanceOutSchema,
   DigestOut as DigestOutSchema,
   QuizGradeOut as QuizGradeOutSchema,
   QuizQuestionOut as QuizQuestionOutSchema,
   SuggestOut as SuggestOutSchema,
 } from "./schemas";
-import type { AliasesTagsDraft, AskDraft, DigestDraft, DuplicatesDraft, QuizGradeDraft, QuizQuestionDraft, SuggestDraft } from "./schemas";
+import type { AliasesTagsDraft, AskDraft, DigestDraft, DuplicatesDraft, QuizGradeDraft, QuizQuestionDraft, RelevanceVerdict, SuggestDraft } from "./schemas";
 import type { WikiLmSettings } from "./settings";
 
 const CardOut = z.object({
@@ -674,6 +678,23 @@ export class LlmClient {
   }
 
   /**
+   * "relevance": which of the retrieved passages bear on the question. The
+   * pool goes out as the same numbered lines the drafter will see and only
+   * numbers come back, so the call can narrow the evidence but can never
+   * reword a passage or answer anything. Omission is the verdict.
+   */
+  async relevance(args: RelevanceArgs): Promise<RelevanceVerdict> {
+    return this.run("query", {
+      system: RELEVANCE_SYSTEM,
+      user: buildRelevanceMessage(args),
+      schema: RelevanceOutSchema,
+      label: "relevance",
+      maxTokens: 200,
+      effort: "low",
+    });
+  }
+
+  /**
    * "aliases and tags": the names a page is missing and the subtype it was
    * never given. Nothing here is written to the vault — every proposal
    * becomes a row in the fix plan, and only the rows the reader leaves ticked
@@ -1172,6 +1193,6 @@ Judge the gap from the answer in front of you, not from what a reader like this 
 Before you return, check that your verdict rests on what the evidence states and not on how the answer was phrased, that every fact in your feedback is in the passage, and that the words in quote appear in the evidence exactly as you copied them.`;
 
 /** The digest, Ask, verify and quiz schemas are defined in schemas.ts so tests can bundle them without obsidian; re-exported here so callers have one import. */
-export { DigestOut, AskOut, KeywordsOut, QuizQuestionOut, QuizGradeOut, SuggestOut, AliasesTagsOut } from "./schemas";
-export type { DigestDraft, AskDraft, QuizQuestionDraft, QuizGradeDraft, SuggestDraft, AliasesTagsDraft } from "./schemas";
-export type { SuggestMessageArgs, AliasesMessageArgs, AliasesPageIn } from "./prompt";
+export { DigestOut, AskOut, KeywordsOut, RelevanceOut, QuizQuestionOut, QuizGradeOut, SuggestOut, AliasesTagsOut } from "./schemas";
+export type { DigestDraft, AskDraft, RelevanceVerdict, QuizQuestionDraft, QuizGradeDraft, SuggestDraft, AliasesTagsDraft } from "./schemas";
+export type { SuggestMessageArgs, AliasesMessageArgs, AliasesPageIn, RelevanceArgs } from "./prompt";
