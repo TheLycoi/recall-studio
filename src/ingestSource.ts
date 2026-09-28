@@ -53,7 +53,18 @@ const MAX_PER_NOTE = 24;
  * model did not copy verbatim, so a quote it reworded never reaches a page
  * with a citation that would not survive being clicked.
  */
-export async function ingestSourceNote(plugin: WikiLmPlugin, file: TFile, opts: { quiet?: boolean } = {}): Promise<"written" | "nothing"> {
+export interface IngestOptions {
+  /** Inside a folder run: say nothing when a note yields nothing. */
+  quiet?: boolean;
+  /**
+   * Set by "AI highlight…", which has already asked what to look for and
+   * settled on wiki notes, so the product-and-instruction form is not shown a
+   * second time. Absent (the chat's `ingest`, a folder run), the form asks.
+   */
+  instruction?: string;
+}
+
+export async function ingestSourceNote(plugin: WikiLmPlugin, file: TFile, opts: IngestOptions = {}): Promise<"written" | "nothing"> {
   let owner: number | undefined;
   try {
     const s = plugin.settings;
@@ -80,12 +91,18 @@ export async function ingestSourceNote(plugin: WikiLmPlugin, file: TFile, opts: 
       return "nothing";
     }
 
-    const options = await askDigestOptions(
-      plugin.app,
-      { product: "notes", instruction: "" },
-      `Read ${basenameNoExt(file.path)} into the wiki`,
-    );
+    const options =
+      opts.instruction !== undefined
+        ? { product: "notes" as const, instruction: opts.instruction }
+        : await askDigestOptions(plugin.app, { product: "notes", instruction: "" }, `Read ${basenameNoExt(file.path)} into the wiki`);
     if (options === null) return "nothing";
+
+    // The guide stored for this note (a study guide or lecture transcript,
+    // attached from "AI highlight…"), read on every ingest of it the way the
+    // PDF highlighter and the note highlighter read theirs. The suggest prompt
+    // already has the slot: it goes in as the <transcript> block, beside the
+    // per-run instruction.
+    const transcript = plugin.store.getTranscript(file.path)?.text ?? null;
 
     const title = basenameNoExt(file.path);
     const batches = batchSegments(quotable, CHARS_PER_BATCH);
@@ -123,7 +140,7 @@ export async function ingestSourceNote(plugin: WikiLmPlugin, file: TFile, opts: 
         // segment. Sending one segment per entry keeps the marker meaningful,
         // so a span can name exactly where it came from.
         pages: batch.map((seg) => ({ page: indexOf.get(seg) as number, text: seg.text })),
-        transcript: null,
+        transcript,
         existingNotes: existingNotesFor(wiki, newNotes),
         alreadySelected: accepted.map((a) => ({ page: a.segment, text: a.quote.slice(0, 80) })),
         perPage: PER_SEGMENT,

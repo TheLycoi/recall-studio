@@ -1,6 +1,6 @@
 import { App, ButtonComponent, Component, FuzzySuggestModal, MarkdownRenderer, Modal, Notice, Setting, SuggestModal, TFile, TFolder } from "obsidian";
 import type { TranscriptRecord } from "./model";
-import { orderTranscriptFiles } from "./util";
+import { orderTranscriptFiles, transcriptRecord } from "./util";
 import type { PreparedNote } from "./topicNote";
 import { rowLabel } from "./topicNote";
 import type { ManifestHighlight } from "./manifest";
@@ -270,6 +270,182 @@ export class TranscriptModal extends Modal {
 
 export function askTranscript(app: App, current: TranscriptRecord | undefined, folder = ""): Promise<TranscriptChoice | null> {
   return new Promise((resolve) => new TranscriptModal(app, current, folder, resolve).open());
+}
+
+/** What AI highlight on a note produces: inbox cards, or passages filed into wiki pages. */
+export type HighlightProduct = "cards" | "wiki";
+
+/** What the reader did to the file's guide in the modal; applied by the caller on Run, never on Cancel. */
+export type GuideChange = { action: "keep" } | { action: "set"; record: TranscriptRecord } | { action: "clear" };
+
+export interface HighlightOptionsArgs {
+  /** Shown in the heading. */
+  fileName: string;
+  /** A PDF has one product (wiki notes behind the preview), so it gets no product choice. */
+  kind: "note" | "pdf";
+  /** The instruction remembered for this file, "" when none. */
+  instruction: string;
+  /** The guide stored for this file, if any. */
+  guide: TranscriptRecord | undefined;
+  transcriptFolder: string;
+  transcriptMaxChars: number;
+}
+
+export interface HighlightOptions {
+  instruction: string;
+  product: HighlightProduct;
+  guide: GuideChange;
+}
+
+/**
+ * The one form behind "AI highlight…": what to look for, the guide that says
+ * what the class cared about, and (for a note) what to make. It replaced four
+ * commands (AI-highlight with and without instructions, the PDF highlighter,
+ * and Add transcript), so everything those asked for separately is on one
+ * screen and the reader sees which guide will be used before anything runs.
+ *
+ * The modal touches nothing: a guide picked or cleared here is handed back as
+ * a change, so Cancel leaves the stored guide exactly as it was.
+ */
+export class HighlightOptionsModal extends Modal {
+  private instruction: string;
+  private product: HighlightProduct = "cards";
+  private guide: TranscriptRecord | undefined;
+  private change: GuideChange = { action: "keep" };
+  private resolved = false;
+  private guideRow!: Setting;
+  private clearButton: ButtonComponent | null = null;
+
+  constructor(
+    app: App,
+    private args: HighlightOptionsArgs,
+    private resolve: (v: HighlightOptions | null) => void,
+  ) {
+    super(app);
+    this.instruction = args.instruction;
+    this.guide = args.guide;
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.addClass("wikilm-modal");
+    contentEl.createEl("h3", { text: `AI highlight: ${this.args.fileName}` });
+
+    new Setting(contentEl).setName("Instructions").setDesc("What to look for. Remembered for this file.");
+    const ta = contentEl.createEl("textarea", {
+      attr: { rows: "3", placeholder: "e.g. only the definitions and the numbers in the Results section" },
+    });
+    ta.addClass("wikilm-modal-textarea");
+    ta.value = this.instruction;
+    ta.addEventListener("input", () => (this.instruction = ta.value));
+    ta.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        this.submit();
+      }
+    });
+
+    this.guideRow = new Setting(contentEl)
+      .setName("Guide")
+      .addButton((b) => b.setButtonText("Pick a note…").onClick(() => this.pickGuide()))
+      .addButton((b) => b.setButtonText("Paste…").onClick(() => this.pasteGuide()))
+      .addButton((b) => {
+        this.clearButton = b;
+        b.setButtonText("Clear").onClick(() => this.setGuide(undefined, { action: "clear" }));
+      });
+    this.renderGuide();
+
+    if (this.args.kind === "note") {
+      const row = new Setting(contentEl).setName("Make").setDesc("Cards go to the inbox; wiki notes are filed into pages behind a preview.");
+      const group = `wikilm-highlight-product-${Date.now()}`;
+      const labels: Record<HighlightProduct, string> = { cards: "Cards", wiki: "Wiki notes" };
+      for (const value of Object.keys(labels) as HighlightProduct[]) {
+        const label = row.controlEl.createEl("label", { cls: "wikilm-radio" });
+        const input = label.createEl("input", { attr: { type: "radio", name: group, value } });
+        input.checked = this.product === value;
+        input.addEventListener("change", () => {
+          if (input.checked) this.product = value;
+        });
+        label.appendText(` ${labels[value]} `);
+      }
+    }
+
+    new Setting(contentEl)
+      .addButton((b) => b.setButtonText("Cancel").onClick(() => this.close()))
+      .addButton((b) =>
+        b
+          .setCta()
+          .setButtonText("Run")
+          .onClick(() => this.submit()),
+      );
+
+    window.setTimeout(() => ta.focus(), 20);
+  }
+
+  /** The guide row's description: where the guide came from and how big it is, or that there is none. */
+  private renderGuide(): void {
+    const g = this.guide;
+    if (!g) {
+      this.guideRow.setDesc("None. A study guide or lecture transcript tells the highlighter what the class cared about.");
+    } else {
+      const from = g.origin === "file" ? `from ${g.sourceFile}` : "pasted";
+      const cut = g.truncated ? ", cut to the size limit" : "";
+      this.guideRow.setDesc(`${from}, ${g.text.length.toLocaleString()} characters${cut}`);
+    }
+    this.clearButton?.setDisabled(!g);
+  }
+
+  private setGuide(record: TranscriptRecord | undefined, change: GuideChange): void {
+    this.guide = record;
+    this.change = change;
+    this.renderGuide();
+  }
+
+  /** Save a picked or pasted guide the way "Add transcript" did: cleaned, then cut to the size limit. */
+  private saveGuide(text: string, origin: TranscriptRecord["origin"], sourceFile: string | null): void {
+    if (!text.trim()) {
+      new Notice("WikiLM: that guide is empty.");
+      return;
+    }
+    const record = transcriptRecord({ text, origin, sourceFile }, this.args.transcriptMaxChars, new Date().toISOString());
+    this.setGuide(record, { action: "set", record });
+  }
+
+  private pickGuide(): void {
+    new TranscriptFileSuggestModal(this.app, this.args.transcriptFolder, async (file) => {
+      if (!file) return;
+      this.saveGuide(await this.app.vault.cachedRead(file), "file", file.path);
+    }).open();
+  }
+
+  /** The transcript editor the chat also uses, opened on the guide as it stands in this form. */
+  private pasteGuide(): void {
+    void askTranscript(this.app, this.guide, this.args.transcriptFolder).then((choice) => {
+      if (choice === null) return;
+      if (choice.action === "clear") this.setGuide(undefined, { action: "clear" });
+      else this.saveGuide(choice.text, choice.origin, choice.sourceFile);
+    });
+  }
+
+  private submit() {
+    this.resolved = true;
+    this.resolve({
+      instruction: this.instruction.trim(),
+      // A PDF has no choice to make: its highlights become wiki notes.
+      product: this.args.kind === "pdf" ? "wiki" : this.product,
+      guide: this.change,
+    });
+    this.close();
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+    if (!this.resolved) this.resolve(null);
+  }
+}
+
+export function askHighlightOptions(app: App, args: HighlightOptionsArgs): Promise<HighlightOptions | null> {
+  return new Promise((resolve) => new HighlightOptionsModal(app, args, resolve).open());
 }
 
 /** What a digest run should produce. */

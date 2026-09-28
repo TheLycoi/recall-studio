@@ -7,6 +7,9 @@ import type { CardRevision, InboxData } from "./model";
 /** Revisions are kept vault-wide, not per-card, so one number bounds the file. */
 export const REVISION_CAP = 200;
 
+/** Remembered highlight instructions are one per file; the cap bounds a vault with thousands of notes. */
+export const INSTRUCTION_CAP = 200;
+
 export function emptyInbox(): InboxData {
   return { version: 1, highlights: [] };
 }
@@ -50,4 +53,21 @@ export function pushRevision(data: InboxData, rev: CardRevision, cap = REVISION_
   data.revisions ??= [];
   data.revisions.push(rev);
   if (data.revisions.length > cap) data.revisions.splice(0, data.revisions.length - cap);
+}
+
+/**
+ * Remember the last instruction the reader gave AI highlight for one file, so
+ * the modal opens with it next time. Keys are kept oldest first: setting a
+ * file again moves it to the end, and past the cap the least recently used
+ * files are forgotten. An empty instruction forgets the file, since an empty
+ * box is already the default.
+ */
+export function rememberInstruction(data: InboxData, path: string, instruction: string, cap = INSTRUCTION_CAP): void {
+  const map = (data.highlightInstructions ??= {});
+  delete map[path];
+  const text = instruction.trim();
+  if (!text) return;
+  map[path] = text;
+  const keys = Object.keys(map);
+  for (const k of keys.slice(0, Math.max(0, keys.length - cap))) delete map[k];
 }

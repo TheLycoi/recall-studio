@@ -186,7 +186,7 @@ export async function writeNotes(
 }
 
 /**
- * "AI-highlight this PDF into the wiki…": the PDF's text layer in, wiki notes
+ * "AI highlight…" on a PDF: the PDF's text layer in, wiki notes
  * out, gated by a per-span preview. Every span the model proposes is verified
  * verbatim against the page it claims to come from before it is ever offered,
  * and a batch that throws aborts the whole run with nothing written.
@@ -194,7 +194,16 @@ export async function writeNotes(
 export async function suggestPdfHighlights(
   plugin: WikiLmPlugin,
   pdf: TFile,
-  opts: { transcriptGate?: () => Promise<"paste" | "skip" | "cancel"> } = {},
+  opts: {
+    transcriptGate?: () => Promise<"paste" | "skip" | "cancel">;
+    /**
+     * Set by "AI highlight…", whose form has already asked what to look for
+     * and settled the guide, so the product-and-instruction form is not shown
+     * again and the run writes wiki notes. Absent (the chat, a digest gate),
+     * the form asks as before.
+     */
+    instruction?: string;
+  } = {},
 ): Promise<void> {
   let owner: number | undefined;
   try {
@@ -237,11 +246,10 @@ export async function suggestPdfHighlights(
     }
 
     // (4) Notes, flashcards, or both — the digest's chooser, reused.
-    const options = await askDigestOptions(
-      plugin.app,
-      { product: "notes", instruction: "" },
-      "Suggest highlights in this PDF",
-    );
+    const options =
+      opts.instruction !== undefined
+        ? { product: "notes" as const, instruction: opts.instruction }
+        : await askDigestOptions(plugin.app, { product: "notes", instruction: "" }, "Suggest highlights in this PDF");
     if (options === null) return;
 
     // (5) The notes the model may assign spans to by name.

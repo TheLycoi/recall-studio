@@ -252,12 +252,19 @@ export async function captureReadingSelection(
   plugin: WikiLmPlugin,
   view: MarkdownView,
   win: Window,
-  opts: CaptureOptions = {},
+  opts: CaptureOptions & {
+    /**
+     * The selection, read before a modal opened. Asking for an instruction
+     * focuses a text box, which takes the page's selection with it, so the
+     * "with instructions" command reads it first and passes it here.
+     */
+    text?: string;
+  } = {},
 ): Promise<Highlight | null> {
   const file = view.file;
   if (!file) return null;
   const sel = win.getSelection();
-  const text = sel && !sel.isCollapsed ? sel.toString().trim() : "";
+  const text = opts.text ?? (sel && !sel.isCollapsed ? sel.toString().trim() : "");
   if (!text) return null;
   const raw = await plugin.app.vault.read(file);
   const { body } = splitFrontmatter(raw);

@@ -127,3 +127,29 @@ test("pushRevision defaults to a cap of 200", () => {
   assert.equal(data.revisions.length, 200);
   assert.equal(data.revisions[0].cardId, "c-1", "the first pushed (c-0) was dropped; c-1 is now oldest");
 });
+
+// --- rememberInstruction -------------------------------------------------------
+
+test("rememberInstruction keeps the last instruction per file and creates the map", () => {
+  const data = d.emptyInbox();
+  d.rememberInstruction(data, "a.md", "only the numbers");
+  d.rememberInstruction(data, "a.md", "only the definitions");
+  assert.deepEqual(data.highlightInstructions, { "a.md": "only the definitions" });
+});
+
+test("rememberInstruction forgets a file when the instruction is emptied", () => {
+  const data = d.emptyInbox();
+  d.rememberInstruction(data, "a.md", "x");
+  d.rememberInstruction(data, "a.md", "   ");
+  assert.deepEqual(data.highlightInstructions, {});
+});
+
+test("rememberInstruction keeps the most recently used files once past the cap", () => {
+  const data = d.emptyInbox();
+  d.rememberInstruction(data, "a.md", "1", 2);
+  d.rememberInstruction(data, "b.md", "2", 2);
+  d.rememberInstruction(data, "a.md", "1 again", 2); // a is now the most recent
+  d.rememberInstruction(data, "c.md", "3", 2);
+  assert.deepEqual(Object.keys(data.highlightInstructions), ["a.md", "c.md"]);
+  assert.equal(data.highlightInstructions["a.md"], "1 again");
+});
