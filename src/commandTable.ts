@@ -2,10 +2,10 @@
 // one-clause availability hint each. Pure on purpose — no `obsidian` import —
 // so the chat matcher and its tests can read the table without a plugin.
 //
-// The ids and names here are the ones Obsidian registers (src/main.ts loops
-// over WIKILM_COMMANDS in src/commands.ts). Changing an id orphans a user's
-// hotkey; changing a name changes what the palette shows. Both are verbatim
-// from the 0.5.0 addCommand blocks.
+// The ids and names of the visible entries are the ones Obsidian registers
+// (src/main.ts loops over the palette commands from src/commands.ts). Changing
+// an id orphans a user's hotkey; changing a name changes what the palette
+// shows.
 
 export interface CommandSpec {
   /** Globally unique within the plugin; what `addCommand` registers. */
@@ -16,91 +16,38 @@ export interface CommandSpec {
   aliases: string[];
   /** One clause on when the command is available, shown by `/help`. */
   hint: string;
+  /**
+   * Kept out of the palette (and so out of the hotkey list) but still run by
+   * its chat aliases. The palette carries the workflow; these are the tools a
+   * reader reaches for by name when they already know what they want.
+   */
+  hidden?: boolean;
 }
 
+// The palette order is the workflow order the reader asked for on 2026-09-28:
+// AI highlight, Digest, Lint first, the capture and housekeeping commands
+// after. The chat-only commands come last. Five commands were removed in that
+// change (capture-pdf-selection, capture-pdf-selection-with-instruction,
+// ai-highlight-with-instruction, ai-highlight-pdf, add-transcript); their
+// aliases now live on the command that absorbed each one, so a chat habit
+// survives the merge even though a hotkey bound to the old id does not.
 export const COMMAND_TABLE: CommandSpec[] = [
   {
-    id: "capture-selection",
-    name: "Send selection to inbox",
-    aliases: ["capture", "send"],
-    hint: "needs an open note",
-  },
-  {
-    id: "capture-pdf-selection",
-    name: "Send PDF selection to inbox",
-    aliases: ["pdf"],
-    hint: "needs an open PDF",
-  },
-  {
-    id: "capture-pdf-selection-with-instruction",
-    name: "Send PDF selection to inbox with instructions…",
-    aliases: ["pdf-instruct"],
-    hint: "needs an open PDF",
-  },
-  {
-    id: "capture-selection-with-instruction",
-    name: "Send selection to inbox with instructions…",
-    aliases: ["capture-instruct"],
-    hint: "needs an open note",
-  },
-  {
-    id: "capture-markdown-highlights",
-    name: "Send all ==highlights== in this note to inbox",
-    aliases: ["highlights", "sweep"],
-    hint: "needs an open note",
-  },
-  {
     id: "ai-highlight",
-    name: "AI-highlight this note and write cards",
-    aliases: ["ai"],
-    hint: "needs an open note",
-  },
-  {
-    id: "ai-highlight-with-instruction",
-    name: "AI-highlight this note with instructions…",
-    aliases: ["ai-instruct"],
-    hint: "needs an open note",
-  },
-  {
-    id: "ingest-source",
-    name: "Ingest source: read this markdown into the wiki",
-    aliases: ["ingest", "read-source"],
-    hint: "needs an open note",
-  },
-  {
-    id: "ingest-folder",
-    name: "Ingest folder: read every note in a folder into the wiki",
-    aliases: ["ingest-folder", "read-folder"],
-    hint: "always",
-  },
-  {
-    id: "cancel-ingestion",
-    name: "Cancel the running AI highlight or ingest",
-    aliases: ["cancel", "stop-run"],
-    hint: "while a run is in progress",
-  },
-  {
-    id: "add-transcript",
-    name: "Add transcript for document highlighting",
-    aliases: ["transcript"],
-    hint: "needs an open note",
+    name: "AI highlight…",
+    aliases: ["ai", "ai-instruct", "suggest", "transcript"],
+    hint: "needs an open note or PDF",
   },
   {
     id: "digest-pdf-highlights",
-    name: "Digest PDF highlights into topic notes…",
+    name: "Digest: PDF highlights into concept and entity notes…",
     aliases: ["digest"],
-    hint: "needs an open PDF, a manifest note, or a note with PDF++ links",
+    hint: "needs an open PDF, or a note with PDF++ links",
   },
   {
-    id: "ai-highlight-pdf",
-    name: "AI-highlight this PDF into the wiki…",
-    aliases: ["suggest"],
-    hint: "needs an open PDF",
-  },
-  {
-    id: "open-chat",
-    name: "Open chat: ask the notes",
-    aliases: ["chat", "ask"],
+    id: "digest-folder",
+    name: "Digest folder: every highlighted PDF under a folder…",
+    aliases: ["digest-folder"],
     hint: "always",
   },
   {
@@ -112,6 +59,24 @@ export const COMMAND_TABLE: CommandSpec[] = [
     name: "Lint wiki: find gaps, dead links and ungrounded quotes",
     aliases: ["wiki", "lint"],
     hint: "always available",
+  },
+  {
+    id: "capture-selection",
+    name: "Send selection to inbox",
+    aliases: ["capture", "send", "pdf"],
+    hint: "needs an open note or PDF",
+  },
+  {
+    id: "capture-selection-with-instruction",
+    name: "Send selection to inbox with instructions…",
+    aliases: ["capture-instruct", "pdf-instruct"],
+    hint: "needs an open note or PDF",
+  },
+  {
+    id: "open-chat",
+    name: "Open chat: ask the notes",
+    aliases: ["chat", "ask"],
+    hint: "always",
   },
   {
     id: "open-inbox",
@@ -126,10 +91,10 @@ export const COMMAND_TABLE: CommandSpec[] = [
     hint: "always",
   },
   {
-    id: "retry-failed",
-    name: "Retry failed highlights",
-    aliases: ["retry"],
-    hint: "always",
+    id: "cancel-ingestion",
+    name: "Cancel the running AI highlight, digest or ingest",
+    aliases: ["cancel", "stop-run"],
+    hint: "while a run is in progress",
   },
   {
     id: "open-schema",
@@ -143,4 +108,39 @@ export const COMMAND_TABLE: CommandSpec[] = [
     aliases: ["suggestions"],
     hint: "always",
   },
+  {
+    id: "ingest-source",
+    name: "Ingest source: read this markdown into the wiki",
+    aliases: ["ingest", "read-source"],
+    hint: "needs an open note",
+    hidden: true,
+  },
+  {
+    id: "ingest-folder",
+    name: "Ingest folder: read every note in a folder into the wiki",
+    aliases: ["ingest-folder", "read-folder"],
+    hint: "always",
+    hidden: true,
+  },
+  {
+    id: "capture-markdown-highlights",
+    name: "Send all ==highlights== in this note to inbox",
+    aliases: ["highlights", "sweep"],
+    hint: "needs an open note",
+    hidden: true,
+  },
+  {
+    // The inbox's own menu has "Retry failed highlights", which is where a
+    // reader looking at a failed row already is.
+    id: "retry-failed",
+    name: "Retry failed highlights",
+    aliases: ["retry"],
+    hint: "always",
+    hidden: true,
+  },
 ];
+
+/** The commands Obsidian registers: everything but the chat-only ones. */
+export function paletteCommands<T extends Pick<CommandSpec, "hidden">>(table: T[]): T[] {
+  return table.filter((c) => !c.hidden);
+}

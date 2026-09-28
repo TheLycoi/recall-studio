@@ -95,6 +95,10 @@ export interface WikiLmSettings {
   wikiSchema: "karpathy" | "class";
   suggestInstructions: string;
 
+  // Lint wiki
+  /** After the instant scan, the model reads the pages with findings and proposes rows; off, Lint wiki makes no model call. */
+  lintModelReview: boolean;
+
   // Ask
   /** Passages the answer is written from; with the relevance filter on, the pool is three times this (at most 30) and the judge keeps up to this many. */
   askEvidenceCount: number;
@@ -148,7 +152,7 @@ const CUSTOM_MODEL = "__custom__";
 const ROLE_ORDER: ModelRole[] = ["lint", "query", "digest"];
 const ROLE_LABELS: Record<ModelRole, string> = { lint: "Lint", query: "Query", digest: "Digest" };
 const ROLE_WORK: Record<ModelRole, string> = {
-  lint: "the fix plan's aliases, tags and duplicate checks",
+  lint: "the model review in Lint wiki and the fix plan's aliases, tags and duplicate checks",
   query: "Ask answers and the search terms behind them",
   digest: "digesting highlights and AI-highlighting into the wiki",
 };
@@ -211,6 +215,8 @@ export const DEFAULT_SETTINGS: WikiLmSettings = {
   wikiEntitiesFolder: "wiki/entities",
   wikiSchema: "class",
   suggestInstructions: "",
+
+  lintModelReview: true,
 
   askEvidenceCount: 6,
   askMaxTurns: 10,
@@ -525,7 +531,7 @@ export class WikiLmSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Standing instructions for the AI highlighter")
-      .setDesc("Used by 'AI-highlight this note', e.g. 'Only pick definitions and numbers.'")
+      .setDesc("Used by 'AI highlight…' on a note, e.g. 'Only pick definitions and numbers.'")
       .addTextArea((t) => {
         t.inputEl.rows = 3;
         t.inputEl.cols = 50;
@@ -841,6 +847,20 @@ export class WikiLmSettingTab extends PluginSettingTab {
           save();
         });
       });
+
+    new Setting(containerEl).setName("Lint wiki").setHeading();
+
+    new Setting(containerEl)
+      .setName("Model reviews pages on lint")
+      .setDesc(
+        "After the instant scan, the model reads the pages with findings, judges unsupported sentences, nominates links and checks each page's kind. One request per five pages; nothing is written until you tick a row.",
+      )
+      .addToggle((t) =>
+        t.setValue(s.lintModelReview).onChange((v) => {
+          s.lintModelReview = v;
+          save();
+        }),
+      );
 
     new Setting(containerEl)
       .setName("Ask")

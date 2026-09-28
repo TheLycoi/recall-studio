@@ -278,3 +278,12 @@ test("plainText reduces links to their words: PDF++ and wiki links to their disp
   assert.equal(u.plainText("A figure ![[deck.pdf#page=7&rect=1,2,3,4]] here and [a site](https://x.y) too."), "A figure here and a site too.");
   assert.equal(u.plainText("plain sentence, no links"), "plain sentence, no links");
 });
+
+test("transcriptRecord normalizes, cuts to the limit, and records where the guide came from", () => {
+  const rec = u.transcriptRecord({ text: "Line one\r\nLine two", origin: "file", sourceFile: "wiki/sources/wispr/L1.md" }, 1000, "2026-09-28T00:00:00.000Z");
+  assert.deepEqual(rec, { text: "Line one\nLine two", origin: "file", sourceFile: "wiki/sources/wispr/L1.md", addedAt: "2026-09-28T00:00:00.000Z", truncated: false });
+  const long = u.transcriptRecord({ text: "word ".repeat(100), origin: "pasted", sourceFile: null }, 50, "t");
+  assert.equal(long.truncated, true);
+  assert.ok(long.text.length <= 50);
+  assert.equal(long.text, u.truncateTranscript(u.normalizeTranscript("word ".repeat(100)), 50).text, "the same cut add-transcript made");
+});

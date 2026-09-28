@@ -15,11 +15,13 @@ import {
   scopeFor,
 } from "./retrieval";
 import type { Graph } from "./graph";
-import { lintVault, renderVaultLint, WIKI_SCHEMA, type LintPage } from "./vaultLint";
+import { lintVault, renderVaultLint, WIKI_SCHEMA, type LintPage, type VaultLintReport } from "./vaultLint";
+import { renderReviewLine, renderReviewTurn } from "./lintReview";
 import { planLinkFixes, applyFixesToNote, type LinkFix } from "./vaultFix";
 import { FixPlanModal, LintReportModal, pickNote } from "./modals";
-import { repointFix, type Fix, type FixPageInfo } from "./fixPlan";
-import { applyPlan, buildPlan, fixPagesFor, pageInfos, proposeAliases, providerReady, verifyDuplicates, type FixContext } from "./fixer";
+import { mergeReview, repointFix, type Fix, type FixPageInfo } from "./fixPlan";
+import type { CancelToken } from "./cancel";
+import { applyPlan, buildPlan, fixPagesFor, pageInfos, proposeAliases, providerReady, runModelReview, verifyDuplicates, type FixContext } from "./fixer";
 import {
   canSendAnswer,
   checkAnswer,
@@ -324,13 +326,20 @@ export class ChatPanel {
   /**
    * `/wiki`: what is wrong with the notes, as structure rather than content.
    *
-   * No model call — every check is counting links and indexed passages — so
-   * this is instant and safe to run whenever the chat feels wrong. It is the
-   * answer to "the chatbot can't find anything": a note with nothing quotable
-   * in it, or one the graph cannot reach, is invisible to Ask no matter how
-   * good it looks in the editor, and this says which notes those are.
+   * The scan makes no model call — every check is counting links and indexed
+   * passages — so its report is instant and is shown before anything else
+   * runs. It is the answer to "the chatbot can't find anything": a note with
+   * nothing quotable in it, or one the graph cannot reach, is invisible to Ask
+   * no matter how good it looks in the editor, and this says which notes
+   * those are. Then, when the lint role has a provider and the setting is on,
+   * the model review (`runModelReview`) reads the pages with findings and adds
+   * a second turn; its rows join the plan before the modal opens.
+   *
+   * `review: false` skips the model review for this run. The re-check after
+   * Apply passes it: the reader has just acted on a review, and running a
+   * second one to see the writes land would pay for every call again.
    */
-  async runVaultLint(): Promise<void> {
+  async runVaultLint(opts: { review?: boolean } = {}): Promise<void> {
     if (this.busy) return;
     this.busy = true;
     this.status = "checking the wiki…";
@@ -359,9 +368,18 @@ export class ChatPanel {
       }
 
       const report = lintVault(pages, { schema: WIKI_SCHEMA, sources });
-      const rendered = renderVaultLint(report);
+      const settings = this.plugin.settings;
+      const ready = providerReady(settings, "lint");
+      const asked = opts.review !== false;
+      const reviewing = ready && settings.lintModelReview && asked;
+      // A review that does not run says why, so its absence is not a silence.
+      const off = !asked ? "not repeated after Apply" : settings.lintModelReview ? "no provider configured" : "off in settings";
+      const rendered = reviewing
+        ? renderVaultLint(report)
+        : `${renderVaultLint(report)}\n\n${renderReviewLine({ read: 0, withFindings: 0, skipped: 0, findings: 0, dropped: {}, failed: [], cleared: 0, off })}`;
       this.turns.push({ role: "assistant", text: rendered });
       this.trim();
+      this.rerender();
 
       // The report is a turn in the log either way; the modal is what makes it
       // actionable. Planning the fixes here rather than inside the modal keeps
@@ -372,27 +390,65 @@ export class ChatPanel {
 
       const ctx: FixContext = { report, pages, sources, prefix };
       const infos = pageInfos(this.plugin, pages);
-      const plan = await buildPlan(this.plugin, ctx);
+      let plan = await buildPlan(this.plugin, ctx);
 
-      // The model's rows are not in `plan` — they cost a request and are only
-      // asked for from inside the modal — so a vault whose only findings are
-      // missing aliases would otherwise have no way to reach the button that
-      // proposes them. That is what `aliasWork` keeps open.
+      // The model review, after the scan's turn is on screen. Its findings are
+      // a turn of their own; the modal gets both turns and one plan: the
+      // mechanical rows less the pairs the duplicate check cleared, plus the
+      // review's rows.
+      let shown = rendered;
+      let planReport: VaultLintReport = report;
+      if (reviewing) {
+        // The plugin's one cancel token, which the status bar and the stop
+        // command already reach; taken only when no other run holds it.
+        const cancel = this.plugin.cancel;
+        const owner = cancel.active ? undefined : cancel.begin("model review of the wiki");
+        try {
+          const review = await runModelReview(
+            this.plugin,
+            ctx,
+            infos,
+            (s) => {
+              this.status = s;
+              cancel.progress(s, owner);
+              this.rerender();
+            },
+            owner !== undefined ? cancel : undefined,
+            plan,
+          );
+          const turn = renderReviewTurn(report, review.issues, review.line);
+          this.turns.push({ role: "assistant", text: turn });
+          this.trim();
+          shown = `${rendered}\n\n${turn}`;
+          ({ plan, report: planReport } = mergeReview(plan, report, review));
+        } catch (e) {
+          this.pushSystem(`Model review failed: ${describeError(e)}`);
+        } finally {
+          cancel.end(owner);
+          this.status = "checking the wiki…";
+        }
+      }
+      const planCtx: FixContext = { ...ctx, report: planReport };
+
+      // The aliases-and-tags rows are not in `plan` — they cost a request and
+      // are only asked for from inside the modal — so a vault whose only
+      // findings are missing aliases would otherwise have no way to reach the
+      // button that proposes them. That is what `aliasWork` keeps open.
       const aliasWork = report.issues.some(
         (i) => i.id === "no-aliases" || (i.id === "schema-violation" && i.detail?.startsWith("tag “")),
       );
       // Look-alike pairs are not rows yet; the plan is still worth opening
       // for the button that lets the model decide them.
-      const candidateWork = providerReady(this.plugin.settings) && (ctx.report.candidates?.length ?? 0) > 0;
+      const candidateWork = ready && (planReport.candidates?.length ?? 0) > 0;
       const canSuggest = plan.length > 0 || aliasWork || candidateWork;
 
       new LintReportModal(
         this.plugin.app,
-        rendered,
+        shown,
         { deadLinksFixable: links.fixable.length, deadLinksUnresolved: links.unresolved.length, schemaViolations, schemaSuggestions: 0 },
         { onFixDeadLinks: () => void this.applyLinkFixes(links.fixable) },
         links.fixable,
-        canSuggest ? () => this.openFixPlan(plan, infos, ctx) : undefined,
+        canSuggest ? () => this.openFixPlan(plan, infos, planCtx) : undefined,
       ).open();
     } catch (e) {
       this.pushSystem(`Wiki check failed: ${describeError(e)}`);
@@ -416,18 +472,31 @@ export class ChatPanel {
    * and `applyPlan` is itself the reader's write, so the re-run is started once
    * the writes have resolved and the panel is idle again. `void` rather than
    * `await` so the modal's Apply does not sit open across a second full lint.
+   *
+   * The two model buttons take the plugin's cancel token the way the lint's
+   * review does, only when nothing else holds it, so the status bar's stop
+   * reaches them between batches.
    */
   private openFixPlan(plan: Fix[], infos: Map<string, FixPageInfo>, ctx: FixContext): void {
     const pages = fixPagesFor(this.plugin, ctx.pages);
+    const withToken = async <T>(label: string, run: (cancel: CancelToken | undefined) => Promise<T>): Promise<T> => {
+      const cancel = this.plugin.cancel;
+      const owner = cancel.active ? undefined : cancel.begin(label);
+      try {
+        return await run(owner !== undefined ? cancel : undefined);
+      } finally {
+        cancel.end(owner);
+      }
+    };
     new FixPlanModal(this.plugin.app, plan, {
       pickTarget: (row) => pickNote(this.plugin.app, pages).then((p) => (p ? repointFix(row, p, ctx.prefix) : null)),
-      proposeAliases: providerReady(this.plugin.settings)
-        ? () => proposeAliases(this.plugin, infos, ctx.report)
+      proposeAliases: providerReady(this.plugin.settings, "lint")
+        ? () => withToken("proposing aliases and tags", (c) => proposeAliases(this.plugin, infos, ctx.report, c))
         : null,
       verifyDuplicates:
-        providerReady(this.plugin.settings) &&
+        providerReady(this.plugin.settings, "lint") &&
         (ctx.report.issues.some((i) => i.id === "duplicate-pages") || (ctx.report.candidates?.length ?? 0) > 0)
-          ? () => verifyDuplicates(this.plugin, infos, ctx.report, ctx.prefix)
+          ? () => withToken("checking duplicates", (c) => verifyDuplicates(this.plugin, infos, ctx.report, ctx.prefix, c))
           : null,
       apply: async (fixes) => {
         try {
@@ -442,7 +511,8 @@ export class ChatPanel {
         }
         // Outside the write's own promise chain: the check the reader now wants
         // is about the vault after the writes, and it re-opens its own modal.
-        void this.runVaultLint();
+        // The scan only: the review has just been acted on.
+        void this.runVaultLint({ review: false });
       },
     }).open();
   }
@@ -964,7 +1034,7 @@ export class ChatPanel {
   }
 
   /** Run a studio action with a system line that says what happened. */
-  private async narrate(text: string, run: () => Promise<void>): Promise<void> {
+  private async narrate(text: string, run: () => Promise<unknown>): Promise<void> {
     const turn: ChatTurn = { role: "system", text };
     this.turns.push(turn);
     this.trim();

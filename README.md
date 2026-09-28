@@ -38,48 +38,52 @@ length (setting, default 12 characters) are ignored, already-highlighted
 spans are captured without being re-wrapped, and the same passage is never
 captured twice in a row.
 
-Every command WikiLM registers. Each one runs from the command palette under
-its name, and from the chat box by any of its aliases, with or without a
-leading slash; the whole table is `COMMAND_TABLE` in `src/commandTable.ts`,
-and `/help` in the chat prints it.
+Twelve commands are in the palette, in the order the workflow runs. Each one
+also runs from the chat box by any of its aliases, with or without a leading
+slash; the whole table is `COMMAND_TABLE` in `src/commandTable.ts`, and `help`
+in the chat lists the phrases.
 
-| Palette name | Chat aliases | When available |
-| --- | --- | --- |
-| **Send selection to inbox** | `capture`, `send` | needs an open note |
-| **Send PDF selection to inbox** | `pdf` | needs an open PDF |
-| **Send PDF selection to inbox with instructions…** | `pdf-instruct` | needs an open PDF |
-| **Send selection to inbox with instructions…** | `capture-instruct` | needs an open note |
-| **Send all ==highlights== in this note to inbox** | `highlights`, `sweep` | needs an open note |
-| **AI-highlight this note and write cards** | `ai` | needs an open note |
-| **AI-highlight this note with instructions…** | `ai-instruct` | needs an open note |
-| **Ingest source: read this markdown into the wiki** | `ingest`, `read-source` | needs an open note |
-| **Ingest folder: read every note in a folder into the wiki** | `ingest-folder`, `read-folder` | always |
-| **Cancel the running AI highlight or ingest** | `cancel`, `stop-run` | while a run is in progress |
-| **Add transcript for document highlighting** | `transcript` | needs an open note |
-| **Digest PDF highlights into topic notes…** | `digest` | needs an open PDF, or a note with PDF++ links |
-| **AI-highlight this PDF into the wiki…** | `suggest` | needs an open PDF |
-| **Open chat: ask the notes** | `chat`, `ask` | always |
-| **Lint wiki: find gaps, dead links and ungrounded quotes** | `lint`, `wiki` | always |
-| **Open inbox** | `inbox` | always |
-| **Export all reviewed cards to Anki** | `export` | always |
-| **Retry failed highlights** | `retry` | always |
-| **Open the schema note** | `schema` | always |
-| **Review schema suggestions** | `suggestions` | always |
+1. **AI highlight…** (`ai`, `ai-instruct`, `suggest`, `transcript`), on an open note or PDF: one form for what to look for (remembered per file), the guide (a study guide or lecture transcript; pick a note, paste one, or clear it), and on a note whether to make cards or wiki notes; a PDF always makes wiki notes behind a preview.
+2. **Digest: PDF highlights into concept and entity notes…** (`digest`), on an open PDF or a note with PDF++ links: your PDF++ highlights grouped into concept and entity pages, previewed before anything is written.
+3. **Digest folder: every highlighted PDF under a folder…** (`digest-folder`), always: pick a folder, answer the digest form once, and every PDF under it with highlights is digested in turn, each behind its own preview.
+4. **Lint wiki: find gaps, dead links and ungrounded quotes** (`lint`, `wiki`), always.
+5. **Send selection to inbox** (`capture`, `send`, `pdf`), on an open note (editor or reading view) or PDF: the selection, or in the editor the paragraph under the cursor, queued for card writing; a PDF selection keeps its page number and the page text as context.
+6. **Send selection to inbox with instructions…** (`capture-instruct`, `pdf-instruct`), the same, with a one-line instruction for the writer first ("one cloze on the number", "cards in Dutch").
+7. **Open chat: ask the notes** (`chat`, `ask`), always.
+8. **Open inbox** (`inbox`), always.
+9. **Export all reviewed cards to Anki** (`export`), always.
+10. **Cancel the running AI highlight, digest or ingest** (`cancel`, `stop-run`), while a run is in progress.
+11. **Open the schema note** (`schema`), always.
+12. **Review schema suggestions** (`suggestions`), always.
 
-What the capture commands do: **Send selection to inbox** takes the selection
-(or the paragraph under the cursor; in reading view, the selected text) and
-queues card writing, and is in the editor right-click menu too. The PDF
-variants take the text selected in the PDF viewer with its page number and
-the page's text as context. The two *…with instructions…* forms add a
-one-line instruction for the writer ("one cloze on the number", "cards in
-Dutch"). **Send all ==highlights== in this note to inbox** sweeps a note you
-highlighted while reading and queues every span not already in the inbox.
-**AI-highlight this note and write cards** has the model pick the spans worth
+**Chat-only commands.** These left the palette but still run from the chat box
+by alias:
+
+- **Ingest source: read this markdown into the wiki** (`ingest`, `read-source`), on an open note. **AI highlight…** with *Wiki notes* writes the same wiki notes from the palette, without the flashcards choice.
+- **Ingest folder: read every note in a folder into the wiki** (`ingest-folder`, `read-folder`).
+- **Send all ==highlights== in this note to inbox** (`highlights`, `sweep`): sweeps a note you highlighted while reading and queues every span not already in the inbox.
+- **Retry failed highlights** (`retry`); the inbox's more menu has the same item.
+
+**Hotkeys bound to old commands are lost.** The palette went from twenty
+commands to twelve. A hotkey bound to one of these ids no longer fires; bind
+the command that replaced it instead:
+
+- `capture-pdf-selection` → **Send selection to inbox**
+- `capture-pdf-selection-with-instruction` → **Send selection to inbox with instructions…**
+- `ai-highlight-with-instruction`, `ai-highlight-pdf`, `add-transcript` → **AI highlight…**
+- `ingest-source`, `ingest-folder`, `capture-markdown-highlights`, `retry-failed` → chat only, above
+
+A hotkey still bound to `ai-highlight` keeps firing, since that command id
+was not one of the ones replaced; it now opens the AI highlight form instead
+of running immediately, and Cmd/Ctrl+Enter in the form runs it.
+
+**Send selection to inbox** is in the editor right-click menu too. **AI
+highlight…** on a note with *Cards* has the model pick the spans worth
 remembering, each verified verbatim against the note before it is queued; use
-it for dense material. **AI-highlight this PDF into the wiki…** does the same
-for a PDF, mapping each verified span to a PDF++ selection and assigning it to
-a same-class wiki note — under one of that note's own `##` headings when the
-span is a subtopic of it — or to a proposed new one, previewed span by span,
+it for dense material. On a PDF it does the same for the PDF's text layer,
+mapping each verified span to a PDF++ selection and assigning it to a
+same-class wiki note (under one of that note's own `##` headings when the
+span is a subtopic of it) or to a proposed new one, previewed span by span,
 then written as callouts.
 
 **Capture does not edit your notes.** WikiLM sends the passage to the inbox and
@@ -151,24 +155,24 @@ in its extra field, plus a `source::<note-slug>` tag.
 
 ### Transcript-guided highlighting
 
-Attach a lecture transcript to a note and the two **AI-highlight** commands
-use it as evidence of what the lecturer emphasised, so the model prefers
+Attach a lecture transcript or study guide to a note or PDF and **AI
+highlight…** uses it as evidence of what the lecturer emphasised, so the model prefers
 spans the lecturer dwells on, repeats, calls important, or says will be
 tested, instead of spreading picks evenly across the note. Spans are still
 copied verbatim from the note; the transcript itself is never quoted.
 
-Run **Add transcript for document highlighting** on an active `.md` note.
-The modal shows the current transcript (origin, character count, added
-date, whether it was cut to the size limit) when one is attached, and lets
-you:
+The **Guide** row of the **AI highlight…** form shows the guide attached to
+the open file (its origin and character count, and whether it was cut to the
+size limit), or none, and lets you:
 
-- Paste a transcript into the textarea.
-- **Choose a file from the vault…**, which opens a fuzzy file picker
-  restricted to `md`, `txt`, `vtt`, and `srt` files and reads the chosen
-  file's contents into the textarea.
-- **Save** the transcript (an empty textarea shows a notice instead), **Clear**
-  it (only shown when a transcript already exists), or **Cancel**. `Cmd`/`Ctrl+Enter`
-  in the textarea also saves.
+- **Pick a note…**, a fuzzy file picker restricted to `md`, `txt`, `vtt`, and
+  `srt` files.
+- **Paste…**, the transcript editor: paste into the textarea, or choose a file
+  from there, then **Save**.
+- **Clear** the guide.
+
+A guide picked, pasted or cleared in the form is stored when you press **Run**;
+**Cancel** leaves the stored guide as it was.
 
 Saving cleans the text before it's stored: WebVTT headers and `NOTE`
 comment blocks are dropped, SRT cue numbers and `-->` timestamp lines are
@@ -181,7 +185,7 @@ much of the transcript is sent to the highlighter; longer transcripts are
 cut at a sentence boundary rather than mid-sentence.
 
 A lecture note exported by a notetaker such as Wispr Flow works as a
-transcript as it is: choose it with **Choose a file from the vault…**. The
+transcript as it is: choose it with **Pick a note…**. The
 picker lists the **Transcript folder** (default `wiki/sources/wispr`) first,
 newest note on top, then the rest of the vault. The export's YAML
 frontmatter, its `> [!summary]` callout wrapper and the trailing pointer to
@@ -189,19 +193,14 @@ its companion transcript file are stripped; the summary text, headings and
 bullets go to the highlighter. The note is a lens on the PDF, never a source:
 every highlight still points at a slide.
 
-Once a transcript is attached, both **AI-highlight this note and write
-cards** and **AI-highlight this note with instructions…** pick it up
-automatically, with no separate step, and the notice they show changes to
-mention the transcript.
+Once a guide is attached, every **AI highlight…** run on that file picks it
+up (cards from a note, wiki notes from a note, or a PDF), and so does the
+chat-only `ingest`. The notice a card run shows changes to mention it.
 
 Limitations:
 
-- **Add transcript for document highlighting** now also runs on an open
-  PDF, and the transcript it saves is picked up by **AI-highlight this PDF
-  into the wiki…**, below.
-- Transcripts are keyed by the note's file path. Renaming or moving a note
-  detaches its transcript; re-add it with **Add transcript for document
-  highlighting** afterward.
+- Guides are keyed by the file's path. Renaming or moving a note or PDF
+  detaches its guide; attach it again from **AI highlight…** afterward.
 
 ### Digesting PDF highlights
 
@@ -212,11 +211,12 @@ group those highlights by topic, write a short summary for each topic from
 the whole paper, and lay out every highlight underneath it as the same
 PDF++ callout, so clicking it still opens the PDF at that highlight.
 
-Three commands, active on an open PDF:
+The commands:
 
 | Command | What it does |
 | --- | --- |
-| **Digest PDF highlights into topic notes…** | Asks the configured model to group the PDF's highlights into topic notes and write each one's summary, then shows a preview before writing anything. |
+| **Digest: PDF highlights into concept and entity notes…** | Asks the configured model to group the PDF's highlights into topic notes and write each one's summary, then shows a preview before writing anything. |
+| **Digest folder: every highlighted PDF under a folder…** | Picks a folder, reads every PDF under it, asks Notes / Flashcards / Both and the instruction once, then digests each PDF with highlights in path order, each behind its own preview. Closing a preview skips that PDF; cancelling the run stops before the next one. Ends on a notice such as "digested 3 of 5 PDFs, 2 skipped". |
 | **Open chat: ask the notes** | Opens the WikiLM sidebar in Chat mode (`src/main.ts`). |
 
 **Pages are concept or entity pages.** A new page carries `type: concept` or
@@ -360,9 +360,9 @@ and "merge into an existing note". Nothing is written until you click
 
 ### Suggesting highlights in a PDF
 
-Digesting (above) starts from highlights you already made by hand. **AI-highlight this PDF into the wiki…** goes the other way: it reads a lecture PDF's own text layer and proposes the highlights, each one verified against the page before it's ever offered, assigned to an existing wiki note (and, when it belongs to one of that note's own subtopics, to that `##` heading) or a new one, and written straight into secondbrain-style notes — not a manifest, not a topic-note folder, but `wiki/concepts` and `wiki/entities`, the same notes you write and link by hand.
+Digesting (above) starts from highlights you already made by hand. **AI highlight…** on a PDF goes the other way: it reads a lecture PDF's own text layer and proposes the highlights, each one verified against the page before it's ever offered, assigned to an existing wiki note (and, when it belongs to one of that note's own subtopics, to that `##` heading) or a new one, and written straight into secondbrain-style notes — not a manifest, not a topic-note folder, but `wiki/concepts` and `wiki/entities`, the same notes you write and link by hand.
 
-The command is active on an open PDF and runs in nine steps: it reads the PDF's text page by page and the highlights the PDF and its backlinking notes already hold; asks for (or reuses) the class code; picks up the transcript attached to the PDF's own path, if any; asks Notes / Flashcards / Both, as the digest does; collects the wiki notes this PDF may write into; sends the pages to the model in batches, each batch told what earlier batches and the manifest already hold; verifies every returned span and turns the survivors into manifest-shaped highlight rows; groups those rows into notes and shows a per-span preview; and, once you confirm (and possibly rename a note or uncheck a span), writes the callouts and queues flashcards if asked.
+The command is active on an open PDF and runs in nine steps: it reads the PDF's text page by page and the highlights the PDF and its backlinking notes already hold; asks for (or reuses) the class code; picks up the guide attached to the PDF's own path, if any; takes the instruction from the form (from the chat's `highlight`, it asks Notes / Flashcards / Both, as the digest does); collects the wiki notes this PDF may write into; sends the pages to the model in batches, each batch told what earlier batches and the manifest already hold; verifies every returned span and turns the survivors into manifest-shaped highlight rows; groups those rows into notes and shows a per-span preview; and, once you confirm (and possibly rename a note or uncheck a span), writes the callouts and queues flashcards if asked (chat `highlight` only).
 
 **Granularity and limits**, under **AI highlights for PDFs** in settings:
 

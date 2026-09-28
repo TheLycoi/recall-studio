@@ -1,7 +1,7 @@
 import type { App } from "obsidian";
 import { Notice, normalizePath } from "obsidian";
 import type { Highlight, InboxData, Card, CardRevision, TranscriptRecord } from "./model";
-import { emptyInbox, parseInboxJson, pushRevision } from "./inboxData";
+import { emptyInbox, parseInboxJson, pushRevision, rememberInstruction } from "./inboxData";
 
 /** `YYYYMMDD-HHMMSS` in local time, for a moved-aside file's suffix. */
 function timestamp(d: Date): string {
@@ -212,6 +212,17 @@ export class InboxStore {
     delete this.data.transcripts[sourcePath];
     this.touch();
     return true;
+  }
+
+  /** The last instruction AI highlight was run with on this file, or "" for none. */
+  getHighlightInstruction(sourcePath: string): string {
+    return this.data.highlightInstructions?.[sourcePath] ?? "";
+  }
+
+  /** Remember (or, when empty, forget) the instruction for this file; capped by rememberInstruction. */
+  setHighlightInstruction(sourcePath: string, instruction: string): void {
+    rememberInstruction(this.data, sourcePath, instruction);
+    this.touch();
   }
 
   ingestedHash(sourcePath: string): string | undefined {

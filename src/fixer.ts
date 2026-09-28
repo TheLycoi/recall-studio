@@ -17,7 +17,7 @@
 import { TFile } from "obsidian";
 import type WikiLmPlugin from "./main";
 import type { WikiLmSettings } from "./settings";
-import type { LintPage, VaultLintReport, VaultIssue } from "./vaultLint";
+import { quoteUnits, type LintPage, type VaultLintReport, type VaultIssue } from "./vaultLint";
 import { planLinkFixes, type FixPage } from "./vaultFix";
 import {
   groupByNote,
@@ -26,6 +26,8 @@ import {
   planAttributions,
   planCrossLinks,
   planHubLinks,
+  planKinds,
+  planReviewLinks,
   planRectCallouts,
   planRelatedFrom,
   planRelinks,
@@ -38,12 +40,28 @@ import {
   type RectText,
   type DuplicateVerdicts,
 } from "./fixPlan";
-import { buildGraph, isGraphUsable, pprFromSeeds, type Graph } from "./graph";
+import { buildGraph, isGraphUsable, linkKey, noteLinks, pprFromSeeds, type Graph } from "./graph";
 import { CONCEPT_TAGS, ENTITY_TAGS, fmList, noteAliases, parseTopicNote } from "./topicNote";
 import { pdfsLinkedFrom } from "./pdf";
 import { collectPdfHighlights } from "./pdfHighlights";
 import { ALIASES_EXCERPT_CHARS, type AliasesPageIn, type DuplicatePageIn, type DuplicatePairIn } from "./prompt";
-import { pairKey } from "./duplicates";
+import { pairKey, type DuplicateFinding } from "./duplicates";
+import { resolveRole, type ModelRole } from "./modelRoles";
+import { resolveApiKey, resolveGeminiKey, type KeySource } from "./keys";
+import { describeError } from "./llm";
+import type { CancelToken } from "./cancel";
+import {
+  buildReviewInputs,
+  directoryOf,
+  renderReviewLine,
+  REVIEW_BUDGET_CHARS,
+  selectPages,
+  verifyReview,
+  verifyTitleScan,
+  type PageKind,
+  type ReviewKind,
+  type ReviewLink,
+} from "./lintReview";
 
 /** What `runVaultLint` already holds when the report is done, handed here whole. */
 export interface FixContext {
@@ -274,7 +292,7 @@ export async function buildPlan(plugin: WikiLmPlugin, ctx: FixContext): Promise<
     ...planRepoints(links.unresolved),
     ...planUnwraps(links.unresolved, contents, ctx.prefix),
     ...planHubLinks(ctx.report.issues, infos, hubs(infos), ctx.prefix),
-    ...planRelatedFrom(ctx.report.issues, infos, neighbourOf(infos, graph), ctx.prefix),
+    ...planRelatedFrom(ctx.report.issues, infos, neighbourOf(infos, graph), ctx.prefix, hubs(infos)),
     ...planRectCallouts(ctx.report.issues, lookup),
     ...planAttributions(ctx.report.issues, ctx.sources),
   ]);
@@ -295,12 +313,49 @@ function excerptOf(content: string): string {
   return (para ?? "").slice(0, ALIASES_EXCERPT_CHARS);
 }
 
-/** Whether the provider is configured well enough to be worth asking. */
-export function providerReady(settings: WikiLmSettings): boolean {
+/** How a key is found; the real ones read settings, then the environment, then the keychain. */
+type KeyResolver = (settingsKey: string) => { key: string; source: KeySource };
+
+/**
+ * Whether the provider a role runs on is configured well enough to be worth
+ * asking.
+ *
+ * The role, because lint may run on its own provider (`resolveRole`); the key
+ * as the backend itself finds it, because a key kept in the environment or the
+ * keychain is as good as one typed into the settings, and a key typed in for
+ * the other API key provider readies nothing. `keys` is there for the tests.
+ */
+export function providerReady(
+  settings: WikiLmSettings,
+  role: ModelRole = "lint",
+  keys: { anthropic: KeyResolver; gemini: KeyResolver } = { anthropic: resolveApiKey, gemini: resolveGeminiKey },
+): boolean {
+  const { provider } = resolveRole(settings, role);
+  if (provider === "anthropic") return keys.anthropic(settings.apiKey ?? "").key !== "";
+  if (provider === "gemini") return keys.gemini(settings.geminiApiKey ?? "").key !== "";
   // The CLI providers find their own binary; a missing one surfaces as an error
   // Notice when the button is pressed, which is a better answer than a button
   // greyed out for a reason the reader cannot see.
-  return settings.provider === "anthropic" ? settings.apiKey.trim() !== "" : true;
+  return true;
+}
+
+/**
+ * What the model review may treat each page as, for both schemas.
+ *
+ * A page that declares `type: concept` or `type: entity` is that. A page with
+ * no `type:` but a class is a class-schema page, and `pageInfos` has already
+ * said which kind it reads as. Everything else (a source page, a class's
+ * `topic-index` hub, the log) is "other": nothing to review, nothing to link.
+ */
+export function reviewKindOf(infos: Map<string, FixPageInfo>): (path: string) => PageKind {
+  return (path: string): PageKind => {
+    const info = infos.get(path);
+    if (!info) return "other";
+    const type = rawTypeOf(info.content);
+    if (type === "concept" || type === "entity") return type;
+    if (type === "" && info.classCodes.length > 0) return info.kind;
+    return "other";
+  };
 }
 
 /**
@@ -315,11 +370,15 @@ export function providerReady(settings: WikiLmSettings): boolean {
  * Results are matched back **by title**, not by position: a model that returns
  * nineteen entries for twenty pages would otherwise write every page after the
  * gap with the wrong name.
+ *
+ * `cancel`, when the caller holds the plugin's token, is read between
+ * batches: a stop keeps the rows already proposed and asks for no more.
  */
 export async function proposeAliases(
   plugin: WikiLmPlugin,
   infos: Map<string, FixPageInfo>,
   report: VaultLintReport,
+  cancel?: CancelToken,
 ): Promise<Fix[]> {
   const wantsAliases = new Set<string>();
   const wantsTag = new Set<string>();
@@ -340,6 +399,7 @@ export async function proposeAliases(
 
   const proposals: AliasProposal[] = [];
   for (let i = 0; i < paths.length; i += ALIASES_BATCH) {
+    if (cancel?.cancelled) break;
     const batch = paths.slice(i, i + ALIASES_BATCH);
     // The title the request carries is the title the answer is matched on, so
     // two pages reaching the model under one name would be indistinguishable
@@ -388,7 +448,9 @@ const DUPLICATES_BATCH = 20;
  * Ask the model whether each duplicate pair is one subject or two.
  *
  * The pairs are the lint's `duplicate-pages` findings (a shared name or a
- * shared PDF span) and its held-back candidates (names spelled alike). Each
+ * shared PDF span) and its held-back candidates: names spelled alike, and,
+ * when the model review runs it first, the pairs its title scan read as one
+ * subject under two names (pass `title`). Each
  * side goes as its title, kind, aliases and the opening of its definition, the
  * same excerpt the aliases request uses. Verdicts are matched back by the
  * pair's number in its batch, never by position.
@@ -402,6 +464,7 @@ export async function verifyDuplicates(
   infos: Map<string, FixPageInfo>,
   report: VaultLintReport,
   prefix: string,
+  cancel?: CancelToken,
 ): Promise<DuplicateVerdicts> {
   type Pair = { a: string; b: string; shared: string; reported: boolean };
   const pairs: Pair[] = [];
@@ -420,7 +483,13 @@ export async function verifyDuplicates(
   const confirmedNew: VaultIssue[] = [];
   let checked = 0;
   let confirmed = 0;
+  let stopped: DuplicateVerdicts["stopped"];
+  const of = Math.ceil(usable.length / DUPLICATES_BATCH);
   for (let i = 0; i < usable.length; i += DUPLICATES_BATCH) {
+    if (cancel?.cancelled) {
+      stopped = { done: i / DUPLICATES_BATCH, of };
+      break;
+    }
     const batch = usable.slice(i, i + DUPLICATES_BATCH);
     const asked: DuplicatePairIn[] = batch.map((p, k) => ({
       n: k + 1,
@@ -445,7 +514,177 @@ export async function verifyDuplicates(
       }
     }
   }
-  return { rows: orderFixes(planCrossLinks(confirmedNew, infos, prefix)), cleared, checked, confirmed };
+  return { rows: orderFixes(planCrossLinks(confirmedNew, infos, prefix)), cleared, checked, confirmed, issues: confirmedNew, ...(stopped ? { stopped } : {}) };
+}
+
+/** How many directory entries go in one title-scan request. */
+const TITLE_SCAN_BATCH = 300;
+/** How many pages go in one page-review request. */
+const REVIEW_BATCH = 5;
+
+/** What the model review adds to a Lint wiki run. */
+export interface ModelReviewResult {
+  /** Findings the review added: confirmed look-alikes, unsupported sentences, missing links, wrong kinds. */
+  issues: VaultIssue[];
+  /** The report's candidates plus the title scan's, less those the duplicate check confirmed or cleared. */
+  candidates: DuplicateFinding[];
+  /** Plan rows from the review, in `orderFixes` order. */
+  rows: Fix[];
+  /** `pairKey`s the duplicate check cleared, for `applyDuplicateVerdicts` on the mechanical plan. */
+  cleared: string[];
+  /** The review in one report line (`renderReviewLine`). */
+  line: string;
+  /** One entry per phase that failed or was stopped, in the line's words. */
+  failed: string[];
+}
+
+function mergeCounts(into: Record<string, number>, from: Record<string, number>): void {
+  for (const [k, n] of Object.entries(from)) into[k] = (into[k] ?? 0) + n;
+}
+
+/**
+ * The model review of Lint wiki: the pure report read by the model, and
+ * nothing it says believed until `src/lintReview.ts` has checked it.
+ *
+ * Three phases, each in its own try so one failure is one line and the others
+ * still run; a cancel is read between batches, never mid-call, and a stopped
+ * phase is reported the way a failed one is. 2a scans every page's title for
+ * pairs a spelling comparison misses, and adds the verified ones to the
+ * candidates. 2b runs the duplicate check the fix plan's button runs, over the
+ * findings and every candidate; a pair it clears leaves the candidates and,
+ * when the scan had reported it, the findings 2c ranks pages by, so a page is
+ * not read for a finding that no longer stands. 2c reads the pages with
+ * findings in full, five a call, worst first until the budget runs out; each
+ * call is its own try, so one failed call costs its five pages and no more.
+ * Follows the design of gd4ai/obsidian-llm-wiki's lint phases, reimplemented.
+ * Nothing is written here: every proposal is a row the reader ticks.
+ *
+ * `plan` is the mechanical plan the review's rows will join, read only so a
+ * turned-round link row can see the page already has a hub or neighbour row
+ * (`planReviewLinks`).
+ */
+export async function runModelReview(
+  plugin: WikiLmPlugin,
+  ctx: FixContext,
+  infos: Map<string, FixPageInfo>,
+  status: (s: string) => void,
+  cancel?: CancelToken,
+  plan: Fix[] = [],
+): Promise<ModelReviewResult> {
+  const { report, pages, prefix } = ctx;
+  const kindOf = reviewKindOf(infos);
+  // What the page review sends, capped so it cannot crowd out the pages. The
+  // title scan is not capped: a pair it cannot see is a pair it cannot find.
+  const directory = directoryOf(pages, kindOf);
+  const everyTitle = directoryOf(pages, kindOf, Infinity, Infinity);
+  const contentOf = new Map(pages.map((p) => [p.path, p.content]));
+
+  const issues: VaultIssue[] = [];
+  let candidates: DuplicateFinding[] = [...(report.candidates ?? [])];
+  const rows: Fix[] = [];
+  const cleared: string[] = [];
+  const failed: string[] = [];
+  const dropped: Record<string, number> = {};
+  const stopped = (phase: string, done: number, of: number): void => {
+    failed.push(`${phase} stopped after ${done} of ${of} batch${of === 1 ? "" : "es"}`);
+  };
+
+  // 2a: the title scan.
+  try {
+    const existing = new Set<string>();
+    for (const i of report.issues) if (i.id === "duplicate-pages" && i.target) existing.add(pairKey(i.path, i.target));
+    for (const c of candidates) existing.add(pairKey(c.a, c.b));
+    const of = Math.ceil(everyTitle.length / TITLE_SCAN_BATCH);
+    for (let b = 0; b < of; b++) {
+      if (cancel?.cancelled) {
+        stopped("title scan", b, of);
+        break;
+      }
+      status(of > 1 ? `model review: title scan ${b + 1} of ${of}` : "model review: title scan");
+      // Each call sees only its own batch, so two names that land in different
+      // batches are never compared: a pair cannot cross a batch. Titles are in
+      // path order, which keeps a folder's pages together in one batch more
+      // often than not. What comes back is resolved against every title, so a
+      // title that two pages share names neither, wherever the other one fell.
+      const batch = everyTitle.slice(b * TITLE_SCAN_BATCH, (b + 1) * TITLE_SCAN_BATCH);
+      const out = await plugin.llm.scanTitles({ pages: batch });
+      const v = verifyTitleScan(out, everyTitle, existing);
+      for (const c of v.candidates) existing.add(pairKey(c.a, c.b));
+      candidates.push(...v.candidates);
+      mergeCounts(dropped, v.dropped);
+    }
+  } catch (e) {
+    failed.push(`title scan failed: ${describeError(e)}`);
+  }
+
+  // 2b: the duplicate check, over the findings and every candidate.
+  try {
+    if (!cancel?.cancelled) status("model review: duplicates");
+    const v = await verifyDuplicates(plugin, infos, { ...report, candidates }, prefix, cancel);
+    issues.push(...v.issues);
+    rows.push(...v.rows);
+    cleared.push(...v.cleared);
+    if (v.stopped) stopped("duplicate check", v.stopped.done, v.stopped.of);
+    const decided = new Set([...v.issues.map((i) => pairKey(i.path, i.target ?? "")), ...v.cleared]);
+    candidates = candidates.filter((c) => !decided.has(pairKey(c.a, c.b)));
+  } catch (e) {
+    failed.push(`duplicate check failed: ${describeError(e)}`);
+  }
+
+  // 2c: the page review.
+  let read = 0;
+  let withFindings = 0;
+  let skipped = 0;
+  try {
+    // A reported pair the check cleared is no longer a finding, here or in the
+    // plan's report (`mergeReview`).
+    const gone = new Set(cleared);
+    const standing = report.issues.filter((i) => !(i.id === "duplicate-pages" && i.target && gone.has(pairKey(i.path, i.target))));
+    const working: VaultLintReport = { ...report, issues: [...standing, ...issues], candidates };
+    const chosen = selectPages(working, pages, REVIEW_BUDGET_CHARS, kindOf);
+    skipped = chosen.skipped;
+    withFindings = chosen.chosen.length + chosen.skipped;
+    const sent = buildReviewInputs(working, chosen.chosen, kindOf, pages);
+    const links: ReviewLink[] = [];
+    const kinds: ReviewKind[] = [];
+    const units = (path: string) => quoteUnits(path, contentOf.get(path) ?? "");
+    // For a page cut off from the graph the link row goes on the target,
+    // linking back, so whether it is already there is read off the target.
+    const cutOff = new Set(working.issues.filter((i) => i.id === "orphan" || i.id === "unlinked").map((i) => i.path));
+    const linksOf = (path: string): string[] => noteLinks(contentOf.get(path) ?? "").map((l) => linkKey(l.raw)).filter(Boolean);
+    const of = Math.ceil(sent.length / REVIEW_BATCH);
+    for (let b = 0; b < of; b++) {
+      if (cancel?.cancelled) {
+        stopped("page review", b, of);
+        break;
+      }
+      status(`model review: page ${b * REVIEW_BATCH + 1} of ${sent.length}`);
+      const batch = sent.slice(b * REVIEW_BATCH, (b + 1) * REVIEW_BATCH);
+      try {
+        const out = await plugin.llm.reviewPages({ pages: batch, directory });
+        const v = verifyReview(batch, out.pages, directory, units, { cutOff, linksOf });
+        issues.push(...v.issues);
+        links.push(...v.links);
+        kinds.push(...v.kinds);
+        mergeCounts(dropped, v.dropped);
+        read += batch.length;
+      } catch (e) {
+        failed.push(`page review: batch ${b + 1} of ${of} failed: ${describeError(e)}`);
+      }
+    }
+    rows.push(...planReviewLinks(links, working.issues, infos, prefix, plan), ...planKinds(kinds, infos));
+  } catch (e) {
+    failed.push(`page review failed: ${describeError(e)}`);
+  }
+
+  return {
+    issues,
+    candidates,
+    rows: orderFixes(rows),
+    cleared,
+    line: renderReviewLine({ read, withFindings, skipped, findings: issues.length, dropped, failed, cleared: cleared.length }),
+    failed,
+  };
 }
 
 /**

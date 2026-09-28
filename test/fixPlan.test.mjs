@@ -806,3 +806,197 @@ test("a cross-link row names its pair, and applyDuplicateVerdicts drops only the
   assert.deepEqual(kept, [other], "a cleared pair loses both rows; unrelated rows stay");
   assert.equal(fp.applyDuplicateVerdicts([...fixes, other], ["a\x00b"]).length, 3, "an unknown key clears nothing");
 });
+
+// ------------------------------------------------ lint model review wiring
+
+test("cross-link ids come from the pair and the direction, so a verdict's rows merge instead of colliding", () => {
+  const pages = new Map([
+    ...PAGES(),
+    [
+      "wiki/concepts/linear-kinematics.md",
+      { path: "wiki/concepts/linear-kinematics.md", title: "linear-kinematics", displayTitle: "Linear Kinematics", schema: "class", kind: "concept", classCodes: [], content: CLASS_PAGE },
+    ],
+  ]);
+  // The lint's own finding, planned on one call...
+  const first = fp.planCrossLinks(
+    [{ id: "duplicate-pages", path: "wiki/concepts/coaching-communication.md", title: "C", target: "wiki/concepts/empowering-behavior-change.md" }],
+    pages,
+    "wiki/",
+  );
+  // ...and a pair the model confirmed later, planned on another. Both start
+  // from the same page, which a per-call counter numbered `:0` both times.
+  const second = fp.planCrossLinks(
+    [{ id: "duplicate-pages", path: "wiki/concepts/coaching-communication.md", title: "C", target: "wiki/concepts/linear-kinematics.md" }],
+    pages,
+    "wiki/",
+  );
+  const known = new Set(first.map((f) => f.id));
+  const added = second.filter((r) => !known.has(r.id));
+  assert.equal(added.length, 2, "both directions of the confirmed pair survive the modal's dedupe by id");
+  const merged = [...first, ...added];
+  assert.equal(new Set(merged.map((f) => f.id)).size, 4);
+  // The same pair planned twice gives the same ids: a re-check adds nothing.
+  assert.deepEqual(fp.planCrossLinks(
+    [{ id: "duplicate-pages", path: "wiki/concepts/empowering-behavior-change.md", title: "E", target: "wiki/concepts/coaching-communication.md" }],
+    pages,
+    "wiki/",
+  ).map((f) => f.id).sort(), first.map((f) => f.id).sort());
+});
+
+test("planRelatedFrom leaves a page to its hub when its class has one", () => {
+  const doping = { path: "wiki/concepts/doping.md", title: "doping", displayTitle: "Doping", schema: "class", kind: "concept", classCodes: ["HBIO250"], content: CLASS_PAGE };
+  const lone = { path: "wiki/concepts/lone.md", title: "lone", displayTitle: "Lone", schema: "class", kind: "concept", classCodes: ["PHED999"], content: CLASS_PAGE };
+  const pages = new Map([[doping.path, doping], [lone.path, lone]]);
+  const hub = { path: "classes/HBIO250/HBIO250.md", title: "HBIO250", schema: "class", kind: "concept", classCodes: ["HBIO250"], content: HUB };
+  const hubs = new Map([["HBIO250", hub]]);
+  const neighbour = { path: "wiki/concepts/pharmacology.md", title: "pharmacology", displayTitle: "Pharmacology", schema: "class", kind: "concept", classCodes: ["HBIO250"], content: CLASS_PAGE };
+  const issues = [
+    { id: "orphan", path: doping.path, title: "Doping" },
+    { id: "unlinked", path: lone.path, title: "Lone" },
+  ];
+  const hubRows = fp.planHubLinks(issues, pages, hubs, "wiki/");
+  const related = fp.planRelatedFrom(issues, pages, () => neighbour, "wiki/", hubs);
+  assert.deepEqual(hubRows.map((f) => f.label), ["List Doping in HBIO250 hub"]);
+  assert.deepEqual(related.map((f) => f.label), ["Relate Lone from Pharmacology"], "the page with a hub gets the hub row only");
+  // Without hubs passed, every orphan still gets a neighbour row, as before.
+  assert.equal(fp.planRelatedFrom(issues, pages, () => neighbour, "wiki/").length, 2);
+});
+
+const REVIEW_PAGES = () =>
+  new Map([
+    ["wiki/concepts/a.md", { path: "wiki/concepts/a.md", title: "a", displayTitle: "Alpha", schema: "karpathy", kind: "concept", classCodes: [], content: KARPATHY_PAGE }],
+    ["wiki/entities/b.md", { path: "wiki/entities/b.md", title: "b", displayTitle: "Beta", schema: "karpathy", kind: "entity", classCodes: [], content: KARPATHY_PAGE }],
+    ["classes/X/c.md", { path: "classes/X/c.md", title: "c", displayTitle: "Gamma", schema: "class", kind: "concept", classCodes: ["X"], content: CLASS_PAGE }],
+  ]);
+
+test("planReviewLinks edits the reviewed page, linking to what it discusses", () => {
+  const links = [{ path: "wiki/concepts/a.md", targetPath: "wiki/entities/b.md", targetTitle: "Beta", reason: "names Beta" }];
+  const rows = fp.planReviewLinks(links, [], REVIEW_PAGES(), "wiki/");
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].kind, "add-link");
+  assert.equal(rows[0].path, "wiki/concepts/a.md");
+  assert.equal(rows[0].label, "Link Alpha → Beta");
+  assert.equal(rows[0].enabled, true);
+  const once = rows[0].apply(KARPATHY_PAGE);
+  // The target is an entity, so the karpathy page's Related Entities section.
+  assert.match(once, /## Related Entities\n- \[\[entities\/b\|Beta\]\]/);
+  assert.equal(rows[0].apply(once), once, "applying twice changes nothing more");
+});
+
+test("planReviewLinks turns a nomination round when the reviewed page is cut off", () => {
+  const links = [{ path: "wiki/concepts/a.md", targetPath: "wiki/entities/b.md", targetTitle: "Beta", reason: "names Beta" }];
+  for (const id of ["orphan", "unlinked"]) {
+    const rows = fp.planReviewLinks(links, [{ id, path: "wiki/concepts/a.md", title: "a" }], REVIEW_PAGES(), "wiki/");
+    assert.equal(rows.length, 1);
+    // An outgoing link would not fix an orphan: the nominated page links back.
+    assert.equal(rows[0].path, "wiki/entities/b.md", id);
+    assert.equal(rows[0].label, "Link Beta → Alpha");
+    assert.match(rows[0].apply(KARPATHY_PAGE), /## Related Concepts\n- \[\[concepts\/retrieval-practice\|Retrieval practice\]\]\n- \[\[concepts\/a\|Alpha\]\]/);
+  }
+  // A finding on the target, not the reviewed page, does not turn the row.
+  const other = fp.planReviewLinks(links, [{ id: "orphan", path: "wiki/entities/b.md", title: "b" }], REVIEW_PAGES(), "wiki/");
+  assert.equal(other[0].path, "wiki/concepts/a.md");
+});
+
+test("planReviewLinks gives each link one row with a stable id, and skips pages it does not know", () => {
+  const link = { path: "wiki/concepts/a.md", targetPath: "wiki/entities/b.md", targetTitle: "Beta", reason: "r" };
+  const rows = fp.planReviewLinks([link, { ...link }, { ...link, targetPath: "wiki/missing.md" }], [], REVIEW_PAGES(), "wiki/");
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, fp.planReviewLinks([link], [], REVIEW_PAGES(), "wiki/")[0].id);
+});
+
+test("hub and neighbour rows name the page they make reachable", () => {
+  const doping = { path: "wiki/concepts/doping.md", title: "doping", displayTitle: "Doping", schema: "class", kind: "concept", classCodes: ["HBIO250"], content: CLASS_PAGE };
+  const lone = { path: "wiki/concepts/lone.md", title: "lone", displayTitle: "Lone", schema: "class", kind: "concept", classCodes: ["PHED999"], content: CLASS_PAGE };
+  const pages = new Map([[doping.path, doping], [lone.path, lone]]);
+  const hubs = new Map([["HBIO250", { path: "classes/HBIO250/HBIO250.md", title: "HBIO250", schema: "class", kind: "concept", classCodes: ["HBIO250"], content: HUB }]]);
+  const neighbour = { path: "wiki/concepts/pharmacology.md", title: "pharmacology", displayTitle: "Pharmacology", schema: "class", kind: "concept", classCodes: [], content: CLASS_PAGE };
+  const issues = [{ id: "orphan", path: doping.path, title: "Doping" }, { id: "unlinked", path: lone.path, title: "Lone" }];
+  assert.deepEqual(fp.planHubLinks(issues, pages, hubs, "wiki/").map((f) => f.about), [doping.path]);
+  assert.deepEqual(fp.planRelatedFrom(issues, pages, () => neighbour, "wiki/", hubs).map((f) => f.about), [lone.path]);
+});
+
+test("planReviewLinks leaves a turned-round row unticked when the plan already links the page another way", () => {
+  const links = [{ path: "wiki/concepts/a.md", targetPath: "wiki/entities/b.md", targetTitle: "Beta", reason: "names Beta" }];
+  const issues = [{ id: "orphan", path: "wiki/concepts/a.md", title: "a" }];
+  const row = (kind, about) => ({ id: `${kind}:x`, kind, path: "wiki/x.md", label: kind, enabled: true, about, apply: (c) => c });
+  for (const kind of ["hub-link", "related-link"]) {
+    const rows = fp.planReviewLinks(links, issues, REVIEW_PAGES(), "wiki/", [row(kind, "wiki/concepts/a.md")]);
+    assert.equal(rows[0].path, "wiki/entities/b.md");
+    assert.equal(rows[0].enabled, false, `${kind}: one link in is enough to fix an orphan; the second is the reader's call`);
+  }
+  // A row for some other page, or no row at all, leaves it ticked.
+  assert.equal(fp.planReviewLinks(links, issues, REVIEW_PAGES(), "wiki/", [row("hub-link", "wiki/entities/b.md")])[0].enabled, true);
+  assert.equal(fp.planReviewLinks(links, issues, REVIEW_PAGES(), "wiki/")[0].enabled, true);
+  // A row that is not turned round is the page's own missing link: always ticked.
+  assert.equal(fp.planReviewLinks(links, [], REVIEW_PAGES(), "wiki/", [row("hub-link", "wiki/concepts/a.md")])[0].enabled, true);
+});
+
+test("mergeReview drops cleared pairs from rows and findings, adds the review's rows once each, and orders the plan", () => {
+  const pages = new Map([
+    ["wiki/concepts/a.md", { path: "wiki/concepts/a.md", title: "a", schema: "karpathy", kind: "concept", classCodes: [], content: KARPATHY_PAGE }],
+    ["wiki/concepts/c.md", { path: "wiki/concepts/c.md", title: "c", schema: "karpathy", kind: "concept", classCodes: [], content: KARPATHY_PAGE }],
+  ]);
+  const dup = { id: "duplicate-pages", path: "wiki/concepts/a.md", title: "a", target: "wiki/concepts/c.md", detail: "same name" };
+  const orphan = { id: "orphan", path: "wiki/concepts/a.md", title: "a" };
+  const cross = fp.planCrossLinks([dup], pages, "wiki/");
+  const mk = (kind, path, id = `${kind}:${path}`) => ({ id, kind, path, label: kind, enabled: true, apply: (x) => x });
+  const plan = [mk("related-link", "wiki/concepts/z.md"), ...cross];
+  const report = { notes: 2, units: 0, issues: [orphan, dup], candidates: [{ a: "x", b: "y", pass: "similar", detail: "" }], claims: [] };
+  const missing = { id: "missing-link", path: "wiki/concepts/a.md", title: "a", target: "Beta", detail: "names Beta" };
+  const review = {
+    issues: [missing],
+    candidates: [],
+    rows: [mk("add-link", "wiki/concepts/a.md"), mk("related-link", "wiki/concepts/z.md"), mk("kind", "wiki/concepts/a.md")],
+    cleared: [fp.pairKey(dup.path, dup.target)],
+  };
+  const got = fp.mergeReview(plan, report, review);
+  assert.deepEqual(got.plan.map((f) => f.id), ["kind:wiki/concepts/a.md", "related-link:wiki/concepts/z.md", "add-link:wiki/concepts/a.md"]);
+  assert.deepEqual(got.report.issues.map((i) => i.id), ["orphan", "missing-link"], "worst first, and a cleared reported pair is no longer a finding");
+  assert.deepEqual(got.report.candidates, [], "the review's candidates replace the scan's");
+  assert.equal(got.report.notes, 2);
+  // Nothing cleared: the reported pair and its rows stay.
+  const kept = fp.mergeReview(plan, report, { ...review, cleared: [] });
+  assert.equal(kept.plan.filter((f) => f.kind === "cross-link").length, 2);
+  assert.ok(kept.report.issues.some((i) => i.id === "duplicate-pages"));
+});
+
+test("setKind rewrites type: and leaves a page without one alone", () => {
+  const md = "---\ntype: concept\ntags: [term]\n---\n\n# A\n";
+  const once = fp.setKind(md, "entity");
+  assert.equal(once, "---\ntype: entity\ntags: [term]\n---\n\n# A\n");
+  assert.equal(fp.setKind(once, "entity"), once, "applying twice changes nothing more");
+  assert.equal(fp.setKind(md, "concept"), md, "already that kind: byte-identical");
+  const classPage = "---\nclass: HBIO250\n---\n\n# A\n";
+  assert.equal(fp.setKind(classPage, "entity"), classPage);
+  assert.equal(fp.setKind("# No frontmatter\n", "entity"), "# No frontmatter\n");
+  assert.equal(fp.setKind('---\ntype: "concept"\n---\n', "entity"), "---\ntype: entity\n---\n");
+  assert.equal(fp.setKind('---\ntype: "concept"\n---\n', "concept"), '---\ntype: "concept"\n---\n', "a quoted kind already right is left as written");
+});
+
+test("planKinds offers an unticked row only for pages that carry type:", () => {
+  const pages = REVIEW_PAGES();
+  pages.set("classes/X/d.md", { path: "classes/X/d.md", title: "d", displayTitle: "Delta", schema: "class", kind: "concept", classCodes: ["X"], content: "---\nclass: X\n---\n\n# Delta\n" });
+  const rows = fp.planKinds(
+    [
+      { path: "wiki/concepts/a.md", kind: "entity", reason: "a person" },
+      { path: "classes/X/d.md", kind: "entity", reason: "a person" },
+      { path: "wiki/missing.md", kind: "entity", reason: "x" },
+    ],
+    pages,
+  );
+  assert.equal(rows.length, 1, "a class-schema page's kind verdict stays a finding only");
+  assert.equal(rows[0].kind, "kind");
+  assert.equal(rows[0].path, "wiki/concepts/a.md");
+  assert.equal(rows[0].enabled, false);
+  assert.match(rows[0].label, /concept → entity/);
+  const once = rows[0].apply(KARPATHY_PAGE);
+  assert.match(once, /^---\ntype: entity\n/);
+  assert.equal(rows[0].apply(once), once);
+});
+
+test("orderFixes puts add-link after related-link and kind after tag", () => {
+  const mk = (kind, path) => ({ id: `${kind}:${path}`, kind, path, label: kind, enabled: true, apply: (s) => s });
+  const ordered = fp.orderFixes([mk("add-link", "a.md"), mk("kind", "a.md"), mk("related-link", "a.md"), mk("tag", "a.md"), mk("cross-link", "a.md"), mk("rect-callout", "a.md")]);
+  assert.deepEqual(ordered.map((f) => f.kind), ["tag", "kind", "cross-link", "related-link", "add-link", "rect-callout"]);
+});

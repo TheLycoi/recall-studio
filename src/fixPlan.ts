@@ -22,8 +22,9 @@
  * Pure: no `obsidian` import, the same rule as `vaultLint` and `vaultFix`, so
  * the tests bundle it standalone and a plan can be built without a vault.
  */
-import type { VaultIssue } from "./vaultLint";
-import { pairKey } from "./duplicates";
+import { compareIssues, type VaultIssue, type VaultLintReport } from "./vaultLint";
+import type { ReviewKind, ReviewLink } from "./lintReview";
+import { pairKey, type DuplicateFinding } from "./duplicates";
 import type { FixPage, LinkFix, FixConfidence } from "./vaultFix";
 import { applyLinkFix, buildReplacement, unwrapDeadLink } from "./vaultFix";
 import { findAllPdfReferences, highlightKey, parsePdfSubpath, renderCallout } from "./pdflink";
@@ -41,11 +42,18 @@ export type FixKind =
   | "rect-callout"
   | "attribute"
   | "aliases"
-  | "tag";
+  | "tag"
+  | "add-link"
+  | "kind";
 
 /** One proposed edit: a row in the plan, and the pure function it applies. */
 export interface Fix {
-  /** `${kind}:${path}:${n}` — stable within a plan, so a row can be replaced by id. */
+  /**
+   * Unique within a plan, so a row can be replaced by id. Rows a later call
+   * can plan again (cross-links, review links, kinds) are named by what they
+   * join rather than numbered, so the same row planned twice has the same id
+   * and two different rows never share one.
+   */
   id: string;
   kind: FixKind;
   /** The note the edit is applied to, which is not always the note the finding is about. */
@@ -60,6 +68,12 @@ export interface Fix {
   target?: string;
   /** The two pages a cross-link row joins, as `pairKey` spells them, so a verdict on the pair finds both rows. */
   pair?: string;
+  /**
+   * The cut-off page a hub-link or related-link row makes reachable. The row
+   * edits another note, so its `path` does not say; `planReviewLinks` reads
+   * this to see that a page already has a way in.
+   */
+  about?: string;
   /** Pure; returns `content` unchanged when there is nothing to do. */
   apply: (content: string) => string;
 }
@@ -402,6 +416,25 @@ export function setTag(md: string, tag: string): string {
   return withFrontmatter(md, fm, body);
 }
 
+/**
+ * Re-file a page as the other kind by rewriting its `type:`.
+ *
+ * Only a page that already declares a `type:` is touched: a class-schema page
+ * says what it is with `class:`, and giving it a `type:` would put it under a
+ * schema its folder does not follow. The line is rewritten in place, so the
+ * rest of the frontmatter keeps its order.
+ */
+export function setKind(md: string, kind: "concept" | "entity"): string {
+  const fm = frontmatter(md);
+  if (!fm) return md;
+  const line = /^type:[ \t]*(.*)$/m.exec(fm.body);
+  if (!line) return md;
+  const current = line[1].trim().replace(/^["']|["']$/g, "").trim();
+  if (current === kind) return md;
+  const body = `${fm.body.slice(0, line.index)}type: ${kind}${fm.body.slice(line.index + line[0].length)}`;
+  return withFrontmatter(md, fm, body);
+}
+
 /** Point a dead link at the page the reader chose, keeping any display text they wrote. */
 export function repoint(md: string, fromTarget: string, page: FixPage, wikiPrefix: string): string {
   return applyLinkFix(md, fromTarget, buildReplacement(page, wikiPrefix));
@@ -434,25 +467,33 @@ function linkPathOf(path: string, wikiPrefix: string): string {
  */
 export function planCrossLinks(issues: VaultIssue[], pages: Map<string, FixPageInfo>, wikiPrefix: string): Fix[] {
   const fixes: Fix[] = [];
-  let n = 0;
+  const seen = new Set<string>();
   for (const issue of issues) {
     if (issue.id !== "duplicate-pages" || !issue.target) continue;
     const a = pages.get(issue.path);
     const b = pages.get(issue.target);
     if (!a || !b) continue;
 
+    const pair = pairKey(a.path, b.path);
     const label = `Link ${shown(a)} ↔ ${shown(b)}`;
     for (const [from, to] of [
       [a, b],
       [b, a],
     ] as Array<[FixPageInfo, FixPageInfo]>) {
+      // The pair and the direction, never a per-call counter: the duplicate
+      // check plans its confirmed pairs on a call of its own, and a counter
+      // restarting at 0 there gave a confirmed pair's row the id of a row
+      // already in the plan, which the modal then dropped as a repeat.
+      const id = `cross-link:${pair.replace("\u0000", "|")}:${from.path}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
       fixes.push({
-        id: `cross-link:${from.path}:${n++}`,
+        id,
         kind: "cross-link",
         path: from.path,
         label,
         enabled: true,
-        pair: pairKey(a.path, b.path),
+        pair,
         apply: (content) => addRelatedLink(content, linkPathOf(to.path, wikiPrefix), shown(to), from.schema, to.kind),
       });
     }
@@ -476,6 +517,10 @@ export interface DuplicateVerdicts {
   checked: number;
   /** Of those, how many it confirmed. */
   confirmed: number;
+  /** The look-alike pairs it confirmed, as the `duplicate-pages` findings they now are. */
+  issues: VaultIssue[];
+  /** Set when a cancel stopped the check between batches: how many of how many ran. */
+  stopped?: { done: number; of: number };
 }
 
 export function applyDuplicateVerdicts(fixes: Fix[], cleared: string[]): Fix[] {
@@ -485,6 +530,41 @@ export function applyDuplicateVerdicts(fixes: Fix[], cleared: string[]): Fix[] {
 }
 
 export { pairKey };
+
+/** What the model review hands the plan: the part of `runModelReview`'s result the merge reads. */
+export interface ReviewForPlan {
+  issues: VaultIssue[];
+  candidates: DuplicateFinding[];
+  rows: Fix[];
+  cleared: string[];
+}
+
+/**
+ * The scan's plan and report once the model review has spoken.
+ *
+ * The cross-link rows of every pair the duplicate check cleared are withdrawn,
+ * and a cleared pair the scan had reported leaves the findings with them, so
+ * the plan's report does not keep a `duplicate-pages` finding whose rows are
+ * gone. The review's rows join the plan once each, by id, the row already
+ * there winning, since the same id is the same edit. The review's candidates
+ * replace the scan's: they are the scan's plus the title scan's, less those
+ * the check decided either way.
+ */
+export function mergeReview(
+  plan: Fix[],
+  report: VaultLintReport,
+  review: ReviewForPlan,
+): { plan: Fix[]; report: VaultLintReport } {
+  const cleared = new Set(review.cleared);
+  const merged = [...applyDuplicateVerdicts(plan, review.cleared), ...review.rows];
+  const seen = new Set<string>();
+  const rows = merged.filter((f) => (seen.has(f.id) ? false : (seen.add(f.id), true)));
+  const kept = report.issues.filter((i) => !(i.id === "duplicate-pages" && i.target && cleared.has(pairKey(i.path, i.target))));
+  return {
+    plan: orderFixes(rows),
+    report: { ...report, issues: [...kept, ...review.issues].sort(compareIssues), candidates: review.candidates },
+  };
+}
 
 /** The dead links the link fixer already resolved, as rows a reader can untick. */
 export function planRelinks(fixable: LinkFix[]): Fix[] {
@@ -613,6 +693,13 @@ function unlinkedPaths(issues: VaultIssue[]): string[] {
   return out;
 }
 
+/** The hub a page is listed in, or null when its class has none (or the page is that hub). */
+function hubFor(page: FixPageInfo, hubs: Map<string, FixPageInfo>): FixPageInfo | null {
+  const code = page.classCodes.find((c) => hubs.has(c));
+  const hub = code ? hubs.get(code) : undefined;
+  return hub && hub.path !== page.path ? hub : null;
+}
+
 /**
  * List an unlinked page in its class's index note.
  *
@@ -631,10 +718,8 @@ export function planHubLinks(
   for (const path of unlinkedPaths(issues)) {
     const page = pages.get(path);
     if (!page) continue;
-    const code = page.classCodes.find((c) => hubs.has(c));
-    if (!code) continue;
-    const hub = hubs.get(code);
-    if (!hub || hub.path === page.path) continue;
+    const hub = hubFor(page, hubs);
+    if (!hub) continue;
 
     fixes.push({
       id: `hub-link:${hub.path}:${n++}`,
@@ -642,6 +727,7 @@ export function planHubLinks(
       path: hub.path,
       label: `List ${shown(page)} in ${shown(hub)} hub`,
       enabled: true,
+      about: page.path,
       apply: (content) => hubListLink(content, linkPathOf(page.path, wikiPrefix), shown(page)),
     });
   }
@@ -653,19 +739,23 @@ export function planHubLinks(
  *
  * For a page whose class has no hub. The edit goes in the *neighbour*, not the
  * orphan: a page is an orphan because nothing points at it, and adding outgoing
- * links to it would not change that.
+ * links to it would not change that. Given `hubs`, a page `planHubLinks` lists
+ * in its hub gets no second row here: the hub is where its class is reached
+ * from, and a neighbour row as well would link it twice for one finding.
  */
 export function planRelatedFrom(
   issues: VaultIssue[],
   pages: Map<string, FixPageInfo>,
   neighbourOf: (path: string) => FixPageInfo | null,
   wikiPrefix: string,
+  hubs?: Map<string, FixPageInfo>,
 ): Fix[] {
   const fixes: Fix[] = [];
   let n = 0;
   for (const path of unlinkedPaths(issues)) {
     const page = pages.get(path);
     if (!page) continue;
+    if (hubs && hubFor(page, hubs)) continue;
     const neighbour = neighbourOf(path);
     if (!neighbour || neighbour.path === page.path) continue;
 
@@ -675,6 +765,7 @@ export function planRelatedFrom(
       path: neighbour.path,
       label: `Relate ${shown(page)} from ${shown(neighbour)}`,
       enabled: true,
+      about: page.path,
       apply: (content) => addRelatedLink(content, linkPathOf(page.path, wikiPrefix), shown(page), neighbour.schema, page.kind),
     });
   }
@@ -808,6 +899,90 @@ export function planAliases(
   return fixes;
 }
 
+/**
+ * The links the model review nominated and code verified, as rows.
+ *
+ * Which page is edited depends on what the reviewed page was flagged for. A
+ * page the lint found cut off (`orphan`, `unlinked`) is not helped by an
+ * outgoing link: nothing points at it, and that is what the finding measures.
+ * So its nomination is applied the way `planRelatedFrom` applies a neighbour,
+ * on the nominated page, linking back; that is upstream's `linkOrphanPage`
+ * direction (gd4ai/obsidian-llm-wiki, reimplemented) with this plugin's
+ * verification in front of it. Any other page gets the link it was reviewed
+ * as missing, on itself. Either way the link goes in the edited page's
+ * related section for the linked page's kind, as every link row here does.
+ *
+ * A turned-round row is left unticked when `existing` (the mechanical plan)
+ * already has a hub-link or related-link row for the same page: one link in
+ * is what the finding asks for, and that row gives it. The review's row is
+ * still offered, since the model may have found the better way in, but as the
+ * reader's choice rather than a second link written by default.
+ */
+export function planReviewLinks(
+  links: ReviewLink[],
+  issues: VaultIssue[],
+  pages: Map<string, FixPageInfo>,
+  wikiPrefix: string,
+  existing: Fix[] = [],
+): Fix[] {
+  const cutOff = new Set(unlinkedPaths(issues));
+  const reached = new Set(existing.filter((f) => (f.kind === "hub-link" || f.kind === "related-link") && f.about).map((f) => f.about as string));
+  const fixes: Fix[] = [];
+  const seen = new Set<string>();
+  for (const link of links) {
+    const page = pages.get(link.path);
+    const target = pages.get(link.targetPath);
+    if (!page || !target || page.path === target.path) continue;
+    const turned = cutOff.has(page.path);
+    const [from, to] = turned ? [target, page] : [page, target];
+    const id = `add-link:${from.path}:${to.path}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    fixes.push({
+      id,
+      kind: "add-link",
+      path: from.path,
+      label: `Link ${shown(from)} → ${shown(to)}`,
+      enabled: !(turned && reached.has(page.path)),
+      apply: (content) => addRelatedLink(content, linkPathOf(to.path, wikiPrefix), shown(to), from.schema, to.kind),
+    });
+  }
+  return fixes;
+}
+
+/**
+ * The kinds the model review says pages are filed under wrongly, as rows.
+ *
+ * Unticked: rewriting `type:` moves a page from one kind to the other, which
+ * changes the tag vocabulary it is checked against and the related section
+ * other pages list it under, and the file stays in the folder it is in. A page
+ * with no `type:` (the class schema) gets no row; the report's finding is all
+ * the review has to say about it.
+ */
+export function planKinds(kinds: ReviewKind[], pages: Map<string, FixPageInfo>): Fix[] {
+  const fixes: Fix[] = [];
+  const seen = new Set<string>();
+  for (const k of kinds) {
+    const page = pages.get(k.path);
+    if (!page || seen.has(page.path)) continue;
+    const fm = frontmatter(page.content);
+    const type = fm ? /^type:[ \t]*(.*)$/m.exec(fm.body) : null;
+    if (!type) continue;
+    const current = type[1].trim().replace(/^["']|["']$/g, "").trim() || "no kind";
+    if (current === k.kind) continue;
+    seen.add(page.path);
+    fixes.push({
+      id: `kind:${page.path}`,
+      kind: "kind",
+      path: page.path,
+      label: `Re-file as ${k.kind}: type ${current} → ${k.kind} (moves the page between kinds; the file stays in its folder)`,
+      enabled: false,
+      apply: (content) => setKind(content, k.kind),
+    });
+  }
+  return fixes;
+}
+
 // ------------------------------------------------------------ order & apply
 
 /**
@@ -821,12 +996,14 @@ export function planAliases(
 const KIND_ORDER: FixKind[] = [
   "aliases",
   "tag",
+  "kind",
   "cross-link",
   "relink",
   "repoint",
   "unwrap",
   "hub-link",
   "related-link",
+  "add-link",
   "rect-callout",
   "attribute",
 ];

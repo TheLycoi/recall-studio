@@ -82,6 +82,13 @@
 .wikilm-stat.is-flagged .wikilm-stat-n {
   color: var(--color-yellow);
 }
+/* Sized like the stats it sits beside, not a full button, since it is a
+   shortcut for the same retry the overflow menu already offers. */
+.wikilm-retry-btn {
+  padding: 0 var(--size-4-2);
+  font-size: var(--font-ui-small);
+  color: var(--color-red);
+}
 /* A deck name is arbitrary user text, so it truncates rather than setting the
    header's width. The icon keeps its size; only the label gives way. */
 .wikilm-deck-btn {

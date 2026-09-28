@@ -292,3 +292,180 @@ test("look-alike pages are held back as candidates for the model, not reported a
   const text = vl.renderVaultLint(r);
   assert.match(text, /1 pair spelled alike/, text);
 });
+
+// ---- a page's own prose, and the pure findings built on it
+//
+// "Own prose" is what the page says in its own sentences: not a quote it
+// carries, not a bullet, a heading or a table. Thin pages and the residue of
+// unquoted sentences are both measured on it.
+
+const MIXED = [
+  "---",
+  "type: concept",
+  "aliases: [A]",
+  "---",
+  "# Title",
+  "",
+  "First paragraph with a [[Target|shown words]] link.",
+  "It runs on a second line.",
+  "",
+  "## Section",
+  "- a bullet that is not prose",
+  "1. a numbered item that is not prose",
+  "> a callout line that is not prose",
+  "| a | table |",
+  "| --- | --- |",
+  "```",
+  "code that is not prose",
+  "```",
+  "![[Deck.pdf#page=2&rect=1,2,3,4]]",
+  "",
+  "Second paragraph.",
+].join("\n");
+
+test("proseParagraphs keeps paragraphs and drops frontmatter, headings, lists, callouts, tables, code and embeds", () => {
+  const got = vl.proseParagraphs(MIXED);
+  assert.deepEqual(got, ["First paragraph with a [[Target|shown words]] link. It runs on a second line.", "Second paragraph."]);
+});
+
+test("proseChars counts what the reader sees, not the link markup", () => {
+  assert.equal(vl.proseChars(MIXED), "First paragraph with a shown words link. It runs on a second line.".length + "Second paragraph.".length);
+});
+
+const CONCEPT = 'type: concept\ntags: [method]\naliases:\n  - "A"';
+/** Prose of exactly `n` characters: one sentence of repeated words, cut to length and ended with a period. */
+const proseOf = (n) => `${"word ".repeat(n).slice(0, n - 1)}.`;
+
+test("a concept page with prose just under the threshold is thin; at the threshold it is not", () => {
+  const T = vl.THIN_PROSE_CHARS;
+  assert.equal(typeof T, "number");
+  const under = vl.lintVault([page("wiki/a.md", CONCEPT, `${proseOf(T - 1)}\n\n- a long bullet ${"x".repeat(400)}`)], { schema: SCHEMA });
+  assert.deepEqual(ids(under, "thin-page"), ["a"]);
+  const at = vl.lintVault([page("wiki/a.md", CONCEPT, proseOf(T))], { schema: SCHEMA });
+  assert.deepEqual(ids(at, "thin-page"), []);
+});
+
+test("an entity page is measured too, and bullets and callouts do not count as its prose", () => {
+  const r = vl.lintVault([page("wiki/e.md", 'type: entity\ntags: [person]\naliases: ["E"]', `> ${"quoted ".repeat(100)}\n\n- ${"listed ".repeat(100)}`)], { schema: SCHEMA });
+  assert.deepEqual(ids(r, "thin-page"), ["e"]);
+});
+
+test("an empty page is empty, not thin, and a source page is never thin", () => {
+  const empty = vl.lintVault([page("wiki/a.md", CONCEPT, "")], { schema: SCHEMA });
+  assert.deepEqual(ids(empty, "empty-note"), ["a"]);
+  assert.deepEqual(ids(empty, "thin-page"), []);
+  const source = vl.lintVault([page("wiki/sources/s.md", "type: source\ntags: [paper]", "Short.")], { schema: vl.WIKI_SCHEMA });
+  assert.deepEqual(ids(source, "thin-page"), []);
+});
+
+test("with no schema there is no kind, so nothing is thin", () => {
+  const r = vl.lintVault([page("wiki/a.md", "type: concept", "Short.")]);
+  assert.deepEqual(ids(r, "thin-page"), []);
+});
+
+test("thin sits just above empty in the report, and every new id has a label", () => {
+  const r = vl.lintVault([page("wiki/a.md", CONCEPT, ""), page("wiki/b.md", CONCEPT, "Short prose here.")], { schema: SCHEMA });
+  const out = vl.renderVaultLint(r);
+  assert.ok(out.indexOf("Thin:") > -1 && out.indexOf("Thin:") < out.indexOf("Empty:"), out);
+  for (const id of ["unsupported-prose", "wrong-kind", "missing-link", "thin-page"]) assert.ok(vl.VAULT_ISSUE_LABELS[id], id);
+  const order = vl.ORDER;
+  const at = (id) => order.indexOf(id);
+  assert.equal(at("unsupported-prose"), at("unattributed-quote") + 1);
+  assert.equal(at("wrong-kind"), at("schema-violation") + 1);
+  assert.equal(at("missing-link"), at("unlinked") + 1);
+  assert.equal(at("thin-page"), at("empty-note") - 1);
+});
+
+// ---- residue: the page's own sentences that none of its quotes back
+//
+// Candidates for the model review, never findings: token overlap misses
+// paraphrase, so an unquoted sentence is one to look at, not one that is wrong.
+
+const KEY_CLAIM = "Spacing improves long term retention of vocabulary items in adults";
+const withClaims = (path, prose) =>
+  page(path, CONCEPT, `${prose}\n\n## Key claims\n- ${KEY_CLAIM} — [[Deck.pdf#page=1|p.1]]`);
+
+test("a sentence a quote on the page states is not residue; one no quote states is", () => {
+  const r = vl.lintVault([
+    withClaims("wiki/a.md", "Spacing improves long term retention of vocabulary. Massed practice feels productive but fades within weeks."),
+  ]);
+  assert.deepEqual(r.claims, [{ path: "wiki/a.md", title: "a", n: 1, text: "Massed practice feels productive but fades within weeks." }]);
+});
+
+test("residue is numbered per page in page order and capped at eight", () => {
+  const sentences = Array.from({ length: 10 }, (_, i) => `Unrelated sentence number ${["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"][i]} mentions giraffes wandering savannahs.`);
+  const r = vl.lintVault([withClaims("wiki/b.md", sentences.slice(0, 5).join(" ") + "\n\n" + sentences.slice(5).join(" "))]);
+  assert.equal(r.claims.length, 8);
+  assert.deepEqual(r.claims.map((c) => c.n), [1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.equal(r.claims[0].text, sentences[0]);
+  assert.equal(r.claims[7].text, sentences[7]);
+});
+
+test("a sentence under the significant-word floor is never residue", () => {
+  const r = vl.lintVault([withClaims("wiki/a.md", "It is so. Massed practice feels productive but fades within weeks.")]);
+  assert.deepEqual(r.claims.map((c) => c.text), ["Massed practice feels productive but fades within weeks."]);
+});
+
+test("a page with no quote units yields no residue: its prose is its only evidence", () => {
+  // No units at all: the only prose line reads as a citation, which the index skips.
+  const none = vl.lintVault([page("wiki/a.md", CONCEPT, "Source: giraffes wander the savannahs looking for acacia trees.")]);
+  assert.equal(none.units, 0);
+  assert.deepEqual(none.claims, []);
+  // Prose-only: indexNote falls back to the prose itself, which would cover every sentence trivially.
+  const prose = vl.lintVault([page("wiki/b.md", CONCEPT, "Giraffes wander the savannahs looking\nfor acacia trees during dry seasons.")]);
+  assert.ok(prose.units > 0);
+  assert.deepEqual(prose.claims, []);
+});
+
+test("the report names the residue in one line and stays byte-identical", () => {
+  const pages = [withClaims("wiki/a.md", "Massed practice feels productive but fades within weeks. Giraffes wander savannahs looking for acacia.")];
+  const a = vl.renderVaultLint(vl.lintVault(pages));
+  assert.match(a, /2 sentences on 1 page have no quote behind them, not reported: the model review decides them when it runs\./, a);
+  assert.equal(a, vl.renderVaultLint(vl.lintVault(pages)));
+  const none = vl.renderVaultLint(vl.lintVault([page("wiki/c.md", CONCEPT, "")]));
+  assert.doesNotMatch(none, /no quote behind/);
+});
+
+test("quotes under Mentions in Source count as the page's quotes for residue, the form the wiki's pages carry", () => {
+  const p = page(
+    "wiki/concepts/m.md",
+    CONCEPT,
+    `## Definition\nSpacing improves long term retention of vocabulary. Giraffes wander savannahs looking for acacia.\n\n## Mentions in Source\n\n- "${KEY_CLAIM}"`,
+  );
+  const r = vl.lintVault([p]);
+  assert.deepEqual(r.claims.map((c) => c.text), ["Giraffes wander savannahs looking for acacia."]);
+  assert.deepEqual(vl.quoteUnits(p.path, p.content).map((u) => u.text), [KEY_CLAIM]);
+});
+
+test("residue is kept only for pages the review can judge: concept and entity, or a page with no kind key", () => {
+  const prose = "Massed practice feels productive but fades within weeks.";
+  const body = `${prose}\n\n## Key claims\n- ${KEY_CLAIM} — [[Deck.pdf#page=1|p.1]]`;
+  const pages = [
+    page("wiki/sources/s.md", "type: source\ntags: [paper]", body),
+    page("classes/X/X.md", "type: topic-index\nclass: X", body),
+    page("classes/X/doping.md", "class: X", body),
+    page("wiki/concepts/c.md", CONCEPT, body),
+    page("wiki/entities/e.md", 'type: entity\ntags: [person]\naliases:\n  - "E"', body),
+  ];
+  const r = vl.lintVault(pages, { schema: vl.WIKI_SCHEMA });
+  assert.deepEqual(
+    [...new Set(r.claims.map((c) => c.path))],
+    ["classes/X/doping.md", "wiki/concepts/c.md", "wiki/entities/e.md"],
+    "the review never reads a source page or an index note, so their residue would be counted and never decided",
+  );
+});
+
+test("the page review prompt's worked example carries its quote in a form quoteUnits reads", async () => {
+  // The example teaches the model what a quote on the page looks like; one in
+  // a form the verifier does not read would teach it to cite quotes that then
+  // fail the check.
+  const { readFileSync } = await import("node:fs");
+  const llm = readFileSync("src/llm.ts", "utf8");
+  const review = /const REVIEW_SYSTEM = `([\s\S]*?)(?<!\\)`;/.exec(llm)[1];
+  const body = /<page title="Insulin"[\s\S]*?<body>\n([\s\S]*?)\n<\/body>/.exec(review)[1];
+  const by = /claim 1 supported, by "([^"]+)"/.exec(review)[1];
+  const units = vl.quoteUnits("wiki/entities/insulin.md", `---\ntype: entity\n---\n\n${body}\n`);
+  assert.equal(units.length, 1, body);
+  assert.ok(units[0].text.toLowerCase().includes(by.toLowerCase()), `${by} not in ${units[0].text}`);
+  assert.ok(!/\[!quote\]/.test(body), "a quote callout is not a form the wiki's pages carry");
+});

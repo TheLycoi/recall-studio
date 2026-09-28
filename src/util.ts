@@ -1,6 +1,8 @@
 // Pure helpers shared across the plugin. Kept free of Obsidian imports so they
 // can be unit-tested with node directly.
 
+import type { TranscriptRecord } from "./model";
+
 export function newId(prefix = ""): string {
   const t = Date.now().toString(36);
   const r = Math.random().toString(36).slice(2, 8);
@@ -317,6 +319,21 @@ export function truncateTranscript(text: string, maxChars: number): { text: stri
   if (wsIdx > 0) return { text: window.slice(0, wsIdx).trim(), truncated: true };
 
   return { text: window.trim(), truncated: true };
+}
+
+/**
+ * The record a guide is stored as, from what the reader picked or pasted:
+ * cleaned of transcript scaffolding and cut to the size the model is given.
+ * One function so the AI highlight modal saves a guide exactly the way the
+ * old "Add transcript" command did.
+ */
+export function transcriptRecord(
+  choice: { text: string; origin: TranscriptRecord["origin"]; sourceFile: string | null },
+  maxChars: number,
+  addedAt: string,
+): TranscriptRecord {
+  const { text, truncated } = truncateTranscript(normalizeTranscript(choice.text), maxChars);
+  return { text, origin: choice.origin, sourceFile: choice.sourceFile, addedAt, truncated };
 }
 
 /**

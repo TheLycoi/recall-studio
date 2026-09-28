@@ -246,6 +246,12 @@ export class InboxView extends ItemView {
       if (counts.flagged) stat("flagged", counts.flagged, "is-flagged");
       if (counts.queued + counts.generating) stat("writing", counts.queued + counts.generating, "is-busy");
       if (counts.errors) stat("failed", counts.errors, "is-error");
+      // Failures are otherwise fixed only from the overflow menu, three clicks
+      // away; a count the reader is already looking at is where the fix belongs.
+      if (counts.errors) {
+        const retryBtn = stats.createEl("button", { cls: "wikilm-retry-btn", text: `Retry failed (${counts.errors})` });
+        retryBtn.addEventListener("click", () => this.retryFailedHighlights());
+      }
     }
 
     const right = header.createDiv({ cls: "wikilm-header-right" });
@@ -309,9 +315,7 @@ export class InboxView extends ItemView {
         i
           .setTitle("Retry failed highlights")
           .setIcon(WIKILM_RETRY_ICON)
-          .onClick(() => {
-            for (const h of this.plugin.store.all()) if (h.status === "error") this.plugin.generator.enqueue(h);
-          }),
+          .onClick(() => this.retryFailedHighlights()),
       );
       menu.addItem((i) =>
         i
@@ -335,6 +339,12 @@ export class InboxView extends ItemView {
       );
       menu.showAtMouseEvent(evt);
     });
+  }
+
+  /** Requeue every highlight sitting in "error", shared by the header button and the overflow menu item. */
+  private retryFailedHighlights(): void {
+    for (const h of this.plugin.store.all()) if (h.status === "error") this.plugin.generator.enqueue(h);
+    this.scheduleRender();
   }
 
   private renderSource(root: HTMLElement, path: string, list: Highlight[]): void {

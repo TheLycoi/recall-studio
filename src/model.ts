@@ -135,6 +135,8 @@ export interface InboxData {
   ingested?: Record<string, string>;
   /** Recent card edits, oldest first, capped by the store (src/inboxData.ts). */
   revisions?: CardRevision[];
+  /** The last AI highlight instruction per file, least recently used first, capped (src/inboxData.ts). */
+  highlightInstructions?: Record<string, string>;
 }
 
 export function makeHighlight(

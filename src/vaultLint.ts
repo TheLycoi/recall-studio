@@ -15,7 +15,8 @@
  * Pure: no `obsidian` import, same rule as src/lint.ts, so the tests bundle it
  * standalone.
  */
-import { indexNote, type EvidenceUnit } from "./retrieval";
+import { coveredBy, indexNote, type EvidenceUnit } from "./retrieval";
+import { splitClaims } from "./answerClaims";
 import { linkKey, noteLinks } from "./graph";
 import { noteAliases } from "./topicNote";
 import { highlightKey } from "./pdflink";
@@ -32,7 +33,11 @@ export type VaultIssueId =
   | "unverifiable-quote"
   | "unattributed-quote"
   | "schema-violation"
-  | "no-aliases";
+  | "no-aliases"
+  | "thin-page"
+  | "unsupported-prose"
+  | "wrong-kind"
+  | "missing-link";
 
 export interface VaultIssue {
   id: VaultIssueId;
@@ -74,10 +79,27 @@ export interface LintOptions {
   sources?: Map<string, string>;
 }
 
+/** One of a page's own sentences that no quote on the page states, numbered within the page. */
+export interface ProseClaim {
+  path: string;
+  title: string;
+  /** 1-based, in page order, so the model can answer by number. */
+  n: number;
+  text: string;
+}
+
 export interface VaultLintReport {
   notes: number;
   units: number;
   issues: VaultIssue[];
+  /**
+   * Sentences of a page's own prose that none of its quotes states, by the
+   * same token-overlap bar the answer check uses. Not findings: overlap misses
+   * paraphrase, so an unquoted sentence is one to look at, not one that is
+   * unsupported. The model review reads each against the page's quotes, and
+   * only a sentence it cannot back becomes an `unsupported-prose` finding.
+   */
+  claims: ProseClaim[];
   /**
    * Pairs of pages spelled alike (`findDuplicates` pass `similar`). Not
    * findings: a report that accused two pages on spelling would be wrong
@@ -110,6 +132,69 @@ export const WIKI_SCHEMA: SchemaRules = {
   aliasKinds: ["concept", "entity"],
   freeKinds: ["topic", "topic-index"],
 };
+
+/**
+ * Below this many characters of its own prose (`proseChars`) a concept or
+ * entity page is reported as thin.
+ *
+ * Measured 2026-09-27 on the projects vault's wiki (101 concept and entity
+ * pages with a body): median 684, p25 474, p10 385; 7 pages under 300, 5
+ * under 250, 3 under 200. The 7 under 300 are the two dead-link stubs and
+ * five pages whose whole prose is one definition sentence, which is what
+ * "under a paragraph" means; the next page up has two sentences. A higher bar
+ * would start flagging ordinary pages and teach the reader to skip the
+ * finding. The secondbrain vault's wiki carries no `type:` key, so the rule
+ * does not reach it.
+ */
+export const THIN_PROSE_CHARS = 300;
+
+/** At most this many residue sentences per page: enough to judge a page by, few enough that one long page cannot fill a review call. */
+export const MAX_CLAIMS_PER_PAGE = 8;
+
+/**
+ * A page's quote units: its highlights and key claims, and the quotes under
+ * its `## Mentions in Source`, never its own prose.
+ *
+ * `indexNote` falls back to a page's prose lines when it has neither
+ * highlights nor key claims (src/retrieval.ts:133), which is right for Ask and
+ * wrong here: checking a page's sentences against units made of those same
+ * sentences would call all of them quoted, and a model asked to name a quote
+ * could quote the sentence back at itself. The fallback units are the `#p`
+ * ones (src/retrieval.ts:200) and are left out. The wiki's concept and entity
+ * pages carry their quotes under Mentions in Source, which `indexNote` does
+ * not read as a section, so those are added here as units of their own.
+ * `indexed` saves a second `indexNote` when the caller already has it.
+ */
+export function quoteUnits(path: string, content: string, indexed: EvidenceUnit[] = indexNote(path, content)): EvidenceUnit[] {
+  const structured = indexed.filter((u) => !/#p\d+$/.test(u.id));
+  const body = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
+  const noteTitle = indexed[0]?.noteTitle ?? titleOf(path);
+  const mentions = mentionQuotes(body).map(
+    (m, i): EvidenceUnit => ({ id: `${path}#m${i}`, notePath: path, noteTitle, pdfBasename: null, target: null, page: null, text: m.quote, kind: "claim", classCodes: [] }),
+  );
+  return [...structured, ...mentions];
+}
+
+/**
+ * The residue of one page: its own sentences, in page order, that no single
+ * quote unit on the page covers (`coveredBy`, src/retrieval.ts:722).
+ *
+ * The sentences are split by `splitClaims` (src/answerClaims.ts:219), which
+ * already drops anything under its significant-word floor, so "See below."
+ * never reaches the model.
+ */
+function residueOf(path: string, title: string, content: string, units: EvidenceUnit[]): ProseClaim[] {
+  if (units.length === 0) return [];
+  const out: ProseClaim[] = [];
+  for (const para of proseParagraphs(content)) {
+    for (const text of splitClaims(para)) {
+      if (coveredBy(text, units).covered) continue;
+      out.push({ path, title, n: out.length + 1, text });
+      if (out.length === MAX_CLAIMS_PER_PAGE) return out;
+    }
+  }
+  return out;
+}
 
 function titleOf(path: string): string {
   return (path.split("/").pop() ?? path).replace(/\.md$/i, "");
@@ -203,6 +288,69 @@ function normalizeForQuote(s: string): string {
 }
 
 /**
+ * The paragraphs a page writes in its own words, each joined onto one line.
+ *
+ * Everything else on a page is either a label (headings), someone else's words
+ * (callouts and quote lines), or a list the reader scans rather than reads
+ * (bullets, numbered items, tables). A page made only of those can look full
+ * on screen and still say nothing of its own, which is what `thin-page`
+ * measures, and the sentences a model is asked to check against the page's
+ * quotes are exactly these, never the quotes themselves. Code fences and
+ * embed-only lines carry no prose either. Markup inside a paragraph is kept:
+ * a caller that splits sentences strips it its own way.
+ */
+export function proseParagraphs(content: string): string[] {
+  const body = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
+  const out: string[] = [];
+  let para: string[] = [];
+  let fenced = false;
+  const flush = (): void => {
+    if (para.length > 0) out.push(para.join(" "));
+    para = [];
+  };
+  for (const raw of body.split("\n")) {
+    const line = raw.trim();
+    if (/^(```|~~~)/.test(line)) {
+      flush();
+      fenced = !fenced;
+      continue;
+    }
+    if (fenced) continue;
+    const notProse =
+      line === "" ||
+      line.startsWith("#") ||
+      line.startsWith(">") ||
+      line.startsWith("|") ||
+      /^(?:[-*+]|\d+[.)])\s/.test(line) ||
+      /^(-{3,}|\*{3,}|_{3,})$/.test(line) ||
+      /^(?:!\[\[[^\]]*\]\]\s*)+$/.test(line);
+    if (notProse) {
+      flush();
+      continue;
+    }
+    para.push(line);
+  }
+  flush();
+  return out;
+}
+
+/** A line of prose as the reader sees it: links reduced to their words, emphasis marks gone. */
+function displayText(s: string): string {
+  return s
+    .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, "$2")
+    .replace(/\[\[([^\]]+)\]\]/g, (_m, t: string) => (t.split("/").pop() ?? t).replace(/#.*$/, ""))
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/==|\*\*|__|`/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Characters of a page's own prose, counted as displayed, so a long PDF link does not make a one-line page look written. */
+export function proseChars(content: string): number {
+  return proseParagraphs(content).reduce((n, p) => n + displayText(p).length, 0);
+}
+
+/**
  * Quotes claimed under `## Mentions in Source`, in both forms this vault holds.
  *
  * A PDF++ callout (`> [!PDF|…] [[link]]` then `> > text`) carries its own
@@ -290,11 +438,20 @@ export function lintVault(pages: LintPage[], options: LintOptions = {}): VaultLi
 
   let units = 0;
   const dupPages: DuplicatePage[] = [];
+  const claims: ProseClaim[] = [];
   for (const page of pages) {
     const title = titleOf(page.path);
     const body = page.content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
     const indexed: EvidenceUnit[] = indexNote(page.path, page.content);
     units += indexed.length;
+    // Residue only where the model review will read it: a concept or entity
+    // page, or a page that names no kind at all (a class page, whose kind is
+    // its class). A source page or an index note is never reviewed, so its
+    // residue would be counted in the report and never decided.
+    const kindHere = options.schema ? fmScalar(frontmatterOf(page.content), options.schema.kindKey) : null;
+    if (!kindHere || kindHere === "concept" || kindHere === "entity") {
+      claims.push(...residueOf(page.path, title, page.content, quoteUnits(page.path, page.content, indexed)));
+    }
     dupPages.push({
       path: page.path,
       title,
@@ -330,6 +487,13 @@ export function lintVault(pages: LintPage[], options: LintOptions = {}): VaultLi
       }
       if (kind && schema.aliasKinds.includes(kind) && !hasAlias(fm)) {
         issues.push({ id: "no-aliases", path: page.path, title });
+      }
+      // An empty page already has its own finding; thin is for a page that
+      // looks written, bullets and quotes and all, but says almost nothing in
+      // its own sentences. Only the two kinds whose job is to explain a
+      // subject: a source page is a record of a document, not an account.
+      if ((kind === "concept" || kind === "entity") && body.length > 0 && proseChars(page.content) < THIN_PROSE_CHARS) {
+        issues.push({ id: "thin-page", path: page.path, title });
       }
     }
 
@@ -400,15 +564,8 @@ export function lintVault(pages: LintPage[], options: LintOptions = {}): VaultLi
 
   // Sorted by how much a finding matters, then by note, so an unchanged vault
   // produces a byte-identical report and the worst thing is always on top.
-  const severity = new Map(ORDER.map((id, i) => [id, i]));
-  issues.sort(
-    (a, b) =>
-      (severity.get(a.id) ?? ORDER.length) - (severity.get(b.id) ?? ORDER.length) ||
-      a.path.localeCompare(b.path) ||
-      a.id.localeCompare(b.id) ||
-      (a.detail ?? "").localeCompare(b.detail ?? ""),
-  );
-  return { notes: pages.length, units, issues, candidates };
+  issues.sort(compareIssues);
+  return { notes: pages.length, units, issues, candidates, claims };
 }
 
 /** What each issue means, in the order a reader should care about it. */
@@ -424,6 +581,10 @@ export const VAULT_ISSUE_LABELS: Record<VaultIssueId, string> = {
   "duplicate-pages": "Two pages, one subject: they share a name or cite the same span",
   "no-aliases": "No aliases: only found under its own exact title",
   unlinked: "Nothing links here: only reachable by searching its own words",
+  "thin-page": "Thin: under a paragraph of its own prose",
+  "unsupported-prose": "Unsupported: a sentence no quote on the page backs",
+  "wrong-kind": "Filed wrong: the model reads this page as the other kind",
+  "missing-link": "Missing link: the page discusses a subject that has its own page",
 };
 
 /**
@@ -432,19 +593,41 @@ export const VAULT_ISSUE_LABELS: Record<VaultIssueId, string> = {
  * A page that misquotes its source leads because it is the one failure that
  * makes an answer wrong rather than merely missing.
  */
-const ORDER: VaultIssueId[] = [
+export const ORDER: VaultIssueId[] = [
   "ungrounded-quote",
   "unverifiable-quote",
   "unattributed-quote",
+  "unsupported-prose",
   "schema-violation",
+  "wrong-kind",
   "no-aliases",
   "dead-link",
   "duplicate-pages",
   "orphan",
   "unlinked",
+  "missing-link",
+  "thin-page",
   "empty-note",
   "no-evidence",
 ];
+
+/**
+ * The one order findings are listed in: severity class by `ORDER`, then note,
+ * then id and detail. Exported so findings the model review adds sort into the
+ * report exactly as the scan's own do.
+ */
+export function compareIssues(a: VaultIssue, b: VaultIssue): number {
+  const rank = (id: VaultIssueId): number => {
+    const i = ORDER.indexOf(id);
+    return i < 0 ? ORDER.length : i;
+  };
+  return (
+    rank(a.id) - rank(b.id) ||
+    a.path.localeCompare(b.path) ||
+    a.id.localeCompare(b.id) ||
+    (a.detail ?? "").localeCompare(b.detail ?? "")
+  );
+}
 
 /** The report as markdown for the chat, worst first, with the notes named. */
 /** Enough of a quote to recognise it, not enough to fill the log. */
@@ -457,7 +640,7 @@ export function renderVaultLint(report: VaultLintReport, limit = 8): string {
   const lines = [`**Wiki check** — ${report.notes} notes, ${report.units} passages Ask can quote.`];
   if (report.issues.length === 0) {
     lines.push("", "Nothing to fix: every note holds evidence and is reachable through the wiki.");
-    lines.push(...candidatesLine(report));
+    lines.push(...candidatesLine(report), ...claimsLine(report));
     return lines.join("\n");
   }
 
@@ -474,7 +657,7 @@ export function renderVaultLint(report: VaultLintReport, limit = 8): string {
     }
     if (found.length > limit) lines.push(`- …and ${found.length - limit} more`);
   }
-  lines.push(...candidatesLine(report));
+  lines.push(...candidatesLine(report), ...claimsLine(report));
   return lines.join("\n");
 }
 
@@ -484,4 +667,15 @@ function candidatesLine(report: VaultLintReport): string[] {
   const n = report.candidates?.length ?? 0;
   if (n === 0) return [];
   return ["", `${n} pair${n === 1 ? "" : "s"} spelled alike, not reported: **Suggest fixes** → **Check duplicates with the model** decides them.`];
+}
+
+/** The residue sentences the report holds back, counted so the reader knows the model review has something to decide. */
+function claimsLine(report: VaultLintReport): string[] {
+  // Tolerant of a report built by hand without the field, as above.
+  const claims = report.claims ?? [];
+  const n = claims.length;
+  if (n === 0) return [];
+  const m = new Set(claims.map((c) => c.path)).size;
+  const one = n === 1;
+  return ["", `${n} sentence${one ? "" : "s"} on ${m} page${m === 1 ? "" : "s"} ${one ? "has" : "have"} no quote behind ${one ? "it" : "them"}, not reported: the model review decides ${one ? "it" : "them"} when it runs.`];
 }
