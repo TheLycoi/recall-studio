@@ -72,6 +72,8 @@ export interface DigestFolderTally {
   failed: number;
   /** PDFs under the folder with no highlights that carry text. */
   bare: number;
+  /** PDFs under the folder whose highlights could not even be read (a parse or resolve failure); never double-counted in `bare`. */
+  unreadable: number;
   /** The reader stopped the run; the rest of the queue was never reached. */
   stopped: boolean;
 }
@@ -79,6 +81,10 @@ export interface DigestFolderTally {
 /**
  * The one line a folder run ends on: "digested 3 of 5 PDFs, 2 skipped". The
  * counts that are zero are left out, so the common case reads as one clause.
+ *
+ * `unreadable` is reported apart from `bare`: a bare PDF was read fine and
+ * simply has no highlights, while an unreadable one never got that far, so
+ * "no highlights" would misstate why it was left out.
  */
 export function digestFolderSummary(t: DigestFolderTally): string {
   const bits = [`digested ${t.digested} of ${t.queued} PDF${t.queued === 1 ? "" : "s"}`];
@@ -87,5 +93,6 @@ export function digestFolderSummary(t: DigestFolderTally): string {
   const unreached = t.queued - t.digested - t.skipped - t.failed;
   if (t.stopped && unreached > 0) bits.push(`${unreached} not reached (stopped)`);
   if (t.bare) bits.push(`${t.bare} with no highlights`);
+  if (t.unreadable) bits.push(`${t.unreadable} could not be read`);
   return bits.join(", ");
 }

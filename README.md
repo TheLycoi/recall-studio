@@ -59,12 +59,12 @@ in the chat lists the phrases.
 **Chat-only commands.** These left the palette but still run from the chat box
 by alias:
 
-- **Ingest source: read this markdown into the wiki** (`ingest`, `read-source`), on an open note. **AI highlight…** with *Wiki notes* does the same from the palette.
+- **Ingest source: read this markdown into the wiki** (`ingest`, `read-source`), on an open note. **AI highlight…** with *Wiki notes* writes the same wiki notes from the palette, without the flashcards choice.
 - **Ingest folder: read every note in a folder into the wiki** (`ingest-folder`, `read-folder`).
 - **Send all ==highlights== in this note to inbox** (`highlights`, `sweep`): sweeps a note you highlighted while reading and queues every span not already in the inbox.
 - **Retry failed highlights** (`retry`); the inbox's more menu has the same item.
 
-**Hotkeys bound to old commands are lost.** The palette went from nineteen
+**Hotkeys bound to old commands are lost.** The palette went from twenty
 commands to twelve. A hotkey bound to one of these ids no longer fires; bind
 the command that replaced it instead:
 
@@ -72,6 +72,10 @@ the command that replaced it instead:
 - `capture-pdf-selection-with-instruction` → **Send selection to inbox with instructions…**
 - `ai-highlight-with-instruction`, `ai-highlight-pdf`, `add-transcript` → **AI highlight…**
 - `ingest-source`, `ingest-folder`, `capture-markdown-highlights`, `retry-failed` → chat only, above
+
+A hotkey still bound to `ai-highlight` keeps firing, since that command id
+was not one of the ones replaced; it now opens the AI highlight form instead
+of running immediately, and Cmd/Ctrl+Enter in the form runs it.
 
 **Send selection to inbox** is in the editor right-click menu too. **AI
 highlight…** on a note with *Cards* has the model pick the spans worth
@@ -358,7 +362,7 @@ and "merge into an existing note". Nothing is written until you click
 
 Digesting (above) starts from highlights you already made by hand. **AI highlight…** on a PDF goes the other way: it reads a lecture PDF's own text layer and proposes the highlights, each one verified against the page before it's ever offered, assigned to an existing wiki note (and, when it belongs to one of that note's own subtopics, to that `##` heading) or a new one, and written straight into secondbrain-style notes — not a manifest, not a topic-note folder, but `wiki/concepts` and `wiki/entities`, the same notes you write and link by hand.
 
-The command is active on an open PDF and runs in nine steps: it reads the PDF's text page by page and the highlights the PDF and its backlinking notes already hold; asks for (or reuses) the class code; picks up the guide attached to the PDF's own path, if any; takes the instruction from the form (from the chat's `highlight`, it asks Notes / Flashcards / Both, as the digest does); collects the wiki notes this PDF may write into; sends the pages to the model in batches, each batch told what earlier batches and the manifest already hold; verifies every returned span and turns the survivors into manifest-shaped highlight rows; groups those rows into notes and shows a per-span preview; and, once you confirm (and possibly rename a note or uncheck a span), writes the callouts and queues flashcards if asked.
+The command is active on an open PDF and runs in nine steps: it reads the PDF's text page by page and the highlights the PDF and its backlinking notes already hold; asks for (or reuses) the class code; picks up the guide attached to the PDF's own path, if any; takes the instruction from the form (from the chat's `highlight`, it asks Notes / Flashcards / Both, as the digest does); collects the wiki notes this PDF may write into; sends the pages to the model in batches, each batch told what earlier batches and the manifest already hold; verifies every returned span and turns the survivors into manifest-shaped highlight rows; groups those rows into notes and shows a per-span preview; and, once you confirm (and possibly rename a note or uncheck a span), writes the callouts and queues flashcards if asked (chat `highlight` only).
 
 **Granularity and limits**, under **AI highlights for PDFs** in settings:
 

@@ -74,10 +74,28 @@ test("planDigestFolder on a folder with no PDFs queues nothing", () => {
 });
 
 test("digestFolderSummary counts digested of queued, then skipped, failed, bare and a stop", () => {
-  assert.equal(dg.digestFolderSummary({ queued: 5, digested: 3, skipped: 2, failed: 0, bare: 0, stopped: false }), "digested 3 of 5 PDFs, 2 skipped");
-  assert.equal(dg.digestFolderSummary({ queued: 1, digested: 1, skipped: 0, failed: 0, bare: 0, stopped: false }), "digested 1 of 1 PDF");
+  assert.equal(dg.digestFolderSummary({ queued: 5, digested: 3, skipped: 2, failed: 0, bare: 0, unreadable: 0, stopped: false }), "digested 3 of 5 PDFs, 2 skipped");
+  assert.equal(dg.digestFolderSummary({ queued: 1, digested: 1, skipped: 0, failed: 0, bare: 0, unreadable: 0, stopped: false }), "digested 1 of 1 PDF");
   assert.equal(
-    dg.digestFolderSummary({ queued: 4, digested: 1, skipped: 0, failed: 1, bare: 2, stopped: true }),
+    dg.digestFolderSummary({ queued: 4, digested: 1, skipped: 0, failed: 1, bare: 2, unreadable: 0, stopped: true }),
     "digested 1 of 4 PDFs, 1 failed, 2 not reached (stopped), 2 with no highlights",
+  );
+});
+
+test("digestFolderSummary reports unreadable PDFs separately from ones with no highlights", () => {
+  assert.equal(
+    dg.digestFolderSummary({ queued: 2, digested: 2, skipped: 0, failed: 0, bare: 0, unreadable: 1, stopped: false }),
+    "digested 2 of 2 PDFs, 1 could not be read",
+  );
+  assert.equal(
+    dg.digestFolderSummary({ queued: 2, digested: 2, skipped: 0, failed: 0, bare: 0, unreadable: 3, stopped: false }),
+    "digested 2 of 2 PDFs, 3 could not be read",
+  );
+});
+
+test("digestFolderSummary keeps 'with no highlights' for the bare count and 'could not be read' for the unreadable one, together", () => {
+  assert.equal(
+    dg.digestFolderSummary({ queued: 3, digested: 3, skipped: 0, failed: 0, bare: 2, unreadable: 1, stopped: false }),
+    "digested 3 of 3 PDFs, 2 with no highlights, 1 could not be read",
   );
 });

@@ -164,9 +164,8 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
       // ingestSource.ts ingestSourceNote, suggest.ts suggestPdfHighlights), so
       // the one just saved is the one used.
       if (pdf) {
-        // The form has settled the guide, so the chat's paste-one-first offer
-        // is answered "go without" when there is none.
-        await suggestPdfHighlights(p, file, { instruction: choice.instruction, transcriptGate: async () => "skip" });
+        // No gate: the form already settled the guide.
+        await suggestPdfHighlights(p, file, { instruction: choice.instruction });
       } else if (choice.product === "wiki") {
         await ingestSourceNote(p, file, { instruction: choice.instruction });
       } else {

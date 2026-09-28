@@ -417,6 +417,10 @@ export async function digestFolder(plugin: WikiLmPlugin, folder: TFolder): Promi
     // (a highlight with text), and the read is handed to `digestPdf` so the
     // document is not parsed twice.
     const reads = new Map<string, Resolved>();
+    // Paths whose PDF++ manifest could not even be resolved, kept apart from
+    // "bare" (read fine, just no highlights) so the summary names the actual
+    // reason instead of implying the reader never highlighted them.
+    const unreadable = new Set<string>();
     for (const [i, f] of [...files].sort((a, b) => a.path.localeCompare(b.path)).entries()) {
       if (plugin.cancel.cancelled) {
         new Notice("WikiLM: stopped before anything was digested.");
@@ -429,6 +433,7 @@ export async function digestFolder(plugin: WikiLmPlugin, folder: TFolder): Promi
       } catch (e) {
         // One unreadable PDF is left out of the queue; it does not stop the run.
         console.error(`WikiLM: could not read ${f.path}`, e);
+        unreadable.add(f.path);
       }
     }
     const plan = planDigestFolder(files, (f) => {
@@ -436,7 +441,15 @@ export async function digestFolder(plugin: WikiLmPlugin, folder: TFolder): Promi
       return !!r && decideGate(r.manifest).action === "digest";
     });
     if (plan.queue.length === 0) {
-      new Notice(`WikiLM: none of the ${files.length} PDF${files.length === 1 ? "" : "s"} under ${folder.path} has highlights with text. Highlight them in PDF++, or run “AI highlight…” on each first.`, 10000);
+      const noun = `${files.length} PDF${files.length === 1 ? "" : "s"}`;
+      // "Has highlights with text" is a claim the read backs up; when every
+      // PDF failed to read, or some did, say that instead of implying the
+      // reader never highlighted them.
+      const msg =
+        unreadable.size === files.length
+          ? `WikiLM: none of the ${noun} under ${folder.path} could be read.`
+          : `WikiLM: none of the ${noun} under ${folder.path} has highlights with text${unreadable.size > 0 ? ` (${unreadable.size} could not be read)` : ""}. Highlight them in PDF++, or run “AI highlight…” on each first.`;
+      new Notice(msg, 10000);
       return;
     }
 
@@ -447,7 +460,18 @@ export async function digestFolder(plugin: WikiLmPlugin, folder: TFolder): Promi
     );
     if (options === null) return;
 
-    const tally: DigestFolderTally = { queued: plan.queue.length, digested: 0, skipped: 0, failed: 0, bare: plan.bare.length, stopped: false };
+    // plan.bare holds every PDF that did not qualify, which includes the
+    // unreadable ones (they never got a read to qualify with); subtract them
+    // so a PDF is counted once, under the reason that actually applies.
+    const tally: DigestFolderTally = {
+      queued: plan.queue.length,
+      digested: 0,
+      skipped: 0,
+      failed: 0,
+      bare: plan.bare.filter((f) => !unreadable.has(f.path)).length,
+      unreadable: unreadable.size,
+      stopped: false,
+    };
     for (const [i, pdf] of plan.queue.entries()) {
       if (plugin.cancel.cancelled) {
         tally.stopped = true;
