@@ -47,6 +47,8 @@ import {
   armRetry,
   checkQuestion,
   dropUnit,
+  failedDraft,
+  nextEvidence,
   isDontKnow,
   nextRequest,
   parseQuizCommand,
@@ -1344,7 +1346,7 @@ export class ChatPanel {
     const kind: QuizScope["kind"] = scope === "all" ? "all" : scope === "this" ? "note" : "query";
     this.session = startSession({ kind, label }, query, pool, Math.max(1, this.plugin.settings.quizCap));
     this.pushSystem(
-      `Quiz on ${label}: questions keep coming until the edge of what you know is found, then the misses go to your inbox as cards. Say hint, skip or stop.`,
+      `Quiz on ${label}: one question per passage until every passage has been asked, then the misses go to your inbox as cards. Say hint, skip or stop.`,
     );
     await this.nextQuestion();
   }
@@ -1392,11 +1394,10 @@ export class ChatPanel {
 
         const req = nextRequest(live);
         const draft = await this.plugin.llm.quizQuestion({
-          evidence: live.numbered,
+          evidence: nextEvidence(live),
           difficulty: req.difficulty,
           askedQuestions: req.askedQuestions,
-          retryOfN: req.retryOfN,
-          retryAngle: req.retryAngle,
+          revealed: req.revealed,
           standingInstructions: this.plugin.settings.quizInstructions,
           failure,
         });
@@ -1420,17 +1421,22 @@ export class ChatPanel {
           continue;
         }
 
-        // Second failure on the same passage: drop it and start over clean.
+        // Second failure: set the cited passage aside and start over clean. A
+        // draft that cites a passage already closed would set nothing aside,
+        // so the loop would repeat the same call forever; end the quiz instead.
         failure = "";
-        const cited = live.pool[draft.evidence_n - 1];
-        if (!cited) {
-          this.turns.push({ role: "system", text: `The model could not write a grounded question (${check.reason}).` });
+        const failed = failedDraft(live, draft.evidence_n);
+        if (failed.stuck) {
+          this.turns.push({
+            role: "system",
+            text: `No question could be written from the passages left (${check.reason}), so the quiz ends here.`,
+          });
           this.busy = false;
           this.status = "";
           await this.finishQuiz();
           return;
         }
-        this.session = dropUnit(live, cited.id);
+        this.session = failed.session;
         this.turns.push({ role: "system", text: "Skipped a passage the model could not turn into a question." });
         this.trim();
         this.rerender();

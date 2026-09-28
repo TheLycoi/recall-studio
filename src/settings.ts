@@ -964,7 +964,7 @@ export class WikiLmSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Question cap per quiz")
       .setDesc(
-        "A safety limit, not a target. A quiz runs until it finds the edge of what you know; this only stops one that never does.",
+        "A safety limit, not a target. A quiz asks every passage in its pool once; this only cuts short a pool longer than one sitting.",
       )
       .addSlider((sl) =>
         sl

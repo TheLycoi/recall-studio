@@ -295,7 +295,7 @@ function scopedQuestion(text: string, ctx: IntentContext): Intent | null {
 /** What the box understands, one phrase per line. Shown for "help". */
 export function renderHelp(): string {
   return [
-    "- **quiz me** — questions on the open note until the edge of what you know shows; **quiz me on Receptors**, **quiz me on HBIO250**, **quiz me on everything**",
+    "- **quiz me** — one question per passage of the open note, the misses become cards; **quiz me on Receptors**, **quiz me on HBIO250**, **quiz me on everything**",
     "- **digest** — group the open PDF's highlights into concept and entity pages; **digest Doping** names a PDF or a note with PDF++ links",
     "- **highlight** — let the model pick spans in the open PDF, each checked against the text layer; **highlight Ch3**",
     "- **lint** — check the wiki for wrong quotes, dead links and duplicate pages",

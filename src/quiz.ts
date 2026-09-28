@@ -21,6 +21,16 @@
  * `evidenceN` means the same thing on question five as it did on question one.
  * `unitId` is the source of truth on every question; `evidenceN` is only the
  * number the prompt and the rendered evidence use.
+ *
+ * A quiz is a sweep: one question per passage, every passage once, and it ends
+ * when the pool is covered. Its job is to find which passages the reader
+ * cannot produce from memory so those become cards (the vault's
+ * retrieval-practice and redundancy pages: learning comes from the effortful
+ * recall, and a fact the reader already knows earns no card). A passage is
+ * never asked twice in a session: every grade shows the expected answer and
+ * the passage itself, so a second question on it would be answered by
+ * scrolling up, which is exactly the false-positive the litmus test for
+ * prompts warns about.
  */
 import { normalizePlain } from "./util";
 import { numberEvidence, renderEvidenceMarkdown, type EvidenceUnit, significantTokens } from "./retrieval";
@@ -39,8 +49,8 @@ export interface QuizScope {
  * How one answer was judged. `skipped` is deliberately not `incorrect`: it
  * covers every answer the reader declined to give, whether they said so (`/idk`)
  * or moved on (`/skip`). It lowers the tier like a miss does, because a passage
- * the reader would not attempt marks a ceiling just as a wrong answer does, but
- * it arms no retry, since there is no wrong model to dislodge.
+ * the reader would not attempt is as much a gap as a wrong answer, and it is
+ * carded the same way.
  */
 export type Verdict = "correct" | "partial" | "incorrect" | "skipped";
 
@@ -84,8 +94,8 @@ export type AskedQuestion = QuizQuestion & {
  * The reference system's point about distractors: which wrong answer someone
  * picks tells you which nuance is off, and that is worth more than the binary.
  * Free recall has no distractors to choose between, so the grader names the
- * kind of error instead. The quiz uses it twice — to decide whether a miss is
- * worth probing further, and to decide what deserves to become a flashcard.
+ * kind of error instead. The quiz uses it to decide what deserves to become a
+ * flashcard, and the card writer uses it to decide what the card should test.
  */
 export type Gap = "none" | "slip" | "vocabulary" | "detail" | "misconception";
 
@@ -99,11 +109,10 @@ export interface QuizSession {
   /** Unit ids the model could not turn into a grounded question. Skipped, never removed. */
   dropped: string[];
   /**
-   * A safety ceiling, not the intended length. The quiz ends when the edge is
-   * bracketed (`bracketed`) or the passages run out; this only stops a session
-   * that would otherwise run away — a reader who answers everything correctly
-   * at the hardest tier, or a grader that never resolves. Nothing about the
-   * teaching aims at it, so it is not shown to the reader as a target.
+   * A safety ceiling, not the intended length. The quiz ends when every usable
+   * passage has been asked; this only stops a session on a pool bigger than
+   * the reader wants to sit through in one go, and the summary says how many
+   * passages were left.
    */
   cap: number;
   asked: AskedQuestion[];
@@ -113,10 +122,6 @@ export interface QuizSession {
   partial: number;
   wrong: number;
   skipped: number;
-  /** The unit the next question must re-probe from another angle, or null. */
-  retryOf: string | null;
-  /** The question that unit was already asked, so the next one can differ from it. */
-  retryAngle: string;
   hintShown: boolean;
   /** 1 on a fresh question; 2 after the hint bought one more try. */
   attempt: 1 | 2;
@@ -352,8 +357,6 @@ export function startSession(scope: QuizScope, query: string, pool: EvidenceUnit
     partial: 0,
     wrong: 0,
     skipped: 0,
-    retryOf: null,
-    retryAngle: "",
     hintShown: false,
     attempt: 1,
     finished: false,
@@ -362,20 +365,21 @@ export function startSession(scope: QuizScope, query: string, pool: EvidenceUnit
 
 /**
  * The units a next question could still come from: the pool minus the dropped
- * ones minus the ones already asked — except the unit a retry is pending on,
- * which is asked precisely because it was already asked once.
+ * ones minus the ones already asked, whatever the verdict was. An asked
+ * passage has been shown in full under its grade, so nothing about it can be
+ * recalled rather than read.
  *
- * The panel uses an empty result to end the quiz early rather than spending a
- * model call that has nothing left to write about.
+ * The panel uses an empty result to end the quiz rather than spending a model
+ * call that has nothing left to write about.
  */
 export function usableUnits(session: QuizSession): EvidenceUnit[] {
-  const dropped = new Set(session.dropped);
-  const asked = new Set(session.asked.map((a) => a.unitId));
-  return session.pool.filter((u) => {
-    if (dropped.has(u.id)) return false;
-    if (session.retryOf === u.id) return true;
-    return !asked.has(u.id);
-  });
+  return remainingUnits(session.pool, session.dropped, session.asked);
+}
+
+function remainingUnits(pool: EvidenceUnit[], droppedIds: string[], asked: AskedQuestion[]): EvidenceUnit[] {
+  const dropped = new Set(droppedIds);
+  const askedIds = new Set(asked.map((a) => a.unitId));
+  return pool.filter((u) => !dropped.has(u.id) && !askedIds.has(u.id));
 }
 
 export type QuestionCheck =
@@ -386,11 +390,16 @@ export type QuestionCheck =
 
 /** A crude root so "binds", "binding", "bound"-free forms compare: strip ing/ed/es/s from longer words. */
 function root(w: string): string {
-  if (w.length > 5 && w.endsWith("ing")) return w.slice(0, -3);
-  if (w.length > 4 && w.endsWith("ed")) return w.slice(0, -2);
+  if (w.length > 5 && w.endsWith("ing")) return undouble(w.slice(0, -3));
+  if (w.length > 4 && w.endsWith("ed")) return undouble(w.slice(0, -2));
   if (w.length > 4 && w.endsWith("es")) return w.slice(0, -2);
   if (w.length > 4 && w.endsWith("s")) return w.slice(0, -1);
   return w;
+}
+
+/** "plott" (from plotted, plotting) is "plot": a consonant doubled before the suffix is one consonant in the root. */
+function undouble(w: string): string {
+  return w.length > 3 && w[w.length - 1] === w[w.length - 2] && !/[aeiou]/.test(w[w.length - 1]) ? w.slice(0, -1) : w;
 }
 
 function rootTokens(text: string): string[] {
@@ -471,8 +480,7 @@ export function checkQuestion(draft: QuizQuestionDraft, session: QuizSession): Q
   if (session.dropped.includes(unit.id)) {
     return { ok: false, reason: `evidence [${n}] was already skipped; use another passage` };
   }
-  const alreadyAsked = session.asked.some((a) => a.unitId === unit.id);
-  if (alreadyAsked && session.retryOf !== unit.id) {
+  if (session.asked.some((a) => a.unitId === unit.id)) {
     return { ok: false, reason: `evidence [${n}] was already asked about; use another passage` };
   }
 
@@ -499,6 +507,19 @@ export function checkQuestion(draft: QuizQuestionDraft, session: QuizSession): Q
   if (normalizePlain(question).includes(normalizePlain(answer)) || (leak.total >= 3 && leak.fraction >= 0.67)) {
     return { ok: false, reason: "the question contains its own answer" };
   }
+
+  // Leakage across questions. Every grade shows the reader the expected answer
+  // and the quoted wording, so a later question whose answer is among them is
+  // answered by scrolling up, not by recall — "what abbreviation names the SR's
+  // calcium pumps?" one turn after "Answer: Ca2+ ATPases (SERCAs)". Passages
+  // in one note restate each other, so this is checked across passages, not
+  // only within one. Only what was called out counts, not the whole displayed
+  // passage: a neighbouring passage shares a subject, not its facts.
+  const shown = session.asked.map((a) => `${a.answer} ${a.quote} ${a.gradeQuote}`).join(" ");
+  const shownCov = wordCoverage(answer, shown);
+  if (shown.trim() && (normalizePlain(shown).includes(normalizePlain(answer)) || (shownCov.total >= 1 && shownCov.fraction === 1))) {
+    return { ok: false, reason: "the answer was already shown to the reader in an earlier grade; ask for a fact that has not been revealed" };
+  }
   // Sets and enumerations: one member per question.
   if (SET_QUESTION.test(question) || /, and /.test(answer) || answer.split(",").length >= 3) {
     return { ok: false, reason: "asks for a set; ask about one member of it" };
@@ -524,7 +545,14 @@ export function checkQuestion(draft: QuizQuestionDraft, session: QuizSession): Q
       question,
       answer,
       quote: draft.quote.trim(),
-      hint: wordCoverage(draft.hint, unit.text).count > 0 ? draft.hint.trim() : "",
+      // A hint has to touch the passage, and it must not be the answer: a hint
+      // that names it turns the second attempt into copying.
+      hint:
+        wordCoverage(draft.hint, unit.text).count > 0 &&
+        !normalizePlain(draft.hint).includes(normalizePlain(answer)) &&
+        wordCoverage(answer, draft.hint).fraction < 1
+          ? draft.hint.trim()
+          : "",
       kind: draft.kind,
     },
   };
@@ -555,10 +583,11 @@ export function acceptQuestion(session: QuizSession, q: Omit<QuizQuestion, "n" |
 }
 
 /**
- * The reader's rule, layered on learn's probe: a first wrong or partial
- * answer buys the question's hint and one more attempt before anything is
- * recorded. Nothing about the tier or the score moves here; the second
- * answer decides.
+ * The reader's rule: a first wrong or partial answer buys the question's hint
+ * and one more attempt before anything is recorded. Nothing about the tier or
+ * the score moves here; the second answer decides. This is the same question
+ * asked again with the answer still hidden — not a new question on a passage
+ * already shown, which the quiz never does.
  */
 export function armRetry(session: QuizSession): QuizSession {
   return { ...session, attempt: 2, hintShown: true };
@@ -571,70 +600,26 @@ export function retryLine(q: QuizQuestion): string {
 }
 
 /**
- * Record a grade and decide what the next question should be.
+ * Record a grade and decide what tier the next question is written at.
  *
- * The escalation is the reference quiz's: a correct answer raises the tier, so
- * an all-correct run keeps getting harder until a gap appears; a wrong answer
- * holds the tier and probes the same passage once more from another angle,
- * because one miss is not yet evidence of a gap. A second miss on that same
- * passage ends the probing — two attempts is the limit, not a loop.
+ * The escalation is the reference quiz's: a correct answer raises the tier,
+ * two in a row jump to the top, and a wrong or declined answer comes back
+ * down. The tier is about keeping each question at a level the reader can
+ * reach; it never decides when the quiz ends. The quiz ends when every usable
+ * passage has been asked (or the cap fires), because its purpose is to find
+ * the passages the reader cannot produce from memory, and it cannot know that
+ * about a passage it never asked.
  *
- * A retry is a graded question like any other: it counts toward the safety cap
- * and it can be the answer that brackets the edge.
+ * No passage is asked twice. The grade below a miss shows the expected answer
+ * and the passage, so a second question on it would test reading, not recall;
+ * the miss is recorded once, with its diagnosis, and becomes one card.
  */
-/**
- * Whether the edge of what the reader knows has been located.
- *
- * The reference system's rule, and the reason a quiz is not a fixed number of
- * questions: the edge is found only when it is *bracketed* — a floor, something
- * they got right, and a ceiling, something they got wrong or could not answer.
- * One side alone says almost nothing. A run of right answers proves only that
- * the questions were too easy; a single miss is one coordinate whose kind is
- * still unknown.
- *
- * So a ceiling has to be confirmed rather than taken from one miss: a careless
- * slip and a real gap look identical at one data point, and the rule is to probe
- * around a miss before concluding anything. Two misses, or one miss that a later
- * question on the same tier or above did not overturn, is a ceiling.
- *
- * The floor must sit *below* the ceiling, otherwise nothing has been bracketed —
- * getting a hard question right after failing an easy one locates no edge, it
- * just says the grading disagreed with itself.
- */
-function bracketed(asked: AskedQuestion[]): boolean {
-  // A quiz needs somewhere to have come from: two answers cannot bracket much.
-  if (asked.length < 3) return false;
-
-  const misses = asked.filter((a) => a.verdict === "incorrect" || a.verdict === "skipped");
-  if (misses.length === 0) return false;
-
-  const floors = asked.filter((a) => a.verdict === "correct");
-  if (floors.length === 0) return false;
-
-  // The ceiling is the easiest tier they failed; the floor the hardest they
-  // cleared. Two misses at the ceiling, or at the only tier there is, confirm
-  // it — one miss could be a slip, and the rule is to probe around it first.
-  const ceiling = Math.min(...misses.map((a) => a.difficulty));
-  const floor = Math.max(...floors.map((a) => a.difficulty));
-  // Two misses anywhere confirm it. Counting only those at the ceiling's own
-  // tier would never confirm the ordinary case, because a miss drops the tier:
-  // fail at 2 and the next question comes at 1, so the two misses that together
-  // establish the ceiling sit on different tiers by construction.
-  if (misses.length < 2) return false;
-
-  // A confirmed ceiling at or below the floor is not a contradiction to wait
-  // out — it is the more informative reading. Clearing tier 1 and then missing
-  // twice at tier 1 says the first answer was the fluke, and the edge sits at
-  // the very bottom of what was asked. Either way it has been located.
-  return floor < ceiling || ceiling <= 1;
-}
-
 /**
  * How many questions the reader has just got right in a row.
  *
  * Only the unbroken tail counts: two correct answers separated by a miss are
  * not a streak, because the miss is the more informative of the three — it is
- * the only one that bracketed the edge from above.
+ * the one that said where the tier was too high.
  */
 function correctStreak(asked: AskedQuestion[]): number {
   let n = 0;
@@ -680,8 +665,6 @@ export function applyGrade(
   ];
 
   let difficulty = session.difficulty;
-  let retryOf: string | null = null;
-  let retryAngle = "";
 
   if (verdict === "correct") {
     if (session.attempt === 2) {
@@ -697,30 +680,11 @@ export function applyGrade(
       const streak = correctStreak(session.asked) + 1;
       difficulty = (streak >= 2 ? 3 : Math.min(3, session.difficulty + 1)) as 1 | 2 | 3;
     }
-  } else if (verdict === "incorrect") {
-    // The ceiling is now bracketed: something below the tier that just failed
-    // is where the edge actually sits, so narrow back toward it instead of
-    // asking a second question the reader cannot reach either.
-    difficulty = Math.max(1, session.difficulty - 1) as 1 | 2 | 3;
-
-    // Probe around a miss rather than moving on from it. A wrong answer is one
-    // coordinate whose kind is not yet known, and the kinds are not worth the
-    // same: a misconception is a belief that will keep producing wrong answers
-    // until it is replaced, so it earns more than one follow-up, while a slip
-    // earns none — the reader already knows it and a second question only
-    // spends a slot. `spent` is what this unit has already had, counted before
-    // the answer being graded is added.
-    const gap = extras.gap ?? "none";
-    const spent = session.asked.filter((a) => a.unitId === current.unitId).length;
-    const allowed = gap === "misconception" ? 2 : gap === "slip" ? 0 : 1;
-    if (spent < allowed) {
-      retryOf = current.unitId;
-      retryAngle = extras.gapNote?.trim() || current.question;
-    }
-  } else if (verdict === "skipped") {
-    // Not a wrong answer — a declined one, and a passage the reader would not
-    // attempt is a ceiling too. It earns no retry (there is nothing to correct)
-    // but the next question should still come back down to where they can reach.
+  } else if (verdict === "incorrect" || verdict === "skipped") {
+    // Something below the tier that just failed is where the reader can
+    // reach, so come back down for the next passage rather than asking a
+    // second question they cannot answer either. A skip is a declined answer,
+    // not a wrong one, but it says the same thing about the tier.
     difficulty = Math.max(1, session.difficulty - 1) as 1 | 2 | 3;
   }
 
@@ -733,14 +697,37 @@ export function applyGrade(
     partial: session.partial + (verdict === "partial" ? 1 : 0),
     wrong: session.wrong + (verdict === "incorrect" ? 1 : 0),
     skipped: session.skipped + (verdict === "skipped" ? 1 : 0),
-    retryOf,
-    retryAngle,
     hintShown: false,
     attempt: 1,
-    // The edge being located is the reason to stop; the cap only catches a
-    // session that would otherwise never bracket.
-    finished: bracketed(asked) || asked.length >= session.cap,
+    // Covering the pool is the reason to stop; the cap only catches a pool
+    // longer than one sitting.
+    finished: asked.length >= session.cap || remainingUnits(session.pool, session.dropped, asked).length === 0,
   };
+}
+
+/**
+ * The evidence the next question may be written from: the open passages only,
+ * each still carrying its frozen number. Showing the writer passages that are
+ * already asked or set aside only invites it to cite one, which `checkQuestion`
+ * then rejects.
+ */
+export function nextEvidence(session: QuizSession): AskEvidenceIn[] {
+  const open = new Set(usableUnits(session).map((u) => u.id));
+  return session.numbered.filter((_, i) => open.has(session.pool[i].id));
+}
+
+/**
+ * What a second failed draft does. A draft citing an open passage sets that
+ * passage aside, which is progress: one fewer passage to try. A draft citing a
+ * passage that is already closed (asked, set aside, or outside the pool) cannot
+ * be set aside again, so nothing would change and the next attempt would be
+ * the same call; that is `stuck`, and the panel ends the quiz instead of
+ * looping.
+ */
+export function failedDraft(session: QuizSession, evidenceN: number): { session: QuizSession; stuck: boolean } {
+  const unit = Number.isInteger(evidenceN) ? session.pool[evidenceN - 1] : undefined;
+  if (!unit || !usableUnits(session).some((u) => u.id === unit.id)) return { session, stuck: true };
+  return { session: dropUnit(session, unit.id), stuck: false };
 }
 
 /** Mark a unit as unusable for the rest of the session, keeping the numbering intact. */
@@ -753,19 +740,13 @@ export function dropUnit(session: QuizSession, unitId: string): QuizSession {
 export function nextRequest(session: QuizSession): {
   difficulty: 1 | 2 | 3;
   askedQuestions: string[];
-  retryOfN: number | null;
-  retryAngle: string;
+  /** Expected answers the reader has already been shown, so the model does not ask for them again. */
+  revealed: string[];
 } {
-  let retryOfN: number | null = null;
-  if (session.retryOf) {
-    const i = session.pool.findIndex((u) => u.id === session.retryOf);
-    if (i >= 0) retryOfN = i + 1;
-  }
   return {
     difficulty: session.difficulty,
     askedQuestions: session.asked.map((a) => a.question),
-    retryOfN,
-    retryAngle: retryOfN === null ? "" : session.retryAngle,
+    revealed: [...new Set(session.asked.map((a) => a.answer.trim()).filter(Boolean))],
   };
 }
 
@@ -779,9 +760,11 @@ export function nextRequest(session: QuizSession): {
  * material the inbox chip should offer to turn into cards.
  */
 export function summary(session: QuizSession): { line: string; misses: AskedQuestion[] } {
-  // Scored against what was actually asked. The quiz has no target length, so
-  // the denominator is the number of questions it took to find the edge.
+  // Scored against what was actually asked: the pool's usable passages when
+  // the quiz ran to the end, fewer when the cap or "stop" cut it short.
   const askedCount = session.asked.length;
+  const left = usableUnits(session).length;
+  const setAside = session.dropped.length;
   const line = [
     `${session.correct} of ${askedCount} correct`,
     `${session.partial} partial`,
@@ -789,18 +772,17 @@ export function summary(session: QuizSession): { line: string; misses: AskedQues
     `${session.skipped} skipped`,
   ]
     .join(" · ")
-    // Say why it ended. Finding the edge is the intended ending, so it is named
-    // as the result it is; hitting the cap means the edge was never located, and
-    // saying so is more honest than implying the quiz finished its job.
+    // Say why it ended. Covering the pool is the intended ending, so it is
+    // named as the result it is; hitting the cap means passages went unasked,
+    // and saying how many is more honest than implying the note was covered.
     .concat(
-      bracketed(session.asked)
-        ? " — found your edge, stopping here"
+      left === 0
+        ? ` — every passage asked${setAside ? `, ${setAside} set aside` : ""}`
         : askedCount >= session.cap
-          ? " — stopped at the question cap without finding your edge"
+          ? ` — stopped at the question cap with ${left} passage${left === 1 ? "" : "s"} not asked`
           : "",
     );
-  // One entry per passage: a retried passage was asked twice, but it is one
-  // thing to review and one thing to send to the inbox.
+  // One entry per passage, guarded even though a passage is asked at most once.
   //
   // What counts as a miss is the diagnosis, not the verdict. A card costs the
   // reader minutes a year for years, so the question is not "was this wrong"

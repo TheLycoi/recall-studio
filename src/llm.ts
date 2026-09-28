@@ -1099,13 +1099,13 @@ Difficulty 3 is a distinction or an application: what separates two similar thin
 
 The tier describes what is asked, not how obscure it is. A difficulty 3 question is still answerable from the passage in front of you by a reader who studied it; it just asks them to do something with it rather than repeat it.
 
-The tier moves because the quiz is searching for one thing: the edge of what this reader knows — the point where what they can produce runs out. A right answer only proves a floor, so the tier jumps rather than inches; a wrong answer or an admitted gap marks a ceiling, so it comes back down to find where between the two the edge actually sits. Write the hardest honest question the tier allows. A quiz the reader answers perfectly has told them nothing they did not already know.
+The tier moves with the reader: a right answer raises it, so a run of right answers is asked to do more with each passage than repeat it; a wrong answer or an admitted gap brings it back down to a level they can reach. Write the hardest honest question the tier allows of the passage you chose. The quiz asks every passage once, and its purpose is to find the passages the reader cannot produce from memory so those can become flashcards, so each question should be the one that would show whether they know that passage.
 </difficulty>
 
 <what_has_been_asked_already>
-When an already_asked block is given, it lists the questions this reader has already answered in this quiz. Do not ask any of them again, and do not ask a differently worded question that tests the same fact: repeating a fact wastes one of five questions and tells the reader nothing new about what they know.
+When an already_asked block is given, it lists the questions this reader has already answered in this quiz. Do not ask any of them again, and do not ask a differently worded question that tests the same fact: repeating a fact spends a question and tells the reader nothing new about what they know. A passage that has been asked about is closed for the rest of the quiz, whatever the answer was, because the reader has since been shown it in full.
 
-When you are told to ask again about a piece of evidence from a different angle, keep that evidence and change what you ask of it. The reader missed the first question, so the passage is worth a second attempt, but the same question in new clothes only asks them to fail twice. Ask why after asking what; ask for an example after asking for a definition; ask what a term is contrasted with after asking what it means.
+When you are told which answers have already been shown to the reader, do not write a question whose answer is one of them, or a phrase made of the same words. Every grade prints the expected answer and quotes the passage, and passages in one note restate each other, so a fact from passage [3] may already be on the screen under the grade for passage [2]. A question the reader can answer by scrolling up is not retrieval practice.
 </what_has_been_asked_already>
 
 <the_hint>

@@ -627,7 +627,7 @@ else is a question for your notes. Three buttons above the box — **Quiz me**,
 
 | Say | What happens |
 | --- | --- |
-| **quiz me** | free-recall questions on the open note until the edge of what you know shows |
+| **quiz me** | one free-recall question per passage of the open note; the misses become cards |
 | **quiz me on Receptors** / **on HBIO250** / **on everything** | a page by title or alias, a class, or every topic note |
 | **digest** / **digest Doping** | group the PDF++ highlights of the open file — or the PDF or note you name — into concept and entity pages, filing into pages you already have first |
 | **highlight** / **highlight Ch3** | the model picks spans in a PDF, each checked against the text layer; you can paste a transcript or study guide first |
@@ -749,7 +749,7 @@ from the vault; nothing is asked that the evidence does not state.
 
 | Say | What it does |
 | --- | --- |
-| **quiz me** | questions on the open note until the edge of what you know shows |
+| **quiz me** | one question per passage of the open note; the misses become cards |
 | **quiz me on Receptors** / **on HBIO250** / **on everything** | a page by title or alias, a class, or every topic note |
 | **hint** | one clue for the current question, once |
 | **skip**, **idk** (or an empty line) | decline the question: the answer and passage are shown, and the passage counts as one you could not produce |
@@ -771,35 +771,42 @@ expected answer, and yours; it returns ✓ correct, △ partly, or ✗ not quite
 with feedback in the passage's own words, then the expected answer and the
 passage as a PDF++ callout or quote block.
 
-**The quiz runs until it finds the edge of what you know.** There is no
-fixed number of questions. The probe rules follow
+**The quiz asks every passage once and ends when the note is covered.**
+Its job is to find the passages you cannot produce from memory so those
+become cards, in the sense of your wiki's retrieval-practice page: the
+learning is in the effortful recall, and a fact you already know earns no
+card. No passage is asked twice in a session, whatever the verdict: every
+grade shows the expected answer and the passage under it, so a second
+question on the same passage would be answered by scrolling up (the
+false-positive litmus test), and answers already shown are listed to the
+question writer and rejected by code if a later question asks for one
+anyway. The tier rules follow
 [amosblomqvist/learn](https://github.com/amosblomqvist/learn): a correct
-answer jumps the tier, from recall (a fact) to why (a mechanism) to
+answer raises the tier, from recall (a fact) to why (a mechanism) to
 distinguish (what separates two similar things), and two in a row go
-straight to the top; a wrong or declined answer drops it. The edge is
-located only when it is *bracketed*: a tier you cleared (a floor) sitting
-below a tier you missed twice (a ceiling). A run of right answers is not
-"done", it means the questions were too easy, and one miss is not done
-either, because a slip and a real gap look the same at one data point. So
-the grader also names what an answer revealed, *slip*, *vocabulary*,
-*detail*, or *misconception*, with a note on the specific gap: a
-misconception is probed twice more from other angles, a slip not at all.
-**Question cap per quiz** (30) is a runaway guard, not a target.
+straight to the top; a wrong or declined answer drops it. The tier keeps
+each question at a level you can reach; it never ends the quiz. The grader
+also names what an answer revealed, *slip*, *vocabulary*, *detail*, or
+*misconception*, with a note on the specific gap, and the card writer uses
+that to decide what the card tests. **Question cap per quiz** (30) is a
+runaway guard, not a target: when it fires, the summary says how many
+passages were not asked.
 
 **One more chance.** A first wrong or partial answer shows the question's hint
 and asks once more; only the second answer is recorded. Right after the hint
 counts as correct but holds the tier and starts no streak, and is never sent
 to the inbox as a miss.
 
-The summary shows the score, why the quiz stopped, and the missed passages
-with two chips. **Send N missed to inbox** hands each missed passage to the
+The summary shows the score, whether every passage was asked, and the
+missed passages with two chips. **Send N missed to inbox** hands each missed passage to the
 card writer, critique, and linter like any capture, with the question you
 missed, the expected answer, and the grader's diagnosis attached as the
 highlight's instruction, so the card tests the fact you missed rather than
 whichever fact in the passage the writer would have picked. Slips are not
 sent: you knew it. The highlights arrive titled with the missed question and
 with the origin "quiz miss". **Quiz again** reruns the same scope with a
-fresh pool.
+fresh pool, so the loop is: quiz the note, card the misses, quiz it again
+later.
 
 Settings: **Question cap per quiz** (30), **Evidence pool per quiz** (20
 matching highlights and claims), **Standing instructions for quizzes**.
@@ -856,13 +863,13 @@ Difficulty 3 is a distinction or an application: what separates two similar thin
 
 The tier describes what is asked, not how obscure it is. A difficulty 3 question is still answerable from the passage in front of you by a reader who studied it; it just asks them to do something with it rather than repeat it.
 
-The tier moves because the quiz is searching for one thing: the edge of what this reader knows — the point where what they can produce runs out. A right answer only proves a floor, so the tier jumps rather than inches; a wrong answer or an admitted gap marks a ceiling, so it comes back down to find where between the two the edge actually sits. Write the hardest honest question the tier allows. A quiz the reader answers perfectly has told them nothing they did not already know.
+The tier moves with the reader: a right answer raises it, so a run of right answers is asked to do more with each passage than repeat it; a wrong answer or an admitted gap brings it back down to a level they can reach. Write the hardest honest question the tier allows of the passage you chose. The quiz asks every passage once, and its purpose is to find the passages the reader cannot produce from memory so those can become flashcards, so each question should be the one that would show whether they know that passage.
 </difficulty>
 
 <what_has_been_asked_already>
-When an already_asked block is given, it lists the questions this reader has already answered in this quiz. Do not ask any of them again, and do not ask a differently worded question that tests the same fact: repeating a fact wastes one of five questions and tells the reader nothing new about what they know.
+When an already_asked block is given, it lists the questions this reader has already answered in this quiz. Do not ask any of them again, and do not ask a differently worded question that tests the same fact: repeating a fact spends a question and tells the reader nothing new about what they know. A passage that has been asked about is closed for the rest of the quiz, whatever the answer was, because the reader has since been shown it in full.
 
-When you are told to ask again about a piece of evidence from a different angle, keep that evidence and change what you ask of it. The reader missed the first question, so the passage is worth a second attempt, but the same question in new clothes only asks them to fail twice. Ask why after asking what; ask for an example after asking for a definition; ask what a term is contrasted with after asking what it means.
+When you are told which answers have already been shown to the reader, do not write a question whose answer is one of them, or a phrase made of the same words. Every grade prints the expected answer and quotes the passage, and passages in one note restate each other, so a fact from passage [3] may already be on the screen under the grade for passage [2]. A question the reader can answer by scrolling up is not retrieval practice.
 </what_has_been_asked_already>
 
 <the_hint>
@@ -974,7 +981,7 @@ Before you return, check that your verdict rests on what the evidence states and
 | Answer from general knowledge when your notes do not | off | lets the model answer a question the notes do not cover, under a banner saying it did not come from them |
 | Show the grounding line under answers | on | the one-line coverage summary, with counts of any citations dropped and of sentences that matched no passage, then the route, what the evidence filter kept, and the class searched |
 | List unmatched sentences | on | lists the sentences that matched no passage under the grounding line; the count on the line stays when this is off |
-| Question cap per quiz | 30 | a runaway guard: a quiz ends when it brackets the edge of what you know, and this only stops one that never does |
+| Question cap per quiz | 30 | a runaway guard: a quiz ends when every passage in its pool has been asked, and this only cuts short a pool longer than one sitting |
 | Evidence pool per quiz | 20 | matching highlights and claims a quiz draws from |
 | Standing instructions for quizzes | *(empty)* | appended to every question-writing prompt |
 

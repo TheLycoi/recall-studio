@@ -212,8 +212,8 @@ export interface QuizQuestionMessageArgs {
   evidence: QuizEvidenceIn[];
   difficulty: 1 | 2 | 3;
   askedQuestions: string[];
-  retryOfN: number | null;
-  retryAngle: string;
+  /** Expected answers already shown to the reader in earlier grades; the model must not ask for them again. */
+  revealed: string[];
   standingInstructions: string;
   failure: string;
 }
@@ -229,11 +229,11 @@ const QUIZ_DIFFICULTY: Record<1 | 2 | 3, string> = {
  * Build the user message for one quiz question.
  *
  * Same order as the ask message: the evidence is the long input and goes
- * first, the questions already asked follow it so the model can see what not
- * to repeat, and the instructions narrow from there — the tier, then the retry
- * angle when there is one, then the reader's standing instructions, then the
- * reason the last attempt was rejected. The closing line is one sentence,
- * because by then everything it needs is above it.
+ * first, the questions already asked and the answers already shown follow it
+ * so the model can see what not to repeat, and the instructions narrow from
+ * there — the tier, then the reader's standing instructions, then the reason
+ * the last attempt was rejected. The closing line is one sentence, because by
+ * then everything it needs is above it.
  *
  * `already_asked` is omitted rather than printed empty: an empty block reads
  * as "nothing has been asked", which is true, but it also invites the model to
@@ -243,12 +243,14 @@ export function buildQuizQuestionMessage(a: QuizQuestionMessageArgs): string {
   const asked = a.askedQuestions.map((q) => q.trim()).filter(Boolean);
   const standing = a.standingInstructions.trim();
   const failure = a.failure.trim();
-  const angle = a.retryAngle.trim();
+  const revealed = a.revealed.map((r) => r.trim()).filter(Boolean);
   return [
     `<evidence>\n${askEvidenceLines(a.evidence)}\n</evidence>`,
     asked.length ? `<already_asked>\n${asked.join("\n")}\n</already_asked>` : "",
+    // Every grade shows its expected answer, so these are on the reader's
+    // screen; a question they answer is a scroll, not a recall.
+    revealed.length ? `Already shown to the reader as answers, so do not ask for any of them again: ${revealed.join("; ")}` : "",
     `Difficulty ${a.difficulty}: ${QUIZ_DIFFICULTY[a.difficulty]}.`,
-    a.retryOfN === null ? "" : `Ask again about evidence [${a.retryOfN}] from a different angle than: ${angle}`,
     standing ? `Standing instructions: ${standing}` : "",
     failure ? `The previous attempt was rejected: ${failure}. Fix that.` : "",
     `Write one question.`,

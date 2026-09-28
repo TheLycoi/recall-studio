@@ -400,8 +400,7 @@ const quizBase = {
   evidence: quizEvidence,
   difficulty: 2,
   askedQuestions: [],
-  retryOfN: null,
-  retryAngle: "",
+  revealed: [],
   standingInstructions: "",
   failure: "",
 };
@@ -412,7 +411,7 @@ test("the quiz question message puts the evidence first and the task last, omitt
   assert.ok(msg.includes("[1] (Receptors, p.4) Receptors bind ligands"), "evidence lines carry the note title and page");
   assert.ok(msg.includes("[2] (Drug Disposition) Metabolism"), "a claim with no page prints without one");
   assert.ok(!msg.includes("<already_asked>"), "no already_asked block when nothing has been asked");
-  assert.ok(!msg.includes("Ask again about evidence"), "no retry line when retryOfN is null");
+  assert.ok(!msg.includes("Already shown to the reader"), "no revealed line when no grade has been shown");
   assert.ok(!msg.includes("Standing instructions:"), "no standing line when blank");
   assert.ok(!msg.includes("was rejected"), "no rejection line when there was no failure");
   assert.ok(
@@ -426,8 +425,7 @@ test("the quiz question blocks appear in the order the prompt expects", () => {
   const msg = p.buildQuizQuestionMessage({
     ...quizBase,
     askedQuestions: ["What is affinity?", "  "],
-    retryOfN: 1,
-    retryAngle: "What is affinity?",
+    revealed: ["high affinity"],
     standingInstructions: "prefer mechanisms",
     failure: "the quote was not in evidence 1",
   });
@@ -439,8 +437,8 @@ test("the quiz question blocks appear in the order the prompt expects", () => {
   const order = [
     at("<evidence>"),
     at("<already_asked>"),
+    at("Already shown to the reader as answers, so do not ask for any of them again: high affinity"),
     at("Difficulty 2:"),
-    at("Ask again about evidence [1] from a different angle than: What is affinity?"),
     at("Standing instructions: prefer mechanisms"),
     at("The previous attempt was rejected: the quote was not in evidence 1. Fix that."),
     at("Write one question."),
@@ -448,6 +446,16 @@ test("the quiz question blocks appear in the order the prompt expects", () => {
   assert.deepEqual(order, [...order].sort((a, b) => a - b), "the blocks run in the documented order");
   assert.ok(msg.includes("<already_asked>\nWhat is affinity?\n</already_asked>"), "blank asked questions are dropped");
   assert.ok(msg.endsWith("Write one question."), "the closing instruction is still last");
+});
+
+test("the quiz question message lists the answers the reader has already seen", () => {
+  const msg = p.buildQuizQuestionMessage({ ...quizBase, askedQuestions: ["What pumps calcium into the SR?"], revealed: ["Ca2+ ATPases (SERCAs)", "  ", "a drug"] });
+  assert.ok(
+    msg.includes("Already shown to the reader as answers, so do not ask for any of them again: Ca2+ ATPases (SERCAs); a drug"),
+    "the revealed answers are listed, blanks dropped",
+  );
+  assert.ok(msg.indexOf("</already_asked>") < msg.indexOf("Already shown"), "after the asked questions, before the tier");
+  assert.ok(msg.indexOf("Already shown") < msg.indexOf("Difficulty 2:"));
 });
 
 test("each difficulty tier prints its own description", () => {
@@ -916,4 +924,12 @@ test("RELEVANCE_SYSTEM tells the model to judge, never to answer, and to return 
   const lines = p.RELEVANCE_SYSTEM.split("\n").length;
   assert.ok(lines >= 25 && lines <= 40, `system prompt is ${lines} lines`);
   assert.ok(/<examples>/.test(p.RELEVANCE_SYSTEM), "it carries worked examples");
+});
+
+
+test("the quiz question system prompt names the knowledge types, the lenses and note order", () => {
+  const src = p.QUIZ_QUESTION_SYSTEM ?? "";
+  for (const needle of ["<what_kind_of_knowledge>", "fact", "procedure", "concept", "always, sometimes, or never true", "lowest-numbered open passage"]) {
+    assert.ok(src.includes(needle), `system prompt mentions ${needle}`);
+  }
 });
