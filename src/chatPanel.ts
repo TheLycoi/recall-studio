@@ -394,8 +394,7 @@ export class ChatPanel {
         // The plugin's one cancel token, which the status bar and the stop
         // command already reach; taken only when no other run holds it.
         const cancel = this.plugin.cancel;
-        const owns = !cancel.active;
-        if (owns) cancel.begin("model review of the wiki");
+        const owner = cancel.active ? undefined : cancel.begin("model review of the wiki");
         try {
           const review = await runModelReview(
             this.plugin,
@@ -403,10 +402,10 @@ export class ChatPanel {
             infos,
             (s) => {
               this.status = s;
-              if (owns) cancel.progress(s);
+              cancel.progress(s, owner);
               this.rerender();
             },
-            owns ? cancel : undefined,
+            owner !== undefined ? cancel : undefined,
           );
           const turn = renderReviewTurn(report, review.issues, review.line);
           this.turns.push({ role: "assistant", text: turn });
@@ -418,7 +417,7 @@ export class ChatPanel {
         } catch (e) {
           this.pushSystem(`Model review failed: ${describeError(e)}`);
         } finally {
-          if (owns) cancel.end();
+          cancel.end(owner);
           this.status = "checking the wiki…";
         }
       }

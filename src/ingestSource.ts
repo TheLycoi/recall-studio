@@ -54,7 +54,7 @@ const MAX_PER_NOTE = 24;
  * with a citation that would not survive being clicked.
  */
 export async function ingestSourceNote(plugin: WikiLmPlugin, file: TFile, opts: { quiet?: boolean } = {}): Promise<"written" | "nothing"> {
-  let ownsRun = false;
+  let owner: number | undefined;
   try {
     const s = plugin.settings;
     const md = await plugin.app.vault.read(file); // obsidian.d.ts:7424
@@ -98,8 +98,8 @@ export async function ingestSourceNote(plugin: WikiLmPlugin, file: TFile, opts: 
     const wiki = await wikiNotes(plugin, "", []);
     const newNotes: SuggestDraft["new_notes"] = [];
 
-    ownsRun = !plugin.cancel.active;
-    if (ownsRun) plugin.cancel.begin(`reading ${title}`);
+    // Taken only when nothing holds it: inside a folder run, the folder does.
+    owner = plugin.cancel.active ? undefined : plugin.cancel.begin(`reading ${title}`);
     let stopped = false;
 
     for (const [n, batch] of batches.entries()) {
@@ -107,7 +107,7 @@ export async function ingestSourceNote(plugin: WikiLmPlugin, file: TFile, opts: 
         stopped = true;
         break;
       }
-      plugin.cancel.progress(`part ${n + 1} of ${batches.length}`);
+      plugin.cancel.progress(`part ${n + 1} of ${batches.length}`, owner);
       const remaining = MAX_PER_NOTE - accepted.length;
       if (remaining <= 0) break;
 
@@ -149,7 +149,7 @@ export async function ingestSourceNote(plugin: WikiLmPlugin, file: TFile, opts: 
         newNotes.push(n);
       }
     }
-    if (ownsRun) plugin.cancel.end();
+    plugin.cancel.end(owner);
     if (stopped) new Notice("WikiLM: stopped; keeping what was already verified.");
 
     if (accepted.length === 0) {
@@ -218,7 +218,7 @@ export async function ingestSourceNote(plugin: WikiLmPlugin, file: TFile, opts: 
     if (!opts.quiet || result.written > 0) new Notice(`WikiLM: ${title} — ${bits.join(", ")}.`, 8000);
     return result.written > 0 || queued > 0 ? "written" : "nothing";
   } catch (e) {
-    if (ownsRun) plugin.cancel.end();
+    plugin.cancel.end(owner);
     new Notice(`WikiLM: ${describeError(e)}`, 8000);
     return "nothing";
   }
@@ -302,7 +302,15 @@ export async function ingestFolder(plugin: WikiLmPlugin, folder: TFolder): Promi
     return;
   }
 
-  plugin.cancel.begin(`ingesting ${folder.name}`);
+  // One run at a time holds the token. Taking it over from a run already
+  // going (a lint's model review, a PDF being highlighted) would leave that
+  // run unstoppable from the status bar, so the folder waits for it instead.
+  if (plugin.cancel.active) {
+    const running = plugin.cancel.label ? ` (${plugin.cancel.label})` : "";
+    new Notice(`WikiLM: another run is still going${running}. Ingest ${folder.name} once it finishes, or stop it from the status bar.`, 8000);
+    return;
+  }
+  const owner = plugin.cancel.begin(`ingesting ${folder.name}`);
   let done = 0;
   let cancelled = false;
   try {
@@ -311,12 +319,12 @@ export async function ingestFolder(plugin: WikiLmPlugin, folder: TFolder): Promi
         cancelled = true;
         break;
       }
-      plugin.cancel.progress(`${i + 1}/${todo.length} ${f.basename}`);
+      plugin.cancel.progress(`${i + 1}/${todo.length} ${f.basename}`, owner);
       await ingestSourceNote(plugin, f, { quiet: true });
       done++;
     }
   } finally {
-    plugin.cancel.end();
+    plugin.cancel.end(owner);
   }
   new Notice(
     `WikiLM: ${done} of ${todo.length} note${todo.length === 1 ? "" : "s"} read${skipped ? `, ${skipped} already done` : ""}${cancelled ? ", stopped at your request" : ""}.`,

@@ -196,7 +196,7 @@ export async function suggestPdfHighlights(
   pdf: TFile,
   opts: { transcriptGate?: () => Promise<"paste" | "skip" | "cancel"> } = {},
 ): Promise<void> {
-  let ownsRun = false;
+  let owner: number | undefined;
   try {
     const s = plugin.settings;
 
@@ -269,8 +269,8 @@ export async function suggestPdfHighlights(
     const newNotes: SuggestDraft["new_notes"] = [];
     let unlocated = 0;
 
-    ownsRun = !plugin.cancel.active;
-    if (ownsRun) plugin.cancel.begin(`highlighting ${manifest.pdfBasename}`);
+    // Taken only when nothing holds it: inside a folder run, the folder does.
+    owner = plugin.cancel.active ? undefined : plugin.cancel.begin(`highlighting ${manifest.pdfBasename}`);
     let stopped = false;
 
     for (const batch of batchPages(pages.length, s.suggestPagesPerBatch)) {
@@ -278,7 +278,7 @@ export async function suggestPdfHighlights(
         stopped = true;
         break;
       }
-      plugin.cancel.progress(`pages ${batch.from}–${batch.to} of ${pages.length}`);
+      plugin.cancel.progress(`pages ${batch.from}–${batch.to} of ${pages.length}`, owner);
       const remaining = cap - accepted.length;
       if (remaining <= 0) break;
 
@@ -319,7 +319,7 @@ export async function suggestPdfHighlights(
         newNotes.push(n);
       }
     }
-    if (ownsRun) plugin.cancel.end();
+    plugin.cancel.end(owner);
     if (stopped) new Notice("WikiLM: stopped; keeping what was already verified.");
 
     if (accepted.length === 0) {
@@ -393,7 +393,7 @@ export async function suggestPdfHighlights(
       8000,
     );
   } catch (e) {
-    if (ownsRun) plugin.cancel.end();
+    plugin.cancel.end(owner);
     console.error("WikiLM: suggesting highlights failed", e);
     new Notice(`WikiLM: suggesting highlights failed. ${describeError(e)}`, 8000);
   }
