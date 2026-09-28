@@ -1032,7 +1032,7 @@ export class ChatPanel {
   }
 
   /** Run a studio action with a system line that says what happened. */
-  private async narrate(text: string, run: () => Promise<void>): Promise<void> {
+  private async narrate(text: string, run: () => Promise<unknown>): Promise<void> {
     const turn: ChatTurn = { role: "system", text };
     this.turns.push(turn);
     this.trim();

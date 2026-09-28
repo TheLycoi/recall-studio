@@ -7,13 +7,13 @@
  * lives in a pure module with its own tests. This file only decides what to
  * read, what to ask, and what to write.
  */
-import { Notice, TFile, normalizePath } from "obsidian";
+import { Notice, TFile, TFolder, normalizePath } from "obsidian";
 import type WikiLmPlugin from "./main";
 import { captureManifestHighlights } from "./capture";
-import { decideGate, type GateDecision } from "./digestGate";
+import { decideGate, digestFolderSummary, planDigestFolder, type DigestFolderTally, type GateDecision } from "./digestGate";
 import { describeError } from "./llm";
 import type { Manifest, ManifestHighlight } from "./manifest";
-import { askDigestOptions, askInstruction, previewDigest } from "./modals";
+import { askDigestOptions, askInstruction, previewDigest, type DigestProduct } from "./modals";
 import { collectPdfHighlights } from "./pdfHighlights";
 import { isPdfFile } from "./pdf";
 import type { DigestDraft } from "./schemas";
@@ -217,42 +217,58 @@ export interface DigestOptions {
    * the PDF first, "cancel" stops.
    */
   gate?: (decision: GateDecision) => Promise<"highlight" | "cancel">;
+  /**
+   * The product and instruction, already answered. A folder run asks once for
+   * the whole folder and passes the answer here, so the form is not shown
+   * again for every PDF.
+   */
+  options?: { product: DigestProduct; instruction: string };
+  /**
+   * The PDF's highlights and text, already read. A folder run reads every PDF
+   * once to decide which ones qualify, and hands that read on rather than
+   * parsing the document a second time.
+   */
+  resolved?: Resolved;
 }
 
+/** How one PDF's digest ended, for a folder run's tally. */
+export type DigestOutcome = "digested" | "skipped" | "failed";
+
 /**
- * "Digest PDF highlights…": manifest in, topic notes out, gated by a preview.
+ * "Digest: PDF highlights into concept and entity notes…": manifest in, topic
+ * notes out, gated by a preview.
  * The draft always comes from the configured provider.
  */
-export async function digestPdf(plugin: WikiLmPlugin, source: TFile, opts: DigestOptions = {}): Promise<void> {
+export async function digestPdf(plugin: WikiLmPlugin, source: TFile, opts: DigestOptions = {}): Promise<DigestOutcome> {
   try {
-    const resolved = await resolveSource(plugin, source);
-    if (!resolved) return;
+    const resolved = opts.resolved ?? (await resolveSource(plugin, source));
+    if (!resolved) return "failed";
     const { manifest, paperText } = resolved;
 
     const gate = decideGate(manifest);
     if (gate.action === "offer") {
       if (!opts.gate) {
         new Notice(
-          `WikiLM: ${manifest.pdfBasename} has no highlights with text (${gate.total} without). Highlight it in PDF++, or run “AI-highlight this PDF into the wiki…” first.`,
+          `WikiLM: ${manifest.pdfBasename} has no highlights with text (${gate.total} without). Highlight it in PDF++, or run “AI highlight…” first.`,
           10000,
         );
-        return;
+        return "skipped";
       }
       const choice = await opts.gate(gate);
       if (choice === "highlight" && isPdfFile(source)) await suggestPdfHighlights(plugin, source);
-      return;
+      return "skipped";
     }
 
     let classCode = manifest.classCode;
     if (!classCode) {
       const asked = await askInstruction(plugin.app, "Class code for this PDF", "e.g. HBIO250");
-      if (asked === null) return;
+      if (asked === null) return "skipped";
       classCode = asked.trim();
       manifest.classCode = classCode;
     }
 
-    const options = await askDigestOptions(plugin.app, { product: "notes", instruction: "" });
-    if (options === null) return;
+    const options = opts.options ?? (await askDigestOptions(plugin.app, { product: "notes", instruction: "" }));
+    if (options === null) return "skipped";
     const { product, instruction } = options;
 
     // Flashcards only: no model call, no notes, straight into the inbox.
@@ -264,14 +280,14 @@ export async function digestPdf(plugin: WikiLmPlugin, source: TFile, opts: Diges
         "",
         null,
       );
-      return;
+      return "digested";
     }
 
     const topicFolder = plugin.settings.topicFolder;
     const pages = await existingPages(plugin, topicFolder);
 
     const draft = await draftFromModel(plugin, manifest, classCode, paperText, instruction, pages);
-    if (!draft) return;
+    if (!draft) return "failed";
 
     const created = today();
     const covered = coverageCheck(pages, classCode);
@@ -281,7 +297,7 @@ export async function digestPdf(plugin: WikiLmPlugin, source: TFile, opts: Diges
     const planned = await plan(draft);
     if (planned.notes.length === 0) {
       new Notice("WikiLM: the draft named no highlight that exists in this manifest; nothing to write.", 8000);
-      return;
+      return "failed";
     }
 
     const flashcards = product === "both" ? planned.notes.reduce((sum, n) => sum + n.highlights.length, 0) : 0;
@@ -291,7 +307,7 @@ export async function digestPdf(plugin: WikiLmPlugin, source: TFile, opts: Diges
       { flashcards, unknownIds: planned.unknownIds, unassignedIds: planned.unassignedIds },
       manifest.pdfBasename,
     );
-    if (chosen === null) return;
+    if (chosen === null) return "skipped";
 
     // The preview lets titles be edited inline, which moves the path and can
     // flip a note between "create" and "merge into an existing note" — and the
@@ -356,8 +372,93 @@ export async function digestPdf(plugin: WikiLmPlugin, source: TFile, opts: Diges
     const named = finalPlan.namedIds.length;
     if (named > 0) bits.push(`${named} slide title${named === 1 ? "" : "s"} left out`);
     new Notice(`WikiLM: ${bits.join(", ")}.`, 8000);
+    return "digested";
   } catch (e) {
     console.error("WikiLM: digest failed", e);
     new Notice(`WikiLM: digest failed. ${describeError(e)}`, 8000);
+    return "failed";
+  }
+}
+
+/**
+ * "Digest folder…": every PDF under a folder that has highlights with text,
+ * digested in turn with one answer to the product-and-instruction form.
+ *
+ * Each PDF still gets its own preview, because the preview is where the reader
+ * decides what is written; closing it skips that PDF, not the run. Stopping
+ * from the status bar (or "Cancel the running AI highlight, digest or ingest")
+ * lets the PDF in hand finish and stops before the next. No model call is made
+ * here beyond the one per PDF that `digestPdf` already makes.
+ */
+export async function digestFolder(plugin: WikiLmPlugin, folder: TFolder): Promise<void> {
+  const files: TFile[] = [];
+  const visit = (f: TFolder): void => {
+    for (const child of f.children) {
+      if (child instanceof TFolder) visit(child);
+      else if (child instanceof TFile && isPdfFile(child)) files.push(child);
+    }
+  };
+  visit(folder);
+  if (files.length === 0) {
+    new Notice(`WikiLM: there are no PDFs under ${folder.path}.`);
+    return;
+  }
+
+  // Same rule as the folder ingest: one run holds the token at a time, and
+  // taking it from a run already going would leave that run unstoppable.
+  if (plugin.cancel.active) {
+    const running = plugin.cancel.label ? ` (${plugin.cancel.label})` : "";
+    new Notice(`WikiLM: another run is still going${running}. Digest ${folder.name} once it finishes, or stop it from the status bar.`, 8000);
+    return;
+  }
+  const owner = plugin.cancel.begin(`digesting ${folder.name}`);
+  try {
+    // Every PDF is read once, here, to apply the same gate `digestPdf` applies
+    // (a highlight with text), and the read is handed to `digestPdf` so the
+    // document is not parsed twice.
+    const reads = new Map<string, Resolved>();
+    for (const [i, f] of [...files].sort((a, b) => a.path.localeCompare(b.path)).entries()) {
+      if (plugin.cancel.cancelled) {
+        new Notice("WikiLM: stopped before anything was digested.");
+        return;
+      }
+      plugin.cancel.progress(`reading ${i + 1}/${files.length} ${f.basename}`, owner);
+      try {
+        const r = await resolveSource(plugin, f);
+        if (r) reads.set(f.path, r);
+      } catch (e) {
+        // One unreadable PDF is left out of the queue; it does not stop the run.
+        console.error(`WikiLM: could not read ${f.path}`, e);
+      }
+    }
+    const plan = planDigestFolder(files, (f) => {
+      const r = reads.get(f.path);
+      return !!r && decideGate(r.manifest).action === "digest";
+    });
+    if (plan.queue.length === 0) {
+      new Notice(`WikiLM: none of the ${files.length} PDF${files.length === 1 ? "" : "s"} under ${folder.path} has highlights with text. Highlight them in PDF++, or run “AI highlight…” on each first.`, 10000);
+      return;
+    }
+
+    const options = await askDigestOptions(
+      plugin.app,
+      { product: "notes", instruction: "" },
+      `Digest ${plan.queue.length} PDF${plan.queue.length === 1 ? "" : "s"} under ${folder.name}`,
+    );
+    if (options === null) return;
+
+    const tally: DigestFolderTally = { queued: plan.queue.length, digested: 0, skipped: 0, failed: 0, bare: plan.bare.length, stopped: false };
+    for (const [i, pdf] of plan.queue.entries()) {
+      if (plugin.cancel.cancelled) {
+        tally.stopped = true;
+        break;
+      }
+      plugin.cancel.progress(`${i + 1}/${plan.queue.length} ${pdf.basename}`, owner);
+      const outcome = await digestPdf(plugin, pdf, { options, resolved: reads.get(pdf.path) });
+      tally[outcome]++;
+    }
+    new Notice(`WikiLM: ${digestFolderSummary(tally)}.`, 10000);
+  } finally {
+    plugin.cancel.end(owner);
   }
 }
