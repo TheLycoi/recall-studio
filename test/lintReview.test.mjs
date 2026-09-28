@@ -37,6 +37,20 @@ test("selectPages takes pages with a finding or a residue claim, worst finding f
   assert.equal(got.skipped, 0);
 });
 
+test("selectPages puts, within one rank and among residue-only pages, the page with more residue first", () => {
+  const pages = ["wiki/a.md", "wiki/b.md", "wiki/c.md", "wiki/d.md", "wiki/e.md"].map((p) => note(p, "type: concept", "Body."));
+  const claim = (path, n) => ({ path, title: path, n, text: `Sentence ${n}.` });
+  const r = report(
+    [issue("orphan", "wiki/a.md"), issue("orphan", "wiki/b.md")],
+    [claim("wiki/b.md", 1), claim("wiki/b.md", 2), claim("wiki/c.md", 1), claim("wiki/e.md", 1), claim("wiki/e.md", 2), claim("wiki/e.md", 3), claim("wiki/d.md", 1)],
+  );
+  assert.deepEqual(
+    lr.selectPages(r, pages).chosen.map((p) => p.path),
+    ["wiki/b.md", "wiki/a.md", "wiki/e.md", "wiki/c.md", "wiki/d.md"],
+    "b before a: same rank, more residue; then residue only, e (3) before c and d (1 each, by path)",
+  );
+});
+
 test("selectPages stops at the budget and counts the rest as skipped", () => {
   const pages = ["wiki/a.md", "wiki/b.md", "wiki/c.md"].map((p) => note(p, "type: concept", "x".repeat(40)));
   const r = report(["wiki/a.md", "wiki/b.md", "wiki/c.md"].map((p) => issue("orphan", p)));
@@ -220,13 +234,14 @@ test("a link resolves by title or alias; unknown, self and already-linked target
         { target: "SRS", reason: "the page is about spacing" },
         { target: "Nonexistent", reason: "" },
         { target: "A page", reason: "" },
-        { target: "[[Other Page]]", reason: "" },
       ],
     }),
   ]);
   assert.deepEqual(got.links, [{ path: "wiki/concepts/a.md", targetPath: "wiki/concepts/spaced-repetition.md", targetTitle: "Spaced repetition", reason: "the page is about spacing" }]);
   assert.deepEqual(got.issues, [{ id: "missing-link", path: "wiki/concepts/a.md", title: "a", target: "Spaced repetition", detail: "the page is about spacing" }]);
-  assert.deepEqual(got.dropped, { "target not in wiki": 1, "self link": 1, "already linked": 1 });
+  assert.deepEqual(got.dropped, { "target not in wiki": 1, "self link": 1 });
+  // Three nominations a verdict, so the already-linked case gets one of its own.
+  assert.deepEqual(run([verdict({ links: [{ target: "[[Other Page]]", reason: "" }] })]).dropped, { "already linked": 1 });
 });
 
 test("a quote of fewer than three words, or one not on word boundaries, does not clear a claim", () => {
@@ -285,6 +300,40 @@ test("a page's title outranks another page's alias, and an alias two pages share
   assert.deepEqual(got.dropped, { "target not in wiki": 1 });
 });
 
+test("a page the lint found cut off is checked against what its target links to, not what it links to", () => {
+  // A page is an orphan; its nomination will be written on the target, linking
+  // back. Whether that link exists is a question about the target's links.
+  const orphan = { ...SENT[0], linked: ["spaced-repetition"] };
+  const targetLinks = { "wiki/concepts/spaced-repetition.md": [], "wiki/entities/other-page.md": ["a"] };
+  const opts = { cutOff: new Set(["wiki/concepts/a.md"]), linksOf: (p) => targetLinks[p] ?? [] };
+  const out = [verdict({ links: [{ target: "Spaced repetition", reason: "r" }, { target: "Other Page", reason: "r" }] })];
+  const got = lr.verifyReview([orphan], out, DIRECTORY, units, opts);
+  assert.deepEqual(got.links.map((l) => l.targetPath), ["wiki/concepts/spaced-repetition.md"], "the page's own link to it is not the link the row writes");
+  assert.deepEqual(got.dropped, { "already linked": 1 }, "Other Page already links back to the page by its filename");
+  // Not cut off: the page's own links decide, as before.
+  const plain = lr.verifyReview([orphan], out, DIRECTORY, units, { ...opts, cutOff: new Set() });
+  assert.deepEqual(plain.links.map((l) => l.targetPath), ["wiki/entities/other-page.md"]);
+  assert.deepEqual(plain.dropped, { "already linked": 1 });
+});
+
+test("a cut-off page's target that links back by the page's title or alias counts as already linked", () => {
+  const orphan = { ...SENT[0], aliases: ["Page A"], linked: [] };
+  const dir = [...DIRECTORY, { path: "wiki/concepts/b.md", title: "B", kind: "concept", aliases: [] }];
+  const linksOf = (p) => (p === "wiki/concepts/spaced-repetition.md" ? ["a-page"] : p === "wiki/concepts/b.md" ? ["page-a"] : []);
+  const got = lr.verifyReview([orphan], [verdict({ links: [{ target: "SRS", reason: "r" }, { target: "B", reason: "r" }] })], dir, units, { cutOff: new Set([orphan.path]), linksOf });
+  assert.deepEqual(got.links, []);
+  assert.deepEqual(got.dropped, { "already linked": 2 });
+});
+
+test("at most three links are taken from a page's verdict; the rest are counted over three", () => {
+  const dir = ["B", "C", "D", "E", "F"].map((t) => ({ path: `wiki/concepts/${t.toLowerCase()}.md`, title: t, kind: "concept", aliases: [] }));
+  const page = { ...SENT[0], linked: [] };
+  const out = [verdict({ links: ["B", "Nowhere", "C", "D", "E", "F"].map((target) => ({ target, reason: "r" })) })];
+  const got = lr.verifyReview([page], out, [...DIRECTORY, ...dir], units);
+  assert.deepEqual(got.links.map((l) => l.targetTitle), ["B", "C"], "the model's first three nominations are the ones it ranked highest");
+  assert.deepEqual(got.dropped, { "target not in wiki": 1, "over three": 3 });
+});
+
 test("a kind verdict is a finding only when it differs from the page's kind", () => {
   const same = run([verdict({ kind: { kind: "concept", reason: "it is a method" } })]);
   assert.deepEqual(same.issues, []);
@@ -338,14 +387,21 @@ test("verifyTitleScan drops a title two pages share as not in the wiki", () => {
 // ---- renderReviewLine
 
 test("renderReviewLine says what was read, found and dropped in one line", () => {
-  const line = lr.renderReviewLine({ read: 12, withFindings: 15, skipped: 3, findings: 5, dropped: { "already linked": 1, "target not in wiki": 1 }, failed: [] });
+  const line = lr.renderReviewLine({ read: 12, withFindings: 15, skipped: 3, findings: 5, dropped: { "already linked": 1, "target not in wiki": 1 }, failed: [], cleared: 0 });
   assert.equal(line, "**Model review** — read 12 of 15 pages with findings (3 over budget); 5 findings; 2 proposals dropped (1 target not in wiki, 1 already linked).");
-  const quiet = lr.renderReviewLine({ read: 1, withFindings: 1, skipped: 0, findings: 1, dropped: {}, failed: ["title scan failed: HTTP 500"] });
+  const quiet = lr.renderReviewLine({ read: 1, withFindings: 1, skipped: 0, findings: 1, dropped: {}, failed: ["title scan failed: HTTP 500"], cleared: 0 });
   assert.equal(quiet, "**Model review** — read 1 of 1 page with findings; 1 finding; title scan failed: HTTP 500.");
 });
 
+test("renderReviewLine counts the duplicate pairs the model cleared, singular and plural", () => {
+  const base = { read: 1, withFindings: 1, skipped: 0, findings: 0, dropped: {}, failed: [] };
+  assert.equal(lr.renderReviewLine({ ...base, cleared: 1 }), "**Model review** — read 1 of 1 page with findings; 0 findings; 1 duplicate pair cleared.");
+  assert.equal(lr.renderReviewLine({ ...base, cleared: 2 }), "**Model review** — read 1 of 1 page with findings; 0 findings; 2 duplicate pairs cleared.");
+  assert.equal(lr.renderReviewLine({ ...base, cleared: 0 }), "**Model review** — read 1 of 1 page with findings; 0 findings.");
+});
+
 test("renderReviewLine says why the review did not run", () => {
-  assert.equal(lr.renderReviewLine({ read: 0, withFindings: 0, skipped: 0, findings: 0, dropped: {}, failed: [], off: "no provider configured" }), "Model review off: no provider configured");
+  assert.equal(lr.renderReviewLine({ read: 0, withFindings: 0, skipped: 0, findings: 0, dropped: {}, failed: [], cleared: 0, off: "no provider configured" }), "Model review off: no provider configured");
 });
 
 // ---- renderReviewTurn

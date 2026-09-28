@@ -420,7 +420,7 @@ test("a page with no quote units yields no residue: its prose is its only eviden
 test("the report names the residue in one line and stays byte-identical", () => {
   const pages = [withClaims("wiki/a.md", "Massed practice feels productive but fades within weeks. Giraffes wander savannahs looking for acacia.")];
   const a = vl.renderVaultLint(vl.lintVault(pages));
-  assert.match(a, /2 sentences on 1 page have no quote behind them, not reported: the model review decides them\./, a);
+  assert.match(a, /2 sentences on 1 page have no quote behind them, not reported: the model review decides them when it runs\./, a);
   assert.equal(a, vl.renderVaultLint(vl.lintVault(pages)));
   const none = vl.renderVaultLint(vl.lintVault([page("wiki/c.md", CONCEPT, "")]));
   assert.doesNotMatch(none, /no quote behind/);
@@ -435,4 +435,22 @@ test("quotes under Mentions in Source count as the page's quotes for residue, th
   const r = vl.lintVault([p]);
   assert.deepEqual(r.claims.map((c) => c.text), ["Giraffes wander savannahs looking for acacia."]);
   assert.deepEqual(vl.quoteUnits(p.path, p.content).map((u) => u.text), [KEY_CLAIM]);
+});
+
+test("residue is kept only for pages the review can judge: concept and entity, or a page with no kind key", () => {
+  const prose = "Massed practice feels productive but fades within weeks.";
+  const body = `${prose}\n\n## Key claims\n- ${KEY_CLAIM} — [[Deck.pdf#page=1|p.1]]`;
+  const pages = [
+    page("wiki/sources/s.md", "type: source\ntags: [paper]", body),
+    page("classes/X/X.md", "type: topic-index\nclass: X", body),
+    page("classes/X/doping.md", "class: X", body),
+    page("wiki/concepts/c.md", CONCEPT, body),
+    page("wiki/entities/e.md", 'type: entity\ntags: [person]\naliases:\n  - "E"', body),
+  ];
+  const r = vl.lintVault(pages, { schema: vl.WIKI_SCHEMA });
+  assert.deepEqual(
+    [...new Set(r.claims.map((c) => c.path))],
+    ["classes/X/doping.md", "wiki/concepts/c.md", "wiki/entities/e.md"],
+    "the review never reads a source page or an index note, so their residue would be counted and never decided",
+  );
 });

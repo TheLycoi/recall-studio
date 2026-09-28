@@ -15,11 +15,11 @@ import {
   scopeFor,
 } from "./retrieval";
 import type { Graph } from "./graph";
-import { compareIssues, lintVault, renderVaultLint, WIKI_SCHEMA, type LintPage, type VaultLintReport } from "./vaultLint";
+import { lintVault, renderVaultLint, WIKI_SCHEMA, type LintPage, type VaultLintReport } from "./vaultLint";
 import { renderReviewLine, renderReviewTurn } from "./lintReview";
 import { planLinkFixes, applyFixesToNote, type LinkFix } from "./vaultFix";
 import { FixPlanModal, LintReportModal, pickNote } from "./modals";
-import { applyDuplicateVerdicts, orderFixes, repointFix, type Fix, type FixPageInfo } from "./fixPlan";
+import { mergeReview, repointFix, type Fix, type FixPageInfo } from "./fixPlan";
 import { applyPlan, buildPlan, fixPagesFor, pageInfos, proposeAliases, providerReady, runModelReview, verifyDuplicates, type FixContext } from "./fixer";
 import {
   canSendAnswer,
@@ -331,8 +331,12 @@ export class ChatPanel {
    * those are. Then, when the lint role has a provider and the setting is on,
    * the model review (`runModelReview`) reads the pages with findings and adds
    * a second turn; its rows join the plan before the modal opens.
+   *
+   * `review: false` skips the model review for this run. The re-check after
+   * Apply passes it: the reader has just acted on a review, and running a
+   * second one to see the writes land would pay for every call again.
    */
-  async runVaultLint(): Promise<void> {
+  async runVaultLint(opts: { review?: boolean } = {}): Promise<void> {
     if (this.busy) return;
     this.busy = true;
     this.status = "checking the wiki…";
@@ -363,12 +367,13 @@ export class ChatPanel {
       const report = lintVault(pages, { schema: WIKI_SCHEMA, sources });
       const settings = this.plugin.settings;
       const ready = providerReady(settings, "lint");
-      const reviewing = ready && settings.lintModelReview;
+      const asked = opts.review !== false;
+      const reviewing = ready && settings.lintModelReview && asked;
       // A review that does not run says why, so its absence is not a silence.
-      const off = settings.lintModelReview ? "no provider configured" : "off in settings";
+      const off = !asked ? "not repeated after Apply" : settings.lintModelReview ? "no provider configured" : "off in settings";
       const rendered = reviewing
         ? renderVaultLint(report)
-        : `${renderVaultLint(report)}\n\n${renderReviewLine({ read: 0, withFindings: 0, skipped: 0, findings: 0, dropped: {}, failed: [], off })}`;
+        : `${renderVaultLint(report)}\n\n${renderReviewLine({ read: 0, withFindings: 0, skipped: 0, findings: 0, dropped: {}, failed: [], cleared: 0, off })}`;
       this.turns.push({ role: "assistant", text: rendered });
       this.trim();
       this.rerender();
@@ -406,14 +411,13 @@ export class ChatPanel {
               this.rerender();
             },
             owner !== undefined ? cancel : undefined,
+            plan,
           );
           const turn = renderReviewTurn(report, review.issues, review.line);
           this.turns.push({ role: "assistant", text: turn });
           this.trim();
           shown = `${rendered}\n\n${turn}`;
-          const merged = [...applyDuplicateVerdicts(plan, review.cleared), ...review.rows];
-          plan = orderFixes(merged.filter((f, i) => merged.findIndex((g) => g.id === f.id) === i));
-          planReport = { ...report, issues: [...report.issues, ...review.issues].sort(compareIssues), candidates: review.candidates };
+          ({ plan, report: planReport } = mergeReview(plan, report, review));
         } catch (e) {
           this.pushSystem(`Model review failed: ${describeError(e)}`);
         } finally {
@@ -491,7 +495,8 @@ export class ChatPanel {
         }
         // Outside the write's own promise chain: the check the reader now wants
         // is about the vault after the writes, and it re-opens its own modal.
-        void this.runVaultLint();
+        // The scan only: the review has just been acted on.
+        void this.runVaultLint({ review: false });
       },
     }).open();
   }

@@ -22,9 +22,9 @@
  * Pure: no `obsidian` import, the same rule as `vaultLint` and `vaultFix`, so
  * the tests bundle it standalone and a plan can be built without a vault.
  */
-import type { VaultIssue } from "./vaultLint";
+import { compareIssues, type VaultIssue, type VaultLintReport } from "./vaultLint";
 import type { ReviewKind, ReviewLink } from "./lintReview";
-import { pairKey } from "./duplicates";
+import { pairKey, type DuplicateFinding } from "./duplicates";
 import type { FixPage, LinkFix, FixConfidence } from "./vaultFix";
 import { applyLinkFix, buildReplacement, unwrapDeadLink } from "./vaultFix";
 import { findAllPdfReferences, highlightKey, parsePdfSubpath, renderCallout } from "./pdflink";
@@ -68,6 +68,12 @@ export interface Fix {
   target?: string;
   /** The two pages a cross-link row joins, as `pairKey` spells them, so a verdict on the pair finds both rows. */
   pair?: string;
+  /**
+   * The cut-off page a hub-link or related-link row makes reachable. The row
+   * edits another note, so its `path` does not say; `planReviewLinks` reads
+   * this to see that a page already has a way in.
+   */
+  about?: string;
   /** Pure; returns `content` unchanged when there is nothing to do. */
   apply: (content: string) => string;
 }
@@ -525,6 +531,41 @@ export function applyDuplicateVerdicts(fixes: Fix[], cleared: string[]): Fix[] {
 
 export { pairKey };
 
+/** What the model review hands the plan: the part of `runModelReview`'s result the merge reads. */
+export interface ReviewForPlan {
+  issues: VaultIssue[];
+  candidates: DuplicateFinding[];
+  rows: Fix[];
+  cleared: string[];
+}
+
+/**
+ * The scan's plan and report once the model review has spoken.
+ *
+ * The cross-link rows of every pair the duplicate check cleared are withdrawn,
+ * and a cleared pair the scan had reported leaves the findings with them, so
+ * the plan's report does not keep a `duplicate-pages` finding whose rows are
+ * gone. The review's rows join the plan once each, by id, the row already
+ * there winning, since the same id is the same edit. The review's candidates
+ * replace the scan's: they are the scan's plus the title scan's, less those
+ * the check decided either way.
+ */
+export function mergeReview(
+  plan: Fix[],
+  report: VaultLintReport,
+  review: ReviewForPlan,
+): { plan: Fix[]; report: VaultLintReport } {
+  const cleared = new Set(review.cleared);
+  const merged = [...applyDuplicateVerdicts(plan, review.cleared), ...review.rows];
+  const seen = new Set<string>();
+  const rows = merged.filter((f) => (seen.has(f.id) ? false : (seen.add(f.id), true)));
+  const kept = report.issues.filter((i) => !(i.id === "duplicate-pages" && i.target && cleared.has(pairKey(i.path, i.target))));
+  return {
+    plan: orderFixes(rows),
+    report: { ...report, issues: [...kept, ...review.issues].sort(compareIssues), candidates: review.candidates },
+  };
+}
+
 /** The dead links the link fixer already resolved, as rows a reader can untick. */
 export function planRelinks(fixable: LinkFix[]): Fix[] {
   return fixable.map((fix, n) => ({
@@ -686,6 +727,7 @@ export function planHubLinks(
       path: hub.path,
       label: `List ${shown(page)} in ${shown(hub)} hub`,
       enabled: true,
+      about: page.path,
       apply: (content) => hubListLink(content, linkPathOf(page.path, wikiPrefix), shown(page)),
     });
   }
@@ -723,6 +765,7 @@ export function planRelatedFrom(
       path: neighbour.path,
       label: `Relate ${shown(page)} from ${shown(neighbour)}`,
       enabled: true,
+      about: page.path,
       apply: (content) => addRelatedLink(content, linkPathOf(page.path, wikiPrefix), shown(page), neighbour.schema, page.kind),
     });
   }
@@ -868,21 +911,30 @@ export function planAliases(
  * verification in front of it. Any other page gets the link it was reviewed
  * as missing, on itself. Either way the link goes in the edited page's
  * related section for the linked page's kind, as every link row here does.
+ *
+ * A turned-round row is left unticked when `existing` (the mechanical plan)
+ * already has a hub-link or related-link row for the same page: one link in
+ * is what the finding asks for, and that row gives it. The review's row is
+ * still offered, since the model may have found the better way in, but as the
+ * reader's choice rather than a second link written by default.
  */
 export function planReviewLinks(
   links: ReviewLink[],
   issues: VaultIssue[],
   pages: Map<string, FixPageInfo>,
   wikiPrefix: string,
+  existing: Fix[] = [],
 ): Fix[] {
   const cutOff = new Set(unlinkedPaths(issues));
+  const reached = new Set(existing.filter((f) => (f.kind === "hub-link" || f.kind === "related-link") && f.about).map((f) => f.about as string));
   const fixes: Fix[] = [];
   const seen = new Set<string>();
   for (const link of links) {
     const page = pages.get(link.path);
     const target = pages.get(link.targetPath);
     if (!page || !target || page.path === target.path) continue;
-    const [from, to] = cutOff.has(page.path) ? [target, page] : [page, target];
+    const turned = cutOff.has(page.path);
+    const [from, to] = turned ? [target, page] : [page, target];
     const id = `add-link:${from.path}:${to.path}`;
     if (seen.has(id)) continue;
     seen.add(id);
@@ -891,7 +943,7 @@ export function planReviewLinks(
       kind: "add-link",
       path: from.path,
       label: `Link ${shown(from)} → ${shown(to)}`,
-      enabled: true,
+      enabled: !(turned && reached.has(page.path)),
       apply: (content) => addRelatedLink(content, linkPathOf(to.path, wikiPrefix), shown(to), from.schema, to.kind),
     });
   }

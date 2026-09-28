@@ -2,6 +2,7 @@
 // module's vault half (TFile, pdf.js) is never reached by what is tested here,
 // which is the readiness check, the kind callback, and the model review's
 // orchestration against a fake client.
+
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
@@ -137,10 +138,10 @@ function fakeLlm(over = {}) {
   return { llm, calls };
 }
 
-function run(llm, { pages = PAGES, report = REPORT(), cancel, status = () => {} } = {}) {
+function run(llm, { pages = PAGES, report = REPORT(), cancel, status = () => {}, plan = [] } = {}) {
   const plugin = { settings: SETTINGS, llm };
   const infos = fx.pageInfos(plugin, pages);
-  return fx.runModelReview(plugin, { report, pages, sources: new Map(), prefix: "wiki/" }, infos, status, cancel);
+  return fx.runModelReview(plugin, { report, pages, sources: new Map(), prefix: "wiki/" }, infos, status, cancel, plan);
 }
 
 test("runModelReview runs the three phases and returns findings, rows and one line", async () => {
@@ -262,4 +263,67 @@ test("two pages under one heading: the review's verdicts land only on the page t
   assert.deepEqual([...new Set(r.issues.map((i) => i.path))], [chem.path]);
   assert.ok(r.rows.every((f) => f.path !== bio.path), r.rows.map((f) => f.path).join(", "));
   assert.equal(calls.verifyDuplicates.length, 0, "a scan pair naming a heading two pages share names neither");
+});
+
+test("the title scan reads every reviewable page, not the capped directory, in batches of three hundred", async () => {
+  const many = Array.from({ length: 700 }, (_, i) => page(`wiki/concepts/t${String(i).padStart(3, "0")}.md`, "type: concept", `# Title ${i}\n`));
+  const { llm, calls } = fakeLlm({
+    async scanTitles(args) {
+      calls.scanTitles.push(args);
+      return { pairs: [] };
+    },
+  });
+  await run(llm, { pages: many, report: { notes: 700, units: 0, issues: [], candidates: [], claims: [] } });
+  assert.deepEqual(calls.scanTitles.map((c) => c.pages.length), [300, 300, 100]);
+  assert.equal(new Set(calls.scanTitles.flatMap((c) => c.pages.map((p) => p.title))).size, 700);
+});
+
+test("a pair the duplicate check clears leaves the candidates and the working findings, and the line counts it", async () => {
+  // Gamma's only finding is the reported pair with Alpha; cleared, it has
+  // nothing left to be reviewed for.
+  const report = {
+    ...REPORT(),
+    issues: [{ id: "orphan", path: ALPHA.path, title: "a" }, { id: "duplicate-pages", path: ALPHA.path, title: "a", target: GAMMA.path, detail: "same name" }],
+  };
+  const { llm, calls } = fakeLlm({
+    async scanTitles() {
+      return { pairs: [{ a: "Beta", b: "Gamma", reason: "x" }] };
+    },
+    async verifyDuplicates(args) {
+      calls.verifyDuplicates.push(args);
+      return { pairs: args.pairs.map((p) => ({ n: p.n, same: false, reason: "two subjects" })) };
+    },
+  });
+  const r = await run(llm, { report });
+  assert.equal(r.cleared.length, 2);
+  assert.deepEqual(r.candidates, [], "the scan's pair was cleared, so it is no longer a candidate");
+  assert.deepEqual(calls.reviewPages[0].pages.map((p) => p.title), ["Alpha"], "Gamma's cleared pair does not earn it a read");
+  assert.match(r.line, /; 2 duplicate pairs cleared/);
+});
+
+test("a turned-round link is unticked when the mechanical plan already gives the page a way in", async () => {
+  const { llm } = fakeLlm({
+    async scanTitles() {
+      return { pairs: [] };
+    },
+  });
+  const related = { id: "related-link:x", kind: "related-link", path: GAMMA.path, label: "Relate Alpha from Gamma", enabled: true, about: ALPHA.path, apply: (c) => c };
+  const r = await run(llm, { plan: [related] });
+  const add = r.rows.find((f) => f.kind === "add-link");
+  assert.equal(add.path, BETA.path);
+  assert.equal(add.enabled, false);
+  const plain = await run(fakeLlm({ async scanTitles() { return { pairs: [] }; } }).llm);
+  assert.equal(plain.rows.find((f) => f.kind === "add-link").enabled, true);
+});
+
+test("a cut-off page's nomination of a page that already links back to it is dropped", async () => {
+  const beta = page("wiki/entities/b.md", "type: entity", "# Beta\n\nA person. See [[a]].\n");
+  const { llm } = fakeLlm({
+    async scanTitles() {
+      return { pairs: [] };
+    },
+  });
+  const r = await run(llm, { pages: [ALPHA, beta, GAMMA, SOURCE] });
+  assert.ok(!r.rows.some((f) => f.kind === "add-link"), r.rows.map((f) => f.id).join(", "));
+  assert.match(r.line, /1 already linked/);
 });

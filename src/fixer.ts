@@ -40,7 +40,7 @@ import {
   type RectText,
   type DuplicateVerdicts,
 } from "./fixPlan";
-import { buildGraph, isGraphUsable, pprFromSeeds, type Graph } from "./graph";
+import { buildGraph, isGraphUsable, linkKey, noteLinks, pprFromSeeds, type Graph } from "./graph";
 import { CONCEPT_TAGS, ENTITY_TAGS, fmList, noteAliases, parseTopicNote } from "./topicNote";
 import { pdfsLinkedFrom } from "./pdf";
 import { collectPdfHighlights } from "./pdfHighlights";
@@ -519,7 +519,7 @@ const REVIEW_BATCH = 5;
 export interface ModelReviewResult {
   /** Findings the review added: confirmed look-alikes, unsupported sentences, missing links, wrong kinds. */
   issues: VaultIssue[];
-  /** The report's candidates plus the title scan's, less those the duplicate check made findings. */
+  /** The report's candidates plus the title scan's, less those the duplicate check confirmed or cleared. */
   candidates: DuplicateFinding[];
   /** Plan rows from the review, in `orderFixes` order. */
   rows: Fix[];
@@ -544,10 +544,16 @@ function mergeCounts(into: Record<string, number>, from: Record<string, number>)
  * phase is reported the way a failed one is. 2a scans every page's title for
  * pairs a spelling comparison misses, and adds the verified ones to the
  * candidates. 2b runs the duplicate check the fix plan's button runs, over the
- * findings and every candidate. 2c reads the pages with findings in full, five
- * a call, worst first until the budget runs out. Follows the design of
- * gd4ai/obsidian-llm-wiki's lint phases, reimplemented. Nothing is written
- * here: every proposal is a row the reader ticks.
+ * findings and every candidate; a pair it clears leaves the candidates and,
+ * when the scan had reported it, the findings 2c ranks pages by, so a page is
+ * not read for a finding that no longer stands. 2c reads the pages with
+ * findings in full, five a call, worst first until the budget runs out.
+ * Follows the design of gd4ai/obsidian-llm-wiki's lint phases, reimplemented.
+ * Nothing is written here: every proposal is a row the reader ticks.
+ *
+ * `plan` is the mechanical plan the review's rows will join, read only so a
+ * turned-round link row can see the page already has a hub or neighbour row
+ * (`planReviewLinks`).
  */
 export async function runModelReview(
   plugin: WikiLmPlugin,
@@ -555,10 +561,14 @@ export async function runModelReview(
   infos: Map<string, FixPageInfo>,
   status: (s: string) => void,
   cancel?: CancelToken,
+  plan: Fix[] = [],
 ): Promise<ModelReviewResult> {
   const { report, pages, prefix } = ctx;
   const kindOf = reviewKindOf(infos);
+  // What the page review sends, capped so it cannot crowd out the pages. The
+  // title scan is not capped: a pair it cannot see is a pair it cannot find.
   const directory = directoryOf(pages, kindOf);
+  const everyTitle = directoryOf(pages, kindOf, Infinity, Infinity);
   const contentOf = new Map(pages.map((p) => [p.path, p.content]));
 
   const issues: VaultIssue[] = [];
@@ -576,18 +586,21 @@ export async function runModelReview(
     const existing = new Set<string>();
     for (const i of report.issues) if (i.id === "duplicate-pages" && i.target) existing.add(pairKey(i.path, i.target));
     for (const c of candidates) existing.add(pairKey(c.a, c.b));
-    const of = Math.ceil(directory.length / TITLE_SCAN_BATCH);
+    const of = Math.ceil(everyTitle.length / TITLE_SCAN_BATCH);
     for (let b = 0; b < of; b++) {
       if (cancel?.cancelled) {
         stopped("title scan", b, of);
         break;
       }
       status(of > 1 ? `model review: title scan ${b + 1} of ${of}` : "model review: title scan");
-      const batch = directory.slice(b * TITLE_SCAN_BATCH, (b + 1) * TITLE_SCAN_BATCH);
+      // Each call sees only its own batch, so two names that land in different
+      // batches are never compared: a pair cannot cross a batch. Titles are in
+      // path order, which keeps a folder's pages together in one batch more
+      // often than not. What comes back is resolved against every title, so a
+      // title that two pages share names neither, wherever the other one fell.
+      const batch = everyTitle.slice(b * TITLE_SCAN_BATCH, (b + 1) * TITLE_SCAN_BATCH);
       const out = await plugin.llm.scanTitles({ pages: batch });
-      // Resolved against the whole directory, so a pair naming a page from
-      // another batch still finds it.
-      const v = verifyTitleScan(out, directory, existing);
+      const v = verifyTitleScan(out, everyTitle, existing);
       for (const c of v.candidates) existing.add(pairKey(c.a, c.b));
       candidates.push(...v.candidates);
       mergeCounts(dropped, v.dropped);
@@ -604,8 +617,8 @@ export async function runModelReview(
     rows.push(...v.rows);
     cleared.push(...v.cleared);
     if (v.stopped) stopped("duplicate check", v.stopped.done, v.stopped.of);
-    const confirmed = new Set(v.issues.map((i) => pairKey(i.path, i.target ?? "")));
-    candidates = candidates.filter((c) => !confirmed.has(pairKey(c.a, c.b)));
+    const decided = new Set([...v.issues.map((i) => pairKey(i.path, i.target ?? "")), ...v.cleared]);
+    candidates = candidates.filter((c) => !decided.has(pairKey(c.a, c.b)));
   } catch (e) {
     failed.push(`duplicate check failed: ${describeError(e)}`);
   }
@@ -615,7 +628,11 @@ export async function runModelReview(
   let withFindings = 0;
   let skipped = 0;
   try {
-    const working: VaultLintReport = { ...report, issues: [...report.issues, ...issues], candidates };
+    // A reported pair the check cleared is no longer a finding, here or in the
+    // plan's report (`mergeReview`).
+    const gone = new Set(cleared);
+    const standing = report.issues.filter((i) => !(i.id === "duplicate-pages" && i.target && gone.has(pairKey(i.path, i.target))));
+    const working: VaultLintReport = { ...report, issues: [...standing, ...issues], candidates };
     const chosen = selectPages(working, pages, REVIEW_BUDGET_CHARS, kindOf);
     skipped = chosen.skipped;
     withFindings = chosen.chosen.length + chosen.skipped;
@@ -623,6 +640,10 @@ export async function runModelReview(
     const links: ReviewLink[] = [];
     const kinds: ReviewKind[] = [];
     const units = (path: string) => quoteUnits(path, contentOf.get(path) ?? "");
+    // For a page cut off from the graph the link row goes on the target,
+    // linking back, so whether it is already there is read off the target.
+    const cutOff = new Set(working.issues.filter((i) => i.id === "orphan" || i.id === "unlinked").map((i) => i.path));
+    const linksOf = (path: string): string[] => noteLinks(contentOf.get(path) ?? "").map((l) => linkKey(l.raw)).filter(Boolean);
     const of = Math.ceil(sent.length / REVIEW_BATCH);
     try {
       for (let b = 0; b < of; b++) {
@@ -633,7 +654,7 @@ export async function runModelReview(
         status(`model review: page ${b * REVIEW_BATCH + 1} of ${sent.length}`);
         const batch = sent.slice(b * REVIEW_BATCH, (b + 1) * REVIEW_BATCH);
         const out = await plugin.llm.reviewPages({ pages: batch, directory });
-        const v = verifyReview(batch, out.pages, directory, units);
+        const v = verifyReview(batch, out.pages, directory, units, { cutOff, linksOf });
         issues.push(...v.issues);
         links.push(...v.links);
         kinds.push(...v.kinds);
@@ -642,7 +663,7 @@ export async function runModelReview(
       }
     } finally {
       // What was verified before a failure is kept, as a cancel keeps it.
-      rows.push(...planReviewLinks(links, [...report.issues, ...issues], infos, prefix), ...planKinds(kinds, infos));
+      rows.push(...planReviewLinks(links, working.issues, infos, prefix, plan), ...planKinds(kinds, infos));
     }
   } catch (e) {
     failed.push(`page review failed: ${describeError(e)}`);
@@ -653,7 +674,7 @@ export async function runModelReview(
     candidates,
     rows: orderFixes(rows),
     cleared,
-    line: renderReviewLine({ read, withFindings, skipped, findings: issues.length, dropped, failed }),
+    line: renderReviewLine({ read, withFindings, skipped, findings: issues.length, dropped, failed, cleared: cleared.length }),
     failed,
   };
 }

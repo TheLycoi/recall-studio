@@ -91,9 +91,13 @@ export type DropReason =
   | "target not in wiki"
   | "already linked"
   | "self link"
+  | "over three"
   | "claim not sent"
   | "quote not on page"
   | "page not sent";
+
+/** The most links one page's verdict may add, as the prompt tells the model: the few a reader would most want to follow. */
+export const MAX_LINKS_PER_PAGE = 3;
 
 /** The longest fragment a claim verdict may cite as its quote: long enough to name a passage, short enough that it cannot be the claim restated. */
 export const MAX_BY_WORDS = 12;
@@ -189,7 +193,10 @@ function count(dropped: Record<string, number>, reason: string): void {
  * decides the order, by the report's own `ORDER`, so a budget that runs out
  * runs out on the least serious pages; a page with residue alone comes after
  * every page with a finding, because residue is a guess by word overlap and a
- * finding is a measurement. The budget counts the clamped body each page
+ * finding is a measurement. Within one rank, and among the residue-only
+ * pages, the page with more residue sentences goes first, since it gives the
+ * model more to decide for the same read; path breaks what ties remain. The
+ * budget counts the clamped body each page
  * sends, since that is what the calls cost, and taking stops at the first
  * page that would pass it so the order stays the order.
  *
@@ -210,13 +217,14 @@ export function selectPages(
     const r = rank < 0 ? ORDER.length : rank;
     worst.set(issue.path, Math.min(worst.get(issue.path) ?? Infinity, r));
   }
-  const withClaims = new Set((report.claims ?? []).map((c) => c.path));
+  const residue = new Map<string, number>();
+  for (const c of report.claims ?? []) residue.set(c.path, (residue.get(c.path) ?? 0) + 1);
 
   const candidates = pages
-    .filter((p) => worst.has(p.path) || withClaims.has(p.path))
+    .filter((p) => worst.has(p.path) || residue.has(p.path))
     .filter((p) => kindOf === undefined || kindOf(p.path) !== "other")
-    .map((p) => ({ page: p, rank: worst.get(p.path) ?? ORDER.length + 1 }))
-    .sort((a, b) => a.rank - b.rank || a.page.path.localeCompare(b.page.path));
+    .map((p) => ({ page: p, rank: worst.get(p.path) ?? ORDER.length + 1, residue: residue.get(p.path) ?? 0 }))
+    .sort((a, b) => a.rank - b.rank || b.residue - a.residue || a.page.path.localeCompare(b.page.path));
 
   const chosen: LintPage[] = [];
   let used = 0;
@@ -423,7 +431,15 @@ function quoteOnPage(by: string, claim: string, units: EvidenceUnit[]): boolean 
  * not judge stays what it was, a candidate: silence is not a verdict.
  *
  * A link must resolve through the directory to one page (`directoryIndex`)
- * that is not this one and is not already linked from it. A kind verdict is a
+ * that is not this one and is not already linked. Only the first three
+ * nominations are read, the rest counted `over three`: the prompt asks for
+ * the three a reader would most want, and a longer list is the model not
+ * choosing. "Already linked" depends on which page the row will edit
+ * (`planReviewLinks`): for a page the lint found cut off (`opts.cutOff`, the
+ * paths with an `orphan` or `unlinked` finding) the row goes on the target,
+ * linking back, so the question is whether the target already links to the
+ * page (`opts.linksOf`, the target's outgoing link keys); for any other page
+ * it is whether the page already links to the target. A kind verdict is a
  * finding only when it moves the page.
  */
 export function verifyReview(
@@ -431,6 +447,7 @@ export function verifyReview(
   out: ReviewPageOut[],
   directory: DirectoryEntry[],
   units: (path: string) => EvidenceUnit[],
+  opts: { cutOff?: Set<string>; linksOf?: (path: string) => string[] } = {},
 ): { issues: VaultIssue[]; links: ReviewLink[]; kinds: ReviewKind[]; dropped: Record<string, number> } {
   const issues: VaultIssue[] = [];
   const links: ReviewLink[] = [];
@@ -473,8 +490,18 @@ export function verifyReview(
       issues.push({ id: "unsupported-prose", path: where, title, target: undefined, detail: claim.text });
     }
 
+    const cutOff = opts.cutOff?.has(where) ?? false;
+    // A page may be linked by its filename, its title or an alias. The page's
+    // own title is its directory title, not the one it was sent under, which
+    // may carry a folder to tell it apart.
+    const ownNames = [basename(where), directory.find((e) => e.path === where)?.title ?? page.title, ...page.aliases].map(linkKey);
     const linked = new Set(page.linked);
-    for (const l of verdict.links) {
+    const taken = new Set<string>();
+    for (const [k, l] of verdict.links.entries()) {
+      if (k >= MAX_LINKS_PER_PAGE) {
+        count(dropped, "over three");
+        continue;
+      }
       const entry = resolve(l.target);
       if (!entry) {
         count(dropped, "target not in wiki");
@@ -484,13 +511,14 @@ export function verifyReview(
         count(dropped, "self link");
         continue;
       }
-      // The page may link its target by filename, by title or by an alias.
-      const names = [basename(entry.path), entry.title, ...entry.aliases].map(linkKey);
-      if (names.some((n) => linked.has(n))) {
+      const already = cutOff
+        ? (opts.linksOf?.(entry.path) ?? []).some((n) => ownNames.includes(n))
+        : [basename(entry.path), entry.title, ...entry.aliases].map(linkKey).some((n) => linked.has(n));
+      if (already || taken.has(entry.path)) {
         count(dropped, "already linked");
         continue;
       }
-      linked.add(linkKey(basename(entry.path)));
+      taken.add(entry.path);
       links.push({ path: where, targetPath: entry.path, targetTitle: entry.title, reason: l.reason });
       issues.push({ id: "missing-link", path: where, title, target: entry.title, detail: l.reason });
     }
@@ -553,14 +581,16 @@ export function verifyTitleScan(
 // ---- report ----------------------------------------------------------------
 
 /** Drop reasons in the order the design lists them, so the line reads the same run to run. */
-const DROP_ORDER: string[] = ["target not in wiki", "already linked", "self link", "claim not sent", "quote not on page", "page not sent", "title not in wiki", "self pair", "already paired"];
+const DROP_ORDER: string[] = ["target not in wiki", "already linked", "self link", "over three", "claim not sent", "quote not on page", "page not sent", "title not in wiki", "self pair", "already paired"];
 
 /**
  * The review in one report line: how much was read, what it found, and what
  * of its answer was not believed, with each reason counted. A reader who sees
  * "3 over budget" knows the report is partial; one who sees proposals dropped
- * knows the model was checked. When the review did not run, the line says why
- * instead, so its absence is not a silence.
+ * knows the model was checked. Pairs the duplicate check cleared are counted
+ * too, since they leave the report and the plan without a finding saying so.
+ * When the review did not run, the line says why instead, so its absence is
+ * not a silence.
  */
 export function renderReviewLine(stats: {
   read: number;
@@ -569,11 +599,14 @@ export function renderReviewLine(stats: {
   findings: number;
   dropped: Record<string, number>;
   failed: string[];
+  /** Duplicate pairs, reported or candidate, the model read as two subjects. */
+  cleared: number;
   off?: string;
 }): string {
   if (stats.off) return `Model review off: ${stats.off}`;
   const s = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
   const parts = [`read ${stats.read} of ${s(stats.withFindings, "page")} with findings${stats.skipped > 0 ? ` (${stats.skipped} over budget)` : ""}`, s(stats.findings, "finding")];
+  if (stats.cleared > 0) parts.push(`${s(stats.cleared, "duplicate pair")} cleared`);
 
   const reasons = Object.keys(stats.dropped)
     .filter((r) => stats.dropped[r] > 0)

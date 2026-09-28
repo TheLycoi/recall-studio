@@ -444,7 +444,14 @@ export function lintVault(pages: LintPage[], options: LintOptions = {}): VaultLi
     const body = page.content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
     const indexed: EvidenceUnit[] = indexNote(page.path, page.content);
     units += indexed.length;
-    claims.push(...residueOf(page.path, title, page.content, quoteUnits(page.path, page.content, indexed)));
+    // Residue only where the model review will read it: a concept or entity
+    // page, or a page that names no kind at all (a class page, whose kind is
+    // its class). A source page or an index note is never reviewed, so its
+    // residue would be counted in the report and never decided.
+    const kindHere = options.schema ? fmScalar(frontmatterOf(page.content), options.schema.kindKey) : null;
+    if (!kindHere || kindHere === "concept" || kindHere === "entity") {
+      claims.push(...residueOf(page.path, title, page.content, quoteUnits(page.path, page.content, indexed)));
+    }
     dupPages.push({
       path: page.path,
       title,
@@ -670,5 +677,5 @@ function claimsLine(report: VaultLintReport): string[] {
   if (n === 0) return [];
   const m = new Set(claims.map((c) => c.path)).size;
   const one = n === 1;
-  return ["", `${n} sentence${one ? "" : "s"} on ${m} page${m === 1 ? "" : "s"} ${one ? "has" : "have"} no quote behind ${one ? "it" : "them"}, not reported: the model review decides ${one ? "it" : "them"}.`];
+  return ["", `${n} sentence${one ? "" : "s"} on ${m} page${m === 1 ? "" : "s"} ${one ? "has" : "have"} no quote behind ${one ? "it" : "them"}, not reported: the model review decides ${one ? "it" : "them"} when it runs.`];
 }
