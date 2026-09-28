@@ -341,3 +341,96 @@ export const DuplicatesOut = z.object({
   ),
 });
 export type DuplicatesDraft = z.infer<typeof DuplicatesOut>;
+
+/**
+ * Pairs of pages the title scan reads as one subject under two names.
+ *
+ * Titles, not paths or numbers: the scan is shown titles only, and the code
+ * resolves each one back to a page and drops a pair it cannot resolve, so a
+ * title the model misspells costs one pair and never a wrong merge offer.
+ */
+export const TitleScanOut = z.object({
+  pairs: z
+    .array(
+      z.object({
+        a: z.string().describe("One page's title, copied exactly from the list."),
+        b: z.string().describe("The other page's title, copied exactly from the list."),
+        reason: z
+          .string()
+          .describe("One sentence naming what joins the two names: an abbreviation and its expansion, a spelling variant, a plural, a translation, or an older name."),
+      }),
+    )
+    .describe("Pairs of pages that are one subject under two names. Empty when there are none."),
+});
+export type TitleScanDraft = z.infer<typeof TitleScanOut>;
+
+/**
+ * The page review, as the model returns it.
+ *
+ * The contract the verifier in src/lintReview.ts reads has `kind` as a
+ * verdict or null. A nullable object serializes as `anyOf`, which the strict
+ * serializers reject (see the note at the top of this file), so on the wire
+ * "no verdict" is the sentinel `none` with an empty reason, the same way
+ * `VerdictOut` in src/llm.ts uses empty strings for fields that do not apply.
+ * `reviewDraftOf` turns the sentinel into null before anything else sees it,
+ * so `ReviewDraft` is the contract shape and `none` never reaches a caller.
+ */
+export const ReviewOut = z.object({
+  pages: z.array(
+    z.object({
+      title: z.string().describe("The page title, copied exactly from the input."),
+      kind: z
+        .object({
+          kind: z
+            .enum(["concept", "entity", "none"])
+            .describe("none unless the page is plainly filed under the wrong kind; then the kind it belongs under."),
+          reason: z.string().describe("One sentence on what makes the page the other kind. Empty string when kind is none."),
+        })
+        .describe("A verdict on the page's kind, given only when it is plainly filed wrong."),
+      claims: z
+        .array(
+          z.object({
+            n: z.number().int().describe("The claim's number, copied exactly from the input."),
+            supported: z.boolean().describe("true only when a quote on this page states the claim."),
+            by: z
+              .string()
+              .describe("The fragment of that quote that states the claim, at most twelve words, copied word for word. Empty string when unsupported."),
+            reason: z.string().describe("One sentence: what the page's quotes do or do not say about the claim."),
+          }),
+        )
+        .describe("One verdict per numbered claim sent with this page."),
+      links: z
+        .array(
+          z.object({
+            target: z.string().describe("A directory title, copied exactly, that the page's prose plainly discusses and does not already link to."),
+            reason: z.string().describe("One sentence naming where the prose discusses the target."),
+          }),
+        )
+        .describe("At most three pages to link to. Empty when none is plainly discussed."),
+    }),
+  ),
+});
+export type ReviewWire = z.infer<typeof ReviewOut>;
+
+/** A kind verdict: the kind the page belongs under, and why. */
+export interface ReviewKindVerdict {
+  kind: "concept" | "entity";
+  reason: string;
+}
+
+/** One page's review, with "no kind verdict" as null. */
+export type ReviewPageDraft = Omit<ReviewWire["pages"][number], "kind"> & { kind: ReviewKindVerdict | null };
+
+export interface ReviewDraft {
+  pages: ReviewPageDraft[];
+}
+
+/** The wire review with the `none` kind sentinel turned into null. */
+export function reviewDraftOf(wire: ReviewWire): ReviewDraft {
+  return {
+    pages: wire.pages.map((pg) => ({
+      ...pg,
+      kind: pg.kind.kind === "none" ? null : { kind: pg.kind.kind, reason: pg.kind.reason },
+    })),
+  };
+}

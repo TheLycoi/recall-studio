@@ -917,3 +917,181 @@ test("RELEVANCE_SYSTEM tells the model to judge, never to answer, and to return 
   assert.ok(lines >= 25 && lines <= 40, `system prompt is ${lines} lines`);
   assert.ok(/<examples>/.test(p.RELEVANCE_SYSTEM), "it carries worked examples");
 });
+
+// --- lint model review: title scan and page review ---------------------------
+
+const scanPages = [
+  { title: "CBT", kind: "concept", aliases: [] },
+  { title: "Cognitive Behavioural Therapy", kind: "concept", aliases: ["Cognitive therapy", "CBT-I"] },
+  { title: "Hermann Ebbinghaus", kind: "entity", aliases: [] },
+];
+
+test("title scan: one self-closing page line per page, titles and aliases verbatim, no bodies", () => {
+  const msg = p.buildTitleScanMessage({ pages: scanPages });
+  assert.ok(msg.startsWith("<pages>\n"), msg.slice(0, 40));
+  assert.equal((msg.match(/<page /g) ?? []).length, 3, "one line per page");
+  assert.ok(msg.includes('<page title="CBT" kind="concept" aliases="" />'), msg);
+  assert.ok(msg.includes('<page title="Cognitive Behavioural Therapy" kind="concept" aliases="Cognitive therapy, CBT-I" />'), msg);
+  assert.ok(msg.includes('<page title="Hermann Ebbinghaus" kind="entity" aliases="" />'), msg);
+  assert.ok(!msg.includes("</page>"), "no page bodies are sent");
+  assert.ok(/copied exactly/.test(msg.split("</pages>")[1]), "the closing instruction asks for exact titles");
+});
+
+test("title scan: an empty wiki still yields a well-formed message", () => {
+  const msg = p.buildTitleScanMessage({ pages: [] });
+  assert.ok(msg.includes("<pages>") && msg.includes("</pages>"), msg);
+  assert.equal((msg.match(/<page /g) ?? []).length, 0);
+});
+
+const reviewPage = {
+  title: "Spaced Repetition",
+  kind: "concept",
+  tags: ["method", "memory"],
+  aliases: ["SRS"],
+  body: "Spaced repetition schedules reviews.\n\n> [!quote] Reviews spaced over days beat massed practice.",
+  omitted: [],
+  claims: [
+    { n: 1, text: "Spaced repetition schedules reviews." },
+    { n: 2, text: "Anki uses it." },
+  ],
+  linked: ["memory", "testing effect"],
+};
+const reviewDirectory = [
+  { title: "Testing Effect", kind: "concept", aliases: ["retrieval practice"] },
+  { title: "Anki", kind: "entity", aliases: [] },
+];
+
+test("page review: the directory comes first, one line per entry as title (kind): aliases", () => {
+  const msg = p.buildReviewMessage({ pages: [reviewPage], directory: reviewDirectory });
+  assert.ok(msg.startsWith("<directory>\n"), msg.slice(0, 40));
+  assert.ok(msg.indexOf("</directory>") < msg.indexOf("<pages>"), "directory before pages");
+  assert.ok(msg.includes("\nTesting Effect (concept): retrieval practice\n"), msg);
+  assert.ok(msg.includes("\nAnki (entity)\n"), "an entry with no aliases has no dangling colon");
+});
+
+test("page review: each page carries its attributes, body, numbered claims and existing links verbatim", () => {
+  const second = { ...reviewPage, title: "Hermann Ebbinghaus", kind: "entity", tags: [], aliases: [], claims: [{ n: 7, text: "He studied forgetting." }], linked: [] };
+  const msg = p.buildReviewMessage({ pages: [reviewPage, second], directory: reviewDirectory });
+  assert.equal((msg.match(/<page /g) ?? []).length, 2);
+  assert.equal((msg.match(/<\/page>/g) ?? []).length, 2);
+  assert.ok(msg.includes('<page title="Spaced Repetition" kind="concept" tags="method, memory" aliases="SRS">'), msg);
+  assert.ok(msg.includes('<page title="Hermann Ebbinghaus" kind="entity" tags="" aliases="">'), msg);
+  assert.ok(msg.includes(`<body>\n${reviewPage.body}\n</body>`), "the body goes as given");
+  assert.ok(msg.includes('<claim n="1">Spaced repetition schedules reviews.</claim>'), msg);
+  assert.ok(msg.includes('<claim n="2">Anki uses it.</claim>'), msg);
+  assert.ok(msg.includes('<claim n="7">He studied forgetting.</claim>'), "claim numbers are copied, not renumbered");
+  assert.equal((msg.match(/<claim /g) ?? []).length, 3);
+  assert.ok(msg.includes("<linked>memory, testing effect</linked>"), msg);
+  const tail = msg.split("</pages>")[1];
+  assert.ok(/title copied exactly/.test(tail), tail);
+  assert.ok(/by (its )?number/.test(tail), tail);
+});
+
+test("page review: the omitted-sections line appears only when sections were cut", () => {
+  const none = p.buildReviewMessage({ pages: [reviewPage], directory: reviewDirectory });
+  assert.ok(!none.includes("Sections not shown"), "no line when nothing was cut");
+  const cut = p.buildReviewMessage({ pages: [{ ...reviewPage, omitted: ["History", "Further reading"] }], directory: reviewDirectory });
+  assert.equal((cut.match(/Sections not shown: History, Further reading/g) ?? []).length, 1, cut);
+});
+
+test("TitleScanOut parses pairs and rejects a missing field or a wrong type", () => {
+  const ok = { pairs: [{ a: "CBT", b: "Cognitive Behavioural Therapy", reason: "abbreviation and expansion" }] };
+  assert.equal(schemas.TitleScanOut.safeParse(ok).success, true);
+  assert.equal(schemas.TitleScanOut.safeParse({ pairs: [] }).success, true, "no pairs is an answer");
+  assert.equal(schemas.TitleScanOut.safeParse({ pairs: [{ a: "CBT", b: "Cognitive Behavioural Therapy" }] }).success, false, "reason is required");
+  assert.equal(schemas.TitleScanOut.safeParse({ pairs: [{ a: "CBT", b: 3, reason: "r" }] }).success, false, "titles are strings");
+  assert.equal(schemas.TitleScanOut.safeParse({}).success, false, "pairs is required");
+  assertStrict(z.toJSONSchema(schemas.TitleScanOut), "TitleScanOut");
+});
+
+const reviewWire = {
+  pages: [
+    {
+      title: "Spaced Repetition",
+      kind: { kind: "none", reason: "" },
+      claims: [
+        { n: 1, supported: true, by: "Reviews spaced over days beat massed practice", reason: "the quote states it" },
+        { n: 2, supported: false, by: "", reason: "no quote names Anki" },
+      ],
+      links: [{ target: "Testing Effect", reason: "the prose discusses retrieval" }],
+    },
+    {
+      title: "Hermann Ebbinghaus",
+      kind: { kind: "entity", reason: "a named person" },
+      claims: [],
+      links: [],
+    },
+  ],
+};
+
+test("ReviewOut parses a review and rejects a missing field or a wrong type", () => {
+  assert.equal(schemas.ReviewOut.safeParse(reviewWire).success, true);
+  const pg = reviewWire.pages[0];
+  assert.equal(schemas.ReviewOut.safeParse({ pages: [{ ...pg, kind: { kind: "person", reason: "" } }] }).success, false, "kind is concept, entity or none");
+  assert.equal(schemas.ReviewOut.safeParse({ pages: [{ ...pg, claims: [{ n: "1", supported: true, by: "x", reason: "r" }] }] }).success, false, "n is a number");
+  assert.equal(schemas.ReviewOut.safeParse({ pages: [{ ...pg, claims: [{ n: 1, supported: true, reason: "r" }] }] }).success, false, "by is required");
+  assert.equal(schemas.ReviewOut.safeParse({ pages: [{ ...pg, links: [{ target: "Anki" }] }] }).success, false, "a link without a reason is incomplete");
+  const { links, ...noLinks } = pg;
+  assert.equal(schemas.ReviewOut.safeParse({ pages: [noLinks] }).success, false, "links is required");
+});
+
+test("ReviewOut serializes strictly: the no-verdict kind is a sentinel, not a nullable union", () => {
+  const js = z.toJSONSchema(schemas.ReviewOut);
+  assertStrict(js, "ReviewOut");
+  assert.deepEqual(js.properties.pages.items.properties.kind.properties.kind.enum, ["concept", "entity", "none"]);
+});
+
+test("reviewDraftOf turns the none sentinel into a null kind and keeps everything else", () => {
+  const draft = schemas.reviewDraftOf(schemas.ReviewOut.parse(reviewWire));
+  assert.equal(draft.pages.length, 2);
+  assert.equal(draft.pages[0].kind, null, "none means no verdict");
+  assert.deepEqual(draft.pages[1].kind, { kind: "entity", reason: "a named person" });
+  assert.deepEqual(draft.pages[0].claims, reviewWire.pages[0].claims);
+  assert.deepEqual(draft.pages[0].links, reviewWire.pages[0].links);
+  assert.equal(draft.pages[0].title, "Spaced Repetition");
+});
+
+// The system prompts live in src/llm.ts, which cannot be bundled here (it
+// reaches `obsidian`), so they are read as text the way
+// test/prompt-examples.test.mjs reads the writer prompt.
+const llmSource = readFileSync("src/llm.ts", "utf8");
+function systemPrompt(name) {
+  const m = llmSource.match(new RegExp(`const ${name} = \`([\\s\\S]*?)(?<!\\\\)\`;`));
+  assert.ok(m, `${name} not found in src/llm.ts`);
+  return m[1];
+}
+
+test("TITLE_SCAN_SYSTEM carries its examples, the look-alike warning and the leave-it-out rule", () => {
+  const s = systemPrompt("TITLE_SCAN_SYSTEM");
+  const n = (s.match(/<example>/g) ?? []).length;
+  assert.ok(n >= 2 && n <= 3, `${n} examples`);
+  assert.ok(s.includes("<examples>") && s.includes("<note>"));
+  assert.ok(s.includes("Kinetics") && s.includes("Kinematics"));
+  assert.ok(/unsure/i.test(s) && /leave (it|the pair) out/i.test(s));
+  assert.ok(/subtopic/.test(s) && /part/.test(s));
+});
+
+test("REVIEW_SYSTEM carries its examples and the rules the verifier enforces", () => {
+  const s = systemPrompt("REVIEW_SYSTEM");
+  const n = (s.match(/<example>/g) ?? []).length;
+  assert.ok(n >= 2 && n <= 3, `${n} examples`);
+  assert.ok(/twelve words/.test(s), "the by fragment is capped at twelve words");
+  assert.ok(/general knowledge/.test(s), "general knowledge never supports a claim");
+  assert.ok(/at most three/.test(s), "links are capped at three");
+  assert.ok(/plainly filed wrong/.test(s), "a kind verdict only when plainly wrong");
+  assert.ok(/ticks?/.test(s) && /decision/.test(s), "a plausible proposal costs the reader a decision");
+});
+
+test("scanTitles and reviewPages run on the lint role with their labels and budgets", () => {
+  const body = (name) => {
+    const m = llmSource.match(new RegExp(`async ${name}\\([^)]*\\)[^{]*\\{([\\s\\S]*?)\\n  \\}`));
+    assert.ok(m, `${name} not found`);
+    return m[1];
+  };
+  const scan = body("scanTitles");
+  assert.ok(scan.includes('this.run("lint"') && scan.includes('label: "title scan"') && scan.includes("maxTokens: 4000") && scan.includes('effort: "low"'), scan);
+  const review = body("reviewPages");
+  assert.ok(review.includes('this.run("lint"') && review.includes('label: "page review"') && review.includes("maxTokens: 6000"), review);
+  assert.ok(!review.includes("effort"), "the review reasons, so it keeps the configured effort");
+  assert.ok(review.includes("reviewDraftOf"), "the none sentinel is turned into null before the caller sees it");
+});

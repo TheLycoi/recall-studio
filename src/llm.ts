@@ -18,6 +18,8 @@ import type {
   QuizGradeMessageArgs,
   QuizQuestionMessageArgs,
   SuggestMessageArgs,
+  TitleScanArgs,
+  ReviewArgs,
 } from "./prompt";
 import {
   buildAliasesMessage,
@@ -32,6 +34,8 @@ import {
   buildQuizGradeMessage,
   buildQuizQuestionMessage,
   buildSuggestMessage,
+  buildTitleScanMessage,
+  buildReviewMessage,
 } from "./prompt";
 import {
   AliasesTagsOut as AliasesTagsOutSchema,
@@ -43,8 +47,11 @@ import {
   QuizGradeOut as QuizGradeOutSchema,
   QuizQuestionOut as QuizQuestionOutSchema,
   SuggestOut as SuggestOutSchema,
+  TitleScanOut as TitleScanOutSchema,
+  ReviewOut as ReviewOutSchema,
+  reviewDraftOf,
 } from "./schemas";
-import type { AliasesTagsDraft, AskDraft, DigestDraft, DuplicatesDraft, QuizGradeDraft, QuizQuestionDraft, RelevanceVerdict, SuggestDraft } from "./schemas";
+import type { AliasesTagsDraft, AskDraft, DigestDraft, DuplicatesDraft, QuizGradeDraft, QuizQuestionDraft, RelevanceVerdict, ReviewDraft, SuggestDraft, TitleScanDraft } from "./schemas";
 import type { WikiLmSettings } from "./settings";
 
 const CardOut = z.object({
@@ -733,6 +740,47 @@ export class LlmClient {
   }
 
   /**
+   * "title scan": which pages are one subject under two names. The model is
+   * shown every page's title, kind and aliases and nothing of their text, so
+   * it can see the whole wiki in one request and catch the abbreviations and
+   * translations a spelling comparison misses. It only nominates: each pair
+   * joins the duplicate candidates and is read by `verifyDuplicates` before
+   * the reader is offered a link. Low effort: recognising two names for one
+   * thing is recognition, not reasoning.
+   */
+  async scanTitles(args: TitleScanArgs): Promise<TitleScanDraft> {
+    return this.run("lint", {
+      system: TITLE_SCAN_SYSTEM,
+      user: buildTitleScanMessage(args),
+      schema: TitleScanOutSchema,
+      label: "title scan",
+      maxTokens: 4000,
+      effort: "low",
+    });
+  }
+
+  /**
+   * "page review": a few pages read in full, each asked which flagged
+   * sentences its own quotes support, which directory pages it should link
+   * to, and whether it is filed under the right kind. Every answer is
+   * verified in src/lintReview.ts and every proposal is a row the reader
+   * ticks, so nothing here writes. No effort override: deciding whether a
+   * quote states a sentence, and whether prose really discusses a subject,
+   * is reasoning, and the configured effort is what it gets. The wire's
+   * `none` kind becomes null here, so callers only ever see `ReviewDraft`.
+   */
+  async reviewPages(args: ReviewArgs): Promise<ReviewDraft> {
+    const wire = await this.run("lint", {
+      system: REVIEW_SYSTEM,
+      user: buildReviewMessage(args),
+      schema: ReviewOutSchema,
+      label: "page review",
+      maxTokens: 6000,
+    });
+    return reviewDraftOf(wire);
+  }
+
+  /**
    * "quiz question": one retrieval-practice question written from the pool of
    * evidence a quiz was started on. As with `ask`, nothing is validated here:
    * src/quiz.ts checks the evidence number and the quote before the reader
@@ -977,6 +1025,104 @@ Pick the word that fits the subject as the excerpt describes it, and pick only f
 
 Return one entry per page you were given, in the order you were given them, with the title copied exactly so each proposal can be matched back to its page. Before you return, check that every alias appears in that page's excerpt or is the subject's standard name, that no alias merely restates the title, and that every tag is a word from the list for that page's kind.`;
 
+/**
+ * The title-scan system prompt. Follows the design of gd4ai/obsidian-llm-wiki's
+ * lint title scan (Apache-2.0; reimplemented here, not copied): one pass over
+ * every page's names, looking for abbreviations, variants and translations
+ * that the spelling-based candidate finder in src/duplicates.ts cannot see.
+ * Names alone are weak evidence, so the prompt leans hard on leaving a pair
+ * out, and every pair it does return still goes through `verifyDuplicates`,
+ * which reads both pages, before the reader is offered anything.
+ */
+const TITLE_SCAN_SYSTEM = `You find pages in a reader's wiki that are one subject filed under two names. You are shown every page's title, its kind, and the other names it already answers to. You are not shown any page's text, so you are judging names alone, and a name alone is weak evidence.
+
+Two pages are one subject only when one thing has ended up with two pages: an abbreviation and its expansion, a spelling variant, a plural and a singular, a translation, an older name and the current one. A title that matches another page's alias is the clearest case there is. Two pages related in any other way are two subjects: a topic and its subtopic, a whole and one of its parts, a method and the field it belongs to, two things that come from the same source, two measures computed from each other. Kinetics and Kinematics are spelled alike and are two subjects.
+
+Nothing is merged on your word. Each pair you return goes to a second check that reads both pages, and a pair that passes is offered to the reader as a link each way, which they tick or leave. So a pair that is merely plausible costs the reader a decision, and a pair you leave out costs nothing, because pages whose names are spelled alike are compared anyway. When you are unsure, leave the pair out.
+
+<examples>
+<example>
+<input><page title="CBT" kind="concept" aliases="" />
+<page title="Cognitive Behavioural Therapy" kind="concept" aliases="" /></input>
+<output>pair a "CBT", b "Cognitive Behavioural Therapy"; reason "CBT is the usual abbreviation of Cognitive Behavioural Therapy."</output>
+<note>An abbreviation and its expansion, and in a wiki that has a page on the therapy, nothing else the letters could stand for. One subject with two pages.</note>
+</example>
+<example>
+<input><page title="Kinetics" kind="concept" aliases="" />
+<page title="Kinematics" kind="concept" aliases="" /></input>
+<output>no pair.</output>
+<note>Spelled alike, two subjects: kinematics describes motion, kinetics accounts for it by the forces involved. A near spelling is a reason to look closer and never a verdict on its own.</note>
+</example>
+<example>
+<input><page title="Pharmacokinetics" kind="concept" aliases="PK" />
+<page title="Half-life" kind="concept" aliases="t1/2" /></input>
+<output>no pair.</output>
+<note>Half-life is one of the quantities pharmacokinetics studies, so the two are a topic and its subtopic. They belong linked, and linking related pages is not what this scan is for.</note>
+</example>
+</examples>
+
+Return each pair once, with both titles copied exactly as they appear in the list so the pair can be matched back to its pages, and one sentence naming what joins the two names. Return no pairs when no two pages are one subject; in most wikis that is the honest answer. Before you return, check that every title you wrote appears in the list character for character, that no pair joins a page to itself, and that every reason names an abbreviation, a variant, a plural, a translation or an older name rather than a relation between two subjects.`;
+
+/**
+ * The page-review system prompt. The model reads a page it can see in full,
+ * never the wiki as a whole (the lesson of upstream's deleted whole-wiki
+ * analysis, gd4ai/obsidian-llm-wiki #473), and answers three narrow
+ * questions about it. The link question follows the design of that repo's
+ * orphan-link fix: a short list chosen from a directory of pages that exist.
+ * Every answer is checked in src/lintReview.ts before the reader sees it, and
+ * the prompt tells the model what is checked, so an answer it cannot back is
+ * one it leaves out rather than one that is dropped later.
+ */
+const REVIEW_SYSTEM = `You review pages in a reader's wiki, one page at a time, and answer three questions about each: which of its flagged sentences the page's own quotes support, which other pages it should link to, and whether it is filed under the right kind. For each page you are shown its title, kind, tags and other names; its text, which on a long page is cut at a section heading with the sections left out named after it; a numbered list of sentences from its prose; and the pages it already links to. Once, above the pages, you are shown a directory of every page in the wiki with its kind and other names.
+
+Nothing you return is written to the vault. Every proposal becomes a row in a list the reader goes through and ticks or leaves, and every answer is checked against the page before they see it. A proposal that is merely plausible costs them a decision about something that was fine, and one you leave out costs them nothing. When you are unsure, leave it out.
+
+<claims>
+The pages in this wiki are written from passages the reader highlighted in their documents, and those passages, the quotes on the page, are its evidence. The numbered sentences are the ones in the page's own prose that the reader's tools could not match to any of its quotes. For each, say whether a quote on this page states it.
+
+A sentence is supported only by a quote on this page. When one states it, set by to the fragment of that quote that states it: at most twelve words, copied from the quote word for word. The fragment is looked up in the page's quotes, and one that is not found there leaves the sentence unsupported whatever you answered. A sentence no quote on this page states is unsupported, even when it is true: general knowledge never supports it, a quote on another page does not, and neither does the rest of the page's prose, which is what is being checked. For an unsupported sentence, by is an empty string and reason says what the quotes do and do not say.
+
+Answer every numbered sentence, under its number.
+</claims>
+
+<links>
+Nominate a link only when the page's prose plainly discusses a subject that has its own page in the directory and the page does not already link to it. Plainly discusses means the prose names the subject and says something about it; a word in passing is not enough. Nominate at most three, the ones a reader of this page would most want to follow, each with the target copied exactly from the directory: its title, not an alias and not a name of your own. A target that is not in the directory, is the page itself, or is among the page's existing links is dropped. Most pages get an empty list.
+</links>
+
+<kind>
+A concept page is about an idea: a mechanism, a method, a theory, a term, a phenomenon. An entity page is about a particular named thing: a person, an organisation, a place, an event, a product. Give a kind verdict only when the page is plainly filed wrong (a named person, organisation, place, event or product under concept, or a mechanism, method, theory or term under entity) and name the kind it belongs under. In every other case, including any you would have to argue for, kind is none with an empty reason. Changing a page's kind moves it to another schema, so this is the verdict to be surest of.
+</kind>
+
+<examples>
+<example>
+<input><page title="Insulin" kind="entity" tags="other" aliases="">
+<body>
+Insulin is secreted by beta cells when blood glucose is high. It was first isolated in 1921.
+> [!quote] Insulin is released by pancreatic beta cells in response to a rise in blood glucose.
+</body>
+<claims>
+<claim n="1">Insulin is secreted by beta cells when blood glucose is high.</claim>
+<claim n="2">Insulin was first isolated in 1921.</claim>
+</claims>
+<linked>glucose</linked>
+</page></input>
+<output>claim 1 supported, by "pancreatic beta cells in response to a rise in blood glucose"; claim 2 unsupported, by "", reason "No quote on the page dates the isolation of insulin."; no links; kind none.</output>
+<note>Claim 2 is true and still unsupported, because nothing the reader highlighted states it. A hormone filed as an entity is arguable rather than plainly wrong, so there is no kind verdict.</note>
+</example>
+<example>
+<input>A directory holding "Testing Effect (concept): retrieval practice", "Anki (entity)" and "Memory (concept)", and a page "Spaced Repetition" (concept) whose prose explains that each review works through the testing effect and that Anki schedules the reviews, with no claims and linked "memory".</input>
+<output>links "Testing Effect", reason "The prose explains spacing through the testing effect."; "Anki", reason "The prose names Anki as the scheduler."; no claims; kind none.</output>
+<note>Both targets are named and discussed in the prose and copied as directory titles. Memory is already linked, so it is not nominated again.</note>
+</example>
+<example>
+<input>A page "Hermann Ebbinghaus" (concept) whose text is about the man and his experiments on his own memory, with no claims and nothing linked.</input>
+<output>kind entity, reason "The page is about a named person."; no claims; no links.</output>
+<note>A named person under concept is plainly filed wrong. His forgetting curve would be a concept, but this page is about him.</note>
+</example>
+</examples>
+
+Return one entry per page you were given, with the title copied exactly. Before you return, check that every numbered sentence has an answer under its number, that every by is at most twelve words copied from a quote on that page, that every link target is a directory title the page does not already link to and there are at most three, and that every kind verdict other than none is for a page plainly filed wrong.`;
+
 const ASK_SYSTEM = `You answer a student's question about their own class notes, using numbered evidence taken from those notes. Each piece of evidence is something they highlighted in a lecture PDF or a claim they wrote down themselves, and it carries the note it came from and the page it was highlighted on. Your answer goes into a small sidebar beside their notes, with a link to one or two of those notes underneath it.
 
 Answer in prose, then name the evidence the answer rests on. The reader sees the answer first and the sources under it, so write the answer to stand on its own.
@@ -1194,6 +1340,6 @@ Judge the gap from the answer in front of you, not from what a reader like this 
 Before you return, check that your verdict rests on what the evidence states and not on how the answer was phrased, that every fact in your feedback is in the passage, and that the words in quote appear in the evidence exactly as you copied them.`;
 
 /** The digest, Ask, verify and quiz schemas are defined in schemas.ts so tests can bundle them without obsidian; re-exported here so callers have one import. */
-export { DigestOut, AskOut, KeywordsOut, RelevanceOut, QuizQuestionOut, QuizGradeOut, SuggestOut, AliasesTagsOut } from "./schemas";
-export type { DigestDraft, AskDraft, RelevanceVerdict, QuizQuestionDraft, QuizGradeDraft, SuggestDraft, AliasesTagsDraft } from "./schemas";
-export type { SuggestMessageArgs, AliasesMessageArgs, AliasesPageIn, RelevanceArgs } from "./prompt";
+export { DigestOut, AskOut, KeywordsOut, RelevanceOut, QuizQuestionOut, QuizGradeOut, SuggestOut, AliasesTagsOut, TitleScanOut, ReviewOut, reviewDraftOf } from "./schemas";
+export type { DigestDraft, AskDraft, RelevanceVerdict, QuizQuestionDraft, QuizGradeDraft, SuggestDraft, AliasesTagsDraft, TitleScanDraft, ReviewDraft, ReviewWire, ReviewPageDraft, ReviewKindVerdict } from "./schemas";
+export type { SuggestMessageArgs, AliasesMessageArgs, AliasesPageIn, RelevanceArgs, TitleScanArgs, TitleScanPageIn, ReviewArgs, ReviewPageIn, ReviewClaimIn, DirectoryEntry } from "./prompt";

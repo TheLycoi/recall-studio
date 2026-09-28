@@ -586,3 +586,111 @@ export function buildAliasesMessage(a: AliasesMessageArgs): string {
     "Return one entry per page, in the same order, with the title copied exactly.",
   ].join("\n\n");
 }
+
+/** One wiki page as the title scan sees it: its names, never its text. */
+export interface TitleScanPageIn {
+  title: string;
+  kind: string;
+  aliases: string[];
+}
+
+export interface TitleScanArgs {
+  pages: TitleScanPageIn[];
+}
+
+/**
+ * Build the user message for the title scan: every page as one self-closing
+ * line of title, kind and aliases, and nothing of its body. The scan is over
+ * names on purpose — it is the one pass that sees the whole wiki at once, and
+ * it can only afford to because a line per page is all it sends. The pairs
+ * come back as titles, so the closing line asks for them copied exactly: a
+ * title the model retypes is one the code cannot resolve to a page.
+ */
+export function buildTitleScanMessage(a: TitleScanArgs): string {
+  const pages = a.pages
+    .map((pg) => `<page title="${pg.title.trim()}" kind="${pg.kind}" aliases="${joinNames(pg.aliases)}" />`)
+    .join("\n");
+  return [
+    `<pages>\n${pages}\n</pages>`,
+    "Return the pairs of pages that are one subject under two names, both titles copied exactly as they appear above. Return no pairs when there are none.",
+  ].join("\n\n");
+}
+
+/** One numbered sentence from a page's prose that no quote on the page was found to cover. */
+export interface ReviewClaimIn {
+  n: number;
+  text: string;
+}
+
+/** One page sent for review: its attributes, its (possibly clamped) body, its residue claims, and the link keys it already has. */
+export interface ReviewPageIn {
+  title: string;
+  kind: "concept" | "entity";
+  tags: string[];
+  aliases: string[];
+  body: string;
+  /** Headings of the sections cut from `body` to fit the budget; empty when the body is whole. */
+  omitted: string[];
+  claims: ReviewClaimIn[];
+  /** Link keys the page already links to, so a nomination can skip them. */
+  linked: string[];
+}
+
+/** One page of the wiki, as the directory lists it: the set a link nomination must choose from. */
+export interface DirectoryEntry {
+  title: string;
+  kind: string;
+  aliases: string[];
+}
+
+export interface ReviewArgs {
+  pages: ReviewPageIn[];
+  directory: DirectoryEntry[];
+}
+
+/**
+ * Build the user message for the page review.
+ *
+ * The directory comes first, once per request, so that every link the model
+ * nominates is a choice from pages that exist rather than a name it expects
+ * to exist. Then each page whole: attributes, the body as the caller clamped
+ * it (with the cut sections named after it, so a missing section reads as
+ * cut rather than absent), the residue claims under the numbers the verdicts
+ * come back under, and the link keys the page already has. The claims are
+ * matched back by number and the pages by title, never by position.
+ */
+export function buildReviewMessage(a: ReviewArgs): string {
+  const directory = a.directory
+    .map((d) => {
+      const names = joinNames(d.aliases);
+      return `${d.title.trim()} (${d.kind})${names ? `: ${names}` : ""}`;
+    })
+    .join("\n");
+  const pages = a.pages
+    .map((pg) => {
+      const lines = [
+        `<page title="${pg.title.trim()}" kind="${pg.kind}" tags="${joinNames(pg.tags)}" aliases="${joinNames(pg.aliases)}">`,
+        `<body>\n${pg.body}\n</body>`,
+      ];
+      if (pg.omitted.length) lines.push(`Sections not shown: ${pg.omitted.join(", ")}`);
+      const claims = pg.claims.map((c) => `<claim n="${c.n}">${c.text.trim()}</claim>`).join("\n");
+      lines.push(claims ? `<claims>\n${claims}\n</claims>` : "<claims></claims>");
+      lines.push(`<linked>${pg.linked.join(", ")}</linked>`);
+      lines.push("</page>");
+      return lines.join("\n");
+    })
+    .join("\n");
+  return [
+    `<directory>\n${directory}\n</directory>`,
+    `<pages>\n${pages}\n</pages>`,
+    "Return one entry per page, with its title copied exactly. Answer every claim by its number. Copy each link target exactly from the directory, and set kind to none unless the page is plainly filed wrong.",
+  ].join("\n\n");
+}
+
+/** Names for an attribute: trimmed, blanks dropped, comma-separated. */
+function joinNames(names: string[]): string {
+  return names
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .join(", ");
+}
