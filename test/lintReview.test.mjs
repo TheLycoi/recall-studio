@@ -61,7 +61,7 @@ test("a class-schema page, with class: and no type:, is selected and reviewed as
   assert.equal(inputs.length, 1);
   assert.equal(inputs[0].kind, "concept");
   assert.equal(inputs[0].title, "Doping");
-  assert.deepEqual(lr.directoryOf(pages, kindOf), [{ title: "Doping", kind: "concept", aliases: [] }], "a hub is not a page to link to or pair by name");
+  assert.deepEqual(lr.directoryOf(pages, kindOf), [{ path: "classes/X/doping.md", title: "Doping", kind: "concept", aliases: [] }], "a hub is not a page to link to or pair by name");
 });
 
 // ---- clampBody
@@ -101,8 +101,8 @@ test("directoryOf names each page by its H1 or basename, with kind and aliases, 
     note("wiki/entities/SuperMemo.md", "type: entity", "No heading here."),
   ];
   assert.deepEqual(lr.directoryOf(pages, byType(pages)), [
-    { title: "Spaced repetition", kind: "concept", aliases: ["SRS", "Spacing"] },
-    { title: "SuperMemo", kind: "entity", aliases: [] },
+    { path: "wiki/concepts/spaced-repetition.md", title: "Spaced repetition", kind: "concept", aliases: ["SRS", "Spacing"] },
+    { path: "wiki/entities/SuperMemo.md", title: "SuperMemo", kind: "entity", aliases: [] },
   ]);
   assert.equal(lr.directoryOf(pages, byType(pages), 1).length, 1);
   assert.equal(lr.directoryOf(pages, byType(pages), 400, 50).length, 1, "the second entry would pass 50 characters");
@@ -116,6 +116,7 @@ test("buildReviewInputs assembles what the model sees per page and skips pages o
   const r = report([], [{ path: "wiki/concepts/a.md", title: "a", n: 1, text: "Prose sentence one." }, { path: "wiki/sources/s.md", title: "s", n: 1, text: "x" }]);
   assert.deepEqual(lr.buildReviewInputs(r, [a, s], byType([a, s])), [
     {
+      path: "wiki/concepts/a.md",
       title: "A page",
       kind: "concept",
       tags: ["method", "term"],
@@ -128,22 +129,41 @@ test("buildReviewInputs assembles what the model sees per page and skips pages o
   ]);
 });
 
+test("buildReviewInputs names apart two sent pages that share a title, by folder and filename", () => {
+  const bio = note("wiki/bio-intro.md", "type: concept", "# Introduction\n\nCells.");
+  const chem = note("wiki/chem-intro.md", "type: concept", "# Introduction\n\nAtoms.");
+  const lone = note("wiki/concepts/lone.md", "type: concept", "# Lone\n\nText.");
+  const got = lr.buildReviewInputs(report([]), [bio, chem, lone], byType([bio, chem, lone]));
+  assert.deepEqual(got.map((p) => [p.path, p.title]), [
+    ["wiki/bio-intro.md", "Introduction (wiki/bio-intro)"],
+    ["wiki/chem-intro.md", "Introduction (wiki/chem-intro)"],
+    ["wiki/concepts/lone.md", "Lone"],
+  ]);
+});
+
+test("buildReviewInputs names a sent page apart from a page of the same title that is not sent this run", () => {
+  const bio = note("wiki/bio-intro.md", "type: concept", "# Introduction\n\nCells.");
+  const chem = note("wiki/chem-intro.md", "type: concept", "# Introduction\n\nAtoms.");
+  const src = note("wiki/sources/intro.md", "type: source", "# Introduction\n\nA source.");
+  const all = [bio, chem, src];
+  const got = lr.buildReviewInputs(report([]), [chem], byType(all), all);
+  assert.deepEqual(got.map((p) => [p.path, p.title]), [["wiki/chem-intro.md", "Introduction (wiki/chem-intro)"]], "the source page is not reviewable, so it does not count");
+  const alone = lr.buildReviewInputs(report([]), [chem], byType(all), [chem, src]);
+  assert.deepEqual(alone.map((p) => p.title), ["Introduction"]);
+});
+
 // ---- verifyReview
 
 const UNITS = { "wiki/concepts/a.md": [{ text: "Spacing improves long‑term retention of vocabulary items in adults" }] };
 const units = (p) => UNITS[p] ?? [];
 const DIRECTORY = [
-  { title: "A page", kind: "concept", aliases: [] },
-  { title: "Spaced repetition", kind: "concept", aliases: ["SRS"] },
-  { title: "Other Page", kind: "entity", aliases: [] },
+  { path: "wiki/concepts/a.md", title: "A page", kind: "concept", aliases: [] },
+  { path: "wiki/concepts/spaced-repetition.md", title: "Spaced repetition", kind: "concept", aliases: ["SRS"] },
+  { path: "wiki/entities/other-page.md", title: "Other Page", kind: "entity", aliases: [] },
 ];
-const BY_KEY = new Map([
-  ["a-page", { path: "wiki/concepts/a.md", title: "A page" }],
-  ["spaced-repetition", { path: "wiki/concepts/spaced-repetition.md", title: "Spaced repetition" }],
-  ["other-page", { path: "wiki/entities/other-page.md", title: "Other Page" }],
-]);
 const SENT = [
   {
+    path: "wiki/concepts/a.md",
     title: "A page",
     kind: "concept",
     tags: [],
@@ -159,7 +179,7 @@ const SENT = [
   },
 ];
 const verdict = (over) => ({ title: "A page", kind: null, claims: [], links: [], ...over });
-const run = (out) => lr.verifyReview(SENT, out, DIRECTORY, BY_KEY, units);
+const run = (out) => lr.verifyReview(SENT, out, DIRECTORY, units);
 
 test("a supported claim whose quote is on the page is cleared, folded for case, spacing and curly quotes", () => {
   const got = run([verdict({ claims: [{ n: 1, supported: true, by: "  “Spacing   IMPROVES long‑term retention”", reason: "the key claim" }] })]);
@@ -176,7 +196,7 @@ test("a supported claim whose quote is not on the page stays an issue and is cou
 
 test("a quote over twelve words does not count, even when it is on the page", () => {
   const units13 = () => [{ text: "one two three four five six seven eight nine ten eleven twelve thirteen" }];
-  const got = lr.verifyReview(SENT, [verdict({ claims: [{ n: 1, supported: true, by: "one two three four five six seven eight nine ten eleven twelve thirteen", reason: "" }] })], DIRECTORY, BY_KEY, units13);
+  const got = lr.verifyReview(SENT, [verdict({ claims: [{ n: 1, supported: true, by: "one two three four five six seven eight nine ten eleven twelve thirteen", reason: "" }] })], DIRECTORY, units13);
   assert.equal(got.issues.length, 1);
   assert.deepEqual(got.dropped, { "quote not on page": 1 });
 });
@@ -209,6 +229,62 @@ test("a link resolves by title or alias; unknown, self and already-linked target
   assert.deepEqual(got.dropped, { "target not in wiki": 1, "self link": 1, "already linked": 1 });
 });
 
+test("a quote of fewer than three words, or one not on word boundaries, does not clear a claim", () => {
+  for (const by of ["a", "runs", "spacing improves", "vocabulary items in adult"]) {
+    const got = run([verdict({ claims: [{ n: 1, supported: true, by, reason: "" }] })]);
+    assert.equal(got.issues.length, 1, by);
+    assert.deepEqual(got.dropped, { "quote not on page": 1 }, by);
+  }
+});
+
+test("a four-word verbatim fragment sharing a word with the claim clears it", () => {
+  const got = run([verdict({ claims: [{ n: 1, supported: true, by: "retention of vocabulary items", reason: "" }] })]);
+  assert.deepEqual(got.issues, []);
+  assert.deepEqual(got.dropped, {});
+});
+
+test("a fragment on the page that shares no word with the claim does not clear it", () => {
+  // Claim 2 is about massed practice; the fragment is on the page but says nothing about it.
+  const got = run([verdict({ claims: [{ n: 2, supported: true, by: "retention of vocabulary items", reason: "" }] })]);
+  assert.deepEqual(got.issues.map((i) => i.detail), ["Massed practice fades within weeks."]);
+  assert.deepEqual(got.dropped, { "quote not on page": 1 });
+});
+
+test("two pages under one title: each verdict lands on the page it was sent for, by path", () => {
+  const bio = { ...SENT[0], path: "wiki/bio-intro.md", title: "Introduction (wiki/bio-intro)", claims: [{ n: 1, text: "Cells divide by mitosis in tissues." }], linked: [] };
+  const chem = { ...SENT[0], path: "wiki/chem-intro.md", title: "Introduction (wiki/chem-intro)", claims: [{ n: 1, text: "Atoms bond by sharing electrons." }], linked: [] };
+  const dir = [...DIRECTORY, { path: bio.path, title: "Introduction", kind: "concept", aliases: [] }, { path: chem.path, title: "Introduction", kind: "concept", aliases: [] }];
+  const out = [{ title: "Introduction (wiki/chem-intro)", kind: null, claims: [{ n: 1, supported: false, by: "", reason: "" }], links: [{ target: "SRS", reason: "r" }] }];
+  // Chem sent alone, as the reproduction had it, and both sent together.
+  for (const sent of [[chem], [bio, chem]]) {
+    const got = lr.verifyReview(sent, out, dir, units);
+    assert.deepEqual([...new Set(got.issues.map((i) => i.path))], ["wiki/chem-intro.md"]);
+    assert.deepEqual(got.links.map((l) => l.path), ["wiki/chem-intro.md"]);
+  }
+  // A bare "Introduction" names no page that was sent: the sent titles were told apart.
+  const bare = lr.verifyReview([bio, chem], [{ ...out[0], title: "Introduction" }], dir, units);
+  assert.deepEqual(bare.issues, []);
+  assert.deepEqual(bare.dropped, { "page not sent": 1 });
+});
+
+test("a directory title two pages share resolves to neither, so a nomination of it is dropped", () => {
+  const dir = [...DIRECTORY, { path: "wiki/bio-intro.md", title: "Introduction", kind: "concept", aliases: [] }, { path: "wiki/chem-intro.md", title: "Introduction", kind: "concept", aliases: [] }];
+  const got = lr.verifyReview(SENT, [verdict({ links: [{ target: "Introduction", reason: "r" }] })], dir, units);
+  assert.deepEqual(got.links, []);
+  assert.deepEqual(got.dropped, { "target not in wiki": 1 });
+});
+
+test("a page's title outranks another page's alias, and an alias two pages share resolves to neither", () => {
+  const dir = [
+    { path: "wiki/concepts/srs.md", title: "SRS", kind: "concept", aliases: [] },
+    { path: "wiki/concepts/spaced-repetition.md", title: "Spaced repetition", kind: "concept", aliases: ["SRS", "Spacing"] },
+    { path: "wiki/concepts/spacing-effect.md", title: "Spacing effect", kind: "concept", aliases: ["Spacing"] },
+  ];
+  const got = lr.verifyReview(SENT, [verdict({ links: [{ target: "SRS", reason: "r" }, { target: "Spacing", reason: "r" }] })], dir, units);
+  assert.deepEqual(got.links.map((l) => l.targetPath), ["wiki/concepts/srs.md"]);
+  assert.deepEqual(got.dropped, { "target not in wiki": 1 });
+});
+
 test("a kind verdict is a finding only when it differs from the page's kind", () => {
   const same = run([verdict({ kind: { kind: "concept", reason: "it is a method" } })]);
   assert.deepEqual(same.issues, []);
@@ -225,14 +301,8 @@ test("issues come back worst first", () => {
 
 // ---- verifyTitleScan
 
-const TITLE_PATHS = new Map([
-  ["Spaced repetition", "wiki/concepts/spaced-repetition.md"],
-  ["A page", "wiki/concepts/a.md"],
-  ["Other Page", "wiki/entities/other-page.md"],
-]);
-
 test("verifyTitleScan resolves both titles by title or alias and emits a title candidate", () => {
-  const got = lr.verifyTitleScan({ pairs: [{ a: "SRS", b: "A page", reason: "abbreviation" }] }, DIRECTORY, TITLE_PATHS, new Set());
+  const got = lr.verifyTitleScan({ pairs: [{ a: "SRS", b: "A page", reason: "abbreviation" }] }, DIRECTORY, new Set());
   assert.deepEqual(got.candidates, [
     { a: "wiki/concepts/a.md", b: "wiki/concepts/spaced-repetition.md", pass: "title", detail: "the model reads the titles as one subject: abbreviation" },
   ]);
@@ -252,11 +322,17 @@ test("verifyTitleScan drops unknown titles, self pairs, existing pairs and repea
       ],
     },
     DIRECTORY,
-    TITLE_PATHS,
     existing,
   );
   assert.deepEqual(got.candidates.map((c) => c.detail), ["the model reads the titles as one subject: first"]);
   assert.deepEqual(got.dropped, { "title not in wiki": 1, "self pair": 1, "already paired": 2 });
+});
+
+test("verifyTitleScan drops a title two pages share as not in the wiki", () => {
+  const dir = [...DIRECTORY, { path: "wiki/bio-intro.md", title: "Introduction", kind: "concept", aliases: [] }, { path: "wiki/chem-intro.md", title: "Introduction", kind: "concept", aliases: [] }];
+  const got = lr.verifyTitleScan({ pairs: [{ a: "Introduction", b: "A page", reason: "" }] }, dir, new Set());
+  assert.deepEqual(got.candidates, []);
+  assert.deepEqual(got.dropped, { "title not in wiki": 1 });
 });
 
 // ---- renderReviewLine

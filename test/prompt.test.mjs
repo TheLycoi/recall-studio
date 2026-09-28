@@ -987,6 +987,16 @@ test("page review: each page carries its attributes, body, numbered claims and e
   assert.ok(/by (its )?number/.test(tail), tail);
 });
 
+test("page review and title scan: a page's path is never sent, only its title", () => {
+  const withPath = { ...reviewPage, path: "wiki/concepts/secret-folder/spaced-repetition.md" };
+  const dir = reviewDirectory.map((d, i) => ({ ...d, path: `wiki/hidden-dir/entry-${i}.md` }));
+  const msg = p.buildReviewMessage({ pages: [withPath], directory: dir });
+  assert.ok(!msg.includes("secret-folder") && !msg.includes("spaced-repetition.md"), msg);
+  assert.ok(!msg.includes("hidden-dir"), msg);
+  const scan = p.buildTitleScanMessage({ pages: dir });
+  assert.ok(!scan.includes("hidden-dir"), scan);
+});
+
 test("page review: the omitted-sections line appears only when sections were cut", () => {
   const none = p.buildReviewMessage({ pages: [reviewPage], directory: reviewDirectory });
   assert.ok(!none.includes("Sections not shown"), "no line when nothing was cut");

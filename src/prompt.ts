@@ -624,6 +624,8 @@ export interface ReviewClaimIn {
 
 /** One page sent for review: its attributes, its (possibly clamped) body, its residue claims, and the link keys it already has. */
 export interface ReviewPageIn {
+  /** Where the page lives, for matching the verdict back; never rendered, since the model answers by title. */
+  path?: string;
   title: string;
   kind: "concept" | "entity";
   tags: string[];
@@ -638,6 +640,8 @@ export interface ReviewPageIn {
 
 /** One page of the wiki, as the directory lists it: the set a link nomination must choose from. */
 export interface DirectoryEntry {
+  /** Where the page lives; never rendered, for the same reason as `ReviewPageIn.path`. */
+  path?: string;
   title: string;
   kind: string;
   aliases: string[];

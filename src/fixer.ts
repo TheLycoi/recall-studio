@@ -40,7 +40,7 @@ import {
   type RectText,
   type DuplicateVerdicts,
 } from "./fixPlan";
-import { buildGraph, isGraphUsable, linkKey, pprFromSeeds, type Graph } from "./graph";
+import { buildGraph, isGraphUsable, pprFromSeeds, type Graph } from "./graph";
 import { CONCEPT_TAGS, ENTITY_TAGS, fmList, noteAliases, parseTopicNote } from "./topicNote";
 import { pdfsLinkedFrom } from "./pdf";
 import { collectPdfHighlights } from "./pdfHighlights";
@@ -53,7 +53,6 @@ import type { CancelToken } from "./cancel";
 import {
   buildReviewInputs,
   directoryOf,
-  pageTitle,
   renderReviewLine,
   REVIEW_BUDGET_CHARS,
   selectPages,
@@ -562,18 +561,6 @@ export async function runModelReview(
   const directory = directoryOf(pages, kindOf);
   const contentOf = new Map(pages.map((p) => [p.path, p.content]));
 
-  // A title the model echoes back finds its page by the same `pageTitle` the
-  // directory was built with; the first page to claim a title keeps it.
-  const pathOfTitle = new Map<string, string>();
-  const pagesByKey = new Map<string, { path: string; title: string }>();
-  for (const p of [...pages].sort((a, b) => a.path.localeCompare(b.path))) {
-    if (kindOf(p.path) === "other") continue;
-    const title = pageTitle(p.path, p.content);
-    if (!pathOfTitle.has(title)) pathOfTitle.set(title, p.path);
-    const key = linkKey(title);
-    if (key && !pagesByKey.has(key)) pagesByKey.set(key, { path: p.path, title });
-  }
-
   const issues: VaultIssue[] = [];
   let candidates: DuplicateFinding[] = [...(report.candidates ?? [])];
   const rows: Fix[] = [];
@@ -600,7 +587,7 @@ export async function runModelReview(
       const out = await plugin.llm.scanTitles({ pages: batch });
       // Resolved against the whole directory, so a pair naming a page from
       // another batch still finds it.
-      const v = verifyTitleScan(out, directory, pathOfTitle, existing);
+      const v = verifyTitleScan(out, directory, existing);
       for (const c of v.candidates) existing.add(pairKey(c.a, c.b));
       candidates.push(...v.candidates);
       mergeCounts(dropped, v.dropped);
@@ -632,7 +619,7 @@ export async function runModelReview(
     const chosen = selectPages(working, pages, REVIEW_BUDGET_CHARS, kindOf);
     skipped = chosen.skipped;
     withFindings = chosen.chosen.length + chosen.skipped;
-    const sent = buildReviewInputs(working, chosen.chosen, kindOf);
+    const sent = buildReviewInputs(working, chosen.chosen, kindOf, pages);
     const links: ReviewLink[] = [];
     const kinds: ReviewKind[] = [];
     const units = (path: string) => quoteUnits(path, contentOf.get(path) ?? "");
@@ -646,7 +633,7 @@ export async function runModelReview(
         status(`model review: page ${b * REVIEW_BATCH + 1} of ${sent.length}`);
         const batch = sent.slice(b * REVIEW_BATCH, (b + 1) * REVIEW_BATCH);
         const out = await plugin.llm.reviewPages({ pages: batch, directory });
-        const v = verifyReview(batch, out.pages, directory, pagesByKey, units);
+        const v = verifyReview(batch, out.pages, directory, units);
         issues.push(...v.issues);
         links.push(...v.links);
         kinds.push(...v.kinds);

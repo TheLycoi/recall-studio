@@ -240,3 +240,26 @@ test("verifyDuplicates returns the pairs it confirmed as findings", async () => 
   assert.deepEqual(v.issues.map((i) => [i.id, i.path, i.target]), [["duplicate-pages", ALPHA.path, GAMMA.path]]);
   assert.equal(v.rows.length, 2);
 });
+
+test("two pages under one heading: the review's verdicts land only on the page that was sent", async () => {
+  const bio = page("wiki/bio-intro.md", "type: concept", "# Introduction\n\nCells divide.\n");
+  const chem = page("wiki/chem-intro.md", "type: concept", "# Introduction\n\nAtoms bond by sharing electrons.\n");
+  const pages = [bio, chem, BETA];
+  const report = { notes: 3, units: 0, issues: [{ id: "orphan", path: chem.path, title: "chem-intro" }], candidates: [], claims: [{ path: chem.path, title: "chem-intro", n: 1, text: "Atoms bond by sharing electrons." }] };
+  const { llm, calls } = fakeLlm({
+    async scanTitles() {
+      return { pairs: [{ a: "Introduction", b: "Beta", reason: "x" }] };
+    },
+    async reviewPages(args) {
+      calls.reviewPages.push(args);
+      return {
+        pages: args.pages.map((p) => ({ title: p.title, kind: null, claims: [{ n: 1, supported: false, by: "", reason: "" }], links: [{ target: "Beta", reason: "r" }] })),
+      };
+    },
+  });
+  const r = await run(llm, { pages, report });
+  assert.deepEqual(calls.reviewPages[0].pages.map((p) => p.title), ["Introduction (wiki/chem-intro)"], "told apart from the bio page the directory also lists");
+  assert.deepEqual([...new Set(r.issues.map((i) => i.path))], [chem.path]);
+  assert.ok(r.rows.every((f) => f.path !== bio.path), r.rows.map((f) => f.path).join(", "));
+  assert.equal(calls.verifyDuplicates.length, 0, "a scan pair naming a heading two pages share names neither");
+});

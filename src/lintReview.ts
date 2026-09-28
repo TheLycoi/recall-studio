@@ -25,7 +25,7 @@ import { linkKey, noteLinks } from "./graph";
 import { fmList, nextHeadingAfter, noteAliases } from "./topicNote";
 import { pairKey, type DuplicateFinding } from "./duplicates";
 import { compareIssues, ORDER, renderVaultLint, type LintPage, type VaultIssue, type VaultLintReport } from "./vaultLint";
-import type { EvidenceUnit } from "./retrieval";
+import { significantTokens, type EvidenceUnit } from "./retrieval";
 
 export { pairKey };
 
@@ -35,6 +35,13 @@ export interface ReviewClaimIn {
 }
 
 export interface ReviewPageIn {
+  /**
+   * The page's vault path. Never sent: the model answers by title, and code
+   * resolves that title to this path, so two pages that share a heading can
+   * never receive each other's verdicts.
+   */
+  path: string;
+  /** The title the page is sent under, unique within one run (`buildReviewInputs`). */
   title: string;
   kind: "concept" | "entity";
   tags: string[];
@@ -46,6 +53,8 @@ export interface ReviewPageIn {
 }
 
 export interface DirectoryEntry {
+  /** The page's vault path, never sent; a name the model copies from the directory resolves to it. */
+  path: string;
   title: string;
   kind: string;
   aliases: string[];
@@ -88,6 +97,8 @@ export type DropReason =
 
 /** The longest fragment a claim verdict may cite as its quote: long enough to name a passage, short enough that it cannot be the claim restated. */
 export const MAX_BY_WORDS = 12;
+/** The shortest: a word or two is on almost any page, so it proves nothing about this one. */
+export const MIN_BY_WORDS = 3;
 
 /** Default run budget for page bodies, and the per-page clamp, from the design. */
 export const REVIEW_BUDGET_CHARS = 60_000;
@@ -136,6 +147,26 @@ function fold(s: string): string {
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
+}
+
+/**
+ * A title reduced to what matching it should ignore: case and every run of
+ * punctuation or space. Not `linkKey`, which keeps only what follows the last
+ * `/` because it reads link targets, and so would read "TCP/IP" as "IP" and a
+ * disambiguated "Introduction (wiki/bio-intro)" as "bio-intro".
+ */
+function titleKey(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/** Folded words, so a quote is matched word for word and never inside a longer word. */
+function words(s: string): string[] {
+  return fold(s)
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
 }
 
 /** A title as the model may write it back: a wikilink's brackets and display text removed. */
@@ -257,7 +288,7 @@ export function directoryOf(
     if (out.length >= max) break;
     const kind = kindOf(p.path);
     if (kind === "other") continue;
-    const entry: DirectoryEntry = { title: pageTitle(p.path, p.content), kind, aliases: noteAliases(p.content) };
+    const entry: DirectoryEntry = { path: p.path, title: pageTitle(p.path, p.content), kind, aliases: noteAliases(p.content) };
     const line = `${entry.title} (${entry.kind}): ${entry.aliases.join(", ")}`.length + 1;
     if (chars + line > maxChars) break;
     chars += line;
@@ -274,15 +305,38 @@ export function directoryOf(
  * one. A page whose kind is neither concept nor entity is left out: the kind
  * verdict can only move a page between those two, and the other checks are
  * about pages that explain a subject.
+ *
+ * The model answers by title, so no two pages of one run go under the same
+ * one: pages whose titles fold alike are each sent as `Title (folder/file)`,
+ * which the model copies back and `verifyReview` resolves to the page's path.
+ * Across the whole run rather than per call, so the name a page is sent
+ * under does not depend on which batch it fell into; and, given `all`, across
+ * every reviewable page of the wiki, so a page sent as "Introduction" is not
+ * read as the other "Introduction" the directory lists beside it.
  */
-export function buildReviewInputs(report: VaultLintReport, chosen: LintPage[], kindOf: (path: string) => PageKind): ReviewPageIn[] {
+export function buildReviewInputs(
+  report: VaultLintReport,
+  chosen: LintPage[],
+  kindOf: (path: string) => PageKind,
+  all: LintPage[] = chosen,
+): ReviewPageIn[] {
+  const reviewable = chosen.filter((p) => kindOf(p.path) !== "other");
+  const sharing = new Map<string, Set<string>>();
+  for (const p of [...all, ...reviewable]) {
+    if (kindOf(p.path) === "other") continue;
+    const key = titleKey(pageTitle(p.path, p.content));
+    sharing.set(key, (sharing.get(key) ?? new Set()).add(p.path));
+  }
+
   const out: ReviewPageIn[] = [];
-  for (const page of chosen) {
-    const kind = kindOf(page.path);
-    if (kind === "other") continue;
+  for (const page of reviewable) {
+    const kind = kindOf(page.path) as "concept" | "entity";
     const { body, omitted } = clampBody(page.content);
+    const title = pageTitle(page.path, page.content);
+    const place = page.path.split("/").slice(-2).join("/").replace(/\.md$/i, "");
     out.push({
-      title: pageTitle(page.path, page.content),
+      path: page.path,
+      title: (sharing.get(titleKey(title))?.size ?? 0) > 1 ? `${title} (${place})` : title,
       kind,
       tags: fmList(frontmatter(page.content), "tags"),
       aliases: noteAliases(page.content),
@@ -297,75 +351,111 @@ export function buildReviewInputs(report: VaultLintReport, chosen: LintPage[], k
 
 // ---- verification ----------------------------------------------------------
 
-/** Title or alias, folded by `linkKey`, to its directory entry; the first entry to claim a key keeps it. */
-function directoryIndex(directory: DirectoryEntry[]): Map<string, DirectoryEntry> {
-  const byKey = new Map<string, DirectoryEntry>();
+/**
+ * A name the model wrote, resolved to the one page it names, or undefined.
+ *
+ * A title outranks an alias: a page called SRS is what "SRS" names, even when
+ * another page lists SRS among its other names. A name two different pages
+ * claim at the same rank names neither, and its proposal is dropped as not in
+ * the wiki: guessing which of two "Introduction" pages was meant would put a
+ * verdict or a link on a page the model never meant, and no first-come order
+ * makes that guess right.
+ */
+function directoryIndex(directory: DirectoryEntry[]): (name: string) => DirectoryEntry | undefined {
+  const byTitle = new Map<string, DirectoryEntry | null>();
+  const byAlias = new Map<string, DirectoryEntry | null>();
+  const claim = (into: Map<string, DirectoryEntry | null>, name: string, entry: DirectoryEntry): void => {
+    const key = titleKey(name);
+    if (!key) return;
+    const had = into.get(key);
+    if (had === undefined) into.set(key, entry);
+    else if (had !== null && had.path !== entry.path) into.set(key, null);
+  };
   for (const entry of directory) {
-    for (const name of [entry.title, ...entry.aliases]) {
-      const key = linkKey(name);
-      if (key && !byKey.has(key)) byKey.set(key, entry);
-    }
+    claim(byTitle, entry.title, entry);
+    for (const alias of entry.aliases) claim(byAlias, alias, entry);
   }
-  return byKey;
+  return (name: string): DirectoryEntry | undefined => {
+    const key = titleKey(bareTitle(name));
+    const title = byTitle.get(key);
+    if (title !== undefined) return title ?? undefined;
+    return byAlias.get(key) ?? undefined;
+  };
 }
 
 /**
- * Whether a claim verdict's quote is really on the page.
+ * Whether a claim verdict's quote is really on the page, and about the claim.
  *
  * The model's word that a sentence is supported is worth nothing on its own:
- * it has to name the fragment, and the fragment has to be found, folded,
- * inside one of the page's quote units. The length cap keeps the check honest
- * in the other direction: a "quote" as long as the sentence could be the
- * sentence itself, restated.
+ * it has to name the fragment, and the fragment has to be found, word for
+ * word, as a run of whole words in one of the page's quote units. Whole words,
+ * because a substring test found "a" and "runs" on every page and cleared any
+ * claim with them. At least three words, because a pair of words is on most
+ * pages by chance. At least one significant word shared with the claim,
+ * because a real quote from the page that is about something else backs
+ * nothing. And at most twelve, because a "quote" as long as the sentence
+ * could be the sentence itself, restated.
  */
-function quoteOnPage(by: string, units: EvidenceUnit[]): boolean {
-  const needle = fold(by).replace(/^["']+|["']+$/g, "").trim();
-  if (needle.length === 0) return false;
-  if (needle.split(" ").length > MAX_BY_WORDS) return false;
-  return units.some((u) => fold(u.text).includes(needle));
+function quoteOnPage(by: string, claim: string, units: EvidenceUnit[]): boolean {
+  const needle = words(by);
+  if (needle.length < MIN_BY_WORDS || needle.length > MAX_BY_WORDS) return false;
+  const about = new Set(significantTokens(claim));
+  if (!significantTokens(by).some((t) => about.has(t))) return false;
+  return units.some((u) => {
+    const hay = words(u.text);
+    for (let i = 0; i + needle.length <= hay.length; i++) {
+      if (needle.every((w, k) => hay[i + k] === w)) return true;
+    }
+    return false;
+  });
 }
 
 /**
  * The review's answer, checked proposal by proposal.
  *
- * A page verdict must name a page that was sent; a claim verdict a claim
- * number that was sent. A claim is cleared only when its quote is on the page
- * (`quoteOnPage`); judged unsupported, or claimed supported by a quote that is
- * not there, it becomes an `unsupported-prose` finding, the latter also
- * counted as `quote not on page` so the reader can see the model overclaiming.
- * A claim the model did not judge stays what it was, a candidate: silence is
- * not a verdict. A link must resolve through the directory to a page that is
- * not this one and is not already linked from it. A kind verdict is a finding
- * only when it moves the page. `pagesByKey` maps `linkKey(title)` to the page,
- * for both the reviewed page and a link's target.
+ * A page verdict must name, by the title it was sent under, a page that was
+ * sent; it is resolved to that page's path, never to whatever page shares its
+ * heading. A claim verdict must name a claim number that was sent. A claim is
+ * cleared only when its quote is on the page (`quoteOnPage`); judged
+ * unsupported, or claimed supported by a quote that is not there, it becomes
+ * an `unsupported-prose` finding, the latter also counted as `quote not on
+ * page` so the reader can see the model overclaiming. A claim the model did
+ * not judge stays what it was, a candidate: silence is not a verdict.
+ *
+ * A link must resolve through the directory to one page (`directoryIndex`)
+ * that is not this one and is not already linked from it. A kind verdict is a
+ * finding only when it moves the page.
  */
 export function verifyReview(
   sent: ReviewPageIn[],
   out: ReviewPageOut[],
   directory: DirectoryEntry[],
-  pagesByKey: Map<string, { path: string; title: string }>,
   units: (path: string) => EvidenceUnit[],
 ): { issues: VaultIssue[]; links: ReviewLink[]; kinds: ReviewKind[]; dropped: Record<string, number> } {
   const issues: VaultIssue[] = [];
   const links: ReviewLink[] = [];
   const kinds: ReviewKind[] = [];
   const dropped: Record<string, number> = {};
-  const sentByKey = new Map(sent.map((p) => [linkKey(p.title), p]));
-  const dirByKey = directoryIndex(directory);
+  // Sent titles are unique by construction; one that is not names no page.
+  const sentByKey = new Map<string, ReviewPageIn | null>();
+  for (const p of sent) {
+    const key = titleKey(p.title);
+    sentByKey.set(key, sentByKey.has(key) ? null : p);
+  }
+  const resolve = directoryIndex(directory);
   const done = new Set<string>();
 
   for (const verdict of out) {
-    const key = linkKey(bareTitle(verdict.title));
-    const page = sentByKey.get(key);
-    const where = page ? pagesByKey.get(linkKey(page.title)) : undefined;
-    if (!page || !where) {
+    const page = sentByKey.get(titleKey(bareTitle(verdict.title)));
+    if (!page) {
       count(dropped, "page not sent");
       continue;
     }
     // A second verdict for the same page adds nothing the first did not say.
-    if (done.has(key)) continue;
-    done.add(key);
-    const title = basename(where.path);
+    if (done.has(page.path)) continue;
+    done.add(page.path);
+    const where = page.path;
+    const title = basename(where);
 
     const judged = new Set<number>();
     for (const c of verdict.claims) {
@@ -377,38 +467,37 @@ export function verifyReview(
       if (judged.has(c.n)) continue;
       judged.add(c.n);
       if (c.supported) {
-        if (quoteOnPage(c.by, units(where.path))) continue;
+        if (quoteOnPage(c.by, claim.text, units(where))) continue;
         count(dropped, "quote not on page");
       }
-      issues.push({ id: "unsupported-prose", path: where.path, title, target: undefined, detail: claim.text });
+      issues.push({ id: "unsupported-prose", path: where, title, target: undefined, detail: claim.text });
     }
 
     const linked = new Set(page.linked);
     for (const l of verdict.links) {
-      const entry = dirByKey.get(linkKey(bareTitle(l.target)));
-      const target = entry ? pagesByKey.get(linkKey(entry.title)) : undefined;
-      if (!entry || !target) {
+      const entry = resolve(l.target);
+      if (!entry) {
         count(dropped, "target not in wiki");
         continue;
       }
-      if (target.path === where.path) {
+      if (entry.path === where) {
         count(dropped, "self link");
         continue;
       }
       // The page may link its target by filename, by title or by an alias.
-      const names = [basename(target.path), entry.title, ...entry.aliases].map(linkKey);
+      const names = [basename(entry.path), entry.title, ...entry.aliases].map(linkKey);
       if (names.some((n) => linked.has(n))) {
         count(dropped, "already linked");
         continue;
       }
-      linked.add(linkKey(basename(target.path)));
-      links.push({ path: where.path, targetPath: target.path, targetTitle: entry.title, reason: l.reason });
-      issues.push({ id: "missing-link", path: where.path, title, target: entry.title, detail: l.reason });
+      linked.add(linkKey(basename(entry.path)));
+      links.push({ path: where, targetPath: entry.path, targetTitle: entry.title, reason: l.reason });
+      issues.push({ id: "missing-link", path: where, title, target: entry.title, detail: l.reason });
     }
 
     if (verdict.kind && verdict.kind.kind !== page.kind && (verdict.kind.kind === "concept" || verdict.kind.kind === "entity")) {
-      kinds.push({ path: where.path, kind: verdict.kind.kind, reason: verdict.kind.reason });
-      issues.push({ id: "wrong-kind", path: where.path, title, detail: `${page.kind} → ${verdict.kind.kind}: ${verdict.kind.reason}` });
+      kinds.push({ path: where, kind: verdict.kind.kind, reason: verdict.kind.reason });
+      issues.push({ id: "wrong-kind", path: where, title, detail: `${page.kind} → ${verdict.kind.kind}: ${verdict.kind.reason}` });
     }
   }
 
@@ -424,19 +513,16 @@ export function verifyReview(
  * spelling: `existingPairs` holds `pairKey(pathA, pathB)` for every finding
  * and candidate the report already carries. What survives is a candidate like
  * a spelling look-alike, for the duplicate check to confirm, never a finding.
- * `pathOfTitle` is keyed by a directory entry's title, exact or by `linkKey`.
+ * A title two pages share names neither (`directoryIndex`) and is dropped as
+ * not in the wiki.
  */
 export function verifyTitleScan(
   out: TitleScanOut,
   directory: DirectoryEntry[],
-  pathOfTitle: Map<string, string>,
   existingPairs: Set<string>,
 ): { candidates: DuplicateFinding[]; dropped: Record<string, number> } {
-  const dirByKey = directoryIndex(directory);
-  const pathOf = (name: string): string | undefined => {
-    const entry = dirByKey.get(linkKey(bareTitle(name)));
-    return entry ? pathOfTitle.get(entry.title) ?? pathOfTitle.get(linkKey(entry.title)) : undefined;
-  };
+  const resolve = directoryIndex(directory);
+  const pathOf = (name: string): string | undefined => resolve(name)?.path;
   const candidates: DuplicateFinding[] = [];
   const dropped: Record<string, number> = {};
   const seen = new Set(existingPairs);
