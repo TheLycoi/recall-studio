@@ -809,6 +809,8 @@ body.wikilm-highlighter-active .textLayer ::selection {
 /* The answer's sentences that matched no passage: listed, never removed. */
 .wikilm-unmatched {
   margin-top: var(--size-4-1);
+  padding-left: var(--size-4-2);
+  border-left: 2px solid var(--text-muted);
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
 }

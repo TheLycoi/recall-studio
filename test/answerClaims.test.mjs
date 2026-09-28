@@ -254,3 +254,90 @@ test("checkClaims splits then verifies in one call", () => {
 test("checkClaims of an empty answer is nothing", () => {
   assert.deepEqual(ac.checkClaims("", UNITS), []);
 });
+
+// ---- supportedBy: titles, and a sentence that joins two passages (A4) ----
+
+const PK = [
+  unit("Half-life", "Elimination half-life is the time for plasma concentration to fall by half"),
+  unit("Clearance", "Clearance measures the volume of plasma cleared of drug per unit time"),
+  unit("Kinematics", "Velocity is the change in position over time, a vector with speed and direction"),
+];
+
+test("supportedBy passes a sentence synthesized from two passages that neither states alone", () => {
+  const claim = "Half-life depends on clearance: the time for plasma concentration to fall by half grows as the volume cleared per unit time shrinks.";
+  const got = ac.supportedBy(claim, PK);
+  assert.equal(got.supported, true, `scored ${got.score}`);
+  assert.ok(got.score >= 0.6, `pair score ${got.score}`);
+  // The best single passage is still the one reported.
+  assert.ok(["Half-life", "Clearance"].includes(got.best.id));
+  const [v] = ac.verifyClaims([claim], PK);
+  assert.equal(v.status, "supported");
+});
+
+test("supportedBy leaves a sentence drawing on none of the passages unmatched", () => {
+  const got = ac.supportedBy("Conduct disorder involves persistent disregard for the rights of others", PK);
+  assert.equal(got.supported, false);
+});
+
+test("supportedBy passes a sentence one passage states, on the single-passage test", () => {
+  const got = ac.supportedBy("Velocity is the change in position over time, a vector with speed and direction", PK);
+  assert.equal(got.supported, true);
+  assert.equal(got.score, 1);
+  assert.equal(got.best.id, "Kinematics");
+});
+
+test("supportedBy counts a passage's note title as part of it", () => {
+  const units = [unit("Bioavailability", "the dose fraction reaching circulation unchanged")];
+  // Five words: the short-claim rule wants every one, and "bioavailability" is only in the title.
+  const got = ac.supportedBy("Bioavailability is the dose fraction reaching circulation", units);
+  assert.equal(got.supported, true);
+  assert.equal(got.best, units[0]);
+});
+
+test("supportedBy does not let a second passage adding one word carry a sentence over the bar", () => {
+  const units = [unit("Note", "alpha beta gamma delta epsilon"), unit("Other", "alpha beta gamma delta zeta")];
+  // The union holds 6 of 10 words, exactly the bar, but the second passage
+  // adds only "zeta" and the first only "epsilon" beyond what they share.
+  const got = ac.supportedBy("alpha beta gamma delta epsilon zeta theta iota kappa lambda", units);
+  assert.equal(got.supported, false);
+  assert.equal(got.score, 0.5);
+});
+
+test("supportedBy pairs the top passage with the one adding the words it lacks, not the runner-up that overlaps it (S5)", () => {
+  // A and B share four words, so each adds only one the other lacks; C adds
+  // two A lacks. A+C holds 7 of 10 words and qualifies; A+B would not.
+  const A = unit("A", "alpha beta gamma delta epsilon");
+  const B = unit("B", "alpha beta gamma delta zeta");
+  const C = unit("C", "zeta theta");
+  const claim = "alpha beta gamma delta epsilon zeta theta iota kappa lambda";
+  const withB = ac.supportedBy(claim, [A, B, C]);
+  assert.equal(withB.supported, true, `with B scored ${withB.score}`);
+  assert.equal(withB.score, 0.7);
+  const withoutB = ac.supportedBy(claim, [A, C]);
+  assert.equal(withoutB.supported, true, `without B scored ${withoutB.score}`);
+  assert.equal(withoutB.score, 0.7);
+});
+
+test("supportedBy tries the second-best passage as the anchor when the top one's best pair fails", () => {
+  // A tops at 5 hits, but X and B each add only one word A lacks, so no pair
+  // with A passes the own-words rule. X (4 hits) is next: B adds three words
+  // X lacks, X adds four B lacks, and together they hold 7 of 10.
+  const A = unit("A", "alpha beta gamma delta epsilon");
+  const B = unit("B", "alpha beta zeta");
+  const X = unit("X", "gamma delta epsilon theta");
+  const claim = "alpha beta gamma delta epsilon zeta theta iota kappa lambda";
+  const got = ac.supportedBy(claim, [A, B, X]);
+  assert.equal(got.supported, true, `scored ${got.score}`);
+  assert.equal(got.score, 0.7);
+  assert.equal(got.best, A);
+});
+
+test("supportedBy keeps the short-claim rule: one word missing everywhere fails a short sentence", () => {
+  const units = [unit("Note", "albumin binds drugs"), unit("Other", "receptors transduce signals")];
+  // Four words, three of them in one passage: 0.75 would pass a long claim's bar, not a short one's.
+  assert.equal(ac.supportedBy("Albumin binds drugs reversibly", units).supported, false);
+});
+
+test("supportedBy with nothing to search is unsupported at score zero", () => {
+  assert.deepEqual(ac.supportedBy("Receptors bind ligands with high affinity", []), { supported: false, score: 0, best: null });
+});

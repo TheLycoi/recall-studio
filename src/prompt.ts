@@ -199,7 +199,7 @@ export function buildAskMessage(a: AskMessageArgs): string {
     .join("\n\n");
 }
 
-/** The numbered evidence lines, shared by the ask and verify messages so the judge sees exactly what the writer saw. */
+/** The numbered evidence lines, shared by the ask, quiz and relevance messages so the relevance judge sees exactly what the writer saw. */
 function askEvidenceLines(evidence: AskEvidenceIn[]): string {
   return evidence.map((e) => `[${e.n}] (${e.noteTitle}${e.page === null ? "" : `, p.${e.page}`}) ${e.text}`).join("\n");
 }
@@ -414,7 +414,7 @@ export interface RelevanceArgs {
   history: AskHistoryTurn[];
 }
 
-/** Counts entries, so one exchange: the previous question and its answer, which is enough for the judge to resolve a follow-up like "why is that". */
+/** Counts entries, so one exchange: the previous question and its answer (the pending question is not in the history; `historyFor` drops it), which is enough for the judge to resolve a follow-up like "why is that". */
 const RELEVANCE_HISTORY_ENTRIES = 2;
 
 /**

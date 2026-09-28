@@ -87,10 +87,13 @@ export const DigestOut = z.object({
  * because the model tidied a quote — and it made the reply a wall of evidence
  * rather than an answer.
  *
- * The grounding is now where the wiki upstream puts it: in the prompt, which
- * tells the model to answer from the given notes and nothing else, and in the
- * sources it names. `used` is short on purpose — the one or two notes that
- * actually carry the answer, not everything retrieval happened to return.
+ * Grounding now starts in the prompt, which tells the model to answer from
+ * the given notes and nothing else, and in the sources it names; the panel
+ * then drops citations that point at no evidence and matches each sentence
+ * of the answer against the cited notes (src/askCheck.ts,
+ * src/answerClaims.ts), listing the unmatched ones rather than deleting them.
+ * `used` is short on purpose — the one or two notes that actually carry the
+ * answer, not everything retrieval happened to return.
  */
 export const AskOut = z.object({
   coverage: z
@@ -125,10 +128,10 @@ export type AskDraft = z.infer<typeof AskOut>;
  *
  * `evidence_n` and `quote` exist so the software can check the question before
  * the reader sees it: src/quiz.ts looks the number up in the pool it sent and
- * checks the quote is in that evidence, the same substring check Ask uses for
- * its quotes. A question whose quote fails verification is regenerated once
- * and then dropped, so the model is never the last word on whether its own
- * question is grounded.
+ * checks the quote is in that evidence, a plain substring check (Ask no
+ * longer checks quotes at all). A question whose quote fails verification is
+ * regenerated once and then dropped, so the model is never the last word on
+ * whether its own question is grounded.
  */
 export const QuizQuestionOut = z.object({
   question: z

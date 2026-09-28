@@ -539,10 +539,14 @@ the two pages the top evidence came from say about themselves — their
 only evidence numbers may be cited, and the prompt says so.
 
 **The route.** The grounding line under an answer names which stage found
-its evidence — *notes*, *notes + graph*, *notes + keywords*, or *general
-knowledge* — and the class it was kept to, so a reader can see whether
-the answer came from words their notes use or from a neighbour the graph
-reached.
+its evidence — *notes*, *notes + graph*, *notes + keywords*, or *keywords*
+— then what the evidence filter did to it (*18 → 6 kept*, *judge failed,
+top 6 of 18*; `describeNarrowing`, `src/relevance.ts`), and the class it
+was kept to, so a reader can see whether the answer came from words their
+notes use or from a neighbour the graph reached. A general-knowledge answer
+shows no route: its banner and grounding line already say it came from
+outside the notes. A refusal shows none either, since no route produced it
+(`routeForReport`, `src/askCheck.ts`). The class scope is shown on both.
 
 **Send to inbox.** A button under an answer, **Send answer to inbox**,
 queues the answer as one inbox item (`captureAskAnswer`, `src/capture.ts`):
@@ -555,10 +559,17 @@ passages; the card's back links the first passage's page. The sources shown and 
 (`pickSources`). Links inside a passage are reduced to their words on the
 card's back, in the inbox and in front of the card writer (`plainText`,
 `src/util.ts`); the stored highlight keeps them so the note can be reopened
-at the passage. An answer with no source has no button: a card with nothing
-to link is the unattributed fact this plugin exists to avoid. Typed, the
-phrase is **send to inbox** (or *card it*, *make flashcards*), which cards
-the most recent answer that has a source.
+at the passage. Every answer the model wrote has the button
+(`canSendAnswer`, `src/askCheck.ts`). A general-knowledge answer rests on no
+passage, so it is carded with a note saying it is unverified, linked to the
+class hub when the question was kept to a class and to the note you have
+open otherwise (`buildAskRow`, `src/askCapture.ts`); with neither, the panel
+says so rather than card a fact with nothing to link. Refusals and errors
+have no button: the plugin wrote them, not the model. Typed, the phrase is
+**send to inbox** or any of its family — *send / add … to inbox*, *send
+it / that / this*, *card it / that / the answer*, *make cards /
+flashcards* (`matchIntent`, `src/chatCommands.ts`) — and it sends the
+newest answer, not an older one behind it.
 
 **No evidence, no model.** When nothing under the topic folder matches the
 question, the panel answers at once, without a model call: *Your notes
@@ -621,7 +632,7 @@ else is a question for your notes. Three buttons above the box — **Quiz me**,
 | **digest** / **digest Doping** | group the PDF++ highlights of the open file — or the PDF or note you name — into concept and entity pages, filing into pages you already have first |
 | **highlight** / **highlight Ch3** | the model picks spans in a PDF, each checked against the text layer; you can paste a transcript or study guide first |
 | **lint** | check the wiki for wrong quotes, dead links and duplicate pages; **Suggest fixes** proposes a repair per finding |
-| **send to inbox** | card the last answer, one inbox item per source it rested on |
+| **send to inbox** (or *send it*, *add to inbox*, *card it*, *card the answer*) | card the last answer: one inbox row per answer, with the sources it rested on beneath it |
 | **export**, **inbox**, **help** | send reviewed cards to Anki, open the inbox, list these phrases |
 
 **Suggest fixes.** The Wiki check modal offers a plan when any finding can be
@@ -665,7 +676,7 @@ Answer in prose, then name the evidence the answer rests on. The reader sees the
 <answer_from_the_evidence>
 Answer from the evidence above, not from general knowledge. You know a great deal about most of these subjects, and none of it belongs in an answer that claims to come from their notes: the reader is revising for an exam set on this material, and a true sentence their course never taught them is one they cannot rely on and cannot trace back to a slide.
 
-Do not make up anything that is not in the evidence. Nothing downstream checks your words against it any more, so an invented sentence reaches the reader looking exactly like a sourced one. Write as though they will open the note you cite and read the passage themselves, because the link under your answer is there for precisely that.
+Do not make up anything that is not in the evidence. Every sentence of your answer is matched against the evidence and the notes you cite, and a sentence the notes do not support is shown to the reader as unmatched, so write each one from the evidence. Write as though they will open the note you cite and read the passage themselves, because the link under your answer is there for precisely that.
 
 The conversation so far, when there is one, is there so that a follow-up makes sense: it tells you what "it" refers to and what has already been said. It is not evidence. Nothing said in an earlier turn may be asserted in this one unless the evidence in front of you now states it.
 </answer_from_the_evidence>
@@ -958,8 +969,11 @@ Before you return, check that your verdict rests on what the evidence states and
 | Conversation turns kept | 10 | how many prior turns Ask keeps for follow-ups |
 | Standing instructions for Ask | *(empty)* | appended to every Ask prompt |
 | Find other wording when a question comes up short | on | one extra call turns the question into the terms your notes use, and those are searched for locally |
+| Filter evidence with the model | on | retrieves three times the evidence count (at most 30), and one extra call keeps only the passages that bear on the question; when it keeps none, the reply says so and no answer call is made |
+| Check the answer's sentences | on | matches each sentence of the answer against the cited notes, with no model call; sentences that match no passage are counted, never deleted |
 | Answer from general knowledge when your notes do not | off | lets the model answer a question the notes do not cover, under a banner saying it did not come from them |
-| Show the grounding line under answers | on | the one-line coverage summary, plus a count of any citations dropped |
+| Show the grounding line under answers | on | the one-line coverage summary, with counts of any citations dropped and of sentences that matched no passage, then the route, what the evidence filter kept, and the class searched |
+| List unmatched sentences | on | lists the sentences that matched no passage under the grounding line; the count on the line stays when this is off |
 | Question cap per quiz | 30 | a runaway guard: a quiz ends when it brackets the edge of what you know, and this only stops one that never does |
 | Evidence pool per quiz | 20 | matching highlights and claims a quiz draws from |
 | Standing instructions for quizzes | *(empty)* | appended to every question-writing prompt |

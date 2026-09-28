@@ -645,7 +645,8 @@ export class LlmClient {
   /**
    * "ask": one question against numbered evidence from the reader's own notes.
    * The draft is structured, not prose: the caller assembles the answer from
-   * it and checks the quotes and citations, so nothing is validated here.
+   * it, drops citations past the end of the evidence, and matches each answer
+   * sentence against the cited passages, so nothing is validated here.
    */
   async ask(args: AskMessageArgs): Promise<AskDraft> {
     return this.run("query", {
@@ -983,7 +984,7 @@ Answer in prose, then name the evidence the answer rests on. The reader sees the
 <answer_from_the_evidence>
 Answer from the evidence above, not from general knowledge. You know a great deal about most of these subjects, and none of it belongs in an answer that claims to come from their notes: the reader is revising for an exam set on this material, and a true sentence their course never taught them is one they cannot rely on and cannot trace back to a slide.
 
-Do not make up anything that is not in the evidence. Nothing downstream checks your words against it any more, so an invented sentence reaches the reader looking exactly like a sourced one. Write as though they will open the note you cite and read the passage themselves, because the link under your answer is there for precisely that.
+Do not make up anything that is not in the evidence. Every sentence of your answer is matched against the evidence and the notes you cite, and a sentence the notes do not support is shown to the reader as unmatched, so write each one from the evidence. Write as though they will open the note you cite and read the passage themselves, because the link under your answer is there for precisely that.
 
 The conversation so far, when there is one, is there so that a follow-up makes sense: it tells you what "it" refers to and what has already been said. It is not evidence. Nothing said in an earlier turn may be asserted in this one unless the evidence in front of you now states it.
 </answer_from_the_evidence>

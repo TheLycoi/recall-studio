@@ -214,3 +214,66 @@ test("send to inbox and its plain-language forms card the last answer; a questio
   assert.equal(cc.matchIntent("what does the inbox send to the writer?", CTX).kind, "question");
   assert.match(cc.renderHelp(), /\*\*send to inbox\*\*/);
 });
+
+// ---- 2.0 ask cleanup: send phrases (B3), file verbs that open questions (A15),
+// ---- "ask about X in CODE" (C15), help text (B6)
+
+test("every plain way of asking to send the last answer is the send-answer intent", () => {
+  const phrases = [
+    "send to inbox",
+    "send answer to inbox",
+    "send the answer to inbox",
+    "send it",
+    "send that",
+    "send this",
+    "add to inbox",
+    "add that to inbox",
+    "card it",
+    "card that",
+    "card the answer",
+    "card this answer",
+  ];
+  for (const phrase of phrases) {
+    assert.deepEqual(cc.matchIntent(phrase, CTX), { kind: "send-answer" }, phrase);
+    assert.deepEqual(cc.matchIntent(phrase.toUpperCase(), CTX), { kind: "send-answer" }, `${phrase} in capitals`);
+    assert.deepEqual(cc.matchIntent(`${phrase}.`, CTX), { kind: "send-answer" }, `${phrase} with a full stop`);
+  }
+});
+
+test("bare 'send' stays the capture alias, and questions that start with send or card stay questions", () => {
+  assert.deepEqual(cc.matchIntent("send", CTX), { kind: "command", id: "capture-selection" });
+  assert.deepEqual(cc.matchIntent("send a signal down the axon?", CTX), { kind: "question" });
+  assert.deepEqual(cc.matchIntent("what does card sorting measure", CTX), { kind: "question" });
+});
+
+test("a file verb leading a real question is a question when no file fits", () => {
+  assert.deepEqual(cc.matchIntent("highlight the differences between kinetics and kinematics", CTX), { kind: "question" });
+  assert.deepEqual(cc.matchIntent("digest the main arguments of the doping debate", CTX), { kind: "question" });
+  // A short name that fits nothing is still a file command that missed, so
+  // the panel says "Nothing called…" rather than answering "lab4".
+  const miss = cc.matchIntent("digest lab4", CTX);
+  assert.equal(miss.kind, "ambiguous");
+  assert.deepEqual(miss.candidates, []);
+  assert.equal(miss.words, "lab4");
+});
+
+test("a file verb leading a question keeps a class scope the line names", () => {
+  assert.deepEqual(cc.matchIntent("highlight the differences between kinetics and kinematics in HBIO408", SCOPE_CTX), {
+    kind: "question",
+    classCode: "HBIO408",
+    text: "highlight the differences between kinetics and kinematics",
+  });
+});
+
+test("'ask about X in CODE' keeps its class", () => {
+  assert.deepEqual(cc.matchIntent("ask about impulse in HBIO408", SCOPE_CTX), { kind: "question", classCode: "HBIO408", text: "impulse" });
+  assert.deepEqual(cc.matchIntent("ask what is impulse in hbio408?", SCOPE_CTX), { kind: "question", classCode: "HBIO408", text: "what is impulse" });
+});
+
+test("help describes one inbox row per answer, lists the send phrases, and the class scope", () => {
+  const help = cc.renderHelp();
+  assert.ok(!/one inbox item per source/.test(help), "the retired one-item-per-source wording is gone");
+  assert.match(help, /one inbox row per answer, with the sources it rested on beneath it/);
+  for (const p of ["send it", "add to inbox", "card it"]) assert.ok(help.includes(p), `help lists ${p}`);
+  assert.ok(help.includes("**ask HBIO250 …**") && help.includes("**… in HBIO250**"));
+});

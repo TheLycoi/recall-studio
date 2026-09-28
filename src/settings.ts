@@ -96,19 +96,23 @@ export interface WikiLmSettings {
   suggestInstructions: string;
 
   // Ask
+  /** Passages the answer is written from; with the relevance filter on, the pool is three times this (at most 30) and the judge keeps up to this many. */
   askEvidenceCount: number;
+  /** Entries of conversation sent to the model with a question (a question and its answer are two); the log keeps twice as many. */
   askMaxTurns: number;
   askInstructions: string;
-  /** When lexical search and the note graph leave an answer short, ask the model for better search terms. */
+  /** When the question's words match weakly and find fewer passages than `askEvidenceCount`, ask the model for the terms the notes would use. */
   askKeywordExpansion: boolean;
-  /** Retrieve three times as many passages, then spend one model call keeping only the ones that bear on the question. */
+  /** Retrieve three times as many passages (at most 30), then spend one model call keeping only the ones that bear on the question. */
   askRelevanceFilter: boolean;
   /** Match each sentence of the answer against the cited notes locally, and list the ones no passage states. Marks, never deletes. */
   askClaimCheck: boolean;
   /** When the notes do not cover a question, let the model answer from general knowledge behind a warning. */
   askGeneralKnowledge: boolean;
-  /** Show the line under an answer reporting what was kept, removed, verified, and rejected. */
+  /** Show the line under an answer: how well the notes covered it, the retrieval route, and the class scope. */
   askShowGrounding: boolean;
+  /** List the sentences that matched no passage under the answer; the count on the grounding line stays either way. */
+  askShowUnmatched: boolean;
   /**
    * A runaway guard, not a target: the quiz ends when it brackets the edge of
    * what the reader knows. This only stops a session that never gets there.
@@ -216,6 +220,7 @@ export const DEFAULT_SETTINGS: WikiLmSettings = {
   askClaimCheck: true,
   askGeneralKnowledge: false,
   askShowGrounding: true,
+  askShowUnmatched: true,
   quizCap: 30,
   quizPoolSize: 20,
   quizInstructions: "",
@@ -837,10 +842,18 @@ export class WikiLmSettingTab extends PluginSettingTab {
         });
       });
 
-    new Setting(containerEl).setName("Ask").setHeading();
+    new Setting(containerEl)
+      .setName("Ask")
+      .setDesc(
+        "A question costs one model call for the answer, one more when the evidence filter is on, and sometimes one to find other wording: one to three calls.",
+      )
+      .setHeading();
 
     new Setting(containerEl)
       .setName("Evidence per question")
+      .setDesc(
+        "How many passages the answer is written from. With “Filter evidence with the model” on, three times as many (at most 30) are retrieved and the filter keeps up to this many. No model call. More passages make each answer call longer.",
+      )
       .addSlider((sl) =>
         sl
           .setLimits(4, 30, 1)
@@ -854,6 +867,9 @@ export class WikiLmSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Conversation turns kept")
+      .setDesc(
+        "Entries of the conversation sent to the model with each question; a question and its answer are two. The log keeps twice that many. No model call. A longer history makes every answer call longer.",
+      )
       .addSlider((sl) =>
         sl
           .setLimits(2, 30, 1)
@@ -867,6 +883,7 @@ export class WikiLmSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Standing instructions for Ask")
+      .setDesc("Added to every answer call. No model call.")
       .addTextArea((t) => {
         t.inputEl.rows = 3;
         t.inputEl.cols = 50;
@@ -879,7 +896,7 @@ export class WikiLmSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Find other wording when a question comes up short")
       .setDesc(
-        "When your words and the linked notes do not fill the evidence list, the model turns the question into the terms your notes would use and they are searched for locally. One extra call, and only on questions that were about to come up short.",
+        "When your question's words match your notes only weakly and find fewer passages than the evidence count, the model turns the question into the terms your notes would use and they are searched for locally. One extra model call, only on those questions.",
       )
       .addToggle((t) =>
         t.setValue(s.askKeywordExpansion).onChange((v) => {
@@ -891,7 +908,7 @@ export class WikiLmSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Filter evidence with the model")
       .setDesc(
-        "Retrieve three times as many passages, then keep only the ones a model judges to bear on the question. One extra model call per question.",
+        "Retrieve three times as many passages (at most 30), then keep only the ones a model judges to bear on the question. One extra model call per question. When it keeps none, the reply says so and no answer call is made.",
       )
       .addToggle((t) =>
         t.setValue(s.askRelevanceFilter).onChange((v) => {
@@ -915,7 +932,7 @@ export class WikiLmSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Answer from general knowledge when your notes do not")
       .setDesc(
-        "Off, a question your notes do not cover is answered with that fact and nothing else. On, the model may answer from what it knows, with a warning above the answer saying it did not come from your notes.",
+        "Off, a question your notes do not cover is answered with that fact and nothing else, and an answer the model drew from general knowledge is replaced by that refusal. On, the model may answer from what it knows, with a warning above the answer; it can be sent to the inbox marked unverified. Costs one answer call on questions that would otherwise be refused without one.",
       )
       .addToggle((t) =>
         t.setValue(s.askGeneralKnowledge).onChange((v) => {
@@ -926,9 +943,20 @@ export class WikiLmSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Show the grounding line under answers")
+      .setDesc("The line under an answer: how well your notes covered it, the route that found the evidence, and the class it was searched in. No model call.")
       .addToggle((t) =>
         t.setValue(s.askShowGrounding).onChange((v) => {
           s.askShowGrounding = v;
+          save();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("List unmatched sentences")
+      .setDesc("List the sentences that matched no passage under the answer. The count on the grounding line stays.")
+      .addToggle((t) =>
+        t.setValue(s.askShowUnmatched).onChange((v) => {
+          s.askShowUnmatched = v;
           save();
         }),
       );

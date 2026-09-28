@@ -414,7 +414,8 @@ export class InboxView extends ItemView {
     where.setText(
       [
         isPdfHighlight(h) ? "PDF" : h.heading ? `§ ${h.heading}` : null,
-        h.page ? `page ${h.page}` : `line ${h.line + 1}`,
+        // An answer carded from Ask sits on no line of its note, so "line 1" would point nowhere.
+        h.page ? `page ${h.page}` : h.origin === "ask" ? null : `line ${h.line + 1}`,
         ORIGIN_LABELS[h.origin] ?? null,
         fmtDate(h.createdAt),
       ]

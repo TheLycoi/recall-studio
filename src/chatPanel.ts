@@ -1,4 +1,4 @@
-import { ItemView, MarkdownRenderer, TAbstractFile, TFile } from "obsidian";
+import { ItemView, MarkdownRenderer, Notice, TAbstractFile, TFile } from "obsidian";
 import type WikiLmPlugin from "./main";
 import { describeError } from "./llm";
 import {
@@ -21,17 +21,22 @@ import { FixPlanModal, LintReportModal, pickNote } from "./modals";
 import { repointFix, type Fix, type FixPageInfo } from "./fixPlan";
 import { applyPlan, buildPlan, fixPagesFor, pageInfos, proposeAliases, providerReady, verifyDuplicates, type FixContext } from "./fixer";
 import {
+  canSendAnswer,
   checkAnswer,
   emptyIndexAnswer,
+  filteredOutAnswer,
+  MAX_SOURCES,
   noEvidenceAnswer,
   renderGroundingLine,
   renderUnmatchedClaims,
+  routeForReport,
   VERIFY_BANNER,
   type GroundingReport,
   pickSources,
   type PickedSource as PickedSourceOf,
 } from "./askCheck";
-import { applyRelevance, RELEVANCE_MIN_CANDIDATES } from "./relevance";
+import { describeNarrowing, narrowEvidence, RELEVANCE_MIN_CANDIDATES } from "./relevance";
+import { historyFor } from "./askHistory";
 import { checkClaims } from "./answerClaims";
 import { matchIntent, renderHelp, type Intent, type IntentContext, type IntentPage, type Target } from "./chatCommands";
 import { WIKILM_COMMANDS, type WikiLmCommand } from "./commands";
@@ -95,12 +100,15 @@ function targetLabel(t: Target): string {
   }
 }
 
+/** A source under an answer, bound to the panel's evidence type. */
+type PickedSource = PickedSourceOf<EvidenceUnit>;
+
 /**
  * One turn in the chat log.
  *
  * An assistant turn carries the evidence it was answered from, error or not,
  * and the `report` of what the grounding checks did to the draft
- * (src/askCheck.ts:21-29). A system turn is the panel talking about itself —
+ * (`GroundingReport`, src/askCheck.ts). A system turn is the panel talking about itself —
  * a command running, a command that cannot run, `/help` — and never reaches
  * the model. A `chips` turn is the panel's own follow-up question with buttons
  * — which of two files was meant, whether to highlight before digesting,
@@ -108,28 +116,38 @@ function targetLabel(t: Target): string {
  * target that fits two files is asked about rather than picked.
  *
  * A `quiz` turn is one of the three shapes a quiz puts in the log — the
- * question, the grade, the closing summary. The marker is what `history()`
- * filters on (a quiz is not a conversation the model should see on the next
- * Ask) and what `renderTurn` styles on, and it carries only what the DOM needs
- * that the markdown does not already say: the index for the badge, the verdict
- * for the border colour, the missed units for the summary's chip.
+ * question, the grade, the closing summary. The marker is what `historyFor`
+ * (src/askHistory.ts) filters on (a quiz is not a conversation the model
+ * should see on the next Ask) and what `renderTurn` styles on, and it carries
+ * only what the DOM needs that the markdown does not already say: the index
+ * for the badge, the verdict for the border colour, the missed units for the
+ * summary's chip.
  */
-/** A source under an answer, bound to the panel's evidence type. */
-type PickedSource = PickedSourceOf<EvidenceUnit>;
-
 interface ChatTurn {
   role: "user" | "assistant" | "system";
   text: string;
   evidence?: EvidenceUnit[];
   error?: string;
   report?: GroundingReport;
-  /** Which retrieval route found the evidence — "notes", "notes + graph", "notes + keywords" — or "general knowledge"; shown on the grounding line. */
+  /**
+   * Which retrieval route found the evidence — "notes", "notes + graph",
+   * "notes + keywords", "keywords" — and what the relevance judge did to it
+   * ("notes · 18 → 6 kept"). Printed on the grounding line unless the report
+   * is general knowledge or canned (`routeForReport`, src/askCheck.ts).
+   */
   route?: string;
-  /** The class the question was scoped to, when it was. */
+  /** The class scope: "in CODE", "the whole vault (CODE has N notes)" when a class fell back, or "" when none applied. */
   scope?: string;
-  /** Set once this answer's sources were queued as cards, so it is not sent twice. */
+  /** The question this answer replied to, kept on the answer so a trimmed log cannot take the card's title with it. */
+  question?: string;
+  /** Copied from `report.canned`: the plugin wrote this text, not the model, so it is never replayed to the model as its own words. */
+  canned?: boolean;
+  /** A typed line that ran a studio action ("send to inbox", "quiz me") rather than asking anything; kept out of the model's history. */
+  command?: boolean;
+  /** Set once this answer, or this quiz summary's misses, is in the inbox (added now or already there), so it is not sent twice. */
   sentToInbox?: boolean;
-  chips?: { prompt: string; options: Array<{ label: string; run: () => void }> };
+  /** `cancel`, when set, is what `clear()` runs so a command awaiting the chips is answered rather than left hanging. */
+  chips?: { prompt: string; options: Array<{ label: string; run: () => void }>; cancel?: () => void };
   quiz?: {
     kind: "question" | "grade" | "retry" | "summary";
     index?: number;
@@ -179,13 +197,23 @@ export class ChatPanel {
    * `null` is the one test for "is a quiz running" everywhere in this file.
    */
   session: QuizSession | null = null;
-  /** What the last finished quiz was and what was missed, kept for the summary's two chips. */
-  private lastQuiz: { scope: QuizScope; query: string; misses: QuizMiss[]; notePath: string | null; classCode: string | null } | null = null;
+  /** What the last finished quiz was, kept so “Quiz again” repeats it; each summary turn carries its own misses for its send button. */
+  private lastQuiz: { scope: QuizScope; query: string; notePath: string | null; classCode: string | null } | null = null;
   /** Set by the first quiz phrase typed during a quiz; the next one restarts, any other message clears it. */
   private restartArmed = false;
   /** The note and class the running quiz was scoped to, so "Quiz again" can repeat it. */
   private lastQuizNotePath: string | null = null;
   private lastQuizClassCode: string | null = null;
+  /**
+   * The log's scroll position and whether the reader is at its foot, kept
+   * across rebuilds: the view redraws on every store change, and only a turn
+   * the panel pushes may move the reader (`render`).
+   */
+  private logScroll = 0;
+  private atBottom = true;
+  private lastRenderedTurn: ChatTurn | null = null;
+  /** Set by the reader's own submit or Clear; the next idle render focuses the input and clears it. A background redraw never does. */
+  private wantFocus = true;
 
   constructor(
     private plugin: WikiLmPlugin,
@@ -285,8 +313,8 @@ export class ChatPanel {
   }
 
   /** The panel's own follow-up with buttons: which file, whether to highlight first, whether to paste a transcript. */
-  private pushChips(prompt: string, options: Array<{ label: string; run: () => void }>): void {
-    this.turns.push({ role: "assistant", text: "", chips: { prompt, options } });
+  private pushChips(prompt: string, options: Array<{ label: string; run: () => void }>, cancel?: () => void): void {
+    this.turns.push({ role: "assistant", text: "", chips: { prompt, options, cancel } });
     this.trim();
     this.rerender();
   }
@@ -480,29 +508,39 @@ export class ChatPanel {
    *   2. graph   — passages from notes the matched notes link to. Local, free.
    *   3. keywords — one model call turning the question into the terms the
    *      notes would use, then a local scan with them. Costs a call, so it is
-   *      last and is skipped entirely when stages 1-2 filled the slots.
+   *      last and is skipped when the words matched strongly or already found
+   *      `keywordGate` passages.
    *
    * Every stage appends; none reorders or drops what lexical search found, so
    * widening can only ever add evidence to an answer.
+   *
+   * `fill` is how many passages to widen to (the judge's pool when the
+   * relevance filter is on); `keywordGate` is the evidence count the drafter
+   * reads. They differ on purpose: gating the call on the pool would make a
+   * question with 6-17 lexical hits at k=6 pay for a keyword call it never
+   * needed, a third round trip before the answer.
    */
   private async widenEvidence(
     q: string,
     units: EvidenceUnit[],
     lexical: EvidenceUnit[],
-    k: number,
+    fill: number,
+    keywordGate: number,
   ): Promise<{ evidence: EvidenceUnit[]; route: string }> {
     let route = lexical.length > 0 ? "notes" : "none";
-    if (lexical.length >= k) return { evidence: lexical, route };
+    if (lexical.length >= fill) return { evidence: lexical, route };
 
-    let out = expandWithGraph(lexical, units, this.buildGraphIndex(), k);
+    let out = expandWithGraph(lexical, units, this.buildGraphIndex(), fill);
     if (out.length > lexical.length) route = "notes + graph";
 
     // The model call is paid for only when the words themselves failed —
     // upstream's gate (gd4ai/obsidian-llm-wiki, select-seeds.ts): a match is
-    // weak by what the best hit covers, not by how many slots are empty. A
-    // question the notes plainly answer used to cost a second round trip
-    // whenever the vault set the evidence count high.
-    if (lexicalIsStrong(q, lexical) || !this.plugin.settings.askKeywordExpansion) return { evidence: out, route };
+    // weak by what the best hit covers — and when they found fewer passages
+    // than the drafter reads. A question the notes plainly answer used to
+    // cost a second round trip whenever the vault set the evidence count high.
+    if (lexicalIsStrong(q, lexical) || lexical.length >= keywordGate || !this.plugin.settings.askKeywordExpansion) {
+      return { evidence: out, route };
+    }
 
     // The terms are worth asking for even when nothing matched at all: that
     // is the case they exist for, a question phrased in words the notes never
@@ -513,11 +551,11 @@ export class ChatPanel {
       this.rerender();
       const titles = [...new Set(units.map((u) => u.noteTitle))];
       const { keywords } = await this.plugin.llm.keywords({ question: q, noteTitles: titles });
-      const byKeyword = rankByKeywords(units, keywords, k);
-      const merged = mergeEvidence(out, byKeyword, k);
+      const byKeyword = rankByKeywords(units, keywords, fill);
+      const merged = mergeEvidence(out, byKeyword, fill);
       if (merged.length > out.length || (out.length === 0 && merged.length > 0)) route = lexical.length > 0 ? "notes + keywords" : "keywords";
       // Neighbours of anything the new terms turned up.
-      out = expandWithGraph(merged, units, this.buildGraphIndex(), k);
+      out = expandWithGraph(merged, units, this.buildGraphIndex(), fill);
     } catch (e) {
       console.debug("[wikilm] keyword expansion failed:", e);
     }
@@ -534,8 +572,12 @@ export class ChatPanel {
     return frontmatterClasses(this.plugin, file.path)[0] ?? null;
   }
 
-  /** The user turn this answer replied to: the nearest one above it in the log. */
+  /**
+   * The question an answer replied to. Answers carry their own (`question`);
+   * the walk up the log is only for a turn written before they did.
+   */
   private questionBefore(turn: ChatTurn): string {
+    if (turn.question) return turn.question;
     const at = this.turns.indexOf(turn);
     for (let i = at - 1; i >= 0; i--) if (this.turns[i].role === "user") return this.turns[i].text;
     return "Question";
@@ -569,27 +611,24 @@ export class ChatPanel {
   }
 
   /**
-   * The last `askMaxTurns` turns, as the prompt wants them (src/prompt.ts:97-106).
+   * The conversation sent with the question now being asked, at most
+   * `maxEntries` entries (a question and its answer are two).
    *
-   * System turns are the panel narrating itself and chips have no text at all,
-   * so neither is conversation: sending them would teach the model that
-   * "Ran Extract PDF highlights to manifest." is something it said.
+   * `historyFor` (src/askHistory.ts) decides what counts as conversation,
+   * takes out typed studio commands ("send to inbox" is the reader's line but
+   * not something to answer on the next Ask), and drops the pending question,
+   * which the prompt carries on its own.
    */
-  private history(): AskHistoryTurn[] {
-    const keep = Math.max(0, this.plugin.settings.askMaxTurns);
-    return this.turns
-      .filter((t): t is ChatTurn & { role: "user" | "assistant" } => t.role === "user" || t.role === "assistant")
-      // Quiz turns are excluded for the same reason: a question the model was
-      // told to write and an answer typed to it are not a conversation about
-      // the notes, and replaying them would have the next Ask answer the quiz.
-      .filter((t) => !t.error && !t.chips && !t.quiz && t.text.trim().length > 0)
-      .slice(-keep)
-      .map((t) => ({ role: t.role, text: t.text }));
+  private history(maxEntries: number): AskHistoryTurn[] {
+    return historyFor(
+      this.turns,
+      { maxEntries, excludeLast: true },
+    );
   }
 
   /**
-   * Keep the log bounded the way the settings ask: `askMaxTurns` exchanges, so
-   * twice that many entries.
+   * Keep the log bounded: twice `askMaxTurns` entries, so the log always
+   * holds at least the history the model is sent.
    *
    * A chips turn is never dropped, however old it is. Chips are a question the
    * panel is waiting on — a gate, or the transcript prompt — and the promise
@@ -619,13 +658,17 @@ export class ChatPanel {
   async ask(text: string): Promise<void> {
     if (this.busy) return;
     const q = text.trim();
+    // The reader submitted: once the panel is idle again, the cursor goes back
+    // in the box. Not for an empty Enter outside a quiz, which returns below
+    // without drawing, so the flag would fire on some later, unrelated redraw.
+    if (q || this.session) this.wantFocus = true;
 
     // The quiz controls are chat-local and not in the registry
-    // (src/quiz.ts:102-126), and while a session runs they outrank everything
-    // else: "skip" during a quiz is a skipped question, not a search. Starting
-    // one is no longer handled here — a quiz phrase flows through `matchIntent`
-    // like every other verb, so "quiz me on receptors" and "digest" are read
-    // the same way.
+    // (`parseQuizCommand`, src/quiz.ts), and while a session runs they
+    // outrank everything else: "skip" during a quiz is a skipped question, not
+    // a search. A quiz phrase that starts one flows through `matchIntent` like
+    // every other verb, so "quiz me on receptors" and "digest" are read the
+    // same way.
     const quizCommand = parseQuizCommand(q, !!this.session);
     if (quizCommand && quizCommand.kind !== "start") {
       this.draft = "";
@@ -649,7 +692,7 @@ export class ChatPanel {
     }
 
     // Anything that is not a quiz control, while a quiz is running, is an
-    // answer — including an empty one, which `isDontKnow` (src/quiz.ts:148)
+    // answer — including an empty one, which `isDontKnow` (src/quiz.ts)
     // reads as "I don't know" so the grader's promise that a blank never
     // reaches it is kept here rather than in the prompt. A quiz phrase is the
     // exception: it means restart, and `quizTarget` handles the confirmation.
@@ -666,7 +709,29 @@ export class ChatPanel {
 
     if (!q) return;
 
-    await this.buildIndex();
+    // A cold index is a read of every topic note, the longest silent wait in
+    // the panel: say so and hold the input before it starts, or a second
+    // Enter starts a second rebuild.
+    if (!this.index) {
+      this.busy = true;
+      this.status = "reading your notes…";
+      this.rerender();
+      let failed: unknown = null;
+      try {
+        await this.buildIndex();
+      } catch (e) {
+        failed = e;
+      } finally {
+        this.busy = false;
+        this.status = "";
+      }
+      if (failed) {
+        this.turns.push({ role: "assistant", text: "", error: describeError(failed) });
+        this.trim();
+        this.rerender();
+        return;
+      }
+    }
     const intent = matchIntent(q, this.intentContext());
     this.draft = "";
     if (intent.kind === "question") {
@@ -677,7 +742,8 @@ export class ChatPanel {
     // What the reader typed goes in the log like any other line of theirs: a
     // studio action that came back on the wrong subject should look like a
     // phrase read differently than intended, not like the panel ignoring them.
-    this.turns.push({ role: "user", text: q });
+    // Marked as a command so it is never replayed to the model as conversation.
+    this.turns.push({ role: "user", text: q, command: true });
     await this.runIntent(intent);
   }
 
@@ -725,61 +791,101 @@ export class ChatPanel {
   }
 
   /**
-   * The typed form of the button under an answer: card the most recent one.
+   * The typed form of the button under an answer: card the newest reply.
    *
-   * The button is the honest surface here — it sits under the answer it sends,
-   * so there is never a question about which one "it" was. This exists so the
-   * phrase works for a reader who types rather than clicks, and it names the
-   * answer it chose for exactly that reason.
+   * Only the newest one. Walking back past a reply that cannot be sent meant a
+   * phrase typed twice carded the answer before last, and one typed after a
+   * quiz carded something from before it; a reader who types "card it" means
+   * the thing just above. A quiz summary there means its misses.
    */
   private async sendLastAnswerToInbox(): Promise<void> {
-    // The newest answer is not always the one that can be carded: a reader who
-    // asks a follow-up the notes do not cover, then types the phrase, means the
-    // answer that had sources. Walk back to the last sendable one and name it,
-    // rather than refusing on the turn that happens to be last.
-    let sawUnsendable = false;
-    for (let i = this.turns.length - 1; i >= 0; i--) {
-      const turn = this.turns[i];
-      if (turn.role !== "assistant" || turn.quiz || turn.error || !turn.report) continue;
-      const picked = pickSources(turn.evidence ?? [], turn.report);
-      if (picked.length === 0 || turn.sentToInbox) {
-        sawUnsendable = true;
-        continue;
-      }
-      const question = this.questionBefore(turn);
-      if (question) this.pushSystem(`Carding the answer to “${question}”.`);
-      await this.sendAnswerToInbox(turn, picked);
+    const turn = this.newestReply();
+    if (!turn) {
+      this.pushSystem("Ask something first: there is no answer to card yet.");
       return;
     }
-    this.pushSystem(
-      sawUnsendable
-        ? "Nothing here to card: those answers are already in the inbox, or have no source to link on a card's back."
-        : "Ask something first: there is no answer to card yet.",
-    );
+    if (turn.quiz?.kind === "summary") {
+      await this.sendMissesToInbox(turn);
+      return;
+    }
+    if (turn.sentToInbox) {
+      this.pushSystem("The last answer is already in the inbox.");
+      return;
+    }
+    if (turn.quiz || turn.error || !turn.report || !canSendAnswer(turn.report, turn.text)) {
+      this.pushSystem("Nothing to card: the last reply is not an answer from your notes or from general knowledge.");
+      return;
+    }
+    await this.sendAnswerToInbox(turn);
+  }
+
+  /** The newest assistant turn that is a reply rather than the panel's own chips, or null. */
+  private newestReply(): ChatTurn | null {
+    for (let i = this.turns.length - 1; i >= 0; i--) {
+      const t = this.turns[i];
+      if (t.role === "assistant" && !t.chips) return t;
+    }
+    return null;
   }
 
   /**
-   * Card the answer: one inbox highlight per source it rested on.
+   * Card the answer: one inbox item holding the answer and the passages it
+   * rested on, or, for a general-knowledge answer, the answer alone marked
+   * unverified and linked to the open note or the class's hub.
    *
    * Reads the turn it was rendered on rather than the panel's last answer —
    * the log holds every answer of the session, and the button under a question
-   * asked four turns ago has to send that one.
+   * asked four turns ago has to send that one. Speaks once: a Notice when a
+   * row was added, one line in the log when it was not, with the reason.
    */
-  async sendAnswerToInbox(turn: ChatTurn, picked: PickedSource[]): Promise<void> {
-    if (turn.sentToInbox || picked.length === 0) return;
-    const question = this.questionBefore(turn);
-    const { added } = captureAskAnswer(this.plugin, question, turn.text, picked);
-    turn.sentToInbox = true;
-    this.pushSystem(added === 0 ? "Nothing sent: that answer is already in the inbox, or has no source to link." : "Sent the answer to the inbox, with its sources. Cards are being written.");
+  async sendAnswerToInbox(turn: ChatTurn): Promise<void> {
+    const report = turn.report;
+    if (turn.sentToInbox || turn.error || !report || !canSendAnswer(report, turn.text)) return;
+    const result = captureAskAnswer(this.plugin, {
+      question: this.questionBefore(turn),
+      answer: turn.text,
+      cited: pickSources(turn.evidence ?? [], report),
+      generalKnowledge: report.fromGeneralKnowledge,
+      fallbackSourcePath: this.fallbackSourcePath(turn),
+    });
+    // "Sent" means a row for this answer is in the inbox, new or old; a
+    // skipped send leaves the button live so it can be tried again.
+    if (result.status === "added" || result.status === "duplicate") turn.sentToInbox = true;
+    if (result.status === "added") {
+      new Notice("Sent to the inbox; cards are being written.");
+      if (this.plugin.settings.openInboxOnCapture) void this.plugin.openInbox();
+      this.rerender();
+      return;
+    }
+    this.pushSystem(`Not sent: ${result.reason ?? "nothing to card."}`);
+  }
+
+  /**
+   * The note a general-knowledge answer is carded against, since it cites
+   * none: the hub of the class the question was scoped to (the page named
+   * after its own folder, classes/HBIO250/HBIO250.md, the same test the
+   * digest uses to find hubs), since "in HBIO250" says where it belongs; else
+   * the markdown note the reader has open.
+   */
+  private fallbackSourcePath(turn: ChatTurn): string | undefined {
+    const code = /^in (.+)$/.exec(turn.scope ?? "")?.[1];
+    const hub = code
+      ? this.pageMeta.find((p) => {
+          const parts = p.path.split("/");
+          return parts[parts.length - 1] === `${code}.md` && parts[parts.length - 2] === code;
+        })?.path
+      : undefined;
+    if (hub) return hub;
+    const active = this.plugin.app.workspace.getActiveFile();
+    return active && active.extension.toLowerCase() === "md" ? active.path : undefined;
   }
 
   /**
    * Start a quiz on whatever the phrase named.
    *
    * A quiz already running is confirmed rather than replaced: the first phrase
-   * says so, the second restarts, which is the same two-step the slash command
-   * had. Losing four graded questions to a misread line is worse than one extra
-   * message.
+   * says so, the second restarts. Losing four graded questions to a misread
+   * line is worse than one extra message.
    */
   private async quizTarget(target: Target): Promise<void> {
     if (this.session && !this.restartArmed) {
@@ -874,7 +980,7 @@ export class ChatPanel {
   /**
    * The digest gate, as chips instead of a Notice: a PDF with no highlights
    * carrying text has nothing to digest, and the way out is to let the model
-   * suggest some first (src/digest.ts:184-192).
+   * suggest some first (`digestPdf`'s `gate` option, src/digest.ts).
    */
   private gateChips(decision: GateDecision): Promise<"highlight" | "cancel"> {
     return new Promise((resolve) => {
@@ -884,6 +990,7 @@ export class ChatPanel {
           { label: "AI highlight first", run: () => resolve("highlight") },
           { label: "Cancel", run: () => resolve("cancel") },
         ],
+        () => resolve("cancel"),
       );
     });
   }
@@ -924,7 +1031,7 @@ export class ChatPanel {
         },
         { label: "Highlight without", run: () => resolve("skip") },
         { label: "Cancel", run: () => resolve("cancel") },
-      ]);
+      ], () => resolve("cancel"));
     });
   }
 
@@ -975,23 +1082,27 @@ export class ChatPanel {
    *
    * Retrieval finding nothing is answered here, not by the model: a model handed
    * no evidence is exactly the situation that invents one, so `noEvidenceAnswer`
-   * (src/askCheck.ts:147) says so and the provider is never called — which is
+   * (src/askCheck.ts) says so and the provider is never called — which is
    * also why a vault with no matching notes answers instantly and without a
    * provider error.
    *
    * Two optional stages sit either side of the drafter. Before it, behind
    * `askRelevanceFilter`: retrieval runs three times as wide and one model
    * call names the passages that bear on the question, so the drafter reads a
-   * narrowed list rather than everything the words happened to hit. After it,
+   * narrowed list rather than everything the words happened to hit;
+   * `narrowEvidence` (src/relevance.ts) decides what the verdict, or the
+   * judge's failure, leaves, and a judge that kept nothing is answered with
+   * `filteredOutAnswer` rather than a drafter reading an empty list. After it,
    * behind `askClaimCheck`: each sentence of the answer is matched locally
    * against the passages it cited, and the ones no passage states are listed
    * under the answer — marked, never deleted, because a bar made of token
    * overlap fails faithful sentences too and deleting them was this file's
-   * old failure mode (src/askCheck.ts:8-22).
+   * old failure mode (the header of src/askCheck.ts).
    *
    * The evidence is pushed with the assistant turn whether the model answered
-   * or failed, because the sources are the part the reader can still use when
-   * there is no provider configured.
+   * or failed, and an error turn shows the top passages (`renderTurn`), because
+   * the sources are the part the reader can still use when there is no
+   * provider configured.
    */
   private async askQuestion(question: string, classCode?: string): Promise<void> {
     const q = question.trim();
@@ -1007,6 +1118,12 @@ export class ChatPanel {
     let evidence: EvidenceUnit[] = [];
     let route = "";
     let scope = "";
+    // Every reply to this question is pushed through here, so each carries
+    // its question (the card's title), its route and scope as they stand, and
+    // the canned flag that keeps a refusal out of the model's history.
+    const reply = (turn: Pick<ChatTurn, "text" | "evidence" | "report" | "error">): void => {
+      this.turns.push({ role: "assistant", question: q, route, scope, canned: turn.report?.canned, ...turn });
+    };
     try {
       const all = await this.buildIndex();
 
@@ -1015,17 +1132,19 @@ export class ChatPanel {
       // setting. Name the folder that was searched so it can be corrected.
       if (all.length === 0) {
         const { answer, report } = emptyIndexAnswer(this.folderPrefix());
-        this.turns.push({ role: "assistant", text: answer, evidence: [], report });
+        reply({ text: answer, evidence: [], report });
         return;
       }
 
       // Scope: the class the phrase named, else the class of the note the
       // reader is looking at. A class with too few notes to answer from falls
-      // back to the whole vault, and the status line says which happened.
+      // back to the whole vault. Which happened is printed on the grounding
+      // line under the reply, where it stays; the status only says where the
+      // search is looking.
       const scoped = scopeFor(all, q, { named: classCode ?? null, inferred: this.activeClass() }, { minNotes: ChatPanel.MIN_SCOPE_NOTES });
       const units = scoped.units;
       scope = scoped.scope;
-      this.status = scope ? `searching ${scope}…` : "searching…";
+      this.status = scope.startsWith("in ") ? `searching ${scope}…` : "searching…";
       this.rerender();
 
       // Weighted by how rare each word is in this vault, so the term that
@@ -1038,42 +1157,52 @@ export class ChatPanel {
       // — thirty lines is already a long pause for one question.
       const filtering = this.plugin.settings.askRelevanceFilter;
       const kPool = filtering ? Math.min(3 * k, 30) : k;
-      evidence = rankEvidence(units, q, scorer, kPool);
+      const lexical = rankEvidence(units, q, scorer, kPool);
 
-      const widened = await this.widenEvidence(q, units, evidence, kPool);
-      evidence = widened.evidence;
+      // Widened to the pool; the keyword call is gated on `k`.
+      const widened = await this.widenEvidence(q, units, lexical, kPool, k);
       route = widened.route;
 
-      // The filter, then the cap. Below the gate there is nothing worth a
-      // round trip to narrow, and with the filter off `kPool` was `k` and the
-      // slice is a no-op — either way the drafter never sees more than `k`,
-      // which is what it saw before this stage existed.
-      const beforeFilter = evidence.length;
-      if (filtering && evidence.length >= RELEVANCE_MIN_CANDIDATES) {
-        this.status = "judging the evidence…";
-        this.rerender();
-        try {
-          const verdict = await this.plugin.llm.relevance({
-            question: q,
-            candidates: numberEvidence(evidence),
-            history: this.history(),
-          });
-          evidence = applyRelevance(evidence, verdict, k).kept;
-        } catch (e) {
-          // As with keyword expansion: a judge that failed is not an error
-          // the reader needs to see, it just leaves the evidence as wide as
-          // the local stages made it, capped where it always was.
-          console.debug("[wikilm] relevance filter failed:", e);
-          evidence = evidence.slice(0, k);
+      if (filtering) {
+        // Below the gate there is nothing worth a round trip to narrow, and
+        // `narrowEvidence` reads the pool as skipped whatever the verdict.
+        let verdict: { relevant: number[] } | Error = { relevant: [] };
+        if (widened.evidence.length >= RELEVANCE_MIN_CANDIDATES) {
+          this.status = "judging the evidence…";
+          this.rerender();
+          try {
+            verdict = await this.plugin.llm.relevance({
+              question: q,
+              candidates: numberEvidence(widened.evidence),
+              // One exchange: the previous question and its answer, enough to
+              // resolve "why is that" without paying for the whole log.
+              history: this.history(2),
+            });
+          } catch (e) {
+            // Not an error the reader needs in red: the evidence falls back
+            // to the retriever's top k, and the route label says the judge failed.
+            console.debug("[wikilm] relevance filter failed:", e);
+            verdict = e instanceof Error ? e : new Error(String(e));
+          }
+        }
+        const narrowed = narrowEvidence(widened.evidence, verdict, k, (u) => u.notePath);
+        evidence = narrowed.evidence;
+        // Only onto a route there is one for: "none" is the sentinel that
+        // prints nothing, and appending to it would print the word itself.
+        const label = describeNarrowing(narrowed);
+        if (label && route && route !== "none") route = `${route} · ${label}`;
+
+        // The judge read the passages and kept none. Saying "nothing matches"
+        // would be false, and the drafter would be reading an empty list, so
+        // no model is called — unless the reader allows general knowledge,
+        // which is the path below with no evidence.
+        if (narrowed.state === "nothing" && !this.plugin.settings.askGeneralKnowledge) {
+          const { answer, report } = filteredOutAnswer(narrowed.before, q);
+          reply({ text: answer, evidence: [], report });
+          return;
         }
       } else {
-        evidence = evidence.slice(0, k);
-      }
-      // Only the narrowing, and only onto a route there is one for: "none" is
-      // the sentinel that prints nothing (renderGrounding, below), so
-      // appending to it would put the word itself under an answer.
-      if (filtering && evidence.length !== beforeFilter && route && route !== "none") {
-        route = `${route} · ${beforeFilter} → ${evidence.length} kept`;
+        evidence = widened.evidence.slice(0, k);
       }
 
       // Retrieval found nothing. Either say so and stop, or let the model
@@ -1083,7 +1212,7 @@ export class ChatPanel {
       // prompt's "two honest options" rule is what decides the reply, not this.
       if (evidence.length === 0 && !this.plugin.settings.askGeneralKnowledge) {
         const { answer, report } = noEvidenceAnswer(q);
-        this.turns.push({ role: "assistant", text: answer, evidence: [], report, route, scope });
+        reply({ text: answer, evidence: [], report });
         return;
       }
 
@@ -1095,18 +1224,20 @@ export class ChatPanel {
         question: q,
         evidence: numbered,
         pages: pageContextFor(evidence, (path) => this.mdByPath.get(path) ?? null),
-        history: this.history(),
+        history: this.history(this.plugin.settings.askMaxTurns),
         standingInstructions: this.plugin.settings.askInstructions,
       });
 
-      const { answer, report } = checkAnswer(draft, numbered);
-      if (report.fromGeneralKnowledge) route = "general knowledge";
+      // The setting is enforced on the draft: with general knowledge off, a
+      // draft that took that option becomes the refusal, whatever the prompt offered.
+      const { answer, report } = checkAnswer(draft, numbered, { allowGeneralKnowledge: this.plugin.settings.askGeneralKnowledge });
       // The sentence check. Local and instant, so there is no status step: a
       // rerender nothing awaits would flicker a line the reader cannot read.
       // Skipped when the answer came from general knowledge (the banner above
-      // it already says every sentence is unverified) and when the notes
-      // covered nothing, where there is no passage to match against anyway.
-      if (this.plugin.settings.askClaimCheck && !report.fromGeneralKnowledge && answer.trim() && report.coverage !== "none") {
+      // it already says every sentence is unverified), when the plugin wrote
+      // the text, and when the notes covered nothing, where there is no
+      // passage to match against anyway.
+      if (this.plugin.settings.askClaimCheck && !report.fromGeneralKnowledge && !report.canned && answer.trim() && report.coverage !== "none") {
         // What the drafter read, plus the rest of every note it cited: a
         // sentence may rest on a line next to the one retrieved, and that is
         // still the reader's own note. Not the whole index — a stray match in
@@ -1132,9 +1263,9 @@ export class ChatPanel {
         const verdicts = checkClaims(answer, unitsToCheck);
         report.claims = { total: verdicts.length, unmatched: verdicts.filter((v) => v.status === "unmatched").map((v) => v.text) };
       }
-      this.turns.push({ role: "assistant", text: answer, evidence, report, route, scope });
+      reply({ text: answer, evidence, report });
     } catch (e) {
-      this.turns.push({ role: "assistant", text: "", evidence, error: describeError(e), route, scope });
+      reply({ text: "", evidence, error: describeError(e) });
     } finally {
       this.busy = false;
       this.status = "";
@@ -1171,8 +1302,8 @@ export class ChatPanel {
     try {
       const all = await this.buildIndex();
       // A phrase can name the note to quiz ("quiz me on Receptors"), so the
-      // pool is not always the file in front of the reader. obsidian.d.ts:1954
-      // (getActiveFile): null when nothing is open, which `resolvePool` reads
+      // pool is not always the file in front of the reader. obsidian.d.ts
+      // (`Workspace.getActiveFile`): null when nothing is open, which `resolvePool` reads
       // as "this note has no evidence".
       const activePath = notePath ?? this.plugin.app.workspace.getActiveFile()?.path ?? null;
       // A class scope is the whole vault narrowed to one code, which is what
@@ -1230,9 +1361,9 @@ export class ChatPanel {
    * Write the next question, checking its grounding before the reader sees it.
    *
    * The loop is the Design's two-strike rule: a draft that fails
-   * `checkQuestion` (src/quiz.ts:259) is asked for once more with the failure
+   * `checkQuestion` (src/quiz.ts) is asked for once more with the failure
    * named in the prompt, and a second failure drops the cited unit
-   * (src/quiz.ts:379) rather than the question, so the numbering stays frozen
+   * (`dropUnit`, src/quiz.ts) rather than the question, so the numbering stays frozen
    * and the next attempt has one fewer passage to get wrong. A draft whose
    * `evidence_n` is out of range cannot be dropped by id, so that case breaks
    * out instead of looping forever on a model that keeps citing [99].
@@ -1447,7 +1578,7 @@ export class ChatPanel {
     // from it tests that fact and not another one in the same passage.
     const misses = missesForInbox(session);
 
-    this.lastQuiz = { scope: session.scope, query: session.query, misses, notePath: this.lastQuizNotePath, classCode: this.lastQuizClassCode };
+    this.lastQuiz = { scope: session.scope, query: session.query, notePath: this.lastQuizNotePath, classCode: this.lastQuizClassCode };
     this.turns.push({
       role: "assistant",
       text: renderSummaryMarkdown(session),
@@ -1463,17 +1594,36 @@ export class ChatPanel {
    * The summary's first chip. Public because the live run drives it through
    * `eval` on the view, and because the chip is the only thing in the plugin
    * that writes to the inbox from a quiz — nothing is written without it.
+   *
+   * Sends the misses of the summary it is given — the one the button sits
+   * under — or, called bare, of the newest summary in the log. Like the
+   * answer button it turns to "Sent" once the rows are in the inbox, new or
+   * already there, so an old summary cannot send a newer quiz's misses and a
+   * second click cannot report "0 sent".
    */
-  async sendMissesToInbox(): Promise<void> {
-    const last = this.lastQuiz;
-    if (!last || last.misses.length === 0) {
+  async sendMissesToInbox(summary?: ChatTurn): Promise<void> {
+    const turn = summary ?? [...this.turns].reverse().find((t) => t.quiz?.kind === "summary");
+    const misses = turn?.quiz?.misses ?? [];
+    if (!turn || misses.length === 0) {
       this.pushSystem("Nothing was missed.");
       return;
     }
-    const { added, skipped } = captureQuizMisses(this.plugin, last.misses);
-    this.pushSystem(
-      `Sent ${added} passage${added === 1 ? "" : "s"} to the inbox${skipped ? `, ${skipped} already there` : ""}.`,
-    );
+    if (turn.sentToInbox) {
+      this.pushSystem("Those misses are already in the inbox.");
+      return;
+    }
+    // `duplicates` are the misses whose row was already in the inbox;
+    // `skipped` also counts passages too short to card. Only an added or a
+    // duplicate row means the misses are in the inbox: a send that skipped
+    // them all as too short sent nothing and keeps its button.
+    const { added, duplicates, reason } = captureQuizMisses(this.plugin, misses);
+    if (added > 0 || duplicates > 0) turn.sentToInbox = true;
+    if (added > 0) {
+      new Notice(`Sent ${added} passage${added === 1 ? "" : "s"} to the inbox${duplicates ? `, ${duplicates} already there` : ""}.`);
+      this.rerender();
+      return;
+    }
+    this.pushSystem(`Not sent: ${reason ?? "nothing to card."}`);
   }
 
   /** The summary's second chip: the same scope and the same words, a fresh pool. */
@@ -1487,14 +1637,27 @@ export class ChatPanel {
     await this.startQuiz(scope, last.query, last.notePath, last.classCode);
   }
 
-  /** Empty the log. The index survives: nothing about the vault changed. */
+  /**
+   * Empty the log. The index survives: nothing about the vault changed.
+   *
+   * Not while busy: an answer in flight would land under no question, and a
+   * quiz question being written would bring the cleared quiz back. The button
+   * is disabled too; this covers any other caller.
+   */
   clear(): void {
+    if (this.busy) return;
+    // A digest gate or transcript prompt is a command awaiting its chips
+    // without holding `busy`; dropping the turn would leave it hanging, so
+    // each is answered "Cancel" once the log is empty.
+    const pending = this.turns.flatMap((t) => (t.chips?.cancel ? [t.chips.cancel] : []));
+    this.wantFocus = true;
     this.turns = [];
     this.draft = "";
     this.status = "";
     this.session = null;
     this.restartArmed = false;
     this.rerender();
+    for (const cancel of pending) cancel();
   }
 
   /** Drop the cached index; the vault listeners belong to the view and go with it. */
@@ -1533,7 +1696,43 @@ export class ChatPanel {
     for (const turn of this.turns) this.renderTurn(log, turn);
 
     this.renderInput(wrap);
-    log.scrollTop = log.scrollHeight;
+
+    // Only a turn the panel pushed moves the log to its foot. Every other
+    // redraw — a status step, or a store change (inboxView's `onChange`
+    // subscription redraws the whole view when a card is written in the
+    // background) — puts the reader back where they were: at the foot if they
+    // were there, else at the same offset, so scrolling back is not undone.
+    const newest = this.turns[this.turns.length - 1] ?? null;
+    if (newest !== this.lastRenderedTurn) this.atBottom = true;
+    this.lastRenderedTurn = newest;
+    // Where to put the log is decided once, here. The scrolls `place` itself
+    // causes are not the reader's and are not recorded: markdown that grows
+    // between the assignment and its scroll event would read as "scrolled up"
+    // and pin the second `place` part-way down the answer. A scroll event
+    // fires before the frame's rAF callbacks, so `placing` clears one frame
+    // after the last `place`.
+    const stick = this.atBottom;
+    const offset = this.logScroll;
+    let placing = false;
+    let placed = 0;
+    const place = (): void => {
+      placing = true;
+      const mine = ++placed;
+      log.scrollTop = stick ? log.scrollHeight : offset;
+      window.requestAnimationFrame(() => {
+        if (mine === placed) placing = false;
+      });
+    };
+    place();
+    // Markdown renders asynchronously, so the height is not final yet.
+    window.requestAnimationFrame(() => {
+      if (log.isConnected) place();
+    });
+    log.addEventListener("scroll", () => {
+      if (placing) return;
+      this.logScroll = log.scrollTop;
+      this.atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 24;
+    });
   }
 
   /**
@@ -1543,11 +1742,11 @@ export class ChatPanel {
    * target in `data-href`, but it attaches no click handler: Obsidian wires
    * those inside its own `MarkdownView`, and this is a plain `ItemView`, so in
    * the panel they rendered as links that did nothing. The quiz felt the gap
-   * most — a grade cites `[17] Self-Efficacy` (src/quiz.ts:604), and the note
+   * most — a grade cites `[17] Self-Efficacy` (`renderGradeMarkdown`, src/quiz.ts), and the note
    * behind the citation is the thing a reader wants after getting one wrong.
    *
    * One delegated listener on the log covers every turn that goes through the
-   * markdown renderer — grades, the closing "Missed" list (src/quiz.ts:617),
+   * markdown renderer — grades, the closing "Missed" list (`renderSummaryMarkdown`, src/quiz.ts),
    * `/help` — rather than each render site wiring its own. `render` rebuilds
    * the log on every state change, so the handler is recreated with it and
    * cannot stack up.
@@ -1630,7 +1829,7 @@ export class ChatPanel {
     if (turn.error) el.createDiv({ cls: "wikilm-error", text: turn.error });
 
     if (turn.quiz?.kind === "summary") {
-      this.renderSummaryChips(el, turn.quiz.misses ?? []);
+      this.renderSummaryChips(el, turn);
       return;
     }
 
@@ -1638,25 +1837,39 @@ export class ChatPanel {
     if (report && this.plugin.settings.askShowGrounding) this.renderGrounding(el, report, turn);
 
     const evidence = turn.evidence ?? [];
-    if (turn.role !== "assistant" || turn.error) return;
+    // A failed model call still found passages, and they are what the reader
+    // can use while the provider is down: the top few, without a send button,
+    // since there is no answer to send.
+    if (turn.error) {
+      if (evidence.length > 0) {
+        this.renderSources(
+          el,
+          evidence.slice(0, MAX_SOURCES).map((unit) => ({ unit, why: "" })),
+          "Closest passages in your notes",
+        );
+      }
+      return;
+    }
+    if (!report || turn.quiz) return;
     // The sources shown and the sources sent are the same list, stand-in and
     // all: a button that queued something other than what is printed above it
     // would be a different answer than the one the reader read.
-    const picked = report && evidence.length > 0 ? pickSources(evidence, report) : [];
+    const picked = evidence.length > 0 ? pickSources(evidence, report) : [];
     if (picked.length > 0) this.renderSources(el, picked);
-    if (report) this.renderAnswerActions(el, turn, picked);
+    // No button that can only say "Not sent": an answer on the notes with no
+    // source left to card is refused by the capture, so it gets none.
+    if (canSendAnswer(report, turn.text) && (picked.length > 0 || report.fromGeneralKnowledge)) this.renderAnswerActions(el, turn);
   }
 
   /**
    * What the reader can do with an answer: card it.
    *
-   * Sending is offered only when the answer has a source, because a card's
-   * back is its source link (src/anki.ts, `buildExtra`) and a card with
-   * nothing to link is the kind of unattributed fact this plugin exists to
-   * avoid.
+   * Offered on every answer `canSendAnswer` (src/askCheck.ts) accepts: the
+   * model's own text resting on the notes, or a general-knowledge answer,
+   * which is carded with an "unverified" note and no passage. A refusal or a
+   * fallback the plugin wrote is not an answer and gets no button.
    */
-  private renderAnswerActions(el: HTMLElement, turn: ChatTurn, picked: PickedSource[]): void {
-    if (turn.quiz || picked.length === 0) return;
+  private renderAnswerActions(el: HTMLElement, turn: ChatTurn): void {
     const row = el.createDiv({ cls: "wikilm-chat-offer" });
     const send = row.createEl("button", {
       cls: turn.sentToInbox ? "" : "mod-cta",
@@ -1666,7 +1879,7 @@ export class ChatPanel {
     // to live on the turn: a disabled flag set on the button would not
     // survive the next answer.
     send.disabled = this.busy || !!turn.sentToInbox;
-    send.addEventListener("click", () => void this.sendAnswerToInbox(turn, picked));
+    send.addEventListener("click", () => void this.sendAnswerToInbox(turn));
   }
 
   /**
@@ -1678,12 +1891,13 @@ export class ChatPanel {
    * now names the pieces it actually used, and only those are shown: the note,
    * what it contributed, and the page, each one clickable.
    *
-   * When the model named nothing (a `none` answer, or a reply that cited
-   * badly) the best-ranked passage is shown instead, so there is always
-   * somewhere to click through to.
+   * When the model named nothing on an answer it says the notes cover, the
+   * best-ranked passage stands in, its `why` saying it was not cited
+   * (`pickSources`, src/askCheck.ts). A refusal or a general-knowledge answer
+   * shows none. An error turn passes its top passages under its own heading.
    */
-  private renderSources(el: HTMLElement, picked: PickedSource[]): void {
-    el.createDiv({ cls: "wikilm-chat-sources-head", text: picked.length === 1 ? "Source" : "Sources" });
+  private renderSources(el: HTMLElement, picked: PickedSource[], head = picked.length === 1 ? "Source" : "Sources"): void {
+    el.createDiv({ cls: "wikilm-chat-sources-head", text: head });
     for (const { unit, why } of picked) {
       const row = el.createDiv({ cls: "wikilm-chat-source" });
 
@@ -1722,22 +1936,35 @@ export class ChatPanel {
   private renderGrounding(el: HTMLElement, report: GroundingReport, turn?: ChatTurn): void {
     const line = el.createDiv({ cls: `wikilm-chat-grounding${report.coverage === "none" ? " is-unverified" : ""}` });
     // The route says which stage found the evidence — the notes' own words,
-    // the graph around them, or the model's keywords — and the scope, when
-    // the question was kept to one class. Upstream shows the same as a chip.
+    // the graph around them, or the model's keywords — and what the judge
+    // kept. Upstream shows the same as a chip. None for a general-knowledge
+    // or canned reply (`routeForReport`): the first already says where it
+    // came from, and the second came from no route.
     const bits = [renderGroundingLine(report)];
-    const route = turn?.route && turn.route !== "none" ? turn.route : "";
-    if (route) bits.push(route + (turn?.scope?.startsWith("in ") ? ` ${turn.scope}` : ""));
+    const route = routeForReport(report, turn?.route ?? "");
+    if (route && route !== "none") bits.push(route);
+    // The scope always, refusals included, since it is what was searched:
+    // "in HBIO408", or the whole vault when the class was too small.
+    const scope = (turn?.scope ?? "").replace(/^the /, "");
+    if (scope) bits.push(scope);
     line.createSpan({ text: bits.join(" · ") });
 
     // The sentences the local check could not find a passage for, quiet under
     // the line that counted them. They stay in the answer above, unaltered:
-    // this is a pointer to what to go and look at, not a verdict on it.
+    // this is a pointer to what to go and look at, not a verdict on it. The
+    // count on the line stays when the list is turned off.
+    if (!this.plugin.settings.askShowUnmatched) return;
     const unmatched = renderUnmatchedClaims(report);
     if (unmatched.length === 0) return;
     const block = el.createDiv({ cls: "wikilm-unmatched" });
     block.createDiv({ text: "Matched no passage:" });
-    for (const text of unmatched) block.createDiv({ text });
+    for (const text of unmatched.slice(0, ChatPanel.UNMATCHED_SHOWN)) block.createDiv({ text });
+    const more = unmatched.length - ChatPanel.UNMATCHED_SHOWN;
+    if (more > 0) block.createDiv({ text: `… and ${more} more` });
   }
+
+  /** How many unmatched sentences are listed under an answer before the rest are counted. */
+  private static readonly UNMATCHED_SHOWN = 5;
 
   /**
    * The panel's own question, with a button per answer.
@@ -1766,20 +1993,22 @@ export class ChatPanel {
   /**
    * The two chips under a summary.
    *
-   * The misses are on the turn rather than read from `lastQuiz`, so an old
-   * summary still says how many it was about; the buttons call the public
-   * methods, which read `lastQuiz` and therefore always act on the most recent
-   * quiz. Sending nothing is not offered: the chip is disabled at zero rather
-   * than writing an empty batch to the inbox.
+   * The misses are on the turn, and the send button sends that turn's misses
+   * and remembers it did, so an old summary sends its own quiz and reads
+   * "Sent to inbox" afterwards, like the button under an answer. "Quiz again"
+   * reads `lastQuiz` and so always repeats the most recent quiz. Sending
+   * nothing is not offered: the chip is disabled at zero rather than writing
+   * an empty batch to the inbox.
    */
-  private renderSummaryChips(el: HTMLElement, misses: QuizMiss[]): void {
+  private renderSummaryChips(el: HTMLElement, turn: ChatTurn): void {
+    const misses = turn.quiz?.misses ?? [];
     const row = el.createDiv({ cls: "wikilm-chat-offer" });
     const send = row.createEl("button", {
-      cls: "mod-cta",
-      text: `Send ${misses.length} missed to inbox`,
+      cls: turn.sentToInbox ? "" : "mod-cta",
+      text: turn.sentToInbox ? "Sent to inbox" : `Send ${misses.length} missed to inbox`,
     });
-    send.disabled = this.busy || misses.length === 0;
-    send.addEventListener("click", () => void this.sendMissesToInbox());
+    send.disabled = this.busy || misses.length === 0 || !!turn.sentToInbox;
+    send.addEventListener("click", () => void this.sendMissesToInbox(turn));
 
     const again = row.createEl("button", { text: "Quiz again" });
     again.disabled = this.busy;
@@ -1843,10 +2072,17 @@ export class ChatPanel {
       void this.ask(ta.value);
     });
     const clear = row.createEl("button", { text: "Clear" });
+    clear.disabled = this.busy;
     clear.addEventListener("click", () => this.clear());
 
     row.createSpan({ cls: "wikilm-muted", text: this.status });
 
-    if (!this.busy) window.setTimeout(() => ta.focus(), 0);
+    // Focus follows the reader's own submit or Clear, once the panel is idle
+    // again, and nothing else: a redraw driven by a store change must not
+    // pull the cursor out of the note they are editing.
+    if (!this.busy && this.wantFocus) {
+      this.wantFocus = false;
+      window.setTimeout(() => ta.focus(), 0);
+    }
   }
 }

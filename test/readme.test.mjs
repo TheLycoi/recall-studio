@@ -100,3 +100,22 @@ test("each verbatim block equals its constant in src/llm.ts character for charac
     assert.equal(b.text, body, `the README's ${b.name} block has drifted from src/llm.ts`);
   }
 });
+
+test("every Ask setting has a row in the README settings table", () => {
+  const settingsSource = readFileSync("src/settings.ts", "utf8");
+  const start = settingsSource.indexOf('.setName("Ask")');
+  const end = settingsSource.indexOf('.setName("Question cap per quiz")');
+  assert.ok(start >= 0 && end > start, "could not find the Ask section of src/settings.ts");
+  const names = [...settingsSource.slice(start, end).matchAll(/\.setName\("([^"]+)"\)/g)].map((m) => m[1]).filter((n) => n !== "Ask");
+  assert.ok(names.includes("Filter evidence with the model"), "the Ask section parse found no relevance-filter setting");
+  for (const name of names) {
+    assert.ok(readme.includes(`\n| ${name} |`), `the README settings table has no row for "${name}"`);
+  }
+});
+
+test("the README does not describe the Ask send button or route as they were before general-knowledge carding", () => {
+  assert.ok(!readme.includes("An answer with no source has no button"), "README still says a sourceless answer has no send button");
+  assert.ok(!readme.includes("the most recent answer that has a source"), "README still says the typed phrase skips sourceless answers");
+  assert.ok(!readme.includes("*notes + keywords*, or *general\nknowledge*"), "README still lists general knowledge as a route");
+  assert.ok(!readme.includes("plus a count of any citations dropped |"), "README grounding-line row predates the unmatched count, route and scope");
+});

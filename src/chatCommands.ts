@@ -62,6 +62,24 @@ export interface IntentContext {
   commands: CommandLike[];
 }
 
+/**
+ * "Card the last answer", every way it is said: send / add … to inbox, send
+ * it / that / this, card it / that / the answer, make cards, flashcard it.
+ * Matched against the normalized line, so case and a trailing full stop do
+ * not matter.
+ */
+const SEND_ANSWER = new RegExp(
+  "^(?:" +
+    [
+      "(?:send|add) (?:(?:it|this|that|answer|the answer|this answer|that answer|my answer) )?to (?:the |my )?inbox",
+      "send (?:it|this|that)",
+      "card (?:it|this|that|answer|the answer|this answer|that answer|my answer)",
+      "make (?:cards|flashcards)",
+      "flashcard (?:it|this|that)",
+    ].join("|") +
+    ")$",
+);
+
 const POLITENESS = /^(?:please |ok |okay |hey |can you |could you |would you |will you )+/;
 const TARGET_LEAD = /^(?:on|about|from|over|in|for|of)\s+/;
 const THIS = /^(?:this|this note|this pdf|this file|the active note|the open note|the current note|here)$/;
@@ -88,6 +106,17 @@ function stripArticles(s: string): string {
 /** Words of the target, folded, two characters or longer. */
 function tokens(s: string): string[] {
   return fold(s).split(" ").filter((w) => w.length >= 2);
+}
+
+/**
+ * Words that carry no subject: articles, connectives, and the file nouns
+ * `stripArticles` drops. What is left is what a question would be about.
+ */
+const FILLER = new Set(["the", "a", "an", "my", "and", "or", "of", "to", "in", "on", "for", "with", "is", "are", "pdf", "deck", "file", "note", "notes", "page", "lecture"]);
+
+/** The subject words of a target, for telling a file name from a question. */
+function significantTokens(s: string): string[] {
+  return tokens(s).filter((w) => !FILLER.has(w));
 }
 
 function pageFor(words: string, ctx: IntentContext): IntentPage | null {
@@ -193,19 +222,32 @@ export function matchIntent(text: string, ctx: IntentContext): Intent {
     return { kind: "quiz", target: quizTarget(quiz.query, ctx) };
   }
 
+  // A file verb followed by words no file fits is usually a question that
+  // happens to start with "highlight" or "digest" ("highlight the differences
+  // between kinetics and kinematics"). Three or more subject words is a
+  // sentence, not a file name, so it is answered rather than refused with
+  // "Nothing called…"; a short miss ("digest lab4") is still reported as one.
+  const fileOrQuestion = (verb: "digest" | "highlight", words: string): Intent => {
+    const intent = fileIntent(verb, words, ctx);
+    if (intent.kind === "ambiguous" && intent.candidates.length === 0 && significantTokens(intent.words).length >= 3) {
+      return scopedQuestion(text, ctx) ?? { kind: "question" };
+    }
+    return intent;
+  };
   const digest = /^(?:ai[- ])?digest(?:\s+(.*))?$/.exec(t);
-  if (digest) return fileIntent("digest", digest[1] ?? "", ctx);
+  if (digest) return fileOrQuestion("digest", digest[1] ?? "");
   const highlight = /^(?:(?:ai[- ])?highlight|suggest highlights?|ai[- ]suggest)(?:\s+(.*))?$/.exec(t);
-  if (highlight) return fileIntent("highlight", highlight[1] ?? "", ctx);
+  if (highlight) return fileOrQuestion("highlight", highlight[1] ?? "");
 
   if (/^(?:lint(?: the)?(?: wiki)?|check the wiki|wiki check|check my wiki)$/.test(t)) return { kind: "lint" };
   if (/^export(?: (?:all|reviewed|cards|the cards|to anki|reviewed cards to anki|reviewed cards|cards to anki))*$/.test(t)) return { kind: "export" };
   // Before the bare "inbox" rule below, whose phrasing this overlaps. Anchored
   // whole-line and led by a verb, so a question that merely mentions the words
-  // ("what does the inbox send to the writer?") stays a question.
-  if (/^(?:send (?:it |this |that |the answer )?to (?:the )?inbox|send to inbox|card (?:it|this|that)|make (?:cards|flashcards)|flashcard (?:it|this|that))$/.test(t)) {
-    return { kind: "send-answer" };
-  }
+  // ("what does the inbox send to the writer?", "send a signal down the
+  // axon?", "what does card sorting measure") stays a question. Bare "send" is
+  // not here: it is the palette alias of "Send selection to inbox" and reaches
+  // that command through the exact-alias match below.
+  if (SEND_ANSWER.test(t)) return { kind: "send-answer" };
   if (/^(?:open (?:the )?inbox|show (?:the )?inbox|inbox)$/.test(t)) return { kind: "inbox" };
 
   // A palette name or alias typed exactly: unambiguous enough to run.
@@ -233,14 +275,20 @@ function scopedQuestion(text: string, ctx: IntentContext): Intent | null {
     return code && question ? { kind: "question", classCode: code, text: question } : null;
   };
   let m = /^ask\s+(\S+)\s+(.+)$/i.exec(raw);
-  if (m) return scoped(m[1], m[2]);
+  if (m) {
+    const hit = scoped(m[1], m[2]);
+    if (hit) return hit;
+  }
   m = /^in\s+(\S+?),?\s+(.+)$/i.exec(raw);
   if (m) {
     const hit = scoped(m[1], m[2]);
     if (hit) return hit;
   }
+  // "… in CODE", including "ask about impulse in HBIO408": the word after
+  // "ask" was not a class, so the leading "ask" (and "about") is the
+  // request, not the question.
   m = /^(.+?)\s+in\s+(\S+?)\s*[?!.]*$/i.exec(raw);
-  if (m) return scoped(m[2], m[1]);
+  if (m) return scoped(m[2], m[1].replace(/^ask\s+(?:about\s+)?(?=\S)/i, ""));
   return null;
 }
 
@@ -253,7 +301,7 @@ export function renderHelp(): string {
     "- **lint** — check the wiki for wrong quotes, dead links and duplicate pages",
     "- **export** — send every reviewed card to Anki",
     "- **inbox** — open the inbox",
-    "- **send to inbox** — card the last answer, one inbox item per source it rested on",
+    "- **send to inbox** — card the last answer: one inbox row per answer, with the sources it rested on beneath it. Also **send it**, **add to inbox**, **card it**, **card the answer**",
     "- while a quiz runs: **hint**, **skip**, **stop**",
     "",
     "Anything else is a question for your notes. **ask HBIO250 …** or **… in HBIO250** keeps it to one class.",

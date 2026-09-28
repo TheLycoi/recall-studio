@@ -13,14 +13,13 @@ import {
   newId,
   normalizeWs,
   splitFrontmatter,
-  plainText,
 } from "./util";
 import { describeError } from "./llm";
 import type { Manifest, ManifestHighlight } from "./manifest";
 import { renderRowInstruction } from "./topicNote";
 import { renderPdfSubpath } from "./pdflink";
 import { missTitle, renderMissInstruction, type QuizMiss } from "./quiz";
-import { renderAnswerHighlight, renderAnswerInstruction } from "./askCheck";
+import { buildAskRow, resolveUnitSource, type UnitSource } from "./askCapture";
 import type { EvidenceUnit } from "./retrieval";
 
 function stripMarks(s: string): string {
@@ -415,6 +414,19 @@ export function captureManifestHighlights(
 }
 
 /**
+ * Where a row built from one evidence unit points: the PDF++ selection when
+ * the unit's PDF resolves from its note, the note otherwise
+ * (src/askCapture.ts resolveUnitSource). Shared by quiz misses and Ask answers.
+ */
+function pdfSourceFor(plugin: WikiLmPlugin, unit: EvidenceUnit): UnitSource {
+  return resolveUnitSource(unit, (pdfBasename, notePath) => pdfDest(plugin, pdfBasename, notePath));
+}
+
+function pdfDest(plugin: WikiLmPlugin, pdfBasename: string, notePath: string): { path: string } | null {
+  return plugin.app.metadataCache.getFirstLinkpathDest(`${pdfBasename}.pdf`, notePath);
+}
+
+/**
  * Queue the passages a quiz found the reader did not know as inbox highlights,
  * so the writer / critique / linter chain turns each into a card. The missed
  * question rides along as the highlight's title and as the writer's
@@ -424,10 +436,19 @@ export function captureManifestHighlights(
  * the PDF file (so the inbox opens the exact PDF++ highlight, as
  * `captureManifestHighlights` does above); otherwise the note itself is the
  * source.
+ *
+ * Shows no Notice: the caller reports the result once. When nothing was
+ * added, `reason` says why. `skipped` counts every miss not queued;
+ * `duplicates` is the part of it already in the inbox (the rest were too
+ * short), so a caller can treat "all already there" as sent.
  */
-export function captureQuizMisses(plugin: WikiLmPlugin, misses: QuizMiss[]): { added: number; skipped: number } {
+export function captureQuizMisses(
+  plugin: WikiLmPlugin,
+  misses: QuizMiss[],
+): { added: number; skipped: number; duplicates: number; reason?: string } {
   let added = 0;
   let skipped = 0;
+  let duplicates = 0;
   for (const miss of misses) {
     const unit = miss.unit;
     const text = unit.text.trim();
@@ -435,29 +456,11 @@ export function captureQuizMisses(plugin: WikiLmPlugin, misses: QuizMiss[]): { a
       skipped++;
       continue;
     }
-    let sourcePath: string;
-    let page: number | null;
-    let heading: string | null;
-    let subpath: string | undefined;
-    if (unit.pdfBasename && unit.target) {
-      const pdf = plugin.app.metadataCache.getFirstLinkpathDest(`${unit.pdfBasename}.pdf`, unit.notePath);
-      if (pdf) {
-        sourcePath = pdf.path;
-        page = unit.page;
-        heading = `page ${unit.page}`;
-        subpath = renderPdfSubpath(unit.target);
-      } else {
-        sourcePath = unit.notePath;
-        page = null;
-        heading = unit.noteTitle;
-      }
-    } else {
-      sourcePath = unit.notePath;
-      page = null;
-      heading = unit.noteTitle;
-    }
+    // The quiz row does not set `topicPath` (it never has), so that field of the lookup is dropped.
+    const { sourcePath, page, heading, subpath } = pdfSourceFor(plugin, unit);
     if (plugin.store.hasDuplicate(sourcePath, normalizeWs(text))) {
       skipped++;
+      duplicates++;
       continue;
     }
     const h = makeHighlight({
@@ -478,80 +481,61 @@ export function captureQuizMisses(plugin: WikiLmPlugin, misses: QuizMiss[]): { a
     plugin.generator.enqueue(h);
     added++;
   }
-  new Notice(
-    added === 0 && skipped === 0
-      ? "WikiLM: nothing to send."
-      : `WikiLM: ${added} passage${added === 1 ? "" : "s"} sent to the inbox from the quiz (${skipped} already there).`,
-  );
-  return { added, skipped };
+  if (added > 0) return { added, skipped, duplicates };
+  const reason =
+    skipped === 0
+      ? "nothing to send."
+      : duplicates === skipped
+        ? "already in the inbox."
+        : duplicates === 0
+          ? "too short to card."
+          : `${duplicates} already in the inbox, ${skipped - duplicates} too short to card.`;
+  return { added, skipped, duplicates, reason };
 }
 
 /**
  * Queue a chat answer as one inbox highlight: the answer itself, with the
- * passages it rested on under it (`renderAnswerHighlight`), so the card
- * writer works from the whole answer and not from one passage at a time
- * (the reader's rule, 2026-09-25). The question is the item's title and,
- * with what each source contributed, the writer's instruction.
+ * passages it rested on under it, so the card writer works from the whole
+ * answer and not from one passage at a time (the reader's rule, 2026-09-25).
+ * The question is the item's title and, with what each source contributed,
+ * the writer's instruction. The row is built by `buildAskRow`
+ * (src/askCapture.ts): the source is the first passage's PDF page when it has
+ * one, else its note; a general-knowledge answer links `fallbackSourcePath`
+ * and says in its instruction that it is unverified.
  *
- * The item's source is the first passage's PDF page when it has one, so the
- * card's back links a real page; `topicPath` is that passage's note, the
- * concept the answer belongs to.
+ * Shows no Notice: the caller reports the result once.
  */
 export function captureAskAnswer(
   plugin: WikiLmPlugin,
-  question: string,
-  answer: string,
-  cited: Array<{ unit: EvidenceUnit; why: string }>,
-): { added: number; skipped: number } {
-  const text = renderAnswerHighlight(plainText(answer), cited.map(({ unit }) => ({ noteTitle: unit.noteTitle, page: unit.page, text: plainText(unit.text) })));
-  if (text.trim().length < 3) {
-    new Notice("WikiLM: nothing to send.");
-    return { added: 0, skipped: 1 };
-  }
-  const first = cited[0]?.unit;
-  let sourcePath = first?.notePath ?? "";
-  let page: number | null = null;
-  let heading: string | null = first?.noteTitle ?? null;
-  let subpath: string | undefined;
-  let topicPath: string | undefined;
-  if (first?.pdfBasename && first.target) {
-    const pdf = plugin.app.metadataCache.getFirstLinkpathDest(`${first.pdfBasename}.pdf`, first.notePath);
-    if (pdf) {
-      sourcePath = pdf.path;
-      page = first.page;
-      heading = `page ${first.page}`;
-      subpath = renderPdfSubpath(first.target);
-      topicPath = first.notePath;
-    }
-  }
-  if (!sourcePath) {
-    new Notice("WikiLM: this answer has no source to link a card to.");
-    return { added: 0, skipped: 1 };
-  }
-  if (plugin.store.hasDuplicate(sourcePath, normalizeWs(text))) {
-    new Notice("WikiLM: this answer is already in the inbox.");
-    return { added: 0, skipped: 1 };
+  args: {
+    question: string;
+    answer: string;
+    cited: Array<{ unit: EvidenceUnit; why: string }>;
+    generalKnowledge: boolean;
+    fallbackSourcePath?: string;
+  },
+): { status: "added" | "duplicate" | "skipped"; reason?: string } {
+  const row = buildAskRow({ ...args, resolvePdf: (pdfBasename, notePath) => pdfDest(plugin, pdfBasename, notePath) });
+  if ("reason" in row) return { status: "skipped", reason: row.reason };
+  if (plugin.store.hasDuplicate(row.sourcePath, normalizeWs(row.text))) {
+    return { status: "duplicate", reason: "this answer is already in the inbox." };
   }
   const h = makeHighlight({
-    sourcePath,
-    sourceTitle: basenameNoExt(sourcePath),
-    text,
+    sourcePath: row.sourcePath,
+    sourceTitle: basenameNoExt(row.sourcePath),
+    text: row.text,
     before: "",
     after: "",
-    line: 0,
-    page,
-    heading,
-    title: missTitle({ question }),
-    instruction: renderAnswerInstruction(
-      question,
-      cited.map(({ unit, why }) => ({ noteTitle: unit.noteTitle, why })),
-    ),
-    subpath,
-    topicPath,
+    line: row.line,
+    page: row.page,
+    heading: row.heading,
+    title: row.title,
+    instruction: row.instruction,
+    subpath: row.subpath,
+    topicPath: row.topicPath,
     origin: "ask",
   });
   plugin.store.add(h);
   plugin.generator.enqueue(h);
-  new Notice("WikiLM: the answer is in the inbox; cards are being written.");
-  return { added: 1, skipped: 0 };
+  return { status: "added" };
 }

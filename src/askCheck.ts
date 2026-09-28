@@ -49,6 +49,12 @@ export interface GroundingReport {
   fromGeneralKnowledge: boolean;
   /** Sentence check (src/answerClaims.ts): how many sentences the answer had and which matched no passage. Absent when the check did not run. */
   claims?: { total: number; unmatched: string[] };
+  /**
+   * The text was written by this file, not the model: a refusal, a fallback,
+   * a "nothing found". It is not an answer, so it is never sent to the inbox,
+   * replayed to the model as something it said, or given a route.
+   */
+  canned?: boolean;
 }
 
 /** How many sources are shown under an answer. Two is enough to confirm one; more is a wall. */
@@ -56,6 +62,22 @@ export const MAX_SOURCES = 2;
 
 /** Shown when the model answered with nothing at all. */
 const NOTHING_SAID = "The model returned an empty answer. Ask again, or rephrase the question.";
+
+/**
+ * Shown instead of a general-knowledge answer when the reader has turned
+ * general knowledge off. The prompt may still offer the model that option
+ * (it cannot know the setting when evidence survives), so the setting is
+ * enforced here, on the draft, where it cannot be talked around.
+ */
+export function generalKnowledgeRefusal(): string {
+  return "The notes don't cover this, and answering from general knowledge is off in settings.";
+}
+
+/** Options for `checkAnswer`. */
+export interface CheckOptions {
+  /** False turns a general-knowledge draft into `generalKnowledgeRefusal()`. Absent means allowed. */
+  allowGeneralKnowledge?: boolean;
+}
 
 /**
  * Assemble the answer and the sources under it.
@@ -66,7 +88,11 @@ const NOTHING_SAID = "The model returned an empty answer. Ask again, or rephrase
  * answer, not to reprint the search results — the reader who wants the rest
  * can open the note.
  */
-export function checkAnswer(draft: AskDraft, evidence: AskEvidenceIn[]): { answer: string; report: GroundingReport } {
+export function checkAnswer(
+  draft: AskDraft,
+  evidence: AskEvidenceIn[],
+  opts?: CheckOptions,
+): { answer: string; report: GroundingReport } {
   const max = evidence.length;
   const answer = draft.answer.trim();
 
@@ -86,22 +112,30 @@ export function checkAnswer(draft: AskDraft, evidence: AskEvidenceIn[]): { answe
   // A general-knowledge answer names no source: it did not come from one.
   // Trusting the flag over the citations would let a model both cite a note
   // and disclaim it, and the reader would see a source under a warning.
-  const fromGeneralKnowledge = draft.from_general_knowledge && sources.length === 0;
+  // An empty draft is not one either: the banner would sit over the
+  // empty-answer notice.
+  const fromGeneralKnowledge = draft.from_general_knowledge && sources.length === 0 && answer.length > 0;
 
   // The model claimed sources and not one of them checked out. Whatever it
   // says about its own coverage, nothing in the notes stands behind this
   // answer, so it must not be labelled as answered from them.
   const allCitationsDropped = draft.used.length > 0 && sources.length === 0;
 
-  return {
-    answer: answer.length > 0 ? answer : NOTHING_SAID,
-    report: {
-      coverage: answer.length > 0 && !allCitationsDropped ? draft.coverage : "none",
-      sources,
-      dropped,
-      fromGeneralKnowledge,
-    },
+  if (fromGeneralKnowledge && opts?.allowGeneralKnowledge === false) {
+    return {
+      answer: generalKnowledgeRefusal(),
+      report: { coverage: "none", sources: [], dropped: 0, fromGeneralKnowledge: false, canned: true },
+    };
+  }
+
+  const report: GroundingReport = {
+    coverage: answer.length > 0 && !allCitationsDropped ? draft.coverage : "none",
+    sources,
+    dropped,
+    fromGeneralKnowledge,
   };
+  if (answer.length === 0) report.canned = true;
+  return { answer: answer.length > 0 ? answer : NOTHING_SAID, report };
 }
 
 /**
@@ -112,7 +146,27 @@ export function checkAnswer(draft: AskDraft, evidence: AskEvidenceIn[]): { answe
 export function noEvidenceAnswer(question: string): { answer: string; report: GroundingReport } {
   return {
     answer: `Your notes don't cover this: nothing under the topic notes matches “${question.trim()}”. Digest the lecture that covers it, then ask again.`,
-    report: { coverage: "none", sources: [], dropped: 0, fromGeneralKnowledge: false },
+    report: { coverage: "none", sources: [], dropped: 0, fromGeneralKnowledge: false, canned: true },
+  };
+}
+
+/**
+ * The answer when retrieval found passages and the relevance judge kept none.
+ *
+ * Distinct from `noEvidenceAnswer`: there, nothing shared the question's
+ * words. Here `n` passages did, and the judge read them and said none answers
+ * it, so "nothing matches" would be false. No model is called to draft: the
+ * drafter would be reading an empty list.
+ */
+export function filteredOutAnswer(n: number, question: string): { answer: string; report: GroundingReport } {
+  const q = question.trim();
+  const found =
+    n === 1
+      ? `1 passage shares words with “${q}”, but it doesn't answer it.`
+      : `${n} passages share words with “${q}”, but none of them answers it.`;
+  return {
+    answer: `${found} Try other words, or digest the lecture that covers it.`,
+    report: { coverage: "none", sources: [], dropped: 0, fromGeneralKnowledge: false, canned: true },
   };
 }
 
@@ -131,7 +185,7 @@ export function emptyIndexAnswer(folderPrefix: string): { answer: string; report
     answer:
       `No notes were searched: the topic notes folder “${folder}” has no markdown notes in this vault. ` +
       `Point “Topic notes folder” in WikiLM's settings at the folder your notes are in, then ask again.`,
-    report: { coverage: "none", sources: [], dropped: 0, fromGeneralKnowledge: false },
+    report: { coverage: "none", sources: [], dropped: 0, fromGeneralKnowledge: false, canned: true },
   };
 }
 
@@ -147,13 +201,20 @@ export const VERIFY_BANNER = "Not from your notes — answered from general know
  * and look, "none" means the notes do not have it.
  */
 export function renderGroundingLine(r: GroundingReport): string {
-  const coverage = r.fromGeneralKnowledge
-    ? "General knowledge, not your notes"
-    : r.coverage === "full"
-      ? "Answered from your notes"
-      : r.coverage === "partial"
-        ? "Partly answered from your notes"
-        : "Not in your notes";
+  // A general-knowledge answer rests on no passage: there are no citations to
+  // count and no sentences checked against the notes worth reporting.
+  if (r.fromGeneralKnowledge) return "General knowledge, not your notes";
+  // The model says it answered from the notes, and not one of its sentences
+  // matched a passage: say both, rather than let the model's word stand alone.
+  const noneMatched = !!r.claims && r.claims.total > 0 && r.claims.unmatched.length === r.claims.total;
+  const coverage =
+    r.coverage !== "none" && noneMatched
+      ? "Answered, but no sentence matched your notes"
+      : r.coverage === "full"
+        ? "Answered from your notes"
+        : r.coverage === "partial"
+          ? "Partly answered from your notes"
+          : "Not in your notes";
   const parts = [coverage];
   if (r.dropped > 0) parts.push(`${r.dropped} bad ${r.dropped === 1 ? "citation" : "citations"} dropped`);
   // "Matched no passage", never "wrong": the check is token overlap
@@ -164,6 +225,30 @@ export function renderGroundingLine(r: GroundingReport): string {
     parts.push(`${unmatched} of ${r.claims.total} ${r.claims.total === 1 ? "sentence" : "sentences"} matched no passage`);
   }
   return parts.join(" · ");
+}
+
+/**
+ * The retrieval route to print after the grounding line, or "" for none.
+ *
+ * A general-knowledge report already says where the answer came from, and a
+ * route label of "general knowledge" after it says it twice; a canned report
+ * came from no route at all.
+ */
+export function routeForReport(report: GroundingReport, route: string): string {
+  return report.fromGeneralKnowledge || report.canned ? "" : route;
+}
+
+/**
+ * Whether an answer may be sent to the inbox.
+ *
+ * The contract (2026-09-27 ask cleanup plan): the model's own text, not
+ * empty, that either rests on the notes or is a general-knowledge answer the
+ * inbox row will label as unverified. A canned refusal is not an answer.
+ */
+export function canSendAnswer(report: GroundingReport, answer: string): boolean {
+  if (report.canned) return false;
+  if (answer.trim().length === 0) return false;
+  return report.coverage !== "none" || report.fromGeneralKnowledge;
 }
 
 /**
@@ -216,6 +301,9 @@ export function renderAnswerInstruction(question: string, sources: Array<{ noteT
   return lines.join("\n");
 }
 
+/** The `why` of a stand-in source: the top-ranked passage the model did not cite. */
+export const STAND_IN_WHY = "top match, not cited";
+
 /** One source as it is shown under an answer, and sent to the inbox from it. */
 export interface PickedSource<U = unknown> {
   unit: U;
@@ -229,16 +317,22 @@ export interface PickedSource<U = unknown> {
  * Shared by the source rows and the inbox button so the two can never
  * disagree about what an answer rested on.
  *
+ * A "none" or general-knowledge answer gets nothing, even if it cited a
+ * passage: it says the notes do not answer the question, so no passage is
+ * what it rested on.
+ *
  * The stand-in must not appear when the model named sources that all failed
  * verification: there is no honest source to show, and showing one would
- * dress an unsupported answer in a citation the model never made.
+ * dress an unsupported answer in a citation the model never made. When it
+ * does appear, its `why` says it was not cited, so the row can say so.
  */
 export function pickSources<U>(evidence: U[], report: GroundingReport): Array<PickedSource<U>> {
+  if (report.fromGeneralKnowledge || report.coverage === "none") return [];
   const picked = report.sources
     .map((s) => ({ unit: evidence[s.n - 1], why: s.why }))
     .filter((p): p is PickedSource<U> => !!p.unit);
   if (picked.length > 0) return picked;
   const allCitationsDropped = report.dropped > 0 && report.sources.length === 0;
-  if (report.coverage === "none" || allCitationsDropped || !evidence[0]) return [];
-  return [{ unit: evidence[0], why: "" }];
+  if (allCitationsDropped || !evidence[0]) return [];
+  return [{ unit: evidence[0], why: STAND_IN_WHY }];
 }
