@@ -31,8 +31,11 @@ export interface DuplicatePage {
  * of their character pairs — and is never reported on its own: it is held
  * back as a candidate for the model to judge, at the reader's request, in
  * the fix plan. Kinetics and Kinematics are spelled alike and are two things.
+ * `title` is the model's title scan (src/lintReview.ts `verifyTitleScan`): a
+ * translation or abbreviation no spelling test can see. It is a candidate like
+ * `similar`, never a finding on its own, and `findDuplicates` never emits it.
  */
-export type DuplicatePass = "name" | "evidence" | "similar";
+export type DuplicatePass = "name" | "evidence" | "similar" | "title";
 
 /** Character-bigram Jaccard, on both names folded: 1 for the same spelling, 0 for nothing shared. */
 export function bigramSimilarity(a: string, b: string): number {
