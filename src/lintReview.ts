@@ -24,7 +24,7 @@
 import { linkKey, noteLinks } from "./graph";
 import { fmList, nextHeadingAfter, noteAliases } from "./topicNote";
 import { pairKey, type DuplicateFinding } from "./duplicates";
-import { compareIssues, ORDER, type LintPage, type VaultIssue, type VaultLintReport } from "./vaultLint";
+import { compareIssues, ORDER, renderVaultLint, type LintPage, type VaultIssue, type VaultLintReport } from "./vaultLint";
 import type { EvidenceUnit } from "./retrieval";
 
 export { pairKey };
@@ -107,10 +107,13 @@ function basename(path: string): string {
   return (path.split("/").pop() ?? path).replace(/\.md$/i, "");
 }
 
-/** The page's kind from its frontmatter, or "" when it has none. */
-function kindOf(content: string, kindKey: string): string {
-  return fmList(frontmatter(content), kindKey)[0] ?? "";
-}
+/**
+ * What the review may treat a page as, answered by the caller from what it
+ * knows of the vault's schema: a karpathy page by its `type:`, a class page by
+ * its `class:`. "other" is a page the review has nothing to say about and
+ * nothing to link to: a source page, a class's index note, the log.
+ */
+export type PageKind = "concept" | "entity" | "other";
 
 /**
  * The name a page goes by for the model: its H1, else its filename.
@@ -159,15 +162,16 @@ function count(dropped: Record<string, number>, reason: string): void {
  * sends, since that is what the calls cost, and taking stops at the first
  * page that would pass it so the order stays the order.
  *
- * `kindKey`, when given, keeps only concept and entity pages: the review has
+ * `kindOf`, when given, keeps only concept and entity pages: the review has
  * nothing to say about a source page, and spending budget on one would push a
- * page it can judge out of the run.
+ * page it can judge out of the run. It is a callback rather than a frontmatter
+ * key because the two schemas say a page's kind in different keys.
  */
 export function selectPages(
   report: VaultLintReport,
   pages: LintPage[],
   budgetChars = REVIEW_BUDGET_CHARS,
-  kindKey?: string,
+  kindOf?: (path: string) => PageKind,
 ): { chosen: LintPage[]; skipped: number } {
   const worst = new Map<string, number>();
   for (const issue of report.issues) {
@@ -179,7 +183,7 @@ export function selectPages(
 
   const candidates = pages
     .filter((p) => worst.has(p.path) || withClaims.has(p.path))
-    .filter((p) => kindKey === undefined || ["concept", "entity"].includes(kindOf(p.content, kindKey)))
+    .filter((p) => kindOf === undefined || kindOf(p.path) !== "other")
     .map((p) => ({ page: p, rank: worst.get(p.path) ?? ORDER.length + 1 }))
     .sort((a, b) => a.rank - b.rank || a.page.path.localeCompare(b.page.path));
 
@@ -237,10 +241,13 @@ export function clampBody(md: string, max = PAGE_BODY_CHARS): { body: string; om
  * Sorted by path so an unchanged wiki sends the same directory, and capped
  * both by entries and by the characters its lines would take, whichever comes
  * first: a large wiki's directory must not crowd out the pages under review.
+ * Only concept and entity pages are listed: a source page or an index note is
+ * neither a subject a page should link to under its related section nor one
+ * the title scan should pair with a page by name.
  */
 export function directoryOf(
   pages: Array<{ path: string; content: string }>,
-  kindKey: string,
+  kindOf: (path: string) => PageKind,
   max = 400,
   maxChars = 12_000,
 ): DirectoryEntry[] {
@@ -248,7 +255,9 @@ export function directoryOf(
   let chars = 0;
   for (const p of [...pages].sort((a, b) => a.path.localeCompare(b.path))) {
     if (out.length >= max) break;
-    const entry: DirectoryEntry = { title: pageTitle(p.path, p.content), kind: kindOf(p.content, kindKey), aliases: noteAliases(p.content) };
+    const kind = kindOf(p.path);
+    if (kind === "other") continue;
+    const entry: DirectoryEntry = { title: pageTitle(p.path, p.content), kind, aliases: noteAliases(p.content) };
     const line = `${entry.title} (${entry.kind}): ${entry.aliases.join(", ")}`.length + 1;
     if (chars + line > maxChars) break;
     chars += line;
@@ -266,11 +275,11 @@ export function directoryOf(
  * verdict can only move a page between those two, and the other checks are
  * about pages that explain a subject.
  */
-export function buildReviewInputs(report: VaultLintReport, chosen: LintPage[], kindKey: string): ReviewPageIn[] {
+export function buildReviewInputs(report: VaultLintReport, chosen: LintPage[], kindOf: (path: string) => PageKind): ReviewPageIn[] {
   const out: ReviewPageIn[] = [];
   for (const page of chosen) {
-    const kind = kindOf(page.content, kindKey);
-    if (kind !== "concept" && kind !== "entity") continue;
+    const kind = kindOf(page.path);
+    if (kind === "other") continue;
     const { body, omitted } = clampBody(page.content);
     out.push({
       title: pageTitle(page.path, page.content),
@@ -491,4 +500,18 @@ export function renderReviewLine(stats: {
   if (total > 0) parts.push(`${s(total, "proposal")} dropped (${reasons.map((r) => `${stats.dropped[r]} ${r}`).join(", ")})`);
   parts.push(...stats.failed);
   return `**Model review** — ${parts.join("; ")}.`;
+}
+
+/**
+ * The review's own turn in the chat: its line first, then the findings it
+ * added, grouped and labelled as the scan's report groups its own, so the two
+ * turns read as one report in two parts. The scan's header and all-clear are
+ * left out: they describe the scan, and a review that found nothing says so in
+ * its line.
+ */
+export function renderReviewTurn(report: VaultLintReport, issues: VaultIssue[], line: string): string {
+  if (issues.length === 0) return line;
+  const body = renderVaultLint({ ...report, issues: [...issues].sort(compareIssues), candidates: [], claims: [] });
+  // Drop the `**Wiki check** — …` header line; what follows starts with a blank line.
+  return `${line}${body.slice(body.indexOf("\n"))}`;
 }

@@ -957,12 +957,14 @@ export function pickPdf(app: App, pdfs: TFile[]): Promise<TFile | null> {
 const FIX_GROUP: Record<FixKind, string> = {
   aliases: "Aliases and tags",
   tag: "Aliases and tags",
+  kind: "Filed wrong",
   "cross-link": "Duplicate pages",
   relink: "Dead links",
   repoint: "Dead links",
   unwrap: "Dead links",
   "hub-link": "Unlinked pages",
   "related-link": "Unlinked pages",
+  "add-link": "Missing links",
   "rect-callout": "Rect-only notes",
   attribute: "Unattributed quotes",
 };
@@ -989,9 +991,11 @@ export interface FixPlanHooks {
  * a target is drawn muted and cannot be ticked: there is nothing to tick yet,
  * and a checkbox that applies nothing is a lie about what Apply will do.
  *
- * The model's rows are not here when the modal opens. They cost a request, and
- * a plan that spent one before the reader had decided to want it would charge
- * for a modal they may close.
+ * The rows the model review proposed during Lint wiki are here when the modal
+ * opens (missing links, kinds, confirmed duplicates), since the review has
+ * already been paid for. The aliases-and-tags rows are not: they cost a
+ * request, and a plan that spent one before the reader had decided to want it
+ * would charge for a modal they may close.
  */
 export class FixPlanModal extends Modal {
   private applyBtn!: ButtonComponent;

@@ -18,6 +18,11 @@ before(async () => {
 const note = (p, front, body) => ({ path: p, content: `---\n${front}\n---\n${body}` });
 const issue = (id, p) => ({ id, path: p, title: p.replace(/^.*\//, "").replace(/\.md$/, "") });
 const report = (issues, claims = []) => ({ notes: 0, units: 0, issues, candidates: [], claims });
+// The caller's kind callback, as a karpathy vault would answer it: `type:` decides.
+const byType = (pages) => (p) => {
+  const t = /^type:\s*(\S+)/m.exec(pages.find((x) => x.path === p)?.content ?? "")?.[1];
+  return t === "concept" || t === "entity" ? t : "other";
+};
 
 // ---- selectPages
 
@@ -40,10 +45,23 @@ test("selectPages stops at the budget and counts the rest as skipped", () => {
   assert.equal(got.skipped, 1);
 });
 
-test("selectPages with a kind key leaves out pages the review cannot judge", () => {
+test("selectPages with a kind callback leaves out pages the review cannot judge", () => {
   const pages = [note("wiki/sources/s.md", "type: source", "Body."), note("wiki/a.md", "type: entity", "Body.")];
   const r = report([issue("dead-link", "wiki/sources/s.md"), issue("dead-link", "wiki/a.md")]);
-  assert.deepEqual(lr.selectPages(r, pages, 60_000, "type").chosen.map((p) => p.path), ["wiki/a.md"]);
+  assert.deepEqual(lr.selectPages(r, pages, 60_000, byType(pages)).chosen.map((p) => p.path), ["wiki/a.md"]);
+});
+
+test("a class-schema page, with class: and no type:, is selected and reviewed as the kind the callback gives", () => {
+  const pages = [note("classes/X/doping.md", "class: HBIO250", "# Doping\n\nProse."), note("classes/X/X.md", "type: topic-index\nclass: HBIO250", "# X")];
+  const kindOf = (p) => (p === "classes/X/doping.md" ? "concept" : "other");
+  const r = report([issue("orphan", "classes/X/doping.md"), issue("orphan", "classes/X/X.md")]);
+  const { chosen } = lr.selectPages(r, pages, 60_000, kindOf);
+  assert.deepEqual(chosen.map((p) => p.path), ["classes/X/doping.md"]);
+  const inputs = lr.buildReviewInputs(r, chosen, kindOf);
+  assert.equal(inputs.length, 1);
+  assert.equal(inputs[0].kind, "concept");
+  assert.equal(inputs[0].title, "Doping");
+  assert.deepEqual(lr.directoryOf(pages, kindOf), [{ title: "Doping", kind: "concept", aliases: [] }], "a hub is not a page to link to or pair by name");
 });
 
 // ---- clampBody
@@ -82,12 +100,12 @@ test("directoryOf names each page by its H1 or basename, with kind and aliases, 
     note("wiki/concepts/spaced-repetition.md", 'type: concept\naliases: ["SRS", "Spacing"]', "# Spaced repetition\n\nBody."),
     note("wiki/entities/SuperMemo.md", "type: entity", "No heading here."),
   ];
-  assert.deepEqual(lr.directoryOf(pages, "type"), [
+  assert.deepEqual(lr.directoryOf(pages, byType(pages)), [
     { title: "Spaced repetition", kind: "concept", aliases: ["SRS", "Spacing"] },
     { title: "SuperMemo", kind: "entity", aliases: [] },
   ]);
-  assert.equal(lr.directoryOf(pages, "type", 1).length, 1);
-  assert.equal(lr.directoryOf(pages, "type", 400, 50).length, 1, "the second entry would pass 50 characters");
+  assert.equal(lr.directoryOf(pages, byType(pages), 1).length, 1);
+  assert.equal(lr.directoryOf(pages, byType(pages), 400, 50).length, 1, "the second entry would pass 50 characters");
 });
 
 // ---- buildReviewInputs
@@ -96,7 +114,7 @@ test("buildReviewInputs assembles what the model sees per page and skips pages o
   const a = note("wiki/concepts/a.md", 'type: concept\ntags: [method, term]\naliases: ["Alpha"]', "# A page\n\nProse. [[Other Page]] and [[concepts/b|Bee]].");
   const s = note("wiki/sources/s.md", "type: source", "# S\n\nProse.");
   const r = report([], [{ path: "wiki/concepts/a.md", title: "a", n: 1, text: "Prose sentence one." }, { path: "wiki/sources/s.md", title: "s", n: 1, text: "x" }]);
-  assert.deepEqual(lr.buildReviewInputs(r, [a, s], "type"), [
+  assert.deepEqual(lr.buildReviewInputs(r, [a, s], byType([a, s])), [
     {
       title: "A page",
       kind: "concept",
@@ -252,4 +270,16 @@ test("renderReviewLine says what was read, found and dropped in one line", () =>
 
 test("renderReviewLine says why the review did not run", () => {
   assert.equal(lr.renderReviewLine({ read: 0, withFindings: 0, skipped: 0, findings: 0, dropped: {}, failed: [], off: "no provider configured" }), "Model review off: no provider configured");
+});
+
+// ---- renderReviewTurn
+
+test("renderReviewTurn leads with the review line and lists the new findings in the report's style", () => {
+  const line = "**Model review** — read 1 of 1 page with findings; 1 finding.";
+  const issues = [{ id: "missing-link", path: "wiki/concepts/a.md", title: "a", target: "Beta", detail: "names Beta" }];
+  const got = lr.renderReviewTurn(report([]), issues, line);
+  assert.ok(got.startsWith(line), got);
+  assert.ok(!got.includes("**Wiki check**"), "the scan's header is the other turn's");
+  assert.match(got, /\*\*Missing link: [^*]+\*\* \(1\)\n- \[\[a\]\] → `Beta`: names Beta/);
+  assert.equal(lr.renderReviewTurn(report([]), [], line), line, "no findings: the line alone, not the scan's all-clear");
 });
