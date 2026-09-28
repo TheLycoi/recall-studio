@@ -1098,7 +1098,10 @@ A concept page is about an idea: a mechanism, a method, a theory, a term, a phen
 <input><page title="Insulin" kind="entity" tags="other" aliases="">
 <body>
 Insulin is secreted by beta cells when blood glucose is high. It was first isolated in 1921.
-> [!quote] Insulin is released by pancreatic beta cells in response to a rise in blood glucose.
+
+## Mentions in Source
+
+- "Insulin is released by pancreatic beta cells in response to a rise in blood glucose." — [[Endocrine physiology lecture 4]]
 </body>
 <claims>
 <claim n="1">Insulin is secreted by beta cells when blood glucose is high.</claim>

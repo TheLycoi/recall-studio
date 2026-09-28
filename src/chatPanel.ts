@@ -20,6 +20,7 @@ import { renderReviewLine, renderReviewTurn } from "./lintReview";
 import { planLinkFixes, applyFixesToNote, type LinkFix } from "./vaultFix";
 import { FixPlanModal, LintReportModal, pickNote } from "./modals";
 import { mergeReview, repointFix, type Fix, type FixPageInfo } from "./fixPlan";
+import type { CancelToken } from "./cancel";
 import { applyPlan, buildPlan, fixPagesFor, pageInfos, proposeAliases, providerReady, runModelReview, verifyDuplicates, type FixContext } from "./fixer";
 import {
   canSendAnswer,
@@ -428,9 +429,9 @@ export class ChatPanel {
       const planCtx: FixContext = { ...ctx, report: planReport };
 
       // The aliases-and-tags rows are not in `plan` — they cost a request and
-      // are only asked for from inside the modal — so a vault whose only findings are
-      // missing aliases would otherwise have no way to reach the button that
-      // proposes them. That is what `aliasWork` keeps open.
+      // are only asked for from inside the modal — so a vault whose only
+      // findings are missing aliases would otherwise have no way to reach the
+      // button that proposes them. That is what `aliasWork` keeps open.
       const aliasWork = report.issues.some(
         (i) => i.id === "no-aliases" || (i.id === "schema-violation" && i.detail?.startsWith("tag “")),
       );
@@ -469,18 +470,31 @@ export class ChatPanel {
    * and `applyPlan` is itself the reader's write, so the re-run is started once
    * the writes have resolved and the panel is idle again. `void` rather than
    * `await` so the modal's Apply does not sit open across a second full lint.
+   *
+   * The two model buttons take the plugin's cancel token the way the lint's
+   * review does, only when nothing else holds it, so the status bar's stop
+   * reaches them between batches.
    */
   private openFixPlan(plan: Fix[], infos: Map<string, FixPageInfo>, ctx: FixContext): void {
     const pages = fixPagesFor(this.plugin, ctx.pages);
+    const withToken = async <T>(label: string, run: (cancel: CancelToken | undefined) => Promise<T>): Promise<T> => {
+      const cancel = this.plugin.cancel;
+      const owner = cancel.active ? undefined : cancel.begin(label);
+      try {
+        return await run(owner !== undefined ? cancel : undefined);
+      } finally {
+        cancel.end(owner);
+      }
+    };
     new FixPlanModal(this.plugin.app, plan, {
       pickTarget: (row) => pickNote(this.plugin.app, pages).then((p) => (p ? repointFix(row, p, ctx.prefix) : null)),
       proposeAliases: providerReady(this.plugin.settings, "lint")
-        ? () => proposeAliases(this.plugin, infos, ctx.report)
+        ? () => withToken("proposing aliases and tags", (c) => proposeAliases(this.plugin, infos, ctx.report, c))
         : null,
       verifyDuplicates:
         providerReady(this.plugin.settings, "lint") &&
         (ctx.report.issues.some((i) => i.id === "duplicate-pages") || (ctx.report.candidates?.length ?? 0) > 0)
-          ? () => verifyDuplicates(this.plugin, infos, ctx.report, ctx.prefix)
+          ? () => withToken("checking duplicates", (c) => verifyDuplicates(this.plugin, infos, ctx.report, ctx.prefix, c))
           : null,
       apply: async (fixes) => {
         try {

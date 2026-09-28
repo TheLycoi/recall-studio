@@ -2,7 +2,11 @@
 // module's vault half (TFile, pdf.js) is never reached by what is tested here,
 // which is the readiness check, the kind callback, and the model review's
 // orchestration against a fake client.
-
+//
+// The stub is an ES module exporting exactly the names the bundle imports, so
+// a new `obsidian` import fails the build here with "No matching export"
+// rather than passing as an empty class; the functions that reach the vault
+// throw if a test ever calls them.
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
@@ -20,13 +24,19 @@ before(async () => {
     setup(b) {
       b.onResolve({ filter: /^obsidian$/ }, () => ({ path: "obsidian", namespace: "stub" }));
       b.onLoad({ filter: /.*/, namespace: "stub" }, () => ({
-        contents: "module.exports = new Proxy({}, { get: (t, k) => (k === '__esModule' ? false : class {}) });",
+        contents: [
+          "const unreached = (name) => () => { throw new Error(`obsidian.${name} is stubbed and must not be reached`); };",
+          "export class TFile {}",
+          "export const loadPdfJs = unreached('loadPdfJs');",
+          "export const normalizePath = unreached('normalizePath');",
+          "export const requestUrl = unreached('requestUrl');",
+        ].join("\n"),
         loader: "js",
       }));
     },
   };
   const out = path.join(dir, "fixer.mjs");
-  await build({ entryPoints: ["src/fixer.ts"], bundle: true, format: "esm", platform: "node", outfile: out, logLevel: "silent", plugins: [stub] });
+  await build({ entryPoints: ["src/fixer.ts"], bundle: true, format: "esm", platform: "node", outfile: out, logLevel: "error", plugins: [stub] });
   fx = await import(pathToFileURL(out).href);
   const cancelOut = path.join(dir, "cancel.mjs");
   await build({ entryPoints: ["src/cancel.ts"], bundle: true, format: "esm", platform: "node", outfile: cancelOut, logLevel: "silent" });
@@ -192,7 +202,7 @@ test("a phase that throws is one entry in failed, and the others still run", asy
     },
   });
   const r2 = await run(llm2);
-  assert.deepEqual(r2.failed, ["page review failed: timeout"]);
+  assert.deepEqual(r2.failed, ["page review: batch 1 of 1 failed: timeout"]);
   assert.ok(r2.issues.some((i) => i.id === "duplicate-pages"), "the duplicate check's finding survives the review failing");
   assert.match(r2.line, /read 0 of 1 page with findings/);
 });
@@ -240,6 +250,25 @@ test("verifyDuplicates returns the pairs it confirmed as findings", async () => 
   assert.equal(v.confirmed, 1);
   assert.deepEqual(v.issues.map((i) => [i.id, i.path, i.target]), [["duplicate-pages", ALPHA.path, GAMMA.path]]);
   assert.equal(v.rows.length, 2);
+});
+
+test("one failed page-review batch is reported and the next batch still runs", async () => {
+  const many = Array.from({ length: 7 }, (_, i) => page(`wiki/concepts/p${i}.md`, "type: concept", `# P${i}\n\nText.\n`));
+  const report = { notes: 7, units: 0, issues: many.map((p) => ({ id: "orphan", path: p.path, title: p.path })), candidates: [], claims: [] };
+  let n = 0;
+  const { llm } = fakeLlm({
+    async scanTitles() {
+      return { pairs: [] };
+    },
+    async reviewPages(args) {
+      if (n++ === 0) throw new Error("HTTP 529");
+      return { pages: args.pages.map((p) => ({ title: p.title, kind: { kind: "entity", reason: "x" }, claims: [], links: [] })) };
+    },
+  });
+  const r = await run(llm, { pages: many, report });
+  assert.deepEqual(r.failed, ["page review: batch 1 of 2 failed: HTTP 529"]);
+  assert.equal(r.issues.filter((i) => i.id === "wrong-kind").length, 2, "the second batch's two pages were still reviewed");
+  assert.match(r.line, /read 2 of 7 pages with findings/);
 });
 
 test("two pages under one heading: the review's verdicts land only on the page that was sent", async () => {
@@ -326,4 +355,18 @@ test("a cut-off page's nomination of a page that already links back to it is dro
   const r = await run(llm, { pages: [ALPHA, beta, GAMMA, SOURCE] });
   assert.ok(!r.rows.some((f) => f.kind === "add-link"), r.rows.map((f) => f.id).join(", "));
   assert.match(r.line, /1 already linked/);
+});
+
+test("proposeAliases stops between batches when the run is cancelled", async () => {
+  const cancel = new CancelToken();
+  cancel.begin("aliases");
+  cancel.cancel();
+  let asked = 0;
+  const plugin = { settings: SETTINGS, llm: { async aliasesAndTags() { asked++; return { pages: [] }; } } };
+  const infos = fx.pageInfos(plugin, PAGES);
+  const report = { ...REPORT(), issues: [{ id: "no-aliases", path: ALPHA.path, title: "a" }] };
+  assert.deepEqual(await fx.proposeAliases(plugin, infos, report, cancel), []);
+  assert.equal(asked, 0);
+  assert.deepEqual(await fx.proposeAliases(plugin, infos, report), []);
+  assert.equal(asked, 1, "no token, no stop");
 });

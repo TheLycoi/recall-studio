@@ -454,3 +454,18 @@ test("residue is kept only for pages the review can judge: concept and entity, o
     "the review never reads a source page or an index note, so their residue would be counted and never decided",
   );
 });
+
+test("the page review prompt's worked example carries its quote in a form quoteUnits reads", async () => {
+  // The example teaches the model what a quote on the page looks like; one in
+  // a form the verifier does not read would teach it to cite quotes that then
+  // fail the check.
+  const { readFileSync } = await import("node:fs");
+  const llm = readFileSync("src/llm.ts", "utf8");
+  const review = /const REVIEW_SYSTEM = `([\s\S]*?)(?<!\\)`;/.exec(llm)[1];
+  const body = /<page title="Insulin"[\s\S]*?<body>\n([\s\S]*?)\n<\/body>/.exec(review)[1];
+  const by = /claim 1 supported, by "([^"]+)"/.exec(review)[1];
+  const units = vl.quoteUnits("wiki/entities/insulin.md", `---\ntype: entity\n---\n\n${body}\n`);
+  assert.equal(units.length, 1, body);
+  assert.ok(units[0].text.toLowerCase().includes(by.toLowerCase()), `${by} not in ${units[0].text}`);
+  assert.ok(!/\[!quote\]/.test(body), "a quote callout is not a form the wiki's pages carry");
+});

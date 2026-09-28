@@ -370,11 +370,15 @@ export function reviewKindOf(infos: Map<string, FixPageInfo>): (path: string) =>
  * Results are matched back **by title**, not by position: a model that returns
  * nineteen entries for twenty pages would otherwise write every page after the
  * gap with the wrong name.
+ *
+ * `cancel`, when the caller holds the plugin's token, is read between
+ * batches: a stop keeps the rows already proposed and asks for no more.
  */
 export async function proposeAliases(
   plugin: WikiLmPlugin,
   infos: Map<string, FixPageInfo>,
   report: VaultLintReport,
+  cancel?: CancelToken,
 ): Promise<Fix[]> {
   const wantsAliases = new Set<string>();
   const wantsTag = new Set<string>();
@@ -395,6 +399,7 @@ export async function proposeAliases(
 
   const proposals: AliasProposal[] = [];
   for (let i = 0; i < paths.length; i += ALIASES_BATCH) {
+    if (cancel?.cancelled) break;
     const batch = paths.slice(i, i + ALIASES_BATCH);
     // The title the request carries is the title the answer is matched on, so
     // two pages reaching the model under one name would be indistinguishable
@@ -443,7 +448,9 @@ const DUPLICATES_BATCH = 20;
  * Ask the model whether each duplicate pair is one subject or two.
  *
  * The pairs are the lint's `duplicate-pages` findings (a shared name or a
- * shared PDF span) and its held-back candidates (names spelled alike). Each
+ * shared PDF span) and its held-back candidates: names spelled alike, and,
+ * when the model review runs it first, the pairs its title scan read as one
+ * subject under two names (pass `title`). Each
  * side goes as its title, kind, aliases and the opening of its definition, the
  * same excerpt the aliases request uses. Verdicts are matched back by the
  * pair's number in its batch, never by position.
@@ -547,7 +554,8 @@ function mergeCounts(into: Record<string, number>, from: Record<string, number>)
  * findings and every candidate; a pair it clears leaves the candidates and,
  * when the scan had reported it, the findings 2c ranks pages by, so a page is
  * not read for a finding that no longer stands. 2c reads the pages with
- * findings in full, five a call, worst first until the budget runs out.
+ * findings in full, five a call, worst first until the budget runs out; each
+ * call is its own try, so one failed call costs its five pages and no more.
  * Follows the design of gd4ai/obsidian-llm-wiki's lint phases, reimplemented.
  * Nothing is written here: every proposal is a row the reader ticks.
  *
@@ -645,14 +653,14 @@ export async function runModelReview(
     const cutOff = new Set(working.issues.filter((i) => i.id === "orphan" || i.id === "unlinked").map((i) => i.path));
     const linksOf = (path: string): string[] => noteLinks(contentOf.get(path) ?? "").map((l) => linkKey(l.raw)).filter(Boolean);
     const of = Math.ceil(sent.length / REVIEW_BATCH);
-    try {
-      for (let b = 0; b < of; b++) {
-        if (cancel?.cancelled) {
-          stopped("page review", b, of);
-          break;
-        }
-        status(`model review: page ${b * REVIEW_BATCH + 1} of ${sent.length}`);
-        const batch = sent.slice(b * REVIEW_BATCH, (b + 1) * REVIEW_BATCH);
+    for (let b = 0; b < of; b++) {
+      if (cancel?.cancelled) {
+        stopped("page review", b, of);
+        break;
+      }
+      status(`model review: page ${b * REVIEW_BATCH + 1} of ${sent.length}`);
+      const batch = sent.slice(b * REVIEW_BATCH, (b + 1) * REVIEW_BATCH);
+      try {
         const out = await plugin.llm.reviewPages({ pages: batch, directory });
         const v = verifyReview(batch, out.pages, directory, units, { cutOff, linksOf });
         issues.push(...v.issues);
@@ -660,11 +668,11 @@ export async function runModelReview(
         kinds.push(...v.kinds);
         mergeCounts(dropped, v.dropped);
         read += batch.length;
+      } catch (e) {
+        failed.push(`page review: batch ${b + 1} of ${of} failed: ${describeError(e)}`);
       }
-    } finally {
-      // What was verified before a failure is kept, as a cancel keeps it.
-      rows.push(...planReviewLinks(links, working.issues, infos, prefix, plan), ...planKinds(kinds, infos));
     }
+    rows.push(...planReviewLinks(links, working.issues, infos, prefix, plan), ...planKinds(kinds, infos));
   } catch (e) {
     failed.push(`page review failed: ${describeError(e)}`);
   }
