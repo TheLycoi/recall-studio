@@ -8,6 +8,7 @@
 // question. A leading slash is tolerated and means the same thing, so older
 // habits keep working, but no slash grammar is documented.
 
+import { COMMAND_TABLE } from "./commandTable";
 import { parseQuizCommand } from "./quiz";
 
 export interface CommandLike {
@@ -292,6 +293,18 @@ function scopedQuestion(text: string, ctx: IntentContext): Intent | null {
   return null;
 }
 
+/**
+ * The commands that left the palette but still answer to a word here. They
+ * are listed so a reader who had a hotkey for one can find where it went.
+ */
+function chatOnlyLine(): string {
+  const hidden = COMMAND_TABLE.filter((c) => c.hidden);
+  // The part of the name after a colon says what the command does; a name
+  // with no colon already is that sentence.
+  const what = (name: string) => (name.includes(":") ? name.slice(name.indexOf(":") + 1) : name).trim().toLowerCase();
+  return `- chat only: ${hidden.map((c) => `**${c.aliases[0]}** (${what(c.name)})`).join(", ")}`;
+}
+
 /** What the box understands, one phrase per line. Shown for "help". */
 export function renderHelp(): string {
   return [
@@ -303,6 +316,7 @@ export function renderHelp(): string {
     "- **inbox** — open the inbox",
     "- **send to inbox** — card the last answer: one inbox row per answer, with the sources it rested on beneath it. Also **send it**, **add to inbox**, **card it**, **card the answer**",
     "- while a quiz runs: **hint**, **skip**, **stop**",
+    chatOnlyLine(),
     "",
     "Anything else is a question for your notes. **ask HBIO250 …** or **… in HBIO250** keeps it to one class.",
   ].join("\n");

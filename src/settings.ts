@@ -531,7 +531,7 @@ export class WikiLmSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Standing instructions for the AI highlighter")
-      .setDesc("Used by 'AI-highlight this note', e.g. 'Only pick definitions and numbers.'")
+      .setDesc("Used by 'AI highlight…' on a note, e.g. 'Only pick definitions and numbers.'")
       .addTextArea((t) => {
         t.inputEl.rows = 3;
         t.inputEl.cols = 50;

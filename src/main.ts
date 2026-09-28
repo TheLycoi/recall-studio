@@ -4,6 +4,7 @@ import { AnkiClient, exportToAnki, finalizeHighlights, buildNote } from "./anki"
 import { CancelToken } from "./cancel";
 import { captureSelection } from "./capture";
 import { WIKILM_COMMANDS } from "./commands";
+import { paletteCommands } from "./commandTable";
 import { Generator } from "./generator";
 import { Highlighter } from "./highlighter";
 import { InboxView, VIEW_TYPE_INBOX } from "./inboxView";
@@ -66,7 +67,9 @@ export default class WikiLmPlugin extends Plugin {
     this.refreshStatusBar();
 
     // ---- commands -------------------------------------------------------
-    for (const c of WIKILM_COMMANDS)
+    // Hidden commands stay in WIKILM_COMMANDS for the chat to run by alias,
+    // but are not registered: no palette entry, no hotkey.
+    for (const c of paletteCommands(WIKILM_COMMANDS))
       this.addCommand({
         id: c.id,
         name: c.name,

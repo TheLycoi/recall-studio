@@ -21,37 +21,62 @@ before(async () => {
   cc = await import(pathToFileURL(outChat).href);
 });
 
-// The ids and names Obsidian registers. Verbatim and in order: an id change
-// orphans a user's hotkey, a name change moves the entry in the palette.
+// The ids and names in the table, in order. An id change orphans a user's
+// hotkey, a name change moves the entry in the palette. Updated for the
+// command simplification (2026-09-28): the twelve palette commands first, then
+// the four the chat still reaches by alias. Five commands were removed outright
+// and their aliases moved onto the command that absorbed them.
 const EXPECTED = [
-  ["capture-selection", "Send selection to inbox"],
-  ["capture-pdf-selection", "Send PDF selection to inbox"],
-  ["capture-pdf-selection-with-instruction", "Send PDF selection to inbox with instructions…"],
-  ["capture-selection-with-instruction", "Send selection to inbox with instructions…"],
-  ["capture-markdown-highlights", "Send all ==highlights== in this note to inbox"],
-  ["ai-highlight", "AI-highlight this note and write cards"],
-  ["ai-highlight-with-instruction", "AI-highlight this note with instructions…"],
-  ["ingest-source", "Ingest source: read this markdown into the wiki"],
-  ["ingest-folder", "Ingest folder: read every note in a folder into the wiki"],
-  ["cancel-ingestion", "Cancel the running AI highlight or ingest"],
-  ["add-transcript", "Add transcript for document highlighting"],
-  ["digest-pdf-highlights", "Digest PDF highlights into topic notes…"],
-  ["ai-highlight-pdf", "AI-highlight this PDF into the wiki…"],
-  ["open-chat", "Open chat: ask the notes"],
+  ["ai-highlight", "AI highlight…"],
+  ["digest-pdf-highlights", "Digest: PDF highlights into concept and entity notes…"],
+  ["digest-folder", "Digest folder: every highlighted PDF under a folder…"],
   ["lint-wiki", "Lint wiki: find gaps, dead links and ungrounded quotes"],
+  ["capture-selection", "Send selection to inbox"],
+  ["capture-selection-with-instruction", "Send selection to inbox with instructions…"],
+  ["open-chat", "Open chat: ask the notes"],
   ["open-inbox", "Open inbox"],
   ["export-reviewed", "Export all reviewed cards to Anki"],
-  ["retry-failed", "Retry failed highlights"],
+  ["cancel-ingestion", "Cancel the running AI highlight, digest or ingest"],
   ["open-schema", "Open the schema note"],
   ["review-schema-suggestions", "Review schema suggestions"],
+  ["ingest-source", "Ingest source: read this markdown into the wiki"],
+  ["ingest-folder", "Ingest folder: read every note in a folder into the wiki"],
+  ["capture-markdown-highlights", "Send all ==highlights== in this note to inbox"],
+  ["retry-failed", "Retry failed highlights"],
 ];
 
-test("COMMAND_TABLE holds the twenty (id, name) pairs verbatim and in order", () => {
-  assert.equal(table.COMMAND_TABLE.length, 20);
+const HIDDEN = ["ingest-source", "ingest-folder", "capture-markdown-highlights", "retry-failed"];
+const REMOVED = ["capture-pdf-selection", "capture-pdf-selection-with-instruction", "ai-highlight-with-instruction", "ai-highlight-pdf", "add-transcript"];
+
+test("COMMAND_TABLE holds the sixteen (id, name) pairs verbatim and in order", () => {
+  assert.equal(table.COMMAND_TABLE.length, 16);
   assert.deepEqual(
     table.COMMAND_TABLE.map((c) => [c.id, c.name]),
     EXPECTED,
   );
+});
+
+test("exactly the four chat-only commands are hidden, and the removed ones are gone", () => {
+  assert.deepEqual(
+    table.COMMAND_TABLE.filter((c) => c.hidden).map((c) => c.id),
+    HIDDEN,
+  );
+  for (const id of REMOVED) assert.ok(!table.COMMAND_TABLE.some((c) => c.id === id), `${id} should be removed`);
+});
+
+test("the palette gets the twelve visible commands and none of the hidden ones", () => {
+  const palette = table.paletteCommands(table.COMMAND_TABLE);
+  assert.equal(palette.length, 12);
+  assert.deepEqual(
+    palette.map((c) => c.id),
+    EXPECTED.slice(0, 12).map(([id]) => id),
+  );
+  for (const id of HIDDEN) assert.ok(!palette.some((c) => c.id === id), `${id} must not reach the palette`);
+});
+
+test("every id is unique", () => {
+  const ids = table.COMMAND_TABLE.map((c) => c.id);
+  assert.equal(new Set(ids).size, ids.length);
 });
 
 test("every command has at least one alias and a hint", () => {
@@ -144,9 +169,33 @@ test("a palette name or alias typed exactly still runs that command", () => {
   assert.deepEqual(cc.matchIntent("retry", CTX), { kind: "command", id: "retry-failed" });
   // The schema aliases reach the exact-alias match at the bottom of the
   // matcher rather than being eaten by an earlier verb rule: "suggest" opens
-  // the PDF highlighter, and "suggestions" must not.
+  // AI highlight, and "suggestions" must not.
   assert.deepEqual(cc.matchIntent("schema", CTX), { kind: "command", id: "open-schema" });
   assert.deepEqual(cc.matchIntent("/suggestions", CTX), { kind: "command", id: "review-schema-suggestions" });
+});
+
+test("hidden commands are still matched by their aliases", () => {
+  assert.deepEqual(cc.matchIntent("/ingest", CTX), { kind: "command", id: "ingest-source" });
+  assert.deepEqual(cc.matchIntent("ingest-folder", CTX), { kind: "command", id: "ingest-folder" });
+  assert.deepEqual(cc.matchIntent("/highlights", CTX), { kind: "command", id: "capture-markdown-highlights" });
+  assert.deepEqual(cc.matchIntent("/retry", CTX), { kind: "command", id: "retry-failed" });
+});
+
+test("the aliases of removed commands reach the command that absorbed them", () => {
+  assert.deepEqual(cc.matchIntent("pdf", CTX), { kind: "command", id: "capture-selection" });
+  assert.deepEqual(cc.matchIntent("/pdf-instruct", CTX), { kind: "command", id: "capture-selection-with-instruction" });
+  for (const alias of ["ai", "ai-instruct", "suggest", "transcript"]) {
+    assert.deepEqual(cc.matchIntent(alias, CTX), { kind: "command", id: "ai-highlight" }, alias);
+  }
+  assert.deepEqual(cc.matchIntent("digest-folder", CTX), { kind: "command", id: "digest-folder" });
+});
+
+test("help lists the hidden commands on a chat-only line", () => {
+  const help = cc.renderHelp();
+  const line = help.split("\n").find((l) => /chat only/i.test(l));
+  assert.ok(line, "help has a chat-only line");
+  for (const c of table.COMMAND_TABLE.filter((c) => c.hidden)) assert.ok(line.includes(`**${c.aliases[0]}**`), `chat-only line names ${c.aliases[0]}`);
+  assert.ok(!/\*\*schema\*\*/.test(line), "a palette command is not listed as chat only");
 });
 
 test("a leading slash is tolerated and means the same thing", () => {
