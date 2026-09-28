@@ -281,6 +281,22 @@ test("a bullet whose link opens the PDF is anchored, never string-checked", () =
   assert.deepEqual(r.issues.filter((i) => i.id.endsWith("-quote")), []);
 });
 
+test("a concept and a source page whose titles fold alike produce no candidate and no finding", () => {
+  // A source page is the document a concept was digested from, not a second
+  // page about the subject (upstream gd4ai/obsidian-llm-wiki issue #358). The
+  // filenames fold to the same name (case and punctuation only), which without
+  // the kind check would fire the "name" pass.
+  const r = vl.lintVault(
+    [
+      page("wiki/concepts/Free Recall.md", "type: concept", "# Free Recall\n\nA sentence of prose here."),
+      page("wiki/sources/free-recall.md", "type: source", "# Free Recall clipping\n\nA clipping."),
+    ],
+    { schema: vl.WIKI_SCHEMA },
+  );
+  assert.deepEqual(r.issues.filter((i) => i.id === "duplicate-pages"), []);
+  assert.equal(r.candidates.length, 0);
+});
+
 test("look-alike pages are held back as candidates for the model, not reported as duplicates", () => {
   const r = vl.lintVault([
     { path: "wiki/concepts/Kinetics.md", content: "---\ntype: concept\naliases: [x]\n---\n# Kinetics\n\nForces. [[Kinematics]]" },

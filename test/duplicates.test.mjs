@@ -15,7 +15,7 @@ before(async () => {
   d = await import(pathToFileURL(out).href);
 });
 
-const pg = (path, title, aliases = [], evidence = []) => ({ path, title, aliases, evidence });
+const pg = (path, title, aliases = [], evidence = [], kind = "") => ({ path, title, aliases, evidence, kind });
 
 test("a title that is another page's alias is a duplicate by name", () => {
   const out = d.findDuplicates([
@@ -106,4 +106,39 @@ test("bigramSimilarity is a Jaccard over character pairs, folded", () => {
   assert.equal(d.bigramSimilarity("Kinetics", "kinetics"), 1);
   assert.equal(d.bigramSimilarity("Kinetics", "Kinematics"), 0.6);
   assert.equal(d.bigramSimilarity("Impulse", "Momentum") < 0.2, true);
+});
+
+test("a concept and the source it was digested from are not a duplicate, even sharing a name", () => {
+  // wiki/concepts/free-recall.md and wiki/sources/free-recall_8ca728.md: the
+  // source is the document the concept was dug out of, not a second page
+  // about it (upstream gd4ai/obsidian-llm-wiki issue #358).
+  const out = d.findDuplicates([
+    pg("wiki/concepts/free-recall.md", "Free Recall", [], [], "concept"),
+    pg("wiki/sources/free-recall_8ca728.md", "Free Recall", [], [], "source"),
+  ]);
+  assert.deepEqual(out, []);
+});
+
+test("two source pages sharing a name are still reported", () => {
+  const out = d.findDuplicates([
+    pg("wiki/sources/a.md", "Free Recall", [], [], "source"),
+    pg("wiki/sources/b.md", "Free Recall", [], [], "source"),
+  ]);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].pass, "name");
+});
+
+test("a concept and an entity sharing a name are still reported", () => {
+  const out = d.findDuplicates([
+    pg("wiki/concepts/a.md", "Free Recall", [], [], "concept"),
+    pg("wiki/entities/b.md", "Free Recall", [], [], "entity"),
+  ]);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].pass, "name");
+});
+
+test("a page with no kind pairs as before", () => {
+  const out = d.findDuplicates([pg("a.md", "Free Recall", [], [], ""), pg("b.md", "Free Recall", [], [], "")]);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].pass, "name");
 });

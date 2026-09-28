@@ -444,12 +444,18 @@ export function lintVault(pages: LintPage[], options: LintOptions = {}): VaultLi
     const body = page.content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
     const indexed: EvidenceUnit[] = indexNote(page.path, page.content);
     units += indexed.length;
+    // Read once and shared by residue, the duplicate scan and the schema
+    // checks below, so a page's frontmatter is parsed once per page rather
+    // than once per use. With no schema configured there is no kindKey to
+    // read by, so this falls back to the plain `type:` key: enough for the
+    // duplicate scan to still tell a source page from a concept or entity.
+    const fm = frontmatterOf(page.content);
+    const kindHere = fmScalar(fm, options.schema ? options.schema.kindKey : "type");
     // Residue only where the model review will read it: a concept or entity
     // page, or a page that names no kind at all (a class page, whose kind is
     // its class). A source page or an index note is never reviewed, so its
     // residue would be counted in the report and never decided.
-    const kindHere = options.schema ? fmScalar(frontmatterOf(page.content), options.schema.kindKey) : null;
-    if (!kindHere || kindHere === "concept" || kindHere === "entity") {
+    if (!options.schema || !kindHere || kindHere === "concept" || kindHere === "entity") {
       claims.push(...residueOf(page.path, title, page.content, quoteUnits(page.path, page.content, indexed)));
     }
     dupPages.push({
@@ -459,6 +465,7 @@ export function lintVault(pages: LintPage[], options: LintOptions = {}): VaultLi
       evidence: indexed
         .filter((u) => u.target !== null && u.pdfBasename !== null && spanTarget(u.target))
         .map((u) => `${u.pdfBasename}#${highlightKey(u.target as NonNullable<EvidenceUnit["target"]>)}`),
+      kind: kindHere ?? "",
     });
 
     if (body.length === 0) {
@@ -471,10 +478,11 @@ export function lintVault(pages: LintPage[], options: LintOptions = {}): VaultLi
     // ---- schema, aliases, and quote grounding -------------------------
     // These run per page and only when the caller supplied what they need, so
     // a vault with no schema configured is not reported as entirely wrong.
-    const fm = frontmatterOf(page.content);
+    // `kind` is `kindHere` above, read by the schema's own kindKey in this
+    // branch, so the frontmatter is not parsed a second time for the same key.
     const schema = options.schema;
     if (schema) {
-      const kind = fmScalar(fm, schema.kindKey);
+      const kind = kindHere;
       const allowed = kind ? schema.tagsByKind[kind] : undefined;
       if (kind && allowed) {
         for (const tag of fmTags(fm)) {

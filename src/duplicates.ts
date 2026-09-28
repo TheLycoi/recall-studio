@@ -23,6 +23,8 @@ export interface DuplicatePage {
   aliases: string[];
   /** `<pdf basename>#<highlightKey>` for every PDF++ callout the page cites. */
   evidence: string[];
+  /** The frontmatter kind as the lint reads it (`vaultLint.ts` `kindHere`), or "" when the page names none. */
+  kind: string;
 }
 
 /**
@@ -63,6 +65,18 @@ export function pairKey(a: string, b: string): string {
   return a < b ? `${a}\u0000${b}` : `${b}\u0000${a}`;
 }
 
+/**
+ * A source page is the document a concept or entity was digested from, not a
+ * second page about the same subject, so pairing it against the page it was
+ * dug out of is never a duplicate. Follows upstream gd4ai/obsidian-llm-wiki's
+ * duplicate-scan design (issue #358): reject entity-source and concept-source
+ * pairs before the model ever sees them, and allow entity-entity,
+ * concept-concept, entity-concept and source-source.
+ */
+function isSourcePair(x: DuplicatePage, y: DuplicatePage): boolean {
+  return (x.kind === "source") !== (y.kind === "source");
+}
+
 export interface DuplicateFinding {
   /** The lesser path of the pair, so a pair has one spelling. */
   a: string;
@@ -86,6 +100,7 @@ export function findDuplicates(pages: DuplicatePage[]): DuplicateFinding[] {
   const seen = new Set<string>();
   const emit = (x: DuplicatePage, y: DuplicatePage, pass: DuplicatePass, detail: string): void => {
     if (x.path === y.path) return;
+    if (isSourcePair(x, y)) return;
     const [a, b] = x.path < y.path ? [x, y] : [y, x];
     const key = `${a.path}\n${b.path}`;
     if (seen.has(key)) return;
