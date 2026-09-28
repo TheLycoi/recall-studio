@@ -83,7 +83,10 @@ export class AnthropicBackend implements LlmBackend {
       model: req.model ?? s.model,
       max_tokens: req.maxTokens,
       system: [{ type: "text", text: req.system, cache_control: { type: "ephemeral" } }],
-      output_config: { effort: s.effort, format: zodOutputFormat(req.schema) },
+      // The call's own effort first, as the other backends read it, so a
+      // request asking for "low" (keywords, relevance, aliases, duplicates,
+      // the title scan) is not run at the global effort.
+      output_config: { effort: req.effort ?? s.effort, format: zodOutputFormat(req.schema) },
       messages: [{ role: "user", content: req.user }],
     });
     if (response.stop_reason === "refusal") throw new Error("The model declined this request.");
