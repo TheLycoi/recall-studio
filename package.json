@@ -9,6 +9,8 @@
     "build": "node scripts/vendor-types-guard.mjs && tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "vendor:types": "node scripts/vendor-types.mjs",
     "vendor:check": "node scripts/vendor-check.mjs",
+    "vendor:manifest": "node scripts/vendor-manifest.mjs",
+    "vendor:update": "node scripts/vendor-update.mjs",
     "install:vault": "npm run build && node scripts/install.mjs",
     "test": "node --test test/*.test.mjs"
   },

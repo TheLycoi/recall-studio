@@ -1266,11 +1266,18 @@ source link; cards captured any other way are unchanged
 
 ```
 npm install
+npm run vendor:types   # once, and again after vendor/llm-wiki changes: declarations for the vendored obsidian-llm-wiki
 npm run dev            # watch build → main.js
-npm run build          # type-check + minified bundle
+npm run build          # type-check + minified bundle (stops and says so if vendor:types is needed)
 npm test               # unit tests for the pure helpers
 npm run install:vault  # build and copy into the vault's .obsidian/plugins/wikilm
+npm run vendor:check   # upstream's own install, typecheck, build and test suite, in vendor/llm-wiki
+npm run vendor:update -- <tag> --dry-run   # show what updating the vendored copy to an upstream release would run
 ```
+
+`vendor:types` and `vendor:check` install upstream's pinned dependencies into
+`vendor/llm-wiki/node_modules`, which needs network access to the registry in
+upstream's lockfile.
 
 State: settings in `data.json` inside the plugin folder; the inbox in
 `inbox.json` inside the schema folder (`wiki/schema`), moved there from the
