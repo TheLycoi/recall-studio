@@ -4,7 +4,7 @@ import { accessSync, constants, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { homedir, tmpdir } from "os";
 import { delimiter, join } from "path";
 import { z } from "zod";
-import type { CompletionRequest, LlmBackend } from "./backend";
+import type { CompletionRequest, LlmBackend, TextRequest } from "./backend";
 import type { WikiLmSettings } from "./settings";
 
 /**
@@ -242,7 +242,7 @@ const live = new Set<Live>();
 const TIMEOUT_MS = 5 * 60 * 1000;
 const KILL_GRACE_MS = 5000;
 
-function runCodex(bin: string, args: string[], stdin: string): Promise<RunResult> {
+function runCodex(bin: string, args: string[], stdin: string, signal?: AbortSignal): Promise<RunResult> {
   return new Promise((resolve) => {
     const child = spawn(bin, args, { env: { ...process.env }, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
@@ -271,6 +271,14 @@ function runCodex(bin: string, args: string[], stdin: string): Promise<RunResult
     };
     live.add(entry);
 
+    // One call's own cancel (upstream's engine passes one) kills this child
+    // the way plugin unload kills them all.
+    const onAbort = () => {
+      entry.aborted = true;
+      entry.kill();
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+
     const timer = setTimeout(() => {
       timedOut = true;
       entry.kill();
@@ -280,6 +288,7 @@ function runCodex(bin: string, args: string[], stdin: string): Promise<RunResult
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
       live.delete(entry);
       resolveDone();
       resolve({ stdout, stderr, code: null, signal: null, timedOut, aborted: entry.aborted, spawnError: null, ...partial });
@@ -334,6 +343,9 @@ function classify(r: RunResult, eventError: string | null): CodexError {
 const PREAMBLE =
   "Reply with one message containing only the JSON object described by the output schema. Do not run commands, read files, or search the web; everything you need is in this message.";
 
+/** The plain-text run's preamble: the same ban, and no answer format of its own, since the prompt brings one. */
+const TEXT_PREAMBLE = "Do not run commands, read files, or search the web; everything you need is in this message.";
+
 export class CodexBackend implements LlmBackend {
   readonly name = "codex" as const;
 
@@ -364,6 +376,39 @@ export class CodexBackend implements LlmBackend {
   }
 
   async complete<T>(req: CompletionRequest<T>): Promise<T> {
+    const text = await this.exec(req, req.label, req.schema);
+    let value: unknown;
+    try {
+      value = JSON.parse(extractJson(text));
+    } catch {
+      throw new CodexError("failed", `Codex returned ${req.label} that were not valid JSON.`);
+    }
+    const parsed = req.schema.safeParse(value);
+    if (!parsed.success) {
+      throw new CodexError("failed", `Codex returned ${req.label} in the wrong shape: ${parsed.error.issues[0]?.message ?? "schema mismatch"}.`);
+    }
+    return parsed.data;
+  }
+
+  /**
+   * The same run as `complete` without `--output-schema`: the final agent
+   * message, as the model wrote it. The stop is always unknown: the `--json`
+   * events this file reads carry the agent message, errors and the turn's
+   * token usage, and none of them says why the model stopped.
+   */
+  async completeText(req: TextRequest): Promise<string> {
+    const text = await this.exec(req, "answer");
+    req.onStop?.("unknown");
+    return text;
+  }
+
+  /**
+   * One `codex exec` run in a throwaway directory, returning the final agent
+   * message. With a schema the message is JSON in that shape; without one it
+   * is plain text.
+   */
+  private async exec(req: TextRequest, label: string, schema?: z.ZodType): Promise<string> {
+    if (req.signal?.aborted) throw new CodexError("aborted", "Cancelled.");
     const s = this.getSettings();
     const bin = resolveCodexBinary(s.codexPath);
     const model = req.model ?? s.codexModel;
@@ -371,7 +416,7 @@ export class CodexBackend implements LlmBackend {
     const dir = mkdtempSync(join(tmpdir(), "wikilm-codex-"));
     try {
       const schemaPath = join(dir, "schema.json");
-      writeFileSync(schemaPath, JSON.stringify(toStrictSchema(req.schema)));
+      if (schema) writeFileSync(schemaPath, JSON.stringify(toStrictSchema(schema)));
       const args = [
         "exec",
         "--json",
@@ -388,29 +433,19 @@ export class CodexBackend implements LlmBackend {
         model,
         "-c",
         `model_reasoning_effort="${effort}"`,
-        "--output-schema",
-        schemaPath,
+        ...(schema ? ["--output-schema", schemaPath] : []),
         "-",
       ];
-      const prompt = [PREAMBLE, req.system, req.user].join("\n\n");
-      const r = await runCodex(bin, args, prompt);
+      const prompt = (schema ? [PREAMBLE, req.system, req.user] : [TEXT_PREAMBLE, req.system, req.user].filter(Boolean)).join("\n\n");
+      const r = await runCodex(bin, args, prompt, req.signal);
+      if (r.aborted && req.signal?.aborted) throw new CodexError("aborted", "Cancelled.");
       const { text, error } = parseCodexEvents(r.stdout);
       const failed = r.spawnError || r.timedOut || r.aborted || r.code !== 0;
       if (failed) throw classify(r, error);
       if (!text) {
-        throw error ? classify(r, error) : new CodexError("failed", `Codex produced no final message for the ${req.label}.`);
+        throw error ? classify(r, error) : new CodexError("failed", `Codex produced no final message for the ${label}.`);
       }
-      let value: unknown;
-      try {
-        value = JSON.parse(extractJson(text));
-      } catch {
-        throw new CodexError("failed", `Codex returned ${req.label} that were not valid JSON.`);
-      }
-      const parsed = req.schema.safeParse(value);
-      if (!parsed.success) {
-        throw new CodexError("failed", `Codex returned ${req.label} in the wrong shape: ${parsed.error.issues[0]?.message ?? "schema mismatch"}.`);
-      }
-      return parsed.data;
+      return text;
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -14,6 +14,7 @@ import type { Card, Highlight } from "./model";
 import { DEFAULT_SETTINGS, WikiLmSettingTab, type WikiLmSettings } from "./settings";
 import { SchemaFile } from "./schemaFile";
 import { InboxStore } from "./store";
+import { UpstreamHost } from "./upstream/host";
 import { buildAnkiTextImport } from "./util";
 
 export default class WikiLmPlugin extends Plugin {
@@ -26,6 +27,7 @@ export default class WikiLmPlugin extends Plugin {
   highlighter!: Highlighter;
   cancel = new CancelToken();
   private statusBar: HTMLElement | null = null;
+  private upstream: UpstreamHost | null = null;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -110,11 +112,18 @@ export default class WikiLmPlugin extends Plugin {
 
   async onunload(): Promise<void> {
     this.generator.stop();
+    this.upstream?.dispose();
+    this.upstream = null;
     await this.llm.abort();
     await this.store.flush();
   }
 
   // ---------------------------------------------------------------- helpers
+
+  /** Upstream's wiki engine host (src/upstream/host.ts), built the first time something asks for it. */
+  upstreamHost(): UpstreamHost {
+    return (this.upstream ??= new UpstreamHost(this));
+  }
 
   async loadSettings(): Promise<void> {
     const saved = (await this.loadData()) as Partial<WikiLmSettings> | null;

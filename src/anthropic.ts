@@ -1,9 +1,31 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { requestUrl } from "obsidian";
-import type { CompletionRequest, LlmBackend } from "./backend";
+import type { StopReason } from "@anthropic-ai/sdk/resources/messages/messages";
+import type { CompletionRequest, LlmBackend, TextRequest, TextStop } from "./backend";
 import { resolveApiKey, type KeySource } from "./keys";
 import type { WikiLmSettings } from "./settings";
+
+/**
+ * The Messages API's stop reason as a TextStop. "max_tokens" and a full
+ * context window cut the answer off. "pause_turn" and "tool_use" end a turn
+ * that is not finished, but no tools are sent, so neither should occur.
+ * "refusal" is thrown before this is asked. A missing or unfamiliar value
+ * is unknown.
+ */
+const STOPS: Record<StopReason, TextStop> = {
+  end_turn: "end",
+  stop_sequence: "end",
+  max_tokens: "length",
+  model_context_window_exceeded: "length",
+  pause_turn: "other",
+  tool_use: "other",
+  refusal: "other",
+};
+
+export function anthropicStop(reason: StopReason | null | undefined): TextStop {
+  return reason && Object.prototype.hasOwnProperty.call(STOPS, reason) ? STOPS[reason] : "unknown";
+}
 
 /**
  * Obsidian runs plugins inside an Electron renderer where plain fetch() is
@@ -93,6 +115,29 @@ export class AnthropicBackend implements LlmBackend {
     const parsed = response.parsed_output;
     if (!parsed) throw new Error(`Model returned no parseable ${req.label}.`);
     return parsed as T;
+  }
+
+  /**
+   * The same request without an output format; the answer is the response's
+   * text blocks joined. An empty system prompt is left off, because the API
+   * rejects an empty text block.
+   */
+  async completeText(req: TextRequest): Promise<string> {
+    const s = this.getSettings();
+    const response = await this.client().messages.create(
+      {
+        model: req.model ?? s.model,
+        max_tokens: req.maxTokens,
+        ...(req.system ? { system: [{ type: "text" as const, text: req.system, cache_control: { type: "ephemeral" as const } }] } : {}),
+        output_config: { effort: req.effort ?? s.effort },
+        messages: [{ role: "user", content: req.user }],
+      },
+      { signal: req.signal },
+    );
+    if (response.stop_reason === "refusal") throw new Error("The model declined this request.");
+    const text = response.content.map((b) => (b.type === "text" ? b.text : "")).join("");
+    req.onStop?.(anthropicStop(response.stop_reason));
+    return text;
   }
 
   async abort(): Promise<void> {

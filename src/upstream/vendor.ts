@@ -8,6 +8,8 @@
 // compiler, because upstream's source is not written for WikiLM's strict
 // settings or its TypeScript version. Run `npm run vendor:types` once after
 // `npm ci` and again whenever vendor/llm-wiki changes.
+//
+// Vendored code gets zod 3 (scripts/esbuild-shared.mjs); any zod schema WikiLM hands to upstream must be built from `zod/v3`, not WikiLM's own zod 4.
 import upstreamManifest from "../../vendor/llm-wiki/manifest.json";
 
 export { WikiEngine } from "@llm-wiki/wiki/wiki-engine";
@@ -19,6 +21,7 @@ export { loadRelevantPagesForQuery } from "@llm-wiki/wiki/query-engine/pipeline/
 export type {
   LLMWikiSettings,
   LLMClient as UpstreamLLMClient,
+  LLMFinishReason as UpstreamFinishReason,
   IngestReport,
   IngestOptions,
 } from "@llm-wiki/types";

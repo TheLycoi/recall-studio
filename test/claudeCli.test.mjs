@@ -2,7 +2,7 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
-import { mkdtempSync } from "node:fs";
+import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -96,6 +96,15 @@ test("buildClaudeArgs is the exact argument array and never contains --bare", ()
   assert.ok(!args.includes("--bare"));
 });
 
+// A plain-text call (upstream's engine, src/upstream/llmAdapter.ts) is the
+// structured call minus the schema: same flags, same order, nothing new.
+test("buildClaudeArgs without a schema drops --json-schema and its value, and nothing else", () => {
+  const withSchema = c.buildClaudeArgs({ model: "sonnet", effort: "low", schemaJson: '{"type":"object"}', system: "sys", maxTurns: 2 });
+  const plain = c.buildClaudeArgs({ model: "sonnet", effort: "low", system: "sys", maxTurns: 2 });
+  assert.deepEqual(plain, withSchema.filter((a) => a !== "--json-schema" && a !== '{"type":"object"}'));
+  assert.ok(!plain.includes("--bare"));
+});
+
 test("classifyClaude: the failure envelope is an auth error", () => {
   const parsed = c.parseClaudeResult(FAILURE_ENVELOPE);
   const e = c.classifyClaude({ parsed, code: 1 });
@@ -169,4 +178,55 @@ test("resolveClaudeBinary reports not-found for a configured path that does not 
     () => c.resolveClaudeBinary("/definitely/not/here/claude"),
     (e) => e.name === "ClaudeCliError" && e.kind === "not-found" && e.message.includes("/definitely/not/here/claude"),
   );
+});
+
+// Captured from the installed CLI (2.1.283) on 2026-09-29, text calls on
+// haiku with the argv buildClaudeArgs gives (no schema), trimmed to the
+// fields WikiLM reads. The second ran with CLAUDE_CODE_MAX_OUTPUT_TOKENS=120:
+// the CLI turns its own output cap into an error, and its stop_reason then
+// says "stop_sequence", so stop_reason alone is not trusted.
+const TEXT_ENVELOPE =
+  '{"type":"result","subtype":"success","is_error":false,"result":"pong","stop_reason":"end_turn","terminal_reason":"completed","api_error_status":null,"num_turns":1,"session_id":"s-x","uuid":"u-x"}';
+const CAPPED_ENVELOPE =
+  '{"type":"result","subtype":"success","is_error":true,"result":"API Error: Claude\'s response exceeded the 120 output token maximum. To configure this behavior, set the CLAUDE_CODE_MAX_OUTPUT_TOKENS environment variable.","stop_reason":"stop_sequence","terminal_reason":"api_error","api_error_status":null,"num_turns":4,"session_id":"s-x","uuid":"u-x"}';
+
+test("claudeTextStop: a completed end_turn is an end; max_tokens a length; anything else unknown", () => {
+  const env = (o) => JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "x", ...o });
+  assert.equal(c.claudeTextStop(TEXT_ENVELOPE), "end");
+  assert.equal(c.claudeTextStop(env({ stop_reason: "max_tokens", terminal_reason: "completed" })), "length");
+  assert.equal(c.claudeTextStop(env({ stop_reason: "model_context_window_exceeded" })), "length");
+  // Seen on the capped call above, so it is not taken for a clean stop.
+  assert.equal(c.claudeTextStop(env({ stop_reason: "stop_sequence", terminal_reason: "completed" })), "unknown");
+  assert.equal(c.claudeTextStop(env({ stop_reason: "end_turn", terminal_reason: "max_turns" })), "unknown");
+  assert.equal(c.claudeTextStop(env({ stop_reason: "tool_use", terminal_reason: "completed" })), "unknown");
+  assert.equal(c.claudeTextStop(env({})), "unknown");
+  assert.equal(c.claudeTextStop(""), "unknown");
+});
+
+/** An executable that stands in for `claude`: reads its stdin and prints `stdout`, exiting with `code`. */
+function fakeClaude(stdout, code = 0) {
+  const dir = mkdtempSync(path.join(tmpdir(), "wikilm-fake-claude-"));
+  const bin = path.join(dir, "claude");
+  writeFileSync(bin, `#!/bin/sh\ncat > /dev/null\ncat <<'ENVELOPE'\n${stdout}\nENVELOPE\nexit ${code}\n`);
+  chmodSync(bin, 0o755);
+  return bin;
+}
+
+test("completeText reports the envelope's stop and returns its result", async () => {
+  const bin = fakeClaude(TEXT_ENVELOPE);
+  const b = new c.ClaudeCliBackend(() => ({ effort: "low", claudeCliPath: bin, claudeCliModel: "haiku" }));
+  const stops = [];
+  assert.equal(await b.completeText({ system: "", user: "ping", maxTokens: 10, onStop: (s) => stops.push(s) }), "pong");
+  assert.deepEqual(stops, ["end"]);
+});
+
+test("completeText throws on the CLI's own output cap and reports no stop", async () => {
+  const bin = fakeClaude(CAPPED_ENVELOPE, 1);
+  const b = new c.ClaudeCliBackend(() => ({ effort: "low", claudeCliPath: bin, claudeCliModel: "haiku" }));
+  const stops = [];
+  await assert.rejects(
+    b.completeText({ system: "", user: "ping", maxTokens: 10, onStop: (s) => stops.push(s) }),
+    (e) => e.name === "ClaudeCliError" && /exceeded the 120 output token maximum/.test(e.message),
+  );
+  assert.deepEqual(stops, []);
 });
