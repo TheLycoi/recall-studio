@@ -14,17 +14,28 @@
  * (src/upstream/host.ts, `forcePdfSupport`); refusing here says why instead
  * of leaving the reader with upstream's "provider does not support PDF".
  *
+ * Nor does a note inside the wiki (sourceRefusal). Upstream reads any note
+ * under <wiki>/sources/ as a conversation, and every page it merges into
+ * loses its whole `## Mentions in Source` block to a one-line citation; a wiki
+ * page ingested as its own source is always sent to a body rewrite. Both are
+ * refused with the reason, before the engine is built.
+ *
  * The folder run follows upstream's own (runBatchIngest in
- * vendor/llm-wiki/src/main-commands/ingest-commands.ts): the same source
- * filter, the same already-ingested check, one batch context shared by every
- * file so a duplicate within the run is caught, a failed file logged and
- * passed over, and a stop after a cancelled file. Upstream's IngestQueue is
- * left out: it feeds only its multi-file picker, which WikiLM does not have.
+ * vendor/llm-wiki/src/main-commands/ingest-commands.ts): the same
+ * already-ingested check, one batch context shared by every file so a
+ * duplicate within the run is caught, a failed file logged and passed over,
+ * and a stop after a cancelled file. Where upstream's filter passes over the
+ * wiki folder in silence, WikiLM refuses each file there, and each file in
+ * one of its own folders, and names it in the report. Upstream's IngestQueue
+ * is left out: it feeds only its multi-file picker, which WikiLM does not have.
  */
 import { Notice, TFile, type TFolder } from "obsidian";
 import type WikiLmPlugin from "../main";
+import type { WikiLmSettings } from "../settings";
+import { upstreamWikiFolder } from "./host";
 import {
-  isIngestableSource,
+  isExcludedFromSourcePicker,
+  isInFolderScope,
   pageBelongsToNote,
   slugify,
   UPSTREAM_SOURCE_EXTENSIONS,
@@ -37,14 +48,81 @@ import {
 export const PDF_REFUSAL =
   "PDFs are read by WikiLM's highlight digest, not by ingest. Open the PDF and run “Digest: PDF highlights into concept and entity notes…”";
 
+type UpstreamRejection = NonNullable<IngestReport["rejectedFiles"]>[number];
+
+/**
+ * A file turned away, by upstream's requirements gate or by WikiLM before the
+ * engine saw it: "wiki-folder" for a note inside the wiki (or the config
+ * folder), "wikilm-folder" for one in a folder WikiLM writes itself.
+ */
+export interface Rejection {
+  path: string;
+  reason: UpstreamRejection["reason"] | "wiki-folder" | "wikilm-folder";
+  detail?: string;
+}
+
 /**
  * Upstream's report, plus every other file the engine wrote in the run: its
  * index and log, a page whose links it re-pointed, the schema note it creates
  * the first time. Upstream's report lists only the pages it created or
  * updated, and the reader is told everything that was written.
  */
-export interface WikiLmIngestReport extends IngestReport {
+export interface WikiLmIngestReport extends Omit<IngestReport, "rejectedFiles"> {
+  rejectedFiles?: Rejection[];
   alsoWritten?: string[];
+}
+
+type SourceFolders = Pick<WikiLmSettings, "wikiConceptsFolder" | "wikiEntitiesFolder" | "schemaFolder" | "exportFolder" | "topicFolder">;
+
+/**
+ * WikiLM's own folders, named as its settings tab names them. The first two
+ * are the wiki's pages; the rest are notes WikiLM writes itself.
+ */
+const WIKILM_FOLDERS: ReadonlyArray<[keyof SourceFolders, string]> = [
+  ["wikiConceptsFolder", "wiki concepts folder"],
+  ["wikiEntitiesFolder", "wiki entities folder"],
+  ["schemaFolder", "schema folder"],
+  ["exportFolder", "text export folder"],
+  ["topicFolder", "topic notes folder"],
+];
+
+/**
+ * Why a note at `path` is not a source, or null when it is one. Pure.
+ *
+ * Refused for a single note and a folder run alike: anything upstream's own
+ * pickers never offer (isExcludedFromSourcePicker: the wiki folder and the
+ * config folder), and WikiLM's concepts and entities folders, which are the
+ * wiki too. A folder run also passes over WikiLM's schema, export and topic
+ * notes folders; opening one of those notes and ingesting it is the reader's
+ * own choice.
+ */
+export function sourceRefusal(
+  path: string,
+  folders: SourceFolders,
+  wikiFolder: string,
+  configDir: string,
+  scope: "note" | "folder",
+): Pick<Rejection, "reason" | "detail"> | null {
+  if (isExcludedFromSourcePicker(path, wikiFolder, configDir)) {
+    if (within(path, configDir)) return { reason: "wiki-folder", detail: `it is in Obsidian's config folder (${configDir}/), which holds settings, not notes` };
+    return {
+      reason: "wiki-folder",
+      detail:
+        `it is inside the wiki folder (${wikiFolder}/), and the engine reads a note there as one of the wiki's own pages, not as a source, ` +
+        `which can strip the quotes from the pages it merges into. Keep sources outside the wiki folder: move the note out of ${wikiFolder}/ and ingest it from there.`,
+    };
+  }
+  for (const [key, name] of scope === "note" ? WIKILM_FOLDERS.slice(0, 2) : WIKILM_FOLDERS) {
+    const f = folders[key].trim().replace(/\/+$/, "");
+    if (f && within(path, f)) {
+      return { reason: "wikilm-folder", detail: `it is in WikiLM's ${name} (${f}/), which WikiLM writes itself. Ingest reads your sources, not WikiLM's own notes` };
+    }
+  }
+  return null;
+}
+
+function within(path: string, folder: string): boolean {
+  return path === folder || path.startsWith(`${folder}/`);
 }
 
 /**
@@ -63,14 +141,17 @@ export interface FolderIngestReport extends WikiLmIngestReport {
  * Never throws: a refusal, a failure and a cancel all come back as a report,
  * so the command, the chat and a test read the outcome the same way.
  */
-export async function ingestWithUpstream(plugin: WikiLmPlugin, file: TFile): Promise<IngestReport> {
+export async function ingestWithUpstream(plugin: WikiLmPlugin, file: TFile): Promise<WikiLmIngestReport> {
   const r = await ingestOne(plugin, file);
   showReport(r);
   return r;
 }
 
-async function ingestOne(plugin: WikiLmPlugin, file: TFile): Promise<IngestReport> {
-  if (isPdf(file)) return refused(file.path, PDF_REFUSAL);
+async function ingestOne(plugin: WikiLmPlugin, file: TFile): Promise<WikiLmIngestReport> {
+  if (isPdf(file)) return refused(file.path, "unsupported-pdf", PDF_REFUSAL);
+  const wikiFolder = upstreamWikiFolder(plugin.settings.wikiConceptsFolder);
+  const why = sourceRefusal(file.path, plugin.settings, wikiFolder, plugin.app.vault.configDir, "note");
+  if (why) return refused(file.path, why.reason, why.detail);
   const running = busy(plugin);
   if (running) return failed(file.path, running);
 
@@ -85,28 +166,31 @@ async function ingestOne(plugin: WikiLmPlugin, file: TFile): Promise<IngestRepor
 /**
  * Ingest every source note under a folder on upstream's engine, then show one
  * report for the run. Returns a report per file it decided about: each note
- * the engine ran, each PDF left to the digest. Notes whose sources/ page is
- * already there are counted, not reported, as upstream's batch does.
+ * the engine ran, each PDF left to the digest, each note refused for where it
+ * is. Notes whose sources/ page is already there are counted, not reported,
+ * as upstream's batch does.
  */
-export async function ingestFolderWithUpstream(plugin: WikiLmPlugin, folder: TFolder): Promise<IngestReport[]> {
+export async function ingestFolderWithUpstream(plugin: WikiLmPlugin, folder: TFolder): Promise<WikiLmIngestReport[]> {
   const engine = plugin.upstreamHost().engine();
   const { vault } = plugin.app;
   const readable: readonly string[] = UPSTREAM_SOURCE_EXTENSIONS;
   const files = vault
     .getFiles()
     .filter((f) => readable.includes(f.extension.toLowerCase()))
-    .filter((f) => isIngestableSource(f.path, folder.path, folder.isRoot(), engine.settings.wikiFolder, vault.configDir))
+    .filter((f) => isInFolderScope(f.path, folder.path, folder.isRoot()))
     .sort((a, b) => a.path.localeCompare(b.path));
   if (files.length === 0) {
     new Notice(`WikiLM: no notes to ingest under ${folder.path}.`);
     return [];
   }
 
-  const reports: IngestReport[] = [];
+  const reports: WikiLmIngestReport[] = [];
   const todo: TFile[] = [];
   let skipped = 0;
   for (const f of files) {
-    if (isPdf(f)) reports.push(refused(f.path, PDF_REFUSAL));
+    const why = sourceRefusal(f.path, plugin.settings, engine.settings.wikiFolder, vault.configDir, "folder");
+    if (why) reports.push(refused(f.path, why.reason, why.detail));
+    else if (isPdf(f)) reports.push(refused(f.path, "unsupported-pdf", PDF_REFUSAL));
     else if (await alreadyIngested(plugin, engine, f)) skipped++;
     else todo.push(f);
   }
@@ -226,7 +310,7 @@ export function renderIngestReport(r: WikiLmIngestReport | FolderIngestReport): 
   if (folder && folder.failedFiles.length > 0) {
     lines.push(`Failed ${plural(folder.failedFiles.length, "file")}:`, ...folder.failedFiles.map((f) => `- ${f.path}: ${f.error}`));
   }
-  if (rejected.length > 0 && !lone) lines.push("Not ingested:", ...rejected.map((x) => `- ${x.path}: ${rejectionText(x)}`));
+  if (rejected.length > 0 && !lone) lines.push("Not ingested:", ...rejectionLines(rejected));
   if (r.contradictionsFound > 0) lines.push(`${plural(r.contradictionsFound, "contradiction")} found.`);
   return lines.join("\n");
 }
@@ -345,7 +429,7 @@ function busy(plugin: WikiLmPlugin): string | null {
   return `another run is still going${running}. Start this once it finishes, or stop it from the status bar`;
 }
 
-function showReport(r: IngestReport): void {
+function showReport(r: WikiLmIngestReport): void {
   // Stays until clicked: the report is a list of paths to read, not a toast.
   new Notice(renderIngestReport(r), 0);
 }
@@ -371,15 +455,29 @@ function emptyReport(path: string): IngestReport {
 }
 
 /** A source turned away before the engine saw it, in the shape upstream's own gate reports a skip. */
-function refused(path: string, detail: string): IngestReport {
-  return { ...emptyReport(path), skipped: true, rejectedFiles: [{ path, reason: "unsupported-pdf", detail }] };
+function refused(path: string, reason: Rejection["reason"], detail?: string): WikiLmIngestReport {
+  return { ...emptyReport(path), skipped: true, rejectedFiles: [{ path, reason, detail }] };
 }
 
 function failed(path: string, message: string): IngestReport {
   return { ...emptyReport(path), success: false, errorMessage: message };
 }
 
-type Rejection = NonNullable<IngestReport["rejectedFiles"]>[number];
+/**
+ * The files not ingested, one line each; files turned away for the same
+ * reason share one line and are listed beneath it, so a folder run over the
+ * vault root names every wiki page without repeating why a hundred times.
+ */
+function rejectionLines(rejected: Rejection[]): string[] {
+  const byReason = new Map<string, string[]>();
+  for (const x of rejected) {
+    const why = rejectionText(x);
+    byReason.set(why, [...(byReason.get(why) ?? []), x.path]);
+  }
+  return [...byReason].flatMap(([why, paths]) =>
+    paths.length === 1 ? [`- ${paths[0]}: ${why}`] : [`- ${plural(paths.length, "file")}: ${why}`, ...paths.map((p) => `  - ${p}`)],
+  );
+}
 
 /** Upstream's rejection reasons in words; its own detail where it wrote one for a reader. */
 function rejectionText(x: Rejection): string {

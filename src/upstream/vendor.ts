@@ -17,9 +17,10 @@ export { SchemaManager } from "@llm-wiki/schema/schema-manager";
 export { DEFAULT_SETTINGS as UPSTREAM_DEFAULT_SETTINGS } from "@llm-wiki/types";
 // What upstream's folder ingest (main-commands/ingest-commands.ts) decides
 // before it calls the engine: which files count as sources, and which already
-// have their sources/ page.
+// have their sources/ page. A file inside the wiki folder or the config folder
+// is never offered as a source by upstream's pickers (isExcludedFromSourcePicker).
 export { COMPATIBLE_SOURCE_EXTENSIONS as UPSTREAM_SOURCE_EXTENSIONS } from "@llm-wiki/constants";
-export { isIngestableSource } from "@llm-wiki/core/folder-scope";
+export { isExcludedFromSourcePicker, isInFolderScope } from "@llm-wiki/core/folder-scope";
 export { pageBelongsToNote } from "@llm-wiki/core/ingest-state";
 export { slugify } from "@llm-wiki/core/slug";
 

@@ -172,6 +172,14 @@ function fakePlugin(engine, { files = [], pages = {} } = {}) {
   const exists = (p) => p in pages || engine.written.has(p);
   const plugin = {
     host,
+    // WikiLM's folders as the reader's vaults set them.
+    settings: {
+      wikiConceptsFolder: "wiki/concepts",
+      wikiEntitiesFolder: "wiki/entities",
+      schemaFolder: "wiki/schema",
+      exportFolder: "wiki/schema/exports",
+      topicFolder: "classes",
+    },
     cancel: new m.CancelToken(),
     app: {
       vault: {
@@ -267,6 +275,55 @@ test("a PDF is refused before the engine is built, with a message naming the hig
   assert.match(m.PDF_REFUSAL, /highlight digest/);
   assert.equal(notices().length, 1);
   assert.match(notices()[0], /Lecture\.pdf not ingested: .*highlight digest/);
+});
+
+// Upstream reads any note under <wiki>/sources/ as a conversation and
+// replaces the quotes on every page it merges into; a wiki page ingested as
+// its own source is always rewritten. So nothing inside the wiki is a source.
+test("a note inside the wiki folder is refused before the engine is built, with the reason and what to do", async () => {
+  for (const p of ["wiki/sources/wispr/Tuesday.md", "wiki/concepts/Receptors.md", "wiki/entities/Albumin.md", "wiki/index.md"]) {
+    globalThis.__notices = [];
+    const engine = fakeEngine(async () => assert.fail("the engine must not run on a wiki page"));
+    const plugin = fakePlugin(engine);
+    const r = await m.ingestWithUpstream(plugin, file(p));
+    assert.equal(plugin.host.built, 0, p);
+    assert.equal(engine.calls.length, 0, p);
+    assert.equal(plugin.cancel.active, false);
+    assert.equal(r.skipped, true);
+    assert.equal(r.rejectedFiles.length, 1);
+    assert.equal(notices().length, 1);
+    assert.equal(
+      notices()[0],
+      `WikiLM: ${p} not ingested: it is inside the wiki folder (wiki/), and the engine reads a note there as one of the wiki's own pages, not as a source, which can strip the quotes from the pages it merges into. Keep sources outside the wiki folder: move the note out of wiki/ and ingest it from there.\nNothing was written.`,
+    );
+  }
+  // A folder that merely starts with the wiki folder's name is not inside it.
+  const engine = fakeEngine(async (e, f) => e.done(report({ sourceFile: f.path })));
+  await m.ingestWithUpstream(fakePlugin(engine), file("wiki-drafts/Note.md"));
+  assert.equal(engine.calls.length, 1);
+});
+
+test("a folder run refuses every note inside the wiki folder or one of WikiLM's own folders, and counts and names each", async () => {
+  const engine = fakeEngine(async (e, f) => e.done(report({ sourceFile: f.path, createdPages: ["wiki/concepts/a.md"] })));
+  const files = [
+    "notes/Lecture.md",
+    "wiki/sources/wispr/Tuesday.md",
+    "wiki/concepts/Receptors.md",
+    "classes/HBIO250.md",
+    "exports/Deck.md",
+  ].map(file);
+  const plugin = fakePlugin(engine, { files });
+  plugin.settings.exportFolder = "exports";
+  const reports = await m.ingestFolderWithUpstream(plugin, folder("/"));
+  assert.deepEqual(engine.calls.map((c) => c.path), ["notes/Lecture.md"]);
+  const refused = reports.filter((r) => r.skipped).map((r) => r.sourceFile);
+  assert.deepEqual(refused.sort(), ["classes/HBIO250.md", "exports/Deck.md", "wiki/concepts/Receptors.md", "wiki/sources/wispr/Tuesday.md"]);
+  const shown = notices().at(-1);
+  assert.match(shown, /1 of 5 files read\./);
+  assert.match(shown, /Not ingested:\n/);
+  assert.match(shown, /- 2 files: it is inside the wiki folder \(wiki\/\).*\n {2}- wiki\/concepts\/Receptors\.md\n {2}- wiki\/sources\/wispr\/Tuesday\.md/);
+  assert.match(shown, /- classes\/HBIO250\.md: it is in WikiLM's topic notes folder \(classes\/\)/);
+  assert.match(shown, /- exports\/Deck\.md: it is in WikiLM's text export folder \(exports\/\)/);
 });
 
 test("a run sets the engine's callbacks, returns its report, shows it, and leaves nothing behind", async () => {
