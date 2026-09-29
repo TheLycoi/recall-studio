@@ -6,7 +6,9 @@
   "private": true,
   "scripts": {
     "dev": "node esbuild.config.mjs",
-    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "build": "node scripts/vendor-types-guard.mjs && tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "vendor:types": "node scripts/vendor-types.mjs",
+    "vendor:check": "node scripts/vendor-check.mjs",
     "install:vault": "npm run build && node scripts/install.mjs",
     "test": "node --test test/*.test.mjs"
   },
@@ -20,7 +22,12 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "3.0.98",
+    "@ai-sdk/openai": "3.0.86",
+    "@ai-sdk/openai-compatible": "2.0.62",
     "@anthropic-ai/sdk": "^0.124.0",
+    "ai": "6.0.230",
+    "fflate": "0.8.3",
     "zod": "^4.5.4"
   }
 }
