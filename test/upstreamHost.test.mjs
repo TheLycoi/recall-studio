@@ -83,7 +83,7 @@ function wikilmSettings(over = {}) {
   };
 }
 
-/** A vault that answers reads with nothing and records every call that would change it. */
+/** A vault and file manager that answer reads with nothing and record every call that would change a file. */
 function fakeVault() {
   const writes = [];
   const record = (name) => async (...args) => {
@@ -91,6 +91,11 @@ function fakeVault() {
   };
   return {
     writes,
+    fileManager: {
+      renameFile: record("fileManager.renameFile"),
+      trashFile: record("fileManager.trashFile"),
+      processFrontMatter: record("fileManager.processFrontMatter"),
+    },
     vault: {
       configDir: ".obsidian",
       getName: () => "test",
@@ -120,7 +125,7 @@ function fakeVault() {
 }
 
 function fakePlugin(settings = wikilmSettings()) {
-  const { vault, writes } = fakeVault();
+  const { vault, fileManager, writes } = fakeVault();
   const backend = {
     name: "claudecli",
     async completeText() {
@@ -130,7 +135,8 @@ function fakePlugin(settings = wikilmSettings()) {
   return {
     writes,
     plugin: {
-      app: { vault, metadataCache: { getFileCache: () => null }, workspace: {} },
+      app: { vault, fileManager, metadataCache: { getFileCache: () => null }, workspace: {} },
+      manifest: { id: "wikilm", dir: ".obsidian/plugins/wikilm" },
       settings,
       llm: { backendFor: () => backend },
     },
@@ -242,6 +248,16 @@ test("the host builds nothing until asked, and a second engine() call returns th
   assert.equal(second, first);
   assert.equal(first.settings.wikiFolder, "wiki");
   assert.deepEqual(writes, [], "building the engine wrote nothing to the vault");
+});
+
+test("the engine and its schema manager are built on the guarded vault, not on the plugin's own", () => {
+  const { plugin } = fakePlugin();
+  const host = new h.UpstreamHost(plugin);
+  const engine = host.engine();
+  assert.notEqual(engine.app, plugin.app);
+  assert.equal(engine.app, host.guard.app);
+  assert.equal(engine.schemaManager.app, host.guard.app);
+  assert.notEqual(engine.app.vault, plugin.app.vault);
 });
 
 test("a settings change reaches the same engine; a moved wiki folder builds a new one", () => {

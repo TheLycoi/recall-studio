@@ -5,9 +5,12 @@
  *
  * The engine writes as it goes: the summary page, then one page per entity and
  * concept, then the index and log. There is no preview. What WikiLM adds is
- * around the run, not inside it: the reader starts it, can stop it from the
- * status bar or "cancel-ingestion", and is shown every page it created or
- * updated and every other file it wrote, by path, when it ends however it ends.
+ * around the run: the reader starts it, can stop it from the status bar or
+ * "cancel-ingestion", and is shown every page it created or updated and every
+ * other file it wrote, by path, when it ends however it ends. Every write goes
+ * through the host's guard (src/upstream/guardedVault.ts), which starts afresh
+ * with each run; the report also names each page the guard kept as it was,
+ * why, and where the proposed text and the earlier texts were saved.
  *
  * PDFs never reach the engine. They are WikiLM's highlight digest's to read,
  * and the host has already switched upstream's PDF conversion off
@@ -32,6 +35,7 @@
 import { Notice, TFile, type TFolder } from "obsidian";
 import type WikiLmPlugin from "../main";
 import type { WikiLmSettings } from "../settings";
+import { describeLoss, type GuardRefusal } from "./guardedVault";
 import { upstreamWikiFolder } from "./host";
 import {
   isExcludedFromSourcePicker,
@@ -70,6 +74,10 @@ export interface Rejection {
 export interface WikiLmIngestReport extends Omit<IngestReport, "rejectedFiles"> {
   rejectedFiles?: Rejection[];
   alsoWritten?: string[];
+  /** Pages the guard kept as they were: a rewrite, a removal or a move it refused. */
+  kept?: GuardRefusal[];
+  /** The folder holding the text each page had before the run changed it. */
+  snapshots?: string;
 }
 
 type SourceFolders = Pick<WikiLmSettings, "wikiConceptsFolder" | "wikiEntitiesFolder" | "schemaFolder" | "exportFolder" | "topicFolder">;
@@ -115,7 +123,7 @@ export function sourceRefusal(
   for (const [key, name] of scope === "note" ? WIKILM_FOLDERS.slice(0, 2) : WIKILM_FOLDERS) {
     const f = folders[key].trim().replace(/\/+$/, "");
     if (f && within(path, f)) {
-      return { reason: "wikilm-folder", detail: `it is in WikiLM's ${name} (${f}/), which WikiLM writes itself. Ingest reads your sources, not WikiLM's own notes` };
+      return { reason: "wikilm-folder", detail: `it is in WikiLM's ${name} (${f}/), which WikiLM writes itself. Ingest reads your sources, not WikiLM's own notes.` };
     }
   }
   return null;
@@ -252,6 +260,9 @@ export function folderIngestReport(
     // The index and log are written by every note; listed once. A file one
     // note wrote in passing and another created is listed as created.
     alsoWritten: [...new Set(reports.flatMap((r) => r.alsoWritten ?? []))].filter((p) => !pages.has(p)),
+    // One run, one guard: a page is kept once however many notes asked.
+    kept: [...new Map(reports.flatMap((r) => r.kept ?? []).map((k) => [`${k.action}\u0000${k.path}`, k])).values()],
+    snapshots: reports.map((r) => r.snapshots).find(Boolean),
     entitiesCreated: sum("entitiesCreated"),
     conceptsCreated: sum("conceptsCreated"),
     failedItems: reports.flatMap((r) => r.failedItems),
@@ -273,8 +284,9 @@ export function folderIngestReport(
  *
  * The first line says how the run ended. Then every page created and every
  * page updated, by path, whatever the ending: a cancelled or failed run keeps
- * the pages it wrote, so they are listed too. Then what upstream could not
- * write and why, and the files it would not read.
+ * the pages it wrote, so they are listed too. Then each page the guard kept
+ * as it was, and where the earlier texts are saved. Then what upstream could
+ * not write and why, and the files it would not read.
  */
 export function renderIngestReport(r: WikiLmIngestReport | FolderIngestReport): string {
   const folder = "filesRead" in r ? r : null;
@@ -303,6 +315,9 @@ export function renderIngestReport(r: WikiLmIngestReport | FolderIngestReport): 
   if (also.length > 0) lines.push("Also written:", ...also.map((p) => `- ${p}`));
   if (written === 0) lines.push("Nothing was written.");
   else if (r.cancelled) lines.push("The pages above were written before the stop and are kept.");
+  const kept = r.kept ?? [];
+  if (kept.length > 0) lines.push("Not updated, to keep what was there:", ...kept.map(keptLine));
+  if (r.snapshots) lines.push(`The text each page had before this run is saved in ${r.snapshots}.`);
 
   if (r.failedItems.length > 0) {
     lines.push(`Failed ${plural(r.failedItems.length, "item")}:`, ...r.failedItems.map((f) => `- ${f.type} “${f.name}”: ${f.reason}`));
@@ -335,6 +350,9 @@ async function withEngineRun<T>(
   body: (relabel: (prefix: string) => void) => Promise<T>,
 ): Promise<T> {
   const owner = plugin.cancel.begin(label);
+  // One snapshot folder per run, and nothing the engine created or the guard
+  // held carries over from the last one.
+  plugin.upstreamHost().guard.begin();
   let prefix = "";
   const relabel = (p: string) => {
     prefix = p;
@@ -375,9 +393,15 @@ async function withEngineRun<T>(
  * log and re-pointed pages that the report leaves out. The schema note is
  * written by upstream's SchemaManager, which calls no callback, so it is
  * checked for before and after.
+ *
+ * A page the guard held (src/upstream/guardedVault.ts) is still in the
+ * engine's report as updated, because the engine's write returned; it is
+ * taken out of the updated and written lists and reported as kept.
  */
 async function runOne(plugin: WikiLmPlugin, engine: WikiEngine, file: TFile, opts: IngestOptions): Promise<WikiLmIngestReport> {
   const { vault } = plugin.app;
+  const guard = plugin.upstreamHost().guard;
+  const refusedBefore = guard.refusals.length;
   // SchemaManager's path for it (SCHEMA_FILENAME, schema/schema-manager.ts), not exported upstream.
   const schemaNote = `${engine.settings.wikiFolder}/schema/config.md`;
   const hadSchema = vault.getAbstractFileByPath(schemaNote) !== null;
@@ -399,10 +423,18 @@ async function runOne(plugin: WikiLmPlugin, engine: WikiEngine, file: TFile, opt
 
   if (!hadSchema && vault.getAbstractFileByPath(schemaNote) !== null) writes.add(schemaNote);
   const listed = new Set([...report.createdPages, ...report.updatedPages]);
+  const written = (p: string) => !guard.isHeld(p);
   // A path no longer in the vault was trashed by the engine: the summary page
   // of a cancelled run, which upstream removes so the note re-ingests cleanly.
-  const alsoWritten = [...writes].filter((p) => !listed.has(p) && vault.getAbstractFileByPath(p) !== null);
-  return { ...report, alsoWritten };
+  const alsoWritten = [...writes].filter((p) => !listed.has(p) && written(p) && vault.getAbstractFileByPath(p) !== null);
+  return {
+    ...report,
+    createdPages: report.createdPages.filter(written),
+    updatedPages: report.updatedPages.filter(written),
+    alsoWritten,
+    kept: guard.refusals.slice(refusedBefore),
+    snapshots: guard.runFolder ?? undefined,
+  };
 }
 
 /**
@@ -463,6 +495,14 @@ function failed(path: string, message: string): IngestReport {
   return { ...emptyReport(path), success: false, errorMessage: message };
 }
 
+/** A page the guard kept, and why, as the reader reads it. */
+function keptLine(k: GuardRefusal): string {
+  if (k.action === "remove") return `- ${k.path}: the engine asked to remove it; it was left in place.`;
+  if (k.action === "rename") return `- ${k.path}: the engine asked to move it to ${k.to}; it was left where it is.`;
+  if (k.detail) return `- ${k.path}: ${k.detail}; it was left as it was.`;
+  return `- ${k.path}: the rewrite would have dropped ${describeLoss(k.lost)}. The proposed text is saved at ${k.proposal}.`;
+}
+
 /**
  * The files not ingested, one line each; files turned away for the same
  * reason share one line and are listed beneath it, so a folder run over the
@@ -475,7 +515,7 @@ function rejectionLines(rejected: Rejection[]): string[] {
     byReason.set(why, [...(byReason.get(why) ?? []), x.path]);
   }
   return [...byReason].flatMap(([why, paths]) =>
-    paths.length === 1 ? [`- ${paths[0]}: ${why}`] : [`- ${plural(paths.length, "file")}: ${why}`, ...paths.map((p) => `  - ${p}`)],
+    paths.length === 1 ? [`- ${paths[0]}: ${closed(why)}`] : [`- ${plural(paths.length, "file")}: ${closed(why)}`, ...paths.map((p) => `  - ${p}`)],
   );
 }
 
@@ -496,6 +536,11 @@ function rejectionText(x: Rejection): string {
 /** A message as a sentence: one full stop at the end, never two. */
 function sentence(s: string): string {
   return `${s.trim().replace(/[.\s]+$/, "")}.`;
+}
+
+/** A sentence, unless it already ends in a stop or a closing quote. */
+function closed(s: string): string {
+  return /[.!?…”"]$/.test(s.trim()) ? s.trim() : sentence(s);
 }
 
 function plural(n: number, word: string): string {

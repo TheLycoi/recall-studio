@@ -168,7 +168,7 @@ function fakeEngine(script) {
 }
 
 function fakePlugin(engine, { files = [], pages = {} } = {}) {
-  const host = { built: 0 };
+  const host = { built: 0, runs: 0 };
   const exists = (p) => p in pages || engine.written.has(p);
   const plugin = {
     host,
@@ -194,6 +194,8 @@ function fakePlugin(engine, { files = [], pages = {} } = {}) {
         host.built++;
         return engine;
       },
+      // The fake engine writes nothing through a vault, so its guard never refuses.
+      guard: { begin: () => host.runs++, refusals: [], runFolder: null, isHeld: () => false },
     }),
   };
   return plugin;
@@ -258,6 +260,42 @@ test("a source upstream's gate skipped is reported as not ingested, with the rea
   );
   assert.match(text, /sources\/Note\.md not ingested: its content is already in the wiki\./);
   assert.match(text, /Nothing was written\./);
+});
+
+test("a report names each page the guard kept, why, and where the texts were saved", () => {
+  const run = ".obsidian/plugins/wikilm/snapshots/2026-09-29T12-00-00-000Z";
+  const lost = [
+    { kind: "heading", key: "## two properties", line: "## Two Properties" },
+    { kind: "quote", key: "> > Albumin binds.", line: "> > Albumin binds." },
+    { kind: "pdf-link", key: "L.pdf#page=5", line: "> [!PDF] [[L.pdf#page=5|L, p.5]]" },
+    { kind: "quote", key: "> [!PDF] [[L.pdf#page=5|L, p.5]]", line: "> [!PDF] [[L.pdf#page=5|L, p.5]]" },
+  ];
+  const text = m.renderIngestReport(
+    report({
+      updatedPages: ["wiki/concepts/other.md"],
+      kept: [
+        { path: "wiki/concepts/receptors.md", action: "rewrite", dropped: 3, lost, proposal: `${run}/wiki/concepts/receptors.proposed.md`, held: 1 },
+        { path: "wiki/concepts/albumin.md", action: "rename", dropped: 0, lost: [], proposal: null, to: "wiki/entities/albumin.md", held: 0 },
+        { path: "wiki/sources/old.md", action: "remove", dropped: 0, lost: [], proposal: null, held: 0 },
+        { path: "wiki/concepts/fm.md", action: "rewrite", dropped: 0, lost: [], proposal: null, detail: "the engine asked for an in-place frontmatter edit, which WikiLM cannot check before it is written", held: 0 },
+      ],
+      snapshots: run,
+    }),
+  );
+  assert.equal(
+    text.slice(text.indexOf("Not updated")),
+    [
+      "Not updated, to keep what was there:",
+      `- wiki/concepts/receptors.md: the rewrite would have dropped 3 lines (1 heading, 2 quote lines). The proposed text is saved at ${run}/wiki/concepts/receptors.proposed.md.`,
+      "- wiki/concepts/albumin.md: the engine asked to move it to wiki/entities/albumin.md; it was left where it is.",
+      "- wiki/sources/old.md: the engine asked to remove it; it was left in place.",
+      "- wiki/concepts/fm.md: the engine asked for an in-place frontmatter edit, which WikiLM cannot check before it is written; it was left as it was.",
+      `The text each page had before this run is saved in ${run}.`,
+    ].join("\n"),
+  );
+  const folderRun = m.folderIngestReport("src", [report({ kept: [{ path: "a.md", action: "remove" }], snapshots: run }), report({ kept: [{ path: "a.md", action: "remove" }] })], { total: 2, skipped: 0, cancelled: false });
+  assert.equal(folderRun.kept.length, 1, "a page two notes asked about is listed once");
+  assert.equal(folderRun.snapshots, run);
 });
 
 // ---- ingestWithUpstream --------------------------------------------------------
