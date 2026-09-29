@@ -24,8 +24,25 @@ export interface CompletionRequest<T> {
 }
 
 /**
+ * One plain-text request: the model's answer comes back as it wrote it, with
+ * no schema and no parsing. Upstream's wiki engine (src/upstream/llmAdapter.ts)
+ * writes its own prompts and parses its own answers, so this is all it needs.
+ */
+export interface TextRequest {
+  system: string;
+  user: string;
+  maxTokens: number;
+  /** As in CompletionRequest. */
+  effort?: "low" | "medium" | "high";
+  /** As in CompletionRequest. */
+  model?: string;
+  /** Cancels this one call: a CLI backend kills its child, an HTTP backend stops waiting where it can. */
+  signal?: AbortSignal;
+}
+
+/**
  * A model provider. LlmClient owns the prompts and schemas; a backend only
- * knows how to get a schema-shaped answer out of its provider.
+ * knows how to get a schema-shaped answer, or plain text, out of its provider.
  */
 export interface LlmBackend {
   readonly name: ProviderName;
@@ -34,6 +51,8 @@ export interface LlmBackend {
   /** The models this provider offers, for the settings dropdown; may throw when the provider cannot be reached. */
   listModels(): Promise<string[]>;
   complete<T>(req: CompletionRequest<T>): Promise<T>;
+  /** The model's raw text for one request. */
+  completeText(req: TextRequest): Promise<string>;
   /** Cancel in-flight work (kills child processes). Resolves once everything has stopped. */
   abort(): Promise<void>;
 }

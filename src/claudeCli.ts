@@ -4,7 +4,7 @@ import { accessSync, constants } from "fs";
 import { homedir } from "os";
 import { delimiter, join } from "path";
 import { z } from "zod";
-import type { CompletionRequest, LlmBackend } from "./backend";
+import type { CompletionRequest, LlmBackend, TextRequest } from "./backend";
 import { extractJson, toStrictSchema } from "./codex";
 import type { WikiLmSettings } from "./settings";
 
@@ -49,7 +49,14 @@ export class ClaudeCliError extends Error {
 export const PREAMBLE =
   "Reply with one message containing only the JSON object described by the output schema. Do not use tools, read files, or search; everything you need is in this message.";
 
-/** Structured output costs one extra internal turn, so a one-shot answer needs two. */
+/** The plain-text call's preamble: the same ban on tools, and no answer format of its own, since the prompt brings one. */
+export const TEXT_PREAMBLE = "Do not use tools, read files, or search; everything you need is in this message.";
+
+/**
+ * Structured output costs one extra internal turn, so a one-shot answer needs
+ * two. A plain-text answer needs one; it keeps the same cap, which is a
+ * ceiling and costs nothing when the answer comes sooner.
+ */
 const MAX_TURNS = 2;
 
 // ------------------------------------------------------------ pure helpers
@@ -117,17 +124,18 @@ export function parseClaudeResult(stdout: string): ClaudeResult {
 }
 
 /**
- * The exact argv for one structured call. Order matters only for readability;
- * what matters is that `--bare` never appears (it disables keychain reads) and
+ * The exact argv for one call. Order matters only for readability; what
+ * matters is that `--bare` never appears (it disables keychain reads) and
  * that the schema, system prompt and model are separate argv elements.
+ * Without `schemaJson` the call is plain text: the same argv minus
+ * `--json-schema`, and the answer is the envelope's `result`.
  */
-export function buildClaudeArgs(opts: { model: string; effort: string; schemaJson: string; system: string; maxTurns: number }): string[] {
+export function buildClaudeArgs(opts: { model: string; effort: string; schemaJson?: string; system: string; maxTurns: number }): string[] {
   return [
     "-p",
     "--output-format",
     "json",
-    "--json-schema",
-    opts.schemaJson,
+    ...(opts.schemaJson === undefined ? [] : ["--json-schema", opts.schemaJson]),
     "--system-prompt",
     opts.system,
     "--model",
@@ -247,7 +255,7 @@ const live = new Set<Live>();
 const TIMEOUT_MS = 5 * 60 * 1000;
 const KILL_GRACE_MS = 5000;
 
-function runClaude(bin: string, args: string[], stdin: string): Promise<RunResult> {
+function runClaude(bin: string, args: string[], stdin: string, signal?: AbortSignal): Promise<RunResult> {
   return new Promise((resolve) => {
     const child = spawn(bin, args, { env: childEnv(process.env), stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
@@ -276,6 +284,14 @@ function runClaude(bin: string, args: string[], stdin: string): Promise<RunResul
     };
     live.add(entry);
 
+    // One call's own cancel (upstream's engine passes one) kills this child
+    // the way plugin unload kills them all.
+    const onAbort = () => {
+      entry.aborted = true;
+      entry.kill();
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+
     const timer = setTimeout(() => {
       timedOut = true;
       entry.kill();
@@ -285,6 +301,7 @@ function runClaude(bin: string, args: string[], stdin: string): Promise<RunResul
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
       live.delete(entry);
       resolveDone();
       resolve({ stdout, stderr, code: null, signal: null, timedOut, aborted: entry.aborted, spawnError: null, ...partial });
@@ -395,6 +412,33 @@ export class ClaudeCliBackend implements LlmBackend {
       throw new ClaudeCliError("failed", `Claude Code returned ${req.label} in the wrong shape: ${result.error.issues[0]?.message ?? "schema mismatch"}.`);
     }
     return result.data;
+  }
+
+  /**
+   * The same process as `complete` without `--json-schema`: the answer is the
+   * envelope's `result`, returned as the model wrote it. An empty answer is
+   * returned empty, for the caller to judge; a missing one is an error.
+   */
+  async completeText(req: TextRequest): Promise<string> {
+    if (req.signal?.aborted) throw new ClaudeCliError("aborted", "Cancelled.");
+    const s = this.settings();
+    const bin = resolveClaudeBinary(s.path);
+    const args = buildClaudeArgs({
+      model: req.model ?? s.model,
+      effort: req.effort ?? s.effort,
+      system: req.system,
+      maxTurns: MAX_TURNS,
+    });
+    const prompt = [TEXT_PREAMBLE, req.user].join("\n\n");
+    const r = await runClaude(bin, args, prompt, req.signal);
+    if (r.aborted && req.signal?.aborted) throw new ClaudeCliError("aborted", "Cancelled.");
+    const parsed = parseClaudeResult(r.stdout);
+    const failed = r.spawnError || r.timedOut || r.aborted || r.code !== 0 || parsed.isError;
+    if (failed) {
+      throw classifyClaude({ spawnError: r.spawnError, timedOut: r.timedOut, aborted: r.aborted, code: r.code, stderr: r.stderr, parsed });
+    }
+    if (parsed.text === null) throw new ClaudeCliError("failed", "Claude Code produced no answer.");
+    return parsed.text;
   }
 
   async abort(): Promise<void> {

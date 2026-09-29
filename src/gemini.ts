@@ -1,6 +1,6 @@
 import { requestUrl } from "obsidian";
 import { z } from "zod";
-import type { CompletionRequest, LlmBackend } from "./backend";
+import type { CompletionRequest, LlmBackend, TextRequest } from "./backend";
 import { resolveGeminiKey, type KeySource } from "./keys";
 import { readGeminiModels } from "./modelRoles";
 import type { Effort, WikiLmSettings } from "./settings";
@@ -95,24 +95,47 @@ export class GeminiBackend implements LlmBackend {
   }
 
   private async call<T>(req: CompletionRequest<T>, key: string): Promise<T> {
+    const text = await this.generate(req, key, req.label, req.schema);
+    let value: unknown;
+    try {
+      value = JSON.parse(text);
+    } catch {
+      throw new GeminiError("failed", `Gemini returned ${req.label} that were not valid JSON.`);
+    }
+    const parsed = req.schema.safeParse(value);
+    if (!parsed.success) {
+      throw new GeminiError("failed", `Gemini returned ${req.label} in the wrong shape: ${parsed.error.issues[0]?.message ?? "schema mismatch"}.`);
+    }
+    return parsed.data;
+  }
+
+  /**
+   * One generateContent request, returning the model's text or throwing with
+   * the reason there is none. With a schema the answer is JSON in that shape;
+   * without one it is plain text, and an empty system prompt is left off.
+   * requestUrl cannot be cancelled, so a signal is only checked on either side
+   * of the request.
+   */
+  private async generate(req: TextRequest, key: string, label: string, schema?: z.ZodType): Promise<string> {
     const s = this.getSettings();
     const effort = req.effort ?? s.effort;
+    if (req.signal?.aborted) throw new GeminiError("failed", "Cancelled.");
     const res = await requestUrl({
       url: `${API_BASE}/${encodeURIComponent(req.model ?? s.geminiModel)}:generateContent`,
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": key },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: req.system }] },
+        ...(schema || req.system ? { systemInstruction: { parts: [{ text: req.system }] } } : {}),
         contents: [{ role: "user", parts: [{ text: req.user }] }],
         generationConfig: {
           maxOutputTokens: req.maxTokens,
-          responseMimeType: "application/json",
-          responseSchema: toGeminiSchema(req.schema),
+          ...(schema ? { responseMimeType: "application/json", responseSchema: toGeminiSchema(schema) } : {}),
           thinkingConfig: { thinkingLevel: THINKING_LEVEL[effort] },
         },
       }),
       throw: false,
     });
+    if (req.signal?.aborted) throw new GeminiError("failed", "Cancelled.");
 
     let body: unknown;
     try {
@@ -132,19 +155,8 @@ export class GeminiBackend implements LlmBackend {
       throw new GeminiError("failed", `Gemini API error ${res.status}${error ? `: ${error}` : ""}.`);
     }
     if (error) throw new GeminiError("failed", error);
-    if (!text) throw new GeminiError("failed", `Gemini returned no ${req.label}.`);
-
-    let value: unknown;
-    try {
-      value = JSON.parse(text);
-    } catch {
-      throw new GeminiError("failed", `Gemini returned ${req.label} that were not valid JSON.`);
-    }
-    const parsed = req.schema.safeParse(value);
-    if (!parsed.success) {
-      throw new GeminiError("failed", `Gemini returned ${req.label} in the wrong shape: ${parsed.error.issues[0]?.message ?? "schema mismatch"}.`);
-    }
-    return parsed.data;
+    if (!text) throw new GeminiError("failed", `Gemini returned no ${label}.`);
+    return text;
   }
 
   async probe(model?: string): Promise<{ model: string; via: string }> {
@@ -176,6 +188,10 @@ export class GeminiBackend implements LlmBackend {
 
   async complete<T>(req: CompletionRequest<T>): Promise<T> {
     return this.call(req, this.key().key);
+  }
+
+  async completeText(req: TextRequest): Promise<string> {
+    return this.generate(req, this.key().key, "answer");
   }
 
   async abort(): Promise<void> {

@@ -429,7 +429,8 @@ export class LlmClient {
     }
   }
 
-  private backendFor(provider: ProviderName): LlmBackend {
+  /** The backend for a provider. Public for upstream's engine (src/upstream/host.ts), which shares these backends rather than building its own. */
+  backendFor(provider: ProviderName): LlmBackend {
     if (provider === "gemini") return this.gemini;
     if (provider === "codex") return this.codex;
     if (provider === "claudecli") return this.claudeCli;

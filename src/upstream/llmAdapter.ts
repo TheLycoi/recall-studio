@@ -1,0 +1,134 @@
+/**
+ * Upstream's model client, served by WikiLM's own backends.
+ *
+ * obsidian-llm-wiki's engine asks its client for text (`createMessage`) and
+ * parses the answer itself. Upstream ships SDK clients that need an API key;
+ * the reader's vault runs Claude Code under a subscription with no key stored,
+ * so the engine is handed this adapter instead, and every call goes through
+ * `LlmBackend.completeText` on the provider and model WikiLM's roles choose
+ * (src/modelRoles.ts).
+ *
+ * Only `createMessage` is offered. Every upstream call site checks for the
+ * optional `createMessageWithOutput` and `createMessageStream` before using
+ * them and otherwise falls back to `createMessage` and its own JSON parsing,
+ * which is the path upstream's Anthropic client has always taken.
+ *
+ * Pure apart from the backends it is given: no `obsidian` import, so
+ * test/upstreamLlmAdapter.test.mjs bundles it with fake backends.
+ */
+import type { LlmBackend, ProviderName, TextRequest } from "../backend";
+import { resolveRole, type ModelRole } from "../modelRoles";
+import type { WikiLmSettings } from "../settings";
+import type { UpstreamLLMClient } from "./vendor";
+
+export type BackendLookup = (provider: ProviderName) => Pick<LlmBackend, "completeText">;
+
+type CreateMessageParams = Parameters<UpstreamLLMClient["createMessage"]>[0];
+type UpstreamMessage = CreateMessageParams["messages"][number];
+
+export interface UpstreamClientOptions {
+  /**
+   * The role for a call that carries no task label. The engine labels every
+   * ingest call, but upstream's seed selection (select-seeds.ts, seed-selector.ts,
+   * query-keywords.ts) labels none, so a client made for seed selection says
+   * "query" here. Defaults to "digest".
+   */
+  untagged?: ModelRole;
+}
+
+/**
+ * The role an upstream task label belongs to. Upstream names its steps at each
+ * call site (`task: "extract"`, `"merge-triage"`, `"query-wiki"`...). Its query
+ * steps start with "query", its lint steps with "lint" plus two fix runners;
+ * every other labelled step builds pages from a source, which is digest work.
+ */
+export function roleForTask(task: string | undefined, untagged: ModelRole = "digest"): ModelRole {
+  if (!task) return untagged;
+  if (task.startsWith("query")) return "query";
+  if (task.startsWith("lint") || task === "fix-dead-link" || task === "link-orphan") return "lint";
+  return "digest";
+}
+
+function messageText(content: UpstreamMessage["content"]): string {
+  if (typeof content === "string") return content;
+  return content
+    .map((part) => {
+      if (part.type === "text") return part.text;
+      throw new Error("WikiLM's model backends take text only, so a file (a PDF) cannot be sent to them.");
+    })
+    .join("\n\n");
+}
+
+/**
+ * The conversation as one user message. A single user turn goes through as
+ * it is; longer conversations keep their order, each turn under its role.
+ */
+export function flattenMessages(messages: UpstreamMessage[]): string {
+  if (messages.length === 1 && messages[0].role === "user") return messageText(messages[0].content);
+  return messages.map((m) => `${m.role === "user" ? "User" : "Assistant"}:\n${messageText(m.content)}`).join("\n\n");
+}
+
+/** Upstream's thinking controls as WikiLM's effort; nothing asked means the backend's configured default. */
+function effortFor(params: CreateMessageParams): TextRequest["effort"] {
+  if (params.reasoningEffort) return params.reasoningEffort;
+  if (params.enableThinking === false) return "low";
+  return undefined;
+}
+
+/** What upstream recognises as a cancel: the engine checks `name === "AbortError"` on a DOMException. */
+function abortError(): DOMException {
+  return new DOMException("The model call was cancelled.", "AbortError");
+}
+
+/**
+ * The call's result, or an AbortError the moment the signal fires. The
+ * backend is handed the same signal and stops its own work where it can
+ * (a CLI child is killed); this makes sure the caller stops waiting even when
+ * it cannot (an Obsidian requestUrl has no cancel).
+ */
+function untilAborted<T>(call: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortError());
+    signal.addEventListener("abort", onAbort, { once: true });
+    call.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(signal.aborted ? abortError() : error);
+      },
+    );
+  });
+}
+
+/**
+ * The client upstream's engine calls. Settings are read on every call, so a
+ * change of role or model in WikiLM's settings reaches the next model call
+ * without rebuilding anything.
+ *
+ * Upstream's `model` parameter is not used: the role decides the model. The
+ * other parameters WikiLM's backends have no use for (sampling, cache
+ * breakpoints, output modes, `onFinish`) are dropped; the table in the task 3
+ * report lists each one and why.
+ */
+export function createUpstreamClient(getSettings: () => WikiLmSettings, backends: BackendLookup, options: UpstreamClientOptions = {}): UpstreamLLMClient {
+  const untagged = options.untagged ?? "digest";
+  return {
+    async createMessage(params: CreateMessageParams): Promise<string> {
+      const signal = params.abortSignal;
+      if (signal?.aborted) throw abortError();
+      const { provider, model } = resolveRole(getSettings(), roleForTask(params.task, untagged));
+      const call = backends(provider).completeText({
+        system: params.system ?? "",
+        user: flattenMessages(params.messages),
+        maxTokens: params.max_tokens,
+        effort: effortFor(params),
+        model: model || undefined,
+        signal,
+      });
+      return signal ? untilAborted(call, signal) : call;
+    },
+  };
+}

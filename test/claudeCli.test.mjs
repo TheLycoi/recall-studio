@@ -96,6 +96,15 @@ test("buildClaudeArgs is the exact argument array and never contains --bare", ()
   assert.ok(!args.includes("--bare"));
 });
 
+// A plain-text call (upstream's engine, src/upstream/llmAdapter.ts) is the
+// structured call minus the schema: same flags, same order, nothing new.
+test("buildClaudeArgs without a schema drops --json-schema and its value, and nothing else", () => {
+  const withSchema = c.buildClaudeArgs({ model: "sonnet", effort: "low", schemaJson: '{"type":"object"}', system: "sys", maxTurns: 2 });
+  const plain = c.buildClaudeArgs({ model: "sonnet", effort: "low", system: "sys", maxTurns: 2 });
+  assert.deepEqual(plain, withSchema.filter((a) => a !== "--json-schema" && a !== '{"type":"object"}'));
+  assert.ok(!plain.includes("--bare"));
+});
+
 test("classifyClaude: the failure envelope is an auth error", () => {
   const parsed = c.parseClaudeResult(FAILURE_ENVELOPE);
   const e = c.classifyClaude({ parsed, code: 1 });
