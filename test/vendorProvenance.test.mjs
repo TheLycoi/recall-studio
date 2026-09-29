@@ -416,6 +416,18 @@ test("vendor-update --dry-run prints the commands and runs none of them", () => 
   assert.equal(execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }), head);
 });
 
+test("vendor-update --dry-run shows the four checks it runs after a pull, in order, stopping at the first failure", () => {
+  const out = execFileSync(process.execPath, ["scripts/vendor-update.mjs", "9.9.9", "--dry-run"], { encoding: "utf8" });
+  const steps = ["$ npm run vendor:types", "$ npm run vendor:check", "$ npm run build", "$ npm test"];
+  let at = out.indexOf("git diff --name-only");
+  for (const step of steps) {
+    const next = out.indexOf(step, at + 1);
+    assert.ok(next > at, `"${step}" comes after the pull and the steps before it:\n${out}`);
+    at = next;
+  }
+  assert.match(out, /stop at the first that fails and name it/);
+});
+
 test("vendor-update refuses a missing or malformed tag", () => {
   const missing = spawnSync(process.execPath, ["scripts/vendor-update.mjs", "--dry-run"], { encoding: "utf8" });
   assert.notEqual(missing.status, 0);
