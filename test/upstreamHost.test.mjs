@@ -225,9 +225,19 @@ test("upstream's per-task model names carry the models WikiLM's roles resolve to
 });
 
 test("the host builds nothing until asked, and a second engine() call returns the same instance", () => {
-  const { plugin, writes } = fakePlugin();
+  const { plugin: real, writes } = fakePlugin();
+  // Every property of the plugin the host reads, in order.
+  const read = [];
+  const plugin = new Proxy(real, {
+    get(target, key, receiver) {
+      read.push(String(key));
+      return Reflect.get(target, key, receiver);
+    },
+  });
   const host = new h.UpstreamHost(plugin);
+  assert.deepEqual(read, [], "constructing the host reads nothing from the plugin: no app, no settings, no backends");
   const first = host.engine();
+  assert.ok(read.includes("app") && read.includes("settings"), `the first engine() call is what reads them: ${read.join(", ")}`);
   const second = host.engine();
   assert.equal(second, first);
   assert.equal(first.settings.wikiFolder, "wiki");

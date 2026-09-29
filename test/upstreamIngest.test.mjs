@@ -272,7 +272,9 @@ test("a PDF is refused before the engine is built, with a message naming the hig
 test("a run sets the engine's callbacks, returns its report, shows it, and leaves nothing behind", async () => {
   const done = report({ sourceFile: "sources/Note.md", createdPages: ["wiki/concepts/a.md"], updatedPages: ["wiki/concepts/b.md"] });
   const labels = [];
+  let duringRun;
   const engine = fakeEngine(async (e) => {
+    duringRun = e.callbacks.write;
     e.callbacks.progress("Analysing Note…");
     e.done(done);
   });
@@ -288,8 +290,10 @@ test("a run sets the engine's callbacks, returns its report, shows it, and leave
   assert.equal(plugin.cancel.active, false);
   const { write, ...rest } = engine.callbacks;
   assert.deepEqual(rest, { done: null, progress: null, start: null, end: null });
-  engine.write("wiki/after-the-run.md");
-  assert.ok(!(r.alsoWritten ?? []).includes("wiki/after-the-run.md"), "the write callback is let go after the run");
+  // Upstream's setter takes no null, so the run's callback is replaced, not cleared.
+  assert.equal(typeof duringRun, "function");
+  assert.equal(typeof write, "function");
+  assert.notEqual(write, duringRun, "the run's write callback is let go after the run");
   const shown = notices().at(-1);
   assert.match(shown, /- wiki\/concepts\/a\.md/);
   assert.match(shown, /- wiki\/concepts\/b\.md/);
