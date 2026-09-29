@@ -41,6 +41,14 @@ export const EXTERNALS = [
  * only after `npm run vendor:check` or `vendor:types` has installed upstream's
  * own dependencies, and without this the bundle would silently pick up a
  * second copy of zod or ai whenever it happened to be there.
+ *
+ * A vendored `import ... from "zod"` goes to `zod/v3`, the zod 3 API that the
+ * root zod 4 package ships alongside its own. Upstream declares zod ^3.25.76
+ * and its tests run on zod 3 only. It matters on the wire: `ai`'s zodSchema()
+ * converts a zod 4 schema with `additionalProperties: false` on every object,
+ * so upstream's `.passthrough()` output schemas, which it documents as open,
+ * would reach the model closed. WikiLM's own files keep plain `zod` (zod 4).
+ * `npm run vendor:types` makes the same substitution in the declarations.
  */
 export function llmWikiVendorPlugin() {
   return {
@@ -52,7 +60,7 @@ export function llmWikiVendorPlugin() {
       b.onResolve({ filter: /^[^./]/ }, (args) => {
         if (args.pluginData?.llmWikiFromRoot) return undefined;
         if (!args.importer.startsWith(VENDOR_SRC + path.sep)) return undefined;
-        return b.resolve(args.path, {
+        return b.resolve(args.path === "zod" ? "zod/v3" : args.path, {
           kind: args.kind,
           importer: args.importer,
           resolveDir: ROOT,
