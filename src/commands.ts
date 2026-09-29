@@ -14,7 +14,8 @@
 import { Notice, type TFile } from "obsidian";
 import type WikiLmPlugin from "./main";
 import { COMMAND_TABLE, type CommandSpec } from "./commandTable";
-import { ingestFolder, ingestSourceNote } from "./ingestSource";
+import { ingestSourceNote } from "./ingestSource";
+import { ingestFolderWithUpstream, ingestWithUpstream } from "./upstream/ingest";
 import { aiHighlightNote, captureMarkdownHighlights, capturePdfSelection, captureReadingSelection, captureSelection } from "./capture";
 import { isPdfFile, pdfsLinkedFrom, readPdfSelection } from "./pdf";
 import { digestFolder, digestPdf } from "./digest";
@@ -110,19 +111,26 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
       const file = p.app.workspace.getActiveFile();
       return !!file && file.extension === "md";
     },
-    run: (p) => {
+    // Both ingest commands run on upstream's engine (src/upstream/ingest.ts).
+    // src/ingestSource.ts is the pipeline they ran before; "AI highlight…"
+    // still uses it for a note whose product is wiki notes.
+    run: async (p) => {
       const file = p.app.workspace.getActiveFile();
       if (!file || file.extension !== "md") return;
-      ingestSourceNote(p, file);
+      await ingestWithUpstream(p, file);
     },
   },
   "ingest-folder": {
     available: () => true,
     run: async (p) => {
       const folder = await pickFolder(p.app);
-      if (folder) await ingestFolder(p, folder);
+      if (folder) await ingestFolderWithUpstream(p, folder);
     },
   },
+  // An ingest on upstream's engine listens on the same token and passes the
+  // cancel on to the engine's cancelIngestion(), which aborts the model call
+  // in flight (src/upstream/ingest.ts, withEngineRun). A click on the status
+  // bar takes the same path.
   "cancel-ingestion": {
     available: (p) => p.cancel.active,
     run: (p) => {
