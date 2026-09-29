@@ -116,7 +116,17 @@ function fakeEngine(script) {
     wasCancelled: false,
     aborted: false,
     ingesting: false,
-    callbacks: { done: null, progress: null, start: null, end: null },
+    callbacks: { done: null, progress: null, start: null, end: null, write: null },
+    /** Paths the fake vault holds because the engine wrote them. */
+    written: new Set(),
+    setFileWriteCallback(cb) {
+      this.callbacks.write = cb;
+    },
+    /** A write through upstream's createOrUpdateFile, which reports every path it writes. */
+    write(path) {
+      this.written.add(path);
+      this.callbacks.write?.(path);
+    },
     setDoneCallback(cb) {
       this.callbacks.done = cb;
     },
@@ -159,6 +169,7 @@ function fakeEngine(script) {
 
 function fakePlugin(engine, { files = [], pages = {} } = {}) {
   const host = { built: 0 };
+  const exists = (p) => p in pages || engine.written.has(p);
   const plugin = {
     host,
     cancel: new m.CancelToken(),
@@ -166,7 +177,7 @@ function fakePlugin(engine, { files = [], pages = {} } = {}) {
       vault: {
         configDir: ".obsidian",
         getFiles: () => files,
-        getAbstractFileByPath: (p) => (p in pages ? file(p) : null),
+        getAbstractFileByPath: (p) => (exists(p) ? file(p) : null),
         read: async (f) => pages[f.path] ?? "",
       },
     },
@@ -268,12 +279,17 @@ test("a run sets the engine's callbacks, returns its report, shows it, and leave
   const plugin = fakePlugin(engine);
   plugin.cancel.onChange(() => labels.push(plugin.cancel.label));
   const r = await m.ingestWithUpstream(plugin, file("sources/Note.md"));
-  assert.equal(r, done);
+  assert.deepEqual(r.createdPages, done.createdPages);
+  assert.deepEqual(r.updatedPages, done.updatedPages);
+  assert.equal(r.success, true);
   assert.equal(engine.calls.length, 1);
   assert.equal(engine.calls[0].path, "sources/Note.md");
   assert.ok(labels.some((l) => /Analysing Note/.test(l)), labels.join(" | "));
   assert.equal(plugin.cancel.active, false);
-  assert.deepEqual(engine.callbacks, { done: null, progress: null, start: null, end: null });
+  const { write, ...rest } = engine.callbacks;
+  assert.deepEqual(rest, { done: null, progress: null, start: null, end: null });
+  engine.write("wiki/after-the-run.md");
+  assert.ok(!(r.alsoWritten ?? []).includes("wiki/after-the-run.md"), "the write callback is let go after the run");
   const shown = notices().at(-1);
   assert.match(shown, /- wiki\/concepts\/a\.md/);
   assert.match(shown, /- wiki\/concepts\/b\.md/);
@@ -335,6 +351,35 @@ test("an ingest does not start while another run holds the token", async () => {
   assert.match(r.errorMessage, /another run is still going \(digesting Deck\)/);
   assert.equal(plugin.cancel.active, true, "the other run keeps its token");
   plugin.cancel.end(owner);
+});
+
+test("the report also names every other file the engine wrote, but not a page it trashed on cancel", async () => {
+  const engine = fakeEngine(async (e, f) => {
+    e.write("wiki/sources/note.md");
+    e.write("wiki/concepts/a.md");
+    e.write("wiki/concepts/b.md");
+    e.write("wiki/index.md");
+    e.write("wiki/log.md");
+    // The schema note is written by upstream's SchemaManager, which does not report writes.
+    e.written.add("wiki/schema/config.md");
+    e.done(report({ sourceFile: f.path, createdPages: ["wiki/sources/note.md", "wiki/concepts/a.md"], updatedPages: ["wiki/concepts/b.md"] }));
+  });
+  const plugin = fakePlugin(engine);
+  const r = await m.ingestWithUpstream(plugin, file("sources/Note.md"));
+  assert.deepEqual(r.alsoWritten, ["wiki/index.md", "wiki/log.md", "wiki/schema/config.md"]);
+  assert.match(notices().at(-1), /Also written:\n- wiki\/index\.md\n- wiki\/log\.md\n- wiki\/schema\/config\.md/);
+
+  const cancelling = fakeEngine(async (e, f) => {
+    e.write("wiki/sources/other.md");
+    e.write("wiki/concepts/c.md");
+    // Upstream trashes the summary page of a cancelled run and leaves it out of the report.
+    e.written.delete("wiki/sources/other.md");
+    e.wasCancelled = true;
+    e.done(report({ sourceFile: f.path, success: false, cancelled: true, errorMessage: "Cancelled by user", createdPages: ["wiki/concepts/c.md"] }));
+  });
+  const r2 = await m.ingestWithUpstream(fakePlugin(cancelling), file("sources/Other.md"));
+  assert.deepEqual(r2.alsoWritten, []);
+  assert.doesNotMatch(notices().at(-1), /sources\/other\.md/);
 });
 
 // ---- ingestFolderWithUpstream -----------------------------------------------------

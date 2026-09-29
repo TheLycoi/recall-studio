@@ -7,7 +7,7 @@
  * concept, then the index and log. There is no preview. What WikiLM adds is
  * around the run, not inside it: the reader starts it, can stop it from the
  * status bar or "cancel-ingestion", and is shown every page it created or
- * updated, by path, when it ends however it ends.
+ * updated and every other file it wrote, by path, when it ends however it ends.
  *
  * PDFs never reach the engine. They are WikiLM's highlight digest's to read,
  * and the host has already switched upstream's PDF conversion off
@@ -38,11 +38,21 @@ export const PDF_REFUSAL =
   "PDFs are read by WikiLM's highlight digest, not by ingest. Open the PDF and run “Digest: PDF highlights into concept and entity notes…”";
 
 /**
+ * Upstream's report, plus every other file the engine wrote in the run: its
+ * index and log, a page whose links it re-pointed, the schema note it creates
+ * the first time. Upstream's report lists only the pages it created or
+ * updated, and the reader is told everything that was written.
+ */
+export interface WikiLmIngestReport extends IngestReport {
+  alsoWritten?: string[];
+}
+
+/**
  * A folder run's report: upstream's aggregate (the one runBatchIngest builds)
  * plus the two things its shape has no room for, how many files were read and
  * which failed with what error.
  */
-export interface FolderIngestReport extends IngestReport {
+export interface FolderIngestReport extends WikiLmIngestReport {
   filesRead: number;
   failedFiles: Array<{ path: string; error: string }>;
 }
@@ -68,7 +78,7 @@ async function ingestOne(plugin: WikiLmPlugin, file: TFile): Promise<IngestRepor
   new Notice(`WikiLM: ingesting ${file.basename}. Click the status bar to stop.`);
   return withEngineRun(plugin, engine, `ingesting ${file.basename}`, (label) => {
     label(file.basename);
-    return runOne(engine, file, {});
+    return runOne(plugin, engine, file, {});
   });
 }
 
@@ -120,7 +130,7 @@ export async function ingestFolderWithUpstream(plugin: WikiLmPlugin, folder: TFo
           break;
         }
         label(`${i + 1}/${todo.length} ${f.basename}`);
-        const r = await runOne(engine, f, { batchCtx });
+        const r = await runOne(plugin, engine, f, { batchCtx });
         reports.push(r);
         if (r.cancelled || engine.wasCancelled) {
           stopped = true;
@@ -140,7 +150,7 @@ export async function ingestFolderWithUpstream(plugin: WikiLmPlugin, folder: TFo
  */
 export function folderIngestReport(
   label: string,
-  reports: IngestReport[],
+  reports: WikiLmIngestReport[],
   run: { total: number; skipped: number; cancelled: boolean },
 ): FolderIngestReport {
   const ran = reports.filter((r) => !r.skipped);
@@ -148,10 +158,16 @@ export function folderIngestReport(
   const cancelled = run.cancelled || ran.some((r) => r.cancelled);
   const sum = (key: "entitiesCreated" | "conceptsCreated" | "contradictionsFound" | "elapsedSeconds") =>
     reports.reduce((n, r) => n + (r[key] ?? 0), 0);
+  const createdPages = [...new Set(reports.flatMap((r) => r.createdPages))];
+  const updatedPages = [...new Set(reports.flatMap((r) => r.updatedPages))];
+  const pages = new Set([...createdPages, ...updatedPages]);
   return {
     sourceFile: label,
-    createdPages: [...new Set(reports.flatMap((r) => r.createdPages))],
-    updatedPages: [...new Set(reports.flatMap((r) => r.updatedPages))],
+    createdPages,
+    updatedPages,
+    // The index and log are written by every note; listed once. A file one
+    // note wrote in passing and another created is listed as created.
+    alsoWritten: [...new Set(reports.flatMap((r) => r.alsoWritten ?? []))].filter((p) => !pages.has(p)),
     entitiesCreated: sum("entitiesCreated"),
     conceptsCreated: sum("conceptsCreated"),
     failedItems: reports.flatMap((r) => r.failedItems),
@@ -176,9 +192,10 @@ export function folderIngestReport(
  * the pages it wrote, so they are listed too. Then what upstream could not
  * write and why, and the files it would not read.
  */
-export function renderIngestReport(r: IngestReport | FolderIngestReport): string {
+export function renderIngestReport(r: WikiLmIngestReport | FolderIngestReport): string {
   const folder = "filesRead" in r ? r : null;
-  const written = r.createdPages.length + r.updatedPages.length;
+  const also = r.alsoWritten ?? [];
+  const written = r.createdPages.length + r.updatedPages.length + also.length;
   const rejected = r.rejectedFiles ?? [];
   // A single source the gate turned away: its reason is the headline, not a list of one.
   const lone = !folder && rejected.length === 1 && rejected[0].path === r.sourceFile ? rejected[0] : null;
@@ -199,6 +216,7 @@ export function renderIngestReport(r: IngestReport | FolderIngestReport): string
 
   if (r.createdPages.length > 0) lines.push(`Created ${plural(r.createdPages.length, "page")}:`, ...r.createdPages.map((p) => `- ${p}`));
   if (r.updatedPages.length > 0) lines.push(`Updated ${plural(r.updatedPages.length, "page")}:`, ...r.updatedPages.map((p) => `- ${p}`));
+  if (also.length > 0) lines.push("Also written:", ...also.map((p) => `- ${p}`));
   if (written === 0) lines.push("Nothing was written.");
   else if (r.cancelled) lines.push("The pages above were written before the stop and are kept.");
 
@@ -221,7 +239,8 @@ export function renderIngestReport(r: IngestReport | FolderIngestReport): string
  * status bar or "cancel-ingestion" (both call `plugin.cancel.cancel()`) calls
  * the engine's `cancelIngestion()`, which aborts the model call in flight.
  *
- * The engine's callbacks are set here on every run and cleared after it: the
+ * The engine's callbacks are set here and in runOne on every run, and cleared
+ * after it: the
  * host may hand back a new engine when the wiki folder moved, and a callback
  * left on the old one would hold this run's closures.
  */
@@ -256,6 +275,8 @@ async function withEngineRun<T>(
     engine.setProgressCallback(null);
     engine.setIngestionCallbacks(null, null);
     engine.setDoneCallback(null);
+    // Upstream's setter takes no null; the host builds the engine with this no-op.
+    engine.setFileWriteCallback(() => {});
     plugin.cancel.end(owner);
   }
 }
@@ -264,19 +285,40 @@ async function withEngineRun<T>(
  * One `ingestSource` call and the report it produced. Upstream reports a
  * failure inside its pipeline through the done callback and then rethrows;
  * one before the pipeline starts (the note could not be read) only throws.
+ *
+ * Every page write the engine makes goes through its createOrUpdateFile,
+ * which calls the file-write callback, so the callback sees the index, the
+ * log and re-pointed pages that the report leaves out. The schema note is
+ * written by upstream's SchemaManager, which calls no callback, so it is
+ * checked for before and after.
  */
-async function runOne(engine: WikiEngine, file: TFile, opts: IngestOptions): Promise<IngestReport> {
+async function runOne(plugin: WikiLmPlugin, engine: WikiEngine, file: TFile, opts: IngestOptions): Promise<WikiLmIngestReport> {
+  const { vault } = plugin.app;
+  // SchemaManager's path for it (SCHEMA_FILENAME, schema/schema-manager.ts), not exported upstream.
+  const schemaNote = `${engine.settings.wikiFolder}/schema/config.md`;
+  const hadSchema = vault.getAbstractFileByPath(schemaNote) !== null;
+  const writes = new Set<string>();
   const reports: IngestReport[] = [];
+  engine.setFileWriteCallback((path) => writes.add(path));
   engine.setDoneCallback((r) => reports.push(r));
+  let report: IngestReport | undefined;
   try {
     await engine.ingestSource(file, opts);
   } catch (e) {
     console.error(`WikiLM: upstream ingest of ${file.path} failed`, e);
-    if (reports.length === 0) return failed(file.path, e instanceof Error ? e.message : String(e));
+    if (reports.length === 0) report = failed(file.path, e instanceof Error ? e.message : String(e));
   } finally {
     engine.setDoneCallback(null);
+    engine.setFileWriteCallback(() => {});
   }
-  return reports[reports.length - 1] ?? failed(file.path, "the engine finished without a report");
+  report ??= reports[reports.length - 1] ?? failed(file.path, "the engine finished without a report");
+
+  if (!hadSchema && vault.getAbstractFileByPath(schemaNote) !== null) writes.add(schemaNote);
+  const listed = new Set([...report.createdPages, ...report.updatedPages]);
+  // A path no longer in the vault was trashed by the engine: the summary page
+  // of a cancelled run, which upstream removes so the note re-ingests cleanly.
+  const alsoWritten = [...writes].filter((p) => !listed.has(p) && vault.getAbstractFileByPath(p) !== null);
+  return { ...report, alsoWritten };
 }
 
 /**
