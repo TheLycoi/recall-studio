@@ -50,7 +50,12 @@ in a comment at the point of use.
   - src/topicNote.ts, src/suggestPlan.ts — filing new material into a section
     of an existing page, and creating that section when it is absent.
 
-WikiLM's own policies differ from upstream's where they conflict: notably,
-new material is appended into an existing page whenever one is related,
-rather than given a page of its own unless an existing page denotes the same
-thing.
+WikiLM's own commands follow WikiLM's policies where the two conflict:
+notably, WikiLM's highlight digest and its AI highlight command append new
+material into an existing page whenever one is related, rather than giving it
+a page of its own unless an existing page denotes the same thing. WikiLM's two
+ingest commands are the exception. They run the included obsidian-llm-wiki
+engine and follow its policy, with a guard of WikiLM's between the engine and
+the vault (src/upstream/guardedVault.ts): each existing page is saved before
+it is overwritten, and a rewrite that would drop a page's headings, quotes,
+PDF links, embeds or frontmatter keys is refused.
