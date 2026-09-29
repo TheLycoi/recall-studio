@@ -1335,6 +1335,10 @@ Layout, one line per module:
 - `src/suggestPlan.ts` — its pure planning layer: page batches, span verification, highlight rows, and grouping into wiki notes
 - `src/topicNote.ts` — pure topic-note render, parse and merge by highlight key, and the digest planner
 - `src/util.ts` — pure helpers shared across the plugin, kept free of Obsidian imports
+- `src/upstream/vendor.ts` — the one door into the vendored obsidian-llm-wiki source under `vendor/llm-wiki`; nothing else imports from it
+- `src/upstream/host.ts` — builds upstream's wiki engine from WikiLM's settings, with its watcher, scheduled lint and startup fixes never constructed
+- `src/upstream/llmAdapter.ts` — upstream's model client on WikiLM's provider backends, reporting why the model stopped
+- `src/upstream/ingest.ts` — the two ingest commands on upstream's wiki engine: PDFs refused to the digest, cancel passed to the engine, and a report of every file written
 - `src/vaultFix.ts` — repairs for what the vault lint finds: the dead link that is only a spelling apart from its page, and the unwrap that withdraws one whose page was never written
 - `src/vaultLint.ts` — structural checks over the notes themselves: what can be found, what links anywhere, what Ask could quote
 
