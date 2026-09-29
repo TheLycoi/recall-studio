@@ -390,9 +390,16 @@ export class CodexBackend implements LlmBackend {
     return parsed.data;
   }
 
-  /** The same run as `complete` without `--output-schema`: the final agent message, as the model wrote it. */
+  /**
+   * The same run as `complete` without `--output-schema`: the final agent
+   * message, as the model wrote it. The stop is always unknown: the `--json`
+   * events this file reads carry the agent message, errors and the turn's
+   * token usage, and none of them says why the model stopped.
+   */
   async completeText(req: TextRequest): Promise<string> {
-    return this.exec(req, "answer");
+    const text = await this.exec(req, "answer");
+    req.onStop?.("unknown");
+    return text;
   }
 
   /**

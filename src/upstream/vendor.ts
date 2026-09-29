@@ -21,6 +21,7 @@ export { loadRelevantPagesForQuery } from "@llm-wiki/wiki/query-engine/pipeline/
 export type {
   LLMWikiSettings,
   LLMClient as UpstreamLLMClient,
+  LLMFinishReason as UpstreamFinishReason,
   IngestReport,
   IngestOptions,
 } from "@llm-wiki/types";

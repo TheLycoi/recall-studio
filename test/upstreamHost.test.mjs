@@ -150,6 +150,11 @@ const UNATTENDED_OFF = {
   createWelcomeNote: false,
   writePdfMarkdownToVault: false,
   markdownConversionBackend: "native",
+  // Upstream's PDF converter (pdf-converter.ts) builds a file part only for a
+  // provider in its native-PDF list, or when forced. "wikilm" is in no such
+  // list, so the converter refuses before it writes to its cache.
+  forcePdfSupport: false,
+  provider: "wikilm",
 };
 
 test("upstreamSettings turns off every unattended write, whatever the input carries", () => {
@@ -166,8 +171,12 @@ test("upstreamSettings turns off every unattended write, whatever the input carr
     createWelcomeNote: true,
     writePdfMarkdownToVault: true,
     markdownConversionBackend: "mineru",
+    forcePdfSupport: true,
   });
-  for (const input of [wikilmSettings(), hostile, wikilmSettings({ rolesEnabled: true })]) {
+  // WikiLM's own `provider` key shares upstream's name; "anthropic" is one of
+  // upstream's native-PDF providers, so it must not pass through.
+  const pdfProvider = wikilmSettings({ provider: "anthropic" });
+  for (const input of [wikilmSettings(), hostile, wikilmSettings({ rolesEnabled: true }), pdfProvider]) {
     const out = h.upstreamSettings(input);
     for (const [key, value] of Object.entries(UNATTENDED_OFF)) {
       assert.deepEqual(out[key], value, `${key} is ${JSON.stringify(value)}`);

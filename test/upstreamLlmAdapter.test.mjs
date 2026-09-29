@@ -238,6 +238,119 @@ test("a file part is refused with a message, since WikiLM's backends take text o
   assert.equal(calls.length, 0);
 });
 
+/** A backend that reports `stop` (or nothing, when it is undefined) before answering. */
+function stoppingBackend(stop, text = "the page body") {
+  return () => ({
+    name: "anthropic",
+    async completeText(req) {
+      if (stop !== undefined) req.onStop?.(stop);
+      return text;
+    },
+  });
+}
+
+async function finishesOf(lookup) {
+  const seen = [];
+  const client = a.createUpstreamClient(() => settings(), lookup);
+  const text = await client.createMessage({ task: "merge-body", model: "m", max_tokens: 8000, messages: userMessage("x"), onFinish: (meta) => seen.push(meta) });
+  return { text, seen };
+}
+
+// Upstream keeps the existing page body when a rewrite stopped at the token
+// cap (merge-page.ts, related-page.ts) and halves an extract batch
+// (source-analyzer.ts). It learns why the model stopped only through onFinish.
+test("a length stop from the backend reaches onFinish as upstream's length reason", async () => {
+  const { text, seen } = await finishesOf(stoppingBackend("length"));
+  assert.equal(text, "the page body");
+  assert.deepEqual(seen, [{ finishReason: "length" }]);
+});
+
+test("a normal stop from the backend reaches onFinish as upstream's stop reason", async () => {
+  const { seen } = await finishesOf(stoppingBackend("end"));
+  assert.deepEqual(seen, [{ finishReason: "stop" }]);
+});
+
+test("a stop the provider named that is neither an end nor a length is upstream's other", async () => {
+  const { seen } = await finishesOf(stoppingBackend("other"));
+  assert.deepEqual(seen, [{ finishReason: "other" }]);
+});
+
+test("a backend that cannot tell leaves the reason unknown, never a clean stop", async () => {
+  assert.deepEqual((await finishesOf(stoppingBackend("unknown"))).seen, [{ finishReason: "unknown" }]);
+  assert.deepEqual((await finishesOf(stoppingBackend(undefined))).seen, [{ finishReason: "unknown" }]);
+});
+
+test("onFinish is called once, with the last reason, even when the backend reports twice", async () => {
+  const lookup = () => ({
+    name: "gemini",
+    async completeText(req) {
+      req.onStop?.("end");
+      req.onStop?.("length");
+      return "x";
+    },
+  });
+  const { seen } = await finishesOf(lookup);
+  assert.deepEqual(seen, [{ finishReason: "length" }]);
+});
+
+test("a call without onFinish still works when the backend reports a stop", async () => {
+  const client = a.createUpstreamClient(() => settings(), stoppingBackend("length"));
+  assert.equal(await client.createMessage({ task: "extract", model: "m", max_tokens: 10, messages: userMessage("x") }), "the page body");
+});
+
+// Upstream's own SDK clients call onFinish just before they return the text
+// (llm-sdk/anthropic-sdk-client.ts), so a call that throws never reports.
+test("onFinish is not called when the backend throws", async () => {
+  const lookup = () => ({
+    name: "claudecli",
+    async completeText(req) {
+      req.onStop?.("end");
+      throw new Error("Claude Code failed: boom");
+    },
+  });
+  const seen = [];
+  const client = a.createUpstreamClient(() => settings(), lookup);
+  await assert.rejects(
+    client.createMessage({ task: "extract", model: "m", max_tokens: 10, messages: userMessage("x"), onFinish: (m) => seen.push(m) }),
+    /boom/,
+  );
+  assert.deepEqual(seen, []);
+});
+
+test("onFinish is not called when the call is aborted, before or during it", async () => {
+  const seen = [];
+  const onFinish = (m) => seen.push(m);
+  const client = a.createUpstreamClient(() => settings(), stoppingBackend("end"));
+  const early = new AbortController();
+  early.abort();
+  await assert.rejects(
+    client.createMessage({ task: "extract", model: "m", max_tokens: 10, messages: userMessage("x"), abortSignal: early.signal, onFinish }),
+    (e) => e.name === "AbortError",
+  );
+
+  // The backend answers after the cancel, as an HTTP backend that cannot
+  // stop its request does.
+  let answer;
+  const slow = a.createUpstreamClient(() => settings(), () => ({
+    name: "gemini",
+    completeText(req) {
+      return new Promise((resolve) => {
+        answer = () => {
+          req.onStop?.("end");
+          resolve("late");
+        };
+      });
+    },
+  }));
+  const during = new AbortController();
+  const pending = slow.createMessage({ task: "extract", model: "m", max_tokens: 10, messages: userMessage("x"), abortSignal: during.signal, onFinish });
+  during.abort();
+  await assert.rejects(pending, (e) => e.name === "AbortError");
+  answer();
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(seen, []);
+});
+
 // Every upstream call site guards the typed and streaming methods with an
 // `if (client.method)` check and falls back to createMessage, which is the
 // path upstream's own Anthropic client takes. Leaving them off is deliberate.

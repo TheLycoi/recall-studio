@@ -16,10 +16,10 @@
  * Pure apart from the backends it is given: no `obsidian` import, so
  * test/upstreamLlmAdapter.test.mjs bundles it with fake backends.
  */
-import type { LlmBackend, ProviderName, TextRequest } from "../backend";
+import type { LlmBackend, ProviderName, TextRequest, TextStop } from "../backend";
 import { resolveRole, type ModelRole } from "../modelRoles";
 import type { WikiLmSettings } from "../settings";
-import type { UpstreamLLMClient } from "./vendor";
+import type { UpstreamFinishReason, UpstreamLLMClient } from "./vendor";
 
 export type BackendLookup = (provider: ProviderName) => Pick<LlmBackend, "completeText">;
 
@@ -75,6 +75,18 @@ function effortFor(params: CreateMessageParams): TextRequest["effort"] {
   return undefined;
 }
 
+/**
+ * A backend's stop in upstream's words (LLMFinishReason in types.ts). Upstream
+ * acts only on "length": it keeps a page's body rather than write a cut-off
+ * rewrite over it, and halves an extract batch (finish-reason.ts captureFinish).
+ */
+const FINISH_REASON: Record<TextStop, UpstreamFinishReason> = {
+  end: "stop",
+  length: "length",
+  other: "other",
+  unknown: "unknown",
+};
+
 /** What upstream recognises as a cancel: the engine checks `name === "AbortError"` on a DOMException. */
 function abortError(): DOMException {
   return new DOMException("The model call was cancelled.", "AbortError");
@@ -110,8 +122,13 @@ function untilAborted<T>(call: Promise<T>, signal: AbortSignal): Promise<T> {
  *
  * Upstream's `model` parameter is not used: the role decides the model. The
  * other parameters WikiLM's backends have no use for (sampling, cache
- * breakpoints, output modes, `onFinish`) are dropped; the table in the task 3
- * report lists each one and why.
+ * breakpoints, output modes) are dropped; the table in the task 3 report
+ * lists each one and why.
+ *
+ * `onFinish` is called once, just before the text is returned, as upstream's
+ * own SDK clients do (llm-sdk/anthropic-sdk-client.ts); a call that throws or
+ * is cancelled never reports. A backend that says nothing leaves the reason
+ * "unknown".
  */
 export function createUpstreamClient(getSettings: () => WikiLmSettings, backends: BackendLookup, options: UpstreamClientOptions = {}): UpstreamLLMClient {
   const untagged = options.untagged ?? "digest";
@@ -120,6 +137,7 @@ export function createUpstreamClient(getSettings: () => WikiLmSettings, backends
       const signal = params.abortSignal;
       if (signal?.aborted) throw abortError();
       const { provider, model } = resolveRole(getSettings(), roleForTask(params.task, untagged));
+      let stop: TextStop = "unknown";
       const call = backends(provider).completeText({
         system: params.system ?? "",
         user: flattenMessages(params.messages),
@@ -127,8 +145,13 @@ export function createUpstreamClient(getSettings: () => WikiLmSettings, backends
         effort: effortFor(params),
         model: model || undefined,
         signal,
+        onStop: (s) => {
+          stop = s;
+        },
       });
-      return signal ? untilAborted(call, signal) : call;
+      const text = await (signal ? untilAborted(call, signal) : call);
+      params.onFinish?.({ finishReason: FINISH_REASON[stop] });
+      return text;
     },
   };
 }

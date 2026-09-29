@@ -1,13 +1,13 @@
 import { requestUrl } from "obsidian";
 import { z } from "zod";
-import type { CompletionRequest, LlmBackend, TextRequest } from "./backend";
+import type { CompletionRequest, LlmBackend, TextRequest, TextStop } from "./backend";
 import { resolveGeminiKey, type KeySource } from "./keys";
 import { readGeminiModels } from "./modelRoles";
 import type { Effort, WikiLmSettings } from "./settings";
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
-export type GeminiErrorKind = "auth" | "rate" | "failed";
+export type GeminiErrorKind = "auth" | "rate" | "failed" | "aborted";
 
 export class GeminiError extends Error {
   constructor(
@@ -77,6 +77,21 @@ export function readGeminiText(body: unknown): { text: string | null; error: str
   return { text: text || null, error: null };
 }
 
+/**
+ * Why the first candidate ended, as a TextStop. "STOP" is a finished answer
+ * and "MAX_TOKENS" one cut off at maxOutputTokens; readGeminiText above reads
+ * the same field. A missing reason, or "FINISH_REASON_UNSPECIFIED", is
+ * unknown, and any other reason Gemini names is other. "SAFETY" and
+ * "PROHIBITED_CONTENT" never reach this: readGeminiText makes them errors.
+ */
+export function geminiStop(body: unknown): TextStop {
+  const reason = (body as { candidates?: Array<{ finishReason?: unknown }> } | null)?.candidates?.[0]?.finishReason;
+  if (typeof reason !== "string" || reason === "FINISH_REASON_UNSPECIFIED") return "unknown";
+  if (reason === "STOP") return "end";
+  if (reason === "MAX_TOKENS") return "length";
+  return "other";
+}
+
 /** Google Gemini via the generateContent REST API with a JSON response schema. Needs an API key. */
 export class GeminiBackend implements LlmBackend {
   readonly name = "gemini" as const;
@@ -119,7 +134,7 @@ export class GeminiBackend implements LlmBackend {
   private async generate(req: TextRequest, key: string, label: string, schema?: z.ZodType): Promise<string> {
     const s = this.getSettings();
     const effort = req.effort ?? s.effort;
-    if (req.signal?.aborted) throw new GeminiError("failed", "Cancelled.");
+    if (req.signal?.aborted) throw new GeminiError("aborted", "Cancelled.");
     const res = await requestUrl({
       url: `${API_BASE}/${encodeURIComponent(req.model ?? s.geminiModel)}:generateContent`,
       method: "POST",
@@ -135,7 +150,7 @@ export class GeminiBackend implements LlmBackend {
       }),
       throw: false,
     });
-    if (req.signal?.aborted) throw new GeminiError("failed", "Cancelled.");
+    if (req.signal?.aborted) throw new GeminiError("aborted", "Cancelled.");
 
     let body: unknown;
     try {
@@ -156,6 +171,7 @@ export class GeminiBackend implements LlmBackend {
     }
     if (error) throw new GeminiError("failed", error);
     if (!text) throw new GeminiError("failed", `Gemini returned no ${label}.`);
+    req.onStop?.(geminiStop(body));
     return text;
   }
 

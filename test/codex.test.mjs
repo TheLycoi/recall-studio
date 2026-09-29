@@ -2,7 +2,7 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
-import { mkdtempSync } from "node:fs";
+import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -88,4 +88,27 @@ test("codexCandidates: configured path is authoritative, otherwise PATH then bun
 
 test("cleanStderr drops the stdin notice", () => {
   assert.equal(c.cleanStderr("Reading prompt from stdin...\nError: not logged in\n"), "Error: not logged in");
+});
+
+/** An executable that stands in for `codex`: reads its stdin and prints `stdout`. */
+function fakeCodex(stdout) {
+  const dir = mkdtempSync(path.join(tmpdir(), "wikilm-fake-codex-"));
+  const bin = path.join(dir, "codex");
+  writeFileSync(bin, `#!/bin/sh\ncat > /dev/null\ncat <<'EVENTS'\n${stdout}\nEVENTS\n`);
+  chmodSync(bin, 0o755);
+  return bin;
+}
+
+// `codex exec --json` says nothing about why the model stopped: its events
+// carry the agent message and, at the end of a turn, token usage only.
+test("completeText reports an unknown stop, since codex's events carry none", async () => {
+  const stdout = [
+    ev({ type: "thread.started", thread_id: "t" }),
+    ev({ type: "item.completed", item: { id: "m1", type: "agent_message", text: "A page body." } }),
+    ev({ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 2 } }),
+  ].join("\n");
+  const b = new c.CodexBackend(() => ({ effort: "low", codexPath: fakeCodex(stdout), codexModel: "gpt-5.5" }));
+  const stops = [];
+  assert.equal(await b.completeText({ system: "", user: "u", maxTokens: 10, onStop: (s) => stops.push(s) }), "A page body.");
+  assert.deepEqual(stops, ["unknown"]);
 });

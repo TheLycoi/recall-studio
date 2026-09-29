@@ -4,7 +4,7 @@ import { accessSync, constants } from "fs";
 import { homedir } from "os";
 import { delimiter, join } from "path";
 import { z } from "zod";
-import type { CompletionRequest, LlmBackend, TextRequest } from "./backend";
+import type { CompletionRequest, LlmBackend, TextRequest, TextStop } from "./backend";
 import { extractJson, toStrictSchema } from "./codex";
 import type { WikiLmSettings } from "./settings";
 
@@ -89,13 +89,11 @@ export interface ClaudeResult {
 }
 
 /**
- * Pull the single result envelope out of `claude -p --output-format json`
- * stdout: the last non-empty line that parses as a JSON object with
- * `type === "result"`. Stray non-JSON lines (update notices, warnings) are
- * skipped.
+ * The single result envelope in `claude -p --output-format json` stdout: the
+ * last non-empty line that parses as a JSON object with `type === "result"`.
+ * Stray non-JSON lines (update notices, warnings) are skipped.
  */
-export function parseClaudeResult(stdout: string): ClaudeResult {
-  const empty: ClaudeResult = { structured: null, text: null, isError: false, message: null, subtype: null, apiErrorStatus: null };
+function findResultEnvelope(stdout: string): Record<string, unknown> | null {
   const lines = stdout.split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i].trim();
@@ -108,19 +106,44 @@ export function parseClaudeResult(stdout: string): ClaudeResult {
     }
     if (!value || typeof value !== "object" || Array.isArray(value)) continue;
     const rec = value as Record<string, unknown>;
-    if (rec.type !== "result") continue;
-    const isError = rec.is_error === true;
-    const text = typeof rec.result === "string" ? rec.result : null;
-    return {
-      structured: rec.structured_output === undefined ? null : rec.structured_output ?? null,
-      text,
-      isError,
-      message: isError ? text : null,
-      subtype: typeof rec.subtype === "string" ? rec.subtype : null,
-      apiErrorStatus: typeof rec.api_error_status === "number" ? rec.api_error_status : null,
-    };
+    if (rec.type === "result") return rec;
   }
-  return empty;
+  return null;
+}
+
+/** What the result envelope says: the answer, or the error and its details. */
+export function parseClaudeResult(stdout: string): ClaudeResult {
+  const rec = findResultEnvelope(stdout);
+  if (!rec) return { structured: null, text: null, isError: false, message: null, subtype: null, apiErrorStatus: null };
+  const isError = rec.is_error === true;
+  const text = typeof rec.result === "string" ? rec.result : null;
+  return {
+    structured: rec.structured_output === undefined ? null : rec.structured_output ?? null,
+    text,
+    isError,
+    message: isError ? text : null,
+    subtype: typeof rec.subtype === "string" ? rec.subtype : null,
+    apiErrorStatus: typeof rec.api_error_status === "number" ? rec.api_error_status : null,
+  };
+}
+
+/**
+ * Why a plain-text call's model stopped, from the envelope's `stop_reason`
+ * (the Messages API's value for the last turn) and `terminal_reason` (why the
+ * CLI's loop ended). Only a completed loop whose last turn ended with
+ * `end_turn` is an end. `max_tokens` is a length. Everything else is unknown,
+ * `stop_sequence` included: no stop sequence is sent, and the CLI reported it
+ * on a call it had failed for exceeding its own output cap (captured in
+ * test/claudeCli.test.mjs). That cap is an error envelope, which
+ * completeText throws on before asking this.
+ */
+export function claudeTextStop(stdout: string): TextStop {
+  const rec = findResultEnvelope(stdout);
+  if (!rec) return "unknown";
+  if (rec.stop_reason === "max_tokens" || rec.stop_reason === "model_context_window_exceeded") return "length";
+  const completed = rec.terminal_reason === undefined || rec.terminal_reason === "completed";
+  if (rec.stop_reason === "end_turn" && completed) return "end";
+  return "unknown";
 }
 
 /**
@@ -438,6 +461,7 @@ export class ClaudeCliBackend implements LlmBackend {
       throw classifyClaude({ spawnError: r.spawnError, timedOut: r.timedOut, aborted: r.aborted, code: r.code, stderr: r.stderr, parsed });
     }
     if (parsed.text === null) throw new ClaudeCliError("failed", "Claude Code produced no answer.");
+    req.onStop?.(claudeTextStop(r.stdout));
     return parsed.text;
   }
 
