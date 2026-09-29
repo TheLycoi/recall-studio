@@ -1,0 +1,417 @@
+// #267 — Non-lossy Mentions re-ingest: formatter ↔ parser round-trip
+//
+// The fix unions the mentions already accumulated on a page with the new
+// source's before re-emitting the section. That union depends on parsing the
+// existing `## Mentions in Source` block back into structured mentions, which
+// the code never did before. These tests pin the format ↔ parse contract so
+// the two cannot drift, and exercise the fail-safe + the #267 regression.
+
+import { describe, it, expect } from 'vitest';
+import { formatMentionsSection } from '../../core/mentions-formatter';
+import { parseMentionsSection, stripMentionsSection, computeReingestMentions } from '../../core/mentions-parser';
+import { injectMentionsSection } from '../../core/mentions-injector';
+import { dedupMentionsByProvenanceKey } from '../../core/batch-merger';
+import type { MentionWithProvenance } from '../../types';
+
+const LABEL = 'Mentions in Source';
+
+function mention(partial: Partial<MentionWithProvenance> & { quote: string; source_path: string }): MentionWithProvenance {
+  return { source_slug: '', extracted_at: '', ...partial };
+}
+
+// ─── round-trip fidelity ─────────────────────────────────────────────────
+
+describe('formatMentionsSection ↔ parseMentionsSection round-trip', () => {
+  it('recovers quote and source_path from a single bullet', () => {
+    const section = formatMentionsSection(['the quick brown fox'], 'notes/MyNote.md', LABEL);
+    const parsed = parseMentionsSection(section, LABEL);
+    expect(parsed.found).toBe(true);
+    expect(parsed.fullyParsed).toBe(true);
+    expect(parsed.mentions).toEqual([
+      mention({ quote: 'the quick brown fox', source_path: 'notes/MyNote' }),
+    ]);
+  });
+
+  it('recovers the optional translation', () => {
+    const structured = [mention({ quote: '光合作用', translation: 'photosynthesis', source_path: 'notes/Bio.md' })];
+    const section = formatMentionsSection(structured, 'notes/Bio.md', LABEL);
+    const parsed = parseMentionsSection(section, LABEL);
+    expect(parsed.fullyParsed).toBe(true);
+    expect(parsed.mentions[0].quote).toBe('光合作用');
+    expect(parsed.mentions[0].translation).toBe('photosynthesis');
+    expect(parsed.mentions[0].source_path).toBe('notes/Bio');
+  });
+
+  it('recovers every mention across multiple sources', () => {
+    const structured = [
+      mention({ quote: 'quote A', source_path: 'notes/A.md', extracted_at: '2026-01-01T00:00:00Z' }),
+      mention({ quote: 'quote B', source_path: 'notes/B.md', extracted_at: '2026-02-01T00:00:00Z' }),
+      mention({ quote: 'quote C', source_path: 'notes/C.md', extracted_at: '2026-03-01T00:00:00Z' }),
+    ];
+    const section = formatMentionsSection(structured, 'notes/A.md', LABEL);
+    const parsed = parseMentionsSection(section, LABEL);
+    expect(parsed.fullyParsed).toBe(true);
+    expect(parsed.mentions.map(m => m.quote).sort()).toEqual(['quote A', 'quote B', 'quote C']);
+    expect(parsed.mentions.map(m => m.source_path).sort()).toEqual(['notes/A', 'notes/B', 'notes/C']);
+  });
+
+  it('re-formatting a parsed section preserves the quotes and links', () => {
+    const original = formatMentionsSection(
+      [
+        mention({ quote: 'alpha', source_path: 'notes/A.md' }),
+        mention({ quote: 'beta', translation: 'zwei', source_path: 'notes/B.md' }),
+      ],
+      'notes/A.md',
+      LABEL,
+    );
+    const reemitted = formatMentionsSection(parseMentionsSection(original, LABEL).mentions, 'notes/A.md', LABEL);
+    expect(reemitted).toContain('- "alpha" — [[notes/A|A]]');
+    expect(reemitted).toContain('- "beta" (zwei) — [[notes/B|B]]');
+  });
+});
+
+// ─── fail-safe on hand-edited / unparseable blocks ───────────────────────
+
+describe('parseMentionsSection fail-safe', () => {
+  it('flags a hand-edited section as not fully parsed and keeps raw', () => {
+    const body = [
+      '## Mentions in Source',
+      '',
+      '- "a real quote" — [[notes/A|A]]',
+      "- a user's freehand note that isn't a bullet link",
+      '',
+    ].join('\n');
+    const parsed = parseMentionsSection(body, LABEL);
+    expect(parsed.found).toBe(true);
+    expect(parsed.fullyParsed).toBe(false);
+    // The one well-formed bullet still parses…
+    expect(parsed.mentions).toEqual([mention({ quote: 'a real quote', source_path: 'notes/A' })]);
+    // …and the raw block is available verbatim for the caller to preserve.
+    expect(parsed.raw).toContain("user's freehand note");
+  });
+
+  it('reports found:false when there is no section', () => {
+    const parsed = parseMentionsSection('# Title\n\n## Summary\n\nbody', LABEL);
+    expect(parsed.found).toBe(false);
+    expect(parsed.fullyParsed).toBe(true);
+    expect(parsed.mentions).toEqual([]);
+  });
+
+  it('stripMentionsSection removes the block and leaves other sections intact', () => {
+    const body = [
+      '# Foo',
+      '',
+      '## Summary',
+      'text',
+      '',
+      '## Mentions in Source',
+      '- "q" — [[notes/A|A]]',
+    ].join('\n');
+    const stripped = stripMentionsSection(body, LABEL);
+    expect(stripped).toContain('## Summary');
+    expect(stripped).not.toContain('## Mentions in Source');
+    expect(stripped).not.toContain('[[notes/A|A]]');
+  });
+});
+
+// ─── composite-key dedup ─────────────────────────────────────────────────
+
+describe('dedupMentionsByProvenanceKey', () => {
+  it('drops a mention identical in quote AND source', () => {
+    const a = [mention({ quote: 'same', source_path: 'notes/A' })];
+    const b = [mention({ quote: 'same', source_path: 'notes/A' })];
+    expect(dedupMentionsByProvenanceKey(a, b)).toHaveLength(1);
+  });
+
+  it('keeps the same quote when it comes from a different source', () => {
+    const a = [mention({ quote: 'same', source_path: 'notes/A' })];
+    const b = [mention({ quote: 'same', source_path: 'notes/B' })];
+    const out = dedupMentionsByProvenanceKey(a, b)!;
+    expect(out).toHaveLength(2);
+    expect(out.map(m => m.source_path).sort()).toEqual(['notes/A', 'notes/B']);
+  });
+
+  it('preserves insertion order, existing first', () => {
+    const a = [mention({ quote: 'x', source_path: 'notes/A' })];
+    const b = [mention({ quote: 'y', source_path: 'notes/B' })];
+    expect(dedupMentionsByProvenanceKey(a, b)!.map(m => m.quote)).toEqual(['x', 'y']);
+  });
+});
+
+// ─── #267 regression: union preserves cross-source mentions ──────────────
+
+describe('#267 — non-lossy re-ingest (parse ∪ new → inject)', () => {
+  it('preserves all prior sources when a new source is merged in', () => {
+    // A page that already accumulated mentions from source A and source B.
+    const existingBody = [
+      '# Oxidative Stress',
+      '',
+      '## Summary',
+      'An accumulated page.',
+      '',
+      formatMentionsSection(
+        [
+          mention({ quote: 'quote from A', source_path: 'notes/A.md', extracted_at: '2026-01-01T00:00:00Z' }),
+          mention({ quote: 'quote from B', source_path: 'notes/B.md', extracted_at: '2026-02-01T00:00:00Z' }),
+        ],
+        'notes/A.md',
+        LABEL,
+      ),
+    ].join('\n');
+
+    // New source C arrives. This mirrors assembleFinalContent's union step.
+    const newMentions = [mention({ quote: 'quote from C', source_path: 'notes/C.md', extracted_at: '2026-03-01T00:00:00Z' })];
+    const parsed = parseMentionsSection(existingBody, LABEL);
+    expect(parsed.fullyParsed).toBe(true);
+    const unioned = dedupMentionsByProvenanceKey(parsed.mentions, newMentions)!;
+    const merged = injectMentionsSection(existingBody, unioned, 'notes/C.md', { sectionLabel: LABEL });
+
+    // Before the fix, A and B were dropped; now all three survive.
+    expect(merged).toContain('quote from A');
+    expect(merged).toContain('quote from B');
+    expect(merged).toContain('quote from C');
+    // Exactly one Mentions section — no duplication.
+    expect((merged.match(/## Mentions in Source/g) || []).length).toBe(1);
+  });
+
+  it('does not accumulate a duplicate when the same source is re-ingested unchanged', () => {
+    const existingBody = [
+      '## Mentions in Source',
+      '',
+      '- "stable quote" — [[notes/A|A]]',
+    ].join('\n');
+    const sameAgain = [mention({ quote: 'stable quote', source_path: 'notes/A' })];
+    const parsed = parseMentionsSection(existingBody, LABEL);
+    const unioned = dedupMentionsByProvenanceKey(parsed.mentions, sameAgain)!;
+    expect(unioned).toHaveLength(1);
+  });
+});
+
+// ─── #289: pre-#244 legacy blockquote shape ──────────────────────────────
+//
+// Before #244 the Mentions section was written by the model, grouped by source
+// under a blockquote header. The flat-only parser could not structure it, so
+// `computeReingestMentions` returned `preserveRaw`, the #267 fail-safe fired,
+// and the page never accumulated another quote — silently, and on every
+// subsequent ingest. Parsing the shape is the migration path: the section is
+// re-emitted flat the first time the page merges again.
+
+describe('#289 — legacy grouped-blockquote Mentions sections', () => {
+  const legacy = [
+    `## ${LABEL}`,
+    '',
+    '> **Source: [[sources/Nephrologie|Nephrologie]]**',
+    '> - "Das Nephron ist die kleinste funktionelle Einheit."',
+    '> - "Der Glomerulus filtert das Blut." (The glomerulus filters the blood.)',
+    '> **Source: [[sources/Physiologie|Physiologie]]**',
+    '> - "Die Filtrationsrate ist altersabhängig."',
+  ].join('\n');
+
+  it('parses a legacy block fully, so the fail-safe does not fire', () => {
+    const r = parseMentionsSection(legacy, LABEL);
+    expect(r.found).toBe(true);
+    expect(r.fullyParsed).toBe(true);
+    expect(r.mentions).toHaveLength(3);
+  });
+
+  it('attributes each quote to the group it sits under', () => {
+    const r = parseMentionsSection(legacy, LABEL);
+    expect(r.mentions[0].source_path).toBe('sources/Nephrologie');
+    expect(r.mentions[1].source_path).toBe('sources/Nephrologie');
+    expect(r.mentions[2].source_path).toBe('sources/Physiologie');
+  });
+
+  it('recovers a parenthetical translation', () => {
+    const r = parseMentionsSection(legacy, LABEL);
+    expect(r.mentions[1].translation).toBe('The glomerulus filters the blood.');
+  });
+
+  it('accepts a group header without a display alias', () => {
+    const body = [`## ${LABEL}`, '', '> **Source: [[sources/X]]**', '> - "q"'].join('\n');
+    const r = parseMentionsSection(body, LABEL);
+    expect(r.fullyParsed).toBe(true);
+    expect(r.mentions[0].source_path).toBe('sources/X');
+  });
+
+  it('accepts a localized group header — the shape is matched, not the English literal', () => {
+    const body = [`## ${LABEL}`, '', '> **Quelle: [[sources/X|X]]**', '> - "q"'].join('\n');
+    const r = parseMentionsSection(body, LABEL);
+    expect(r.fullyParsed).toBe(true);
+    expect(r.mentions[0].source_path).toBe('sources/X');
+  });
+
+  it('parses a block that mixes the legacy and flat shapes', () => {
+    const body = [
+      `## ${LABEL}`,
+      '',
+      '> **Source: [[sources/Alt|Alt]]**',
+      '> - "alter Beleg"',
+      '- "neuer Beleg" — [[sources/Neu|Neu]]',
+    ].join('\n');
+    const r = parseMentionsSection(body, LABEL);
+    expect(r.fullyParsed).toBe(true);
+    expect(r.mentions.map(m => m.source_path)).toEqual(['sources/Alt', 'sources/Neu']);
+  });
+
+  it('still fails safe on a quote that has no group to inherit attribution from', () => {
+    const body = [`## ${LABEL}`, '', '> - "orphan quote"'].join('\n');
+    const r = parseMentionsSection(body, LABEL);
+    expect(r.fullyParsed).toBe(false);
+    expect(r.mentions).toHaveLength(0);
+  });
+
+  it('still fails safe on genuinely hand-edited prose', () => {
+    const body = [`## ${LABEL}`, '', 'Some note the user typed by hand.'].join('\n');
+    expect(parseMentionsSection(body, LABEL).fullyParsed).toBe(false);
+  });
+
+  // ─── invariance gate: legacy → flat re-emit loses nothing ───────────────
+
+  it('[invariance] re-emits every legacy quote in the flat shape, losing none', () => {
+    const parsed = parseMentionsSection(legacy, LABEL);
+    const reemitted = formatMentionsSection(parsed.mentions, '', LABEL);
+
+    // Every quote survives, in order.
+    const quotes = parsed.mentions.map(m => m.quote);
+    expect(quotes).toHaveLength(3);
+    for (const q of quotes) expect(reemitted).toContain(q);
+
+    // And the result is now in the shape the parser accepts natively — the
+    // page is upgraded, so the next ingest parses it without the legacy path.
+    const reparsed = parseMentionsSection(reemitted, LABEL);
+    expect(reparsed.fullyParsed).toBe(true);
+    expect(reparsed.mentions.map(m => m.quote)).toEqual(quotes);
+    expect(reparsed.mentions.map(m => m.source_path))
+      .toEqual(['sources/Nephrologie', 'sources/Nephrologie', 'sources/Physiologie']);
+    expect(reemitted).not.toContain('>');
+  });
+
+  it('[invariance] a legacy page merging a new source keeps its old quotes', () => {
+    const result = computeReingestMentions(
+      legacy,
+      [mention({ quote: 'brandneuer Beleg', source_path: 'sources/Neu' })],
+      LABEL,
+    );
+    expect(result.preserveRaw).toBeNull(); // fail-safe no longer fires
+    expect(result.mentions.map(m => m.quote)).toEqual([
+      'Das Nephron ist die kleinste funktionelle Einheit.',
+      'Der Glomerulus filtert das Blut.',
+      'Die Filtrationsrate ist altersabhängig.',
+      'brandneuer Beleg',
+    ]);
+  });
+});
+
+// ─── #363: citation with no resolvable target ────────────────────────────
+//
+// An empty wikilink `[[|]]` reached pages through `formatMentionsSection`
+// taking a blank `source_path` straight from the model. It reads as cosmetic
+// and is not: `BULLET_RE` required a non-empty target, so the line failed to
+// parse, `computeReingestMentions` returned `preserveRaw`, the #267 fail-safe
+// fired, and the page stopped accumulating quotes on every later ingest.
+// Measured on a 417-note corpus (9272 writes): 119 frozen pages, 104 of the
+// 144 unparseable lines were empty backlinks.
+//
+// The two halves below are one fix, not two: the formatter stops writing an
+// empty target (it emits the quote without a citation), and the parser accepts
+// both that shape and the `[[|]]` already sitting in vaults. Shipping only the
+// formatter half would trade one unparseable shape for another.
+
+describe('#363 — empty and absent citations', () => {
+  const frozen = [
+    `## ${LABEL}`,
+    '',
+    '- "ein eingefrorener Beleg" — [[|]]',
+    '- "mit Übersetzung" (with translation) — [[|]]',
+  ].join('\n');
+
+  it('parses a bullet whose citation target is empty', () => {
+    const r = parseMentionsSection(frozen, LABEL);
+    expect(r.found).toBe(true);
+    expect(r.fullyParsed).toBe(true); // the fail-safe no longer fires
+    expect(r.mentions.map(m => m.quote)).toEqual(['ein eingefrorener Beleg', 'mit Übersetzung']);
+    expect(r.mentions.map(m => m.source_path)).toEqual(['', '']);
+    expect(r.mentions[1].translation).toBe('with translation');
+  });
+
+  it('parses a bullet that carries no citation at all', () => {
+    const body = [`## ${LABEL}`, '', '- "a quote with no source"'].join('\n');
+    const r = parseMentionsSection(body, LABEL);
+    expect(r.fullyParsed).toBe(true);
+    expect(r.mentions).toEqual([mention({ quote: 'a quote with no source', source_path: '' })]);
+  });
+
+  it('[control] a real target is still required to be recovered verbatim', () => {
+    const r = parseMentionsSection([`## ${LABEL}`, '', '- "q" — [[notes/A|A]]'].join('\n'), LABEL);
+    expect(r.fullyParsed).toBe(true);
+    expect(r.mentions[0].source_path).toBe('notes/A');
+  });
+
+  it('[control] genuinely unstructurable lines still fail safe', () => {
+    const body = [
+      `## ${LABEL}`,
+      '',
+      '- "a real quote" — [[|]]',
+      '- a freehand note that is not a quote at all',
+    ].join('\n');
+    const r = parseMentionsSection(body, LABEL);
+    expect(r.fullyParsed).toBe(false);
+    expect(r.raw).toContain('freehand note');
+  });
+
+  it('the formatter emits no wikilink when the source path is blank', () => {
+    const section = formatMentionsSection([mention({ quote: 'q', source_path: '' })], '', LABEL);
+    expect(section).toContain('- "q"');
+    expect(section).not.toContain('[[');
+  });
+
+  it('the formatter emits no wikilink in conversation mode without a path', () => {
+    const section = formatMentionsSection([], '', LABEL, {
+      conversationMode: true,
+      conversationLabel: 'Conversation: X',
+    });
+    expect(section).toContain('- (Conversation: X)');
+    expect(section).not.toContain('[[');
+  });
+
+  it('a citation-less bullet round-trips through the parser', () => {
+    const section = formatMentionsSection([mention({ quote: 'orphan', source_path: '' })], '', LABEL);
+    const r = parseMentionsSection(section, LABEL);
+    expect(r.fullyParsed).toBe(true);
+    expect(r.mentions).toEqual([mention({ quote: 'orphan', source_path: '' })]);
+  });
+
+  it('fills a blank source from the source being merged, and keeps it blank without one', () => {
+    const withDefault = computeReingestMentions(frozen, [], LABEL, 'sources/Aktuell.md');
+    expect(withDefault.preserveRaw).toBeNull();
+    expect(withDefault.mentions.map(m => m.source_path)).toEqual(['sources/Aktuell', 'sources/Aktuell']);
+
+    const withoutDefault = computeReingestMentions(frozen, [], LABEL);
+    expect(withoutDefault.preserveRaw).toBeNull();
+    expect(withoutDefault.mentions.map(m => m.source_path)).toEqual(['', '']);
+  });
+
+  it('[invariance] a frozen page merging a new source keeps its quotes AND heals the links', () => {
+    const existingBody = ['# Klotho', '', '## Summary', 'A frozen page.', '', frozen].join('\n');
+    const { mentions: unioned, preserveRaw } = computeReingestMentions(
+      existingBody,
+      [mention({ quote: 'neuer Beleg', source_path: 'sources/Neu.md' })],
+      LABEL,
+      'sources/Aktuell.md',
+    );
+    expect(preserveRaw).toBeNull();
+
+    const merged = injectMentionsSection(existingBody, unioned, 'sources/Aktuell.md', { sectionLabel: LABEL });
+    expect(merged).toContain('ein eingefrorener Beleg');
+    expect(merged).toContain('mit Übersetzung');
+    expect(merged).toContain('neuer Beleg');
+    expect(merged).not.toContain('[[|]]');
+    expect((merged.match(/## Mentions in Source/g) || []).length).toBe(1);
+
+    // And the page is now in a shape that parses on its own — the freeze is
+    // gone for good, not just for this pass.
+    const reparsed = parseMentionsSection(merged, LABEL);
+    expect(reparsed.fullyParsed).toBe(true);
+    expect(reparsed.mentions).toHaveLength(3);
+  });
+});
