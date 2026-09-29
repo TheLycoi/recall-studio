@@ -7,9 +7,12 @@ file to carry a prominent notice that it was changed. This file lists every
 file under `vendor/llm-wiki/` that WikiLM has modified, added or removed.
 
 `vendor/llm-wiki.manifest.json` records the sha256 of every file as imported
-from upstream. `test/vendorProvenance.test.mjs` fails when a file differs from
-the manifest and is not listed here, when a listed file lacks its marker, or
-when a file is missing and its removal is not recorded.
+from upstream. `scripts/vendor-manifest.mjs` computes it from git's squash
+commit for the latest import, never from the working tree, so regenerating it
+does not absorb a change to a vendored file. `test/vendorProvenance.test.mjs`
+fails when a file differs from the manifest and is not listed here, when a
+listed file lacks its marker, or when a file is missing and its removal is not
+recorded.
 
 ## The marking rule
 

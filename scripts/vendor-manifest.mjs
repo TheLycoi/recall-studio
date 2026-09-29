@@ -2,14 +2,18 @@
 //
 // Usage: node scripts/vendor-manifest.mjs --tag <tag>
 //
-// Writes vendor/llm-wiki.manifest.json: the upstream repository, the tag and
-// commit the tree was imported from, when the manifest was generated, and the
-// sha256 of every file under vendor/llm-wiki as it stands on disk. Run it only
-// straight after importing or updating the subtree, when the tree is exactly
-// upstream's; test/vendorProvenance.test.mjs then holds the tree to it.
+// Writes vendor/llm-wiki.manifest.json: the upstream repository, the tag, the
+// upstream commit, the squash commit it was read from, that commit's date, and
+// the sha256 of every file in upstream's tree.
 //
-// The commit is read from the `git-subtree-split:` trailer of the latest
-// squash commit for vendor/llm-wiki, so it is always the commit git imported.
+// The manifest is taken from git, never from the working tree. `git subtree
+// add --squash` and `git subtree pull --squash` each make a squash commit
+// whose tree is upstream's tree exactly and whose message ends with the
+// trailers `git-subtree-dir: vendor/llm-wiki` and `git-subtree-split: <the
+// upstream commit>`. The latest such commit reachable from HEAD is the one
+// read. So regenerating the manifest records upstream's bytes whatever the
+// working tree holds, and it cannot absorb an edit WikiLM made to a vendored
+// file. test/vendorProvenance.test.mjs holds the working tree to it.
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -24,26 +28,42 @@ export const CHANGES_PATH = "vendor/llm-wiki.CHANGES.md";
 /** Upstream's licence files. They must match the manifest and may never be listed as changed. */
 export const PROTECTED = ["LICENSE", "NOTICE"];
 
-/** Directories and files that are never part of the tree: installed packages and Finder litter. */
-const SKIP_DIRS = new Set(["node_modules"]);
-const SKIP_FILES = new Set([".DS_Store"]);
+const sha256 = (data) => crypto.createHash("sha256").update(data).digest("hex");
 
-/** `{ "<path relative to root, / separated>": "<sha256 hex>" }` for every file under root, sorted by path. */
+/** Runs git in `cwd` and returns its output. The vendored tree is several megabytes, hence the buffer. */
+function git(cwd, args, options = {}) {
+  return execFileSync("git", args, { cwd, maxBuffer: 1 << 30, ...options });
+}
+
+/** An object with `entries` as its own properties, sorted by key. Every key, `__proto__` included, becomes a file. */
+function sortedObject(entries) {
+  return Object.fromEntries([...entries].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+}
+
+/**
+ * `{ "<path relative to root, / separated>": "<sha256 hex>" }` for every file
+ * under root, sorted by path. `root` must be inside a git working tree. The
+ * files are the ones git lists there: tracked files that are still on disk,
+ * plus untracked files that no ignore rule matches. A file that git ignores
+ * but tracks is still listed, so no name can hide a file git would commit.
+ */
 export function hashTree(root) {
-  const out = {};
-  const walk = (dir, prefix) => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (!SKIP_DIRS.has(entry.name)) walk(full, rel);
-      } else if (!SKIP_FILES.has(entry.name)) {
-        out[rel] = crypto.createHash("sha256").update(fs.readFileSync(full)).digest("hex");
-      }
+  const listed = git(root, ["ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", "."], { encoding: "utf8" });
+  const out = new Map();
+  for (const rel of new Set(listed.split("\0").filter(Boolean))) {
+    const full = path.join(root, rel);
+    let stat;
+    try {
+      stat = fs.lstatSync(full);
+    } catch (e) {
+      if (e.code === "ENOENT") continue; // tracked but deleted: the check reports it missing
+      throw e;
     }
-  };
-  walk(root, "");
-  return Object.fromEntries(Object.entries(out).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+    // Git stores a symbolic link as its target, so hash the target the same way.
+    if (stat.isSymbolicLink()) out.set(rel, sha256(fs.readlinkSync(full)));
+    else if (stat.isFile()) out.set(rel, sha256(fs.readFileSync(full)));
+  }
+  return sortedObject(out);
 }
 
 /**
@@ -88,16 +108,20 @@ function hasMarker(rel, text) {
  *   it, and absent from the change list.
  */
 export function checkProvenance({ manifestFiles, actualFiles, changes, readText }) {
+  // Maps, not `in` on plain objects: a file named `constructor` or `__proto__`
+  // must be looked up as a file, not found on Object.prototype.
+  const manifest = new Map(Object.entries(manifestFiles));
+  const actual = new Map(Object.entries(actualFiles));
   const problems = [];
   for (const name of PROTECTED) {
     if (changes.modified.has(name) || changes.removed.has(name)) {
       problems.push(`${name}: upstream's ${name} may never appear in the change list`);
     }
-    if (!(name in manifestFiles)) problems.push(`${name}: not recorded in the manifest`);
-    else if (!(name in actualFiles)) problems.push(`${name}: missing from the vendored tree`);
-    else if (actualFiles[name] !== manifestFiles[name]) problems.push(`${name}: differs from upstream's ${name}`);
+    if (!manifest.has(name)) problems.push(`${name}: not recorded in the manifest`);
+    else if (!actual.has(name)) problems.push(`${name}: missing from the vendored tree`);
+    else if (actual.get(name) !== manifest.get(name)) problems.push(`${name}: differs from upstream's ${name}`);
   }
-  for (const [rel, sha] of Object.entries(actualFiles)) {
+  for (const [rel, sha] of actual) {
     if (PROTECTED.includes(rel)) continue;
     if (changes.removed.has(rel)) {
       problems.push(`${rel}: recorded as removed in the change list but still present`);
@@ -105,18 +129,18 @@ export function checkProvenance({ manifestFiles, actualFiles, changes, readText 
       if (!hasMarker(rel, readText(rel))) {
         problems.push(`${rel}: listed in the change list but has no line starting "${markerFor(rel)}"`);
       }
-    } else if (!(rel in manifestFiles)) {
+    } else if (!manifest.has(rel)) {
       problems.push(`${rel}: not in the manifest and not listed in the change list`);
-    } else if (sha !== manifestFiles[rel]) {
+    } else if (sha !== manifest.get(rel)) {
       problems.push(`${rel}: differs from the manifest and is not listed in the change list`);
     }
   }
-  for (const rel of Object.keys(manifestFiles)) {
-    if (PROTECTED.includes(rel) || rel in actualFiles) continue;
+  for (const rel of manifest.keys()) {
+    if (PROTECTED.includes(rel) || actual.has(rel)) continue;
     if (!changes.removed.has(rel)) problems.push(`${rel}: in the manifest but missing, and its removal is not recorded`);
   }
   for (const rel of changes.modified) {
-    if (!PROTECTED.includes(rel) && !(rel in actualFiles)) {
+    if (!PROTECTED.includes(rel) && !actual.has(rel)) {
       problems.push(`${rel}: listed as modified in the change list but not present`);
     }
   }
@@ -133,21 +157,75 @@ export function checkTree(root, manifest, changesText) {
   });
 }
 
-/** The upstream commit of the latest squash import of `prefix`, from its git-subtree-split trailer. */
-export function subtreeCommit(prefix = VENDOR_DIR) {
-  const log = execFileSync("git", ["log", "-1", "--format=%B", `--grep=^git-subtree-dir: ${prefix}$`], { encoding: "utf8" });
-  const match = log.match(/^git-subtree-split: ([0-9a-f]{40})$/m);
-  if (!match) throw new Error(`No git-subtree-split trailer found for ${prefix}`);
-  return match[1];
+/**
+ * The latest squash commit for `prefix` reachable from HEAD, and the upstream
+ * commit it holds: `{ squash, commit }`.
+ *
+ * A squash commit carries the trailers `git-subtree-dir: <prefix>` and
+ * `git-subtree-split: <upstream commit>`. The merge commit that `git subtree
+ * add` makes carries both too, plus `git-subtree-mainline:`, and its split
+ * trailer names the squash commit rather than upstream's, so commits with a
+ * mainline trailer are passed over. Git parses the trailers itself.
+ */
+export function subtreeSquash(prefix = VENDOR_DIR, cwd = process.cwd()) {
+  const trailer = (key) => `%(trailers:key=${key},valueonly,separator=%x20)`;
+  const format = ["%H", trailer("git-subtree-dir"), trailer("git-subtree-mainline"), trailer("git-subtree-split")].join("%x00");
+  const log = git(cwd, ["log", "--date-order", `--format=${format}%x00`, "--fixed-strings", `--grep=git-subtree-dir: ${prefix}`, "HEAD"], {
+    encoding: "utf8",
+  });
+  const fields = log.split("\0");
+  for (let i = 0; i + 3 < fields.length; i += 4) {
+    const [hash, dir, mainline, split] = fields.slice(i, i + 4).map((f) => f.trim());
+    if (dir === prefix && !mainline && /^[0-9a-f]{40}$/.test(split)) return { squash: hash, commit: split };
+  }
+  throw new Error(`No git subtree squash commit for ${prefix} is reachable from HEAD`);
 }
 
-export function buildManifest({ root = VENDOR_DIR, tag, commit, generated = new Date().toISOString() }) {
-  return { upstream: UPSTREAM, tag, commit, generated, files: hashTree(root) };
+/**
+ * `{ "<path>": "<sha256 hex>" }` for every file in the tree of `commit`,
+ * sorted by path, read from git's object store. For a squash commit that tree
+ * is upstream's, so the paths are relative to the vendored directory.
+ */
+export function hashCommitTree(commit, cwd = process.cwd()) {
+  const entries = git(cwd, ["ls-tree", "-r", "-z", "--full-tree", commit], { encoding: "utf8" })
+    .split("\0")
+    .filter(Boolean)
+    .map((line) => {
+      const [meta, rel] = [line.slice(0, line.indexOf("\t")), line.slice(line.indexOf("\t") + 1)];
+      const [mode, type, object] = meta.split(" ");
+      if (type !== "blob") throw new Error(`${rel}: a ${type} (mode ${mode}) in ${commit}; only files are expected`);
+      return { rel, object };
+    });
+  // One `git cat-file --batch` for all blobs: each answer is "<object> blob <size>\n<content>\n".
+  const batch = git(cwd, ["cat-file", "--batch"], { input: entries.map((e) => e.object).join("\n") + "\n" });
+  const out = new Map();
+  let at = 0;
+  for (const { rel, object } of entries) {
+    const eol = batch.indexOf(10, at);
+    const [got, type, size] = batch.subarray(at, eol).toString("utf8").split(" ");
+    if (got !== object || type !== "blob") throw new Error(`git cat-file answered ${got} ${type} for ${object} (${rel})`);
+    const start = eol + 1;
+    out.set(rel, sha256(batch.subarray(start, start + Number(size))));
+    at = start + Number(size) + 1;
+  }
+  return sortedObject(out);
 }
 
-export function writeManifest(tag) {
-  const manifest = buildManifest({ tag, commit: subtreeCommit() });
-  fs.writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2) + "\n");
+/**
+ * The manifest for the latest squash import of `prefix`, computed from git
+ * alone. `generated` is the squash commit's commit date, so the same import
+ * always gives the same manifest, byte for byte.
+ */
+export function buildManifest({ tag, prefix = VENDOR_DIR, cwd = process.cwd() }) {
+  const { squash, commit } = subtreeSquash(prefix, cwd);
+  const seconds = Number(git(cwd, ["show", "-s", "--format=%ct", squash], { encoding: "utf8" }).trim());
+  const generated = new Date(seconds * 1000).toISOString();
+  return { upstream: UPSTREAM, tag, commit, squash, generated, files: hashCommitTree(squash, cwd) };
+}
+
+export function writeManifest(tag, cwd = process.cwd()) {
+  const manifest = buildManifest({ tag, cwd });
+  fs.writeFileSync(path.join(cwd, MANIFEST_PATH), JSON.stringify(manifest, null, 2) + "\n");
   return manifest;
 }
 
@@ -159,5 +237,7 @@ if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(file
     process.exit(2);
   }
   const manifest = writeManifest(tag);
-  console.log(`Wrote ${MANIFEST_PATH}: ${Object.keys(manifest.files).length} files, ${tag} (${manifest.commit})`);
+  console.log(
+    `Wrote ${MANIFEST_PATH}: ${Object.keys(manifest.files).length} files, ${tag} (${manifest.commit}), from squash commit ${manifest.squash}`,
+  );
 }

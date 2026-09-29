@@ -28,8 +28,9 @@ licence:
   - Files under vendor/llm-wiki/ that WikiLM has modified, added or removed
     are listed in vendor/llm-wiki.CHANGES.md, and each modified or added file
     carries a comment line reading "Modified by WikiLM on" followed by the
-    date. The sha256 of every file as imported is recorded in
-    vendor/llm-wiki.manifest.json.
+    date. The sha256 of every file as imported from upstream is recorded in
+    vendor/llm-wiki.manifest.json, which is computed from git's squash commit
+    for the import, not from the files on disk.
 
 Separately from that included source, the following parts of WikiLM were
 written independently against obsidian-llm-wiki's published design, and this

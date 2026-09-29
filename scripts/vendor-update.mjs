@@ -5,15 +5,17 @@
 // 1. Refuses unless the working tree is clean (git status --porcelain is empty).
 // 2. Pulls the tag into vendor/llm-wiki as a squashed subtree merge from the
 //    `llmwiki` remote.
-// 3. Regenerates vendor/llm-wiki.manifest.json.
+// 3. Regenerates vendor/llm-wiki.manifest.json from the squash commit the pull
+//    made, so it records upstream's new content.
 // 4. Prints the files in vendor/llm-wiki.CHANGES.md that the pull touched:
 //    WikiLM's modifications to those files need checking against upstream's.
 //
 // --dry-run prints the commands and runs none of them.
 //
-// After a real run, the regenerated manifest records the files as they stand
-// on disk. A file in the change list therefore has WikiLM's merged content
-// recorded, not upstream's; review those files before committing.
+// The manifest is read from git's squash commit, not from disk, so a file in
+// the change list keeps upstream's content in the manifest and WikiLM's merged
+// content on disk. Review those files, and their marker lines, before
+// committing.
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { CHANGES_PATH, VENDOR_DIR, parseChangeList, writeManifest } from "./vendor-manifest.mjs";
@@ -62,7 +64,9 @@ execFileSync(pullCmd[0], pullCmd.slice(1), { stdio: "inherit" });
 
 show(manifestCmd);
 const manifest = writeManifest(tag);
-console.log(`Wrote the manifest: ${Object.keys(manifest.files).length} files, ${tag} (${manifest.commit})`);
+console.log(
+  `Wrote the manifest: ${Object.keys(manifest.files).length} files, ${tag} (${manifest.commit}), from squash commit ${manifest.squash}`,
+);
 
 const touched = new Set(
   git(...diffCmd(before).slice(1)).split("\n").filter(Boolean).map((p) => p.slice(VENDOR_DIR.length + 1)),

@@ -2,7 +2,8 @@
   "upstream": "https://github.com/GD4AI/obsidian-llm-wiki",
   "tag": "1.27.2",
   "commit": "acabfcbf2e7845857967a4ba4212ef434615f77a",
-  "generated": "2026-09-29T18:46:21.260Z",
+  "squash": "1eb2a1d2d34010728de0fe940647a4e0584db543",
+  "generated": "2026-09-29T18:36:37.000Z",
   "files": {
     ".github/FUNDING.yml": "8824328b8853b36decedd53efab7367e98a2d08d48685b7776bdf2135cc31f37",
     ".github/ISSUE_TEMPLATE/bug_report.md": "9a3e95ff8f23685b3b8bf9d9369e93984e739d477b635a5330ed2d6553d2de8d",
