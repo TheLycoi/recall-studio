@@ -168,10 +168,18 @@ function fakeEngine(script) {
 }
 
 function fakePlugin(engine, { files = [], pages = {} } = {}) {
-  const host = { built: 0 };
+  const host = { built: 0, runs: 0 };
   const exists = (p) => p in pages || engine.written.has(p);
   const plugin = {
     host,
+    // WikiLM's folders as the reader's vaults set them.
+    settings: {
+      wikiConceptsFolder: "wiki/concepts",
+      wikiEntitiesFolder: "wiki/entities",
+      schemaFolder: "wiki/schema",
+      exportFolder: "wiki/schema/exports",
+      topicFolder: "classes",
+    },
     cancel: new m.CancelToken(),
     app: {
       vault: {
@@ -186,6 +194,8 @@ function fakePlugin(engine, { files = [], pages = {} } = {}) {
         host.built++;
         return engine;
       },
+      // The fake engine writes nothing through a vault, so its guard never refuses.
+      guard: { begin: () => host.runs++, refusals: [], runFolder: null, isHeld: () => false },
     }),
   };
   return plugin;
@@ -252,6 +262,42 @@ test("a source upstream's gate skipped is reported as not ingested, with the rea
   assert.match(text, /Nothing was written\./);
 });
 
+test("a report names each page the guard kept, why, and where the texts were saved", () => {
+  const run = ".obsidian/plugins/wikilm/snapshots/2026-09-29T12-00-00-000Z";
+  const lost = [
+    { kind: "heading", key: "## two properties", line: "## Two Properties" },
+    { kind: "quote", key: "> > Albumin binds.", line: "> > Albumin binds." },
+    { kind: "pdf-link", key: "L.pdf#page=5", line: "> [!PDF] [[L.pdf#page=5|L, p.5]]" },
+    { kind: "quote", key: "> [!PDF] [[L.pdf#page=5|L, p.5]]", line: "> [!PDF] [[L.pdf#page=5|L, p.5]]" },
+  ];
+  const text = m.renderIngestReport(
+    report({
+      updatedPages: ["wiki/concepts/other.md"],
+      kept: [
+        { path: "wiki/concepts/receptors.md", action: "rewrite", dropped: 3, lost, proposal: `${run}/wiki/concepts/receptors.proposed.md`, held: 1 },
+        { path: "wiki/concepts/albumin.md", action: "rename", dropped: 0, lost: [], proposal: null, to: "wiki/entities/albumin.md", held: 0 },
+        { path: "wiki/sources/old.md", action: "remove", dropped: 0, lost: [], proposal: null, held: 0 },
+        { path: "wiki/concepts/fm.md", action: "rewrite", dropped: 0, lost: [], proposal: null, detail: "the engine asked for an in-place frontmatter edit, which WikiLM cannot check before it is written", held: 0 },
+      ],
+      snapshots: run,
+    }),
+  );
+  assert.equal(
+    text.slice(text.indexOf("Not updated")),
+    [
+      "Not updated, to keep what was there:",
+      `- wiki/concepts/receptors.md: the rewrite would have dropped 3 lines (1 heading, 2 quote lines). The proposed text is saved at ${run}/wiki/concepts/receptors.proposed.md.`,
+      "- wiki/concepts/albumin.md: the engine asked to move it to wiki/entities/albumin.md; it was left where it is.",
+      "- wiki/sources/old.md: the engine asked to remove it; it was left in place.",
+      "- wiki/concepts/fm.md: the engine asked for an in-place frontmatter edit, which WikiLM cannot check before it is written; it was left as it was.",
+      `The text each page had before this run is saved in ${run}.`,
+    ].join("\n"),
+  );
+  const folderRun = m.folderIngestReport("src", [report({ kept: [{ path: "a.md", action: "remove" }], snapshots: run }), report({ kept: [{ path: "a.md", action: "remove" }] })], { total: 2, skipped: 0, cancelled: false });
+  assert.equal(folderRun.kept.length, 1, "a page two notes asked about is listed once");
+  assert.equal(folderRun.snapshots, run);
+});
+
 // ---- ingestWithUpstream --------------------------------------------------------
 
 test("a PDF is refused before the engine is built, with a message naming the highlight digest", async () => {
@@ -269,10 +315,61 @@ test("a PDF is refused before the engine is built, with a message naming the hig
   assert.match(notices()[0], /Lecture\.pdf not ingested: .*highlight digest/);
 });
 
+// Upstream reads any note under <wiki>/sources/ as a conversation and
+// replaces the quotes on every page it merges into; a wiki page ingested as
+// its own source is always rewritten. So nothing inside the wiki is a source.
+test("a note inside the wiki folder is refused before the engine is built, with the reason and what to do", async () => {
+  for (const p of ["wiki/sources/wispr/Tuesday.md", "wiki/concepts/Receptors.md", "wiki/entities/Albumin.md", "wiki/index.md"]) {
+    globalThis.__notices = [];
+    const engine = fakeEngine(async () => assert.fail("the engine must not run on a wiki page"));
+    const plugin = fakePlugin(engine);
+    const r = await m.ingestWithUpstream(plugin, file(p));
+    assert.equal(plugin.host.built, 0, p);
+    assert.equal(engine.calls.length, 0, p);
+    assert.equal(plugin.cancel.active, false);
+    assert.equal(r.skipped, true);
+    assert.equal(r.rejectedFiles.length, 1);
+    assert.equal(notices().length, 1);
+    assert.equal(
+      notices()[0],
+      `WikiLM: ${p} not ingested: it is inside the wiki folder (wiki/), and the engine reads a note there as one of the wiki's own pages, not as a source, which can strip the quotes from the pages it merges into. Keep sources outside the wiki folder: move the note out of wiki/ and ingest it from there.\nNothing was written.`,
+    );
+  }
+  // A folder that merely starts with the wiki folder's name is not inside it.
+  const engine = fakeEngine(async (e, f) => e.done(report({ sourceFile: f.path })));
+  await m.ingestWithUpstream(fakePlugin(engine), file("wiki-drafts/Note.md"));
+  assert.equal(engine.calls.length, 1);
+});
+
+test("a folder run refuses every note inside the wiki folder or one of WikiLM's own folders, and counts and names each", async () => {
+  const engine = fakeEngine(async (e, f) => e.done(report({ sourceFile: f.path, createdPages: ["wiki/concepts/a.md"] })));
+  const files = [
+    "notes/Lecture.md",
+    "wiki/sources/wispr/Tuesday.md",
+    "wiki/concepts/Receptors.md",
+    "classes/HBIO250.md",
+    "exports/Deck.md",
+  ].map(file);
+  const plugin = fakePlugin(engine, { files });
+  plugin.settings.exportFolder = "exports";
+  const reports = await m.ingestFolderWithUpstream(plugin, folder("/"));
+  assert.deepEqual(engine.calls.map((c) => c.path), ["notes/Lecture.md"]);
+  const refused = reports.filter((r) => r.skipped).map((r) => r.sourceFile);
+  assert.deepEqual(refused.sort(), ["classes/HBIO250.md", "exports/Deck.md", "wiki/concepts/Receptors.md", "wiki/sources/wispr/Tuesday.md"]);
+  const shown = notices().at(-1);
+  assert.match(shown, /1 of 5 files read\./);
+  assert.match(shown, /Not ingested:\n/);
+  assert.match(shown, /- 2 files: it is inside the wiki folder \(wiki\/\).*\n {2}- wiki\/concepts\/Receptors\.md\n {2}- wiki\/sources\/wispr\/Tuesday\.md/);
+  assert.match(shown, /- classes\/HBIO250\.md: it is in WikiLM's topic notes folder \(classes\/\)/);
+  assert.match(shown, /- exports\/Deck\.md: it is in WikiLM's text export folder \(exports\/\)/);
+});
+
 test("a run sets the engine's callbacks, returns its report, shows it, and leaves nothing behind", async () => {
   const done = report({ sourceFile: "sources/Note.md", createdPages: ["wiki/concepts/a.md"], updatedPages: ["wiki/concepts/b.md"] });
   const labels = [];
+  let duringRun;
   const engine = fakeEngine(async (e) => {
+    duringRun = e.callbacks.write;
     e.callbacks.progress("Analysing Note…");
     e.done(done);
   });
@@ -288,8 +385,10 @@ test("a run sets the engine's callbacks, returns its report, shows it, and leave
   assert.equal(plugin.cancel.active, false);
   const { write, ...rest } = engine.callbacks;
   assert.deepEqual(rest, { done: null, progress: null, start: null, end: null });
-  engine.write("wiki/after-the-run.md");
-  assert.ok(!(r.alsoWritten ?? []).includes("wiki/after-the-run.md"), "the write callback is let go after the run");
+  // Upstream's setter takes no null, so the run's callback is replaced, not cleared.
+  assert.equal(typeof duringRun, "function");
+  assert.equal(typeof write, "function");
+  assert.notEqual(write, duringRun, "the run's write callback is let go after the run");
   const shown = notices().at(-1);
   assert.match(shown, /- wiki\/concepts\/a\.md/);
   assert.match(shown, /- wiki\/concepts\/b\.md/);

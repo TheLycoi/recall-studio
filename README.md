@@ -59,8 +59,8 @@ in the chat lists the phrases.
 **Chat-only commands.** These left the palette but still run from the chat box
 by alias:
 
-- **Ingest source: read this markdown into the wiki** (`ingest`, `read-source`), on an open note. **AI highlight…** with *Wiki notes* writes the same wiki notes from the palette, without the flashcards choice.
-- **Ingest folder: read every note in a folder into the wiki** (`ingest-folder`, `read-folder`).
+- **Ingest source: read this markdown into the wiki** (`ingest`, `read-source`), on an open note outside the wiki folder; a note inside it is refused, with the reason. It runs the included obsidian-llm-wiki engine, which gives each entity and concept a page of its own, merges into an existing page that denotes the same thing, and writes as it goes, with WikiLM's guard between it and your pages (see [Built on](#built-on)). **AI highlight…** with *Wiki notes* reads a markdown note with WikiLM's own pipeline instead: it shows a preview first and appends into a related page wherever there is one.
+- **Ingest folder: read every note in a folder into the wiki** (`ingest-folder`, `read-folder`). Notes inside the wiki folder or one of WikiLM's own folders (concepts, entities, schema, text export, topic notes) are not read; the report names each one.
 - **Send all ==highlights== in this note to inbox** (`highlights`, `sweep`): sweeps a note you highlighted while reading and queues every span not already in the inbox.
 - **Retry failed highlights** (`retry`); the inbox's more menu has the same item.
 
@@ -194,8 +194,9 @@ bullets go to the highlighter. The note is a lens on the PDF, never a source:
 every highlight still points at a slide.
 
 Once a guide is attached, every **AI highlight…** run on that file picks it
-up (cards from a note, wiki notes from a note, or a PDF), and so does the
-chat-only `ingest`. The notice a card run shows changes to mention it.
+up (cards from a note, wiki notes from a note, or a PDF). The chat-only
+`ingest` does not: it runs the included obsidian-llm-wiki engine, which reads
+the note alone. The notice a card run shows changes to mention it.
 
 Limitations:
 
@@ -1338,7 +1339,8 @@ Layout, one line per module:
 - `src/upstream/vendor.ts` — the one door into the vendored obsidian-llm-wiki source under `vendor/llm-wiki`; nothing else imports from it
 - `src/upstream/host.ts` — builds upstream's wiki engine from WikiLM's settings, with its watcher, scheduled lint and startup fixes never constructed
 - `src/upstream/llmAdapter.ts` — upstream's model client on WikiLM's provider backends, reporting why the model stopped
-- `src/upstream/ingest.ts` — the two ingest commands on upstream's wiki engine: PDFs refused to the digest, cancel passed to the engine, and a report of every file written
+- `src/upstream/ingest.ts` — the two ingest commands on upstream's wiki engine: PDFs refused to the digest, notes inside the wiki refused, cancel passed to the engine, and a report of every file written and every page kept
+- `src/upstream/guardedVault.ts` — the vault the engine writes through: each page saved before it is overwritten, a rewrite that would drop the reader's headings, quotes, PDF links, embeds or frontmatter keys refused, no existing page removed or moved
 - `src/vaultFix.ts` — repairs for what the vault lint finds: the dead link that is only a spelling apart from its page, and the unwrap that withdraws one whose page was never written
 - `src/vaultLint.ts` — structural checks over the notes themselves: what can be found, what links anywhere, what Ask could quote
 
@@ -1369,8 +1371,20 @@ dead-link repair with count-gated fix buttons, and filing new material into a
 section of an existing page. Each part was reimplemented against this plugin's
 own types. [NOTICE](NOTICE) lists them and credits the design for each.
 
-Where the two disagree, WikiLM keeps its own policy. The clearest case is what
-happens to a new subject: upstream gives every entity and concept a page of its
-own and merges only when an existing page denotes the same thing, while WikiLM
-appends into an existing page whenever one is related and creates a page only
+The two ingest commands run the included engine and follow upstream's policy
+for a new subject: every entity and concept gets a page of its own, and new
+material is merged into an existing page only when that page denotes the same
+thing. The highlight digest and **AI highlight…** keep WikiLM's policy: they
+append into an existing page whenever one is related, and create a page only
 when nothing is.
+
+Between that engine and your pages sits a guard of WikiLM's, with no change to
+upstream's code. Before an existing page is overwritten, its text is saved
+under the plugin's folder (`.obsidian/plugins/wikilm/snapshots/`, one folder
+per run, the last 20 runs kept). A rewrite that would drop a heading, a quote
+or callout line, a PDF link, an embed or a frontmatter key is refused: the page
+keeps its text, and the proposed text is saved beside the old one. No page that
+existed before the run is removed or moved. A note inside the wiki folder is
+not ingested at all, because upstream reads a note there as one of the wiki's
+own pages. The ingest report lists every page kept this way, with where its
+texts were saved.

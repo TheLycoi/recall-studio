@@ -9,6 +9,11 @@
 //    made, so it records upstream's new content.
 // 4. Prints the files in vendor/llm-wiki.CHANGES.md that the pull touched:
 //    WikiLM's modifications to those files need checking against upstream's.
+// 5. Runs the checks, in order: `npm run vendor:types` (upstream's
+//    declarations for WikiLM's typecheck), `npm run vendor:check` (upstream's
+//    own install, typecheck, build and test suite), `npm run build` and
+//    `npm test` (WikiLM's). It stops at the first that fails and says which,
+//    and how to go back to the commit before the pull.
 //
 // --dry-run prints the commands and runs none of them.
 //
@@ -16,7 +21,7 @@
 // the change list keeps upstream's content in the manifest and WikiLM's merged
 // content on disk. Review those files, and their marker lines, before
 // committing.
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { CHANGES_PATH, VENDOR_DIR, parseChangeList, writeManifest } from "./vendor-manifest.mjs";
 
@@ -38,6 +43,13 @@ const headCmd = ["git", "rev-parse", "HEAD"];
 const pullCmd = ["git", "subtree", "pull", `--prefix=${VENDOR_DIR}`, REMOTE, `refs/tags/${tag}`, "--squash"];
 const manifestCmd = ["node", "scripts/vendor-manifest.mjs", "--tag", tag];
 const diffCmd = (before) => ["git", "diff", "--name-only", before, "HEAD", "--", VENDOR_DIR];
+const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+const checkCmds = [
+  [npm, "run", "vendor:types"],
+  [npm, "run", "vendor:check"],
+  [npm, "run", "build"],
+  [npm, "test"],
+];
 
 if (dryRun) {
   console.log(`Dry run: updating ${VENDOR_DIR} to ${tag} would run:`);
@@ -49,6 +61,8 @@ if (dryRun) {
   show(manifestCmd);
   show(diffCmd("<before>"));
   console.log(`  (print the files among those that ${CHANGES_PATH} lists)`);
+  for (const c of checkCmds) show(c);
+  console.log("  (in this order; stop at the first that fails and name it)");
   process.exit(0);
 }
 
@@ -79,3 +93,17 @@ if (hits.length) {
 } else {
   console.log(`The pull touched no file in ${CHANGES_PATH}.`);
 }
+
+for (const c of checkCmds) {
+  show(c);
+  const run = spawnSync(c[0], c.slice(1), { stdio: "inherit" });
+  if (run.status !== 0) {
+    const how = run.error ? run.error.message : run.status === null ? `signal ${run.signal}` : `exit ${run.status}`;
+    console.error(
+      `Stopped: \`${c.slice(1).join(" ")}\` failed (${how}), so the steps after it did not run. ` +
+        `The pull is committed and the manifest is rewritten but not committed; to undo both, run git reset --hard ${before}.`,
+    );
+    process.exit(1);
+  }
+}
+console.log("All four checks passed. Review the diff, then commit the manifest.");

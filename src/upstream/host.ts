@@ -9,11 +9,18 @@
  * engine writes nothing; the first write happens when the reader starts an
  * ingest, which creates the wiki folders and upstream's schema note if they
  * are missing (WikiEngine.ensureWikiStructure).
+ *
+ * The engine and its schema manager are built on the guarded view of the
+ * vault (src/upstream/guardedVault.ts), never on the plugin's own `app`: an
+ * existing page is saved before it is overwritten, a rewrite that would drop
+ * the reader's headings, quotes, PDF links, embeds or frontmatter keys is
+ * refused, and no existing file is removed or moved.
  */
 import type { ProviderName } from "../backend";
 import type WikiLmPlugin from "../main";
 import { resolveRole } from "../modelRoles";
 import type { WikiLmSettings } from "../settings";
+import { WriteGuard } from "./guardedVault";
 import { createUpstreamClient } from "./llmAdapter";
 import { SchemaManager, UPSTREAM_DEFAULT_SETTINGS, WikiEngine, type LLMWikiSettings, type UpstreamLLMClient } from "./vendor";
 
@@ -100,14 +107,13 @@ interface Built {
  */
 export class UpstreamHost {
   private built: Built | null = null;
+  private writeGuard: WriteGuard | null = null;
   private readonly ingestClient: UpstreamLLMClient;
-  private readonly seedClient: UpstreamLLMClient;
 
   constructor(private readonly plugin: WikiLmPlugin) {
     const settings = () => plugin.settings;
     const backends = (provider: ProviderName) => plugin.llm.backendFor(provider);
     this.ingestClient = createUpstreamClient(settings, backends);
-    this.seedClient = createUpstreamClient(settings, backends, { untagged: "query" });
   }
 
   engine(): WikiEngine {
@@ -123,20 +129,34 @@ export class UpstreamHost {
       return b.engine;
     }
     const getClient = () => this.ingestClient;
-    const schema = new SchemaManager(this.plugin.app, next, getClient);
+    const app = this.guard.app;
+    const schema = new SchemaManager(app, next, getClient);
     // The fifth argument is upstream's write hook, which its own plugin wires
     // to AutoMaintainManager.watchWrite. There is no watcher here.
-    const engine = new WikiEngine(this.plugin.app, next, getClient, schema, () => {});
+    const engine = new WikiEngine(app, next, getClient, schema, () => {});
     this.built = { engine, schema, settings: next };
     return engine;
   }
 
   /**
-   * A client for upstream's seed selection (`selectPprSeeds`), whose model
-   * calls carry no task label: they run on WikiLM's query role.
+   * The guard every engine write goes through, built on first use. Its
+   * snapshots go under the plugin's own folder, out of the reader's notes.
    */
-  queryClient(): UpstreamLLMClient {
-    return this.seedClient;
+  get guard(): WriteGuard {
+    const p = this.plugin;
+    this.writeGuard ??= new WriteGuard(p.app, p.manifest.dir ?? `${p.app.vault.configDir}/plugins/wikilm`, (path) => this.rewrittenEachRun(path));
+    return this.writeGuard;
+  }
+
+  /**
+   * Upstream's index and log, which it writes on every run: the index is
+   * rebuilt whole from the pages (engine-internals/index-generator.ts) and
+   * the log gains an entry and is trimmed when long (log-writer.ts). They hold
+   * no text of the reader's, so they skip the loss check; they are still saved.
+   */
+  private rewrittenEachRun(path: string): boolean {
+    const wiki = this.built?.settings.wikiFolder;
+    return !!wiki && (path === `${wiki}/index.md` || path === `${wiki}/log.md`);
   }
 
   /** Stops a running ingest and drops the engine; the next `engine()` call builds afresh. */
