@@ -249,6 +249,13 @@ test("a settings change reaches the same engine; a moved wiki folder builds a ne
   assert.deepEqual(writes, []);
 });
 
+test("the host offers no client for the parked retrieval task", () => {
+  const { plugin } = fakePlugin();
+  const host = new h.UpstreamHost(plugin);
+  assert.equal(host.queryClient, undefined);
+  assert.equal(host.seedClient, undefined);
+});
+
 test("dispose drops the engine, so the next engine() call builds afresh", () => {
   const { plugin } = fakePlugin();
   const host = new h.UpstreamHost(plugin);

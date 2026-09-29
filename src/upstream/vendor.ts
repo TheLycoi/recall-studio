@@ -15,8 +15,6 @@ import upstreamManifest from "../../vendor/llm-wiki/manifest.json";
 export { WikiEngine } from "@llm-wiki/wiki/wiki-engine";
 export { SchemaManager } from "@llm-wiki/schema/schema-manager";
 export { DEFAULT_SETTINGS as UPSTREAM_DEFAULT_SETTINGS } from "@llm-wiki/types";
-export { selectPprSeeds } from "@llm-wiki/wiki/query-engine/pipeline/select-seeds";
-export { loadRelevantPagesForQuery } from "@llm-wiki/wiki/query-engine/pipeline/load-pages";
 // What upstream's folder ingest (main-commands/ingest-commands.ts) decides
 // before it calls the engine: which files count as sources, and which already
 // have their sources/ page.
@@ -32,7 +30,6 @@ export type {
   IngestReport,
   IngestOptions,
 } from "@llm-wiki/types";
-export type { SeedSelectionResult } from "@llm-wiki/wiki/query-engine/pipeline/select-seeds";
 
 /** The upstream release vendored under vendor/llm-wiki, read from its manifest at build time. */
 export const UPSTREAM_VERSION: string = upstreamManifest.version;

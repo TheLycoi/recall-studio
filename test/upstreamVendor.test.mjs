@@ -74,15 +74,20 @@ after(() => {
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
-test("the facade exports upstream's engine, schema manager, settings and retrieval functions", () => {
-  for (const name of ["WikiEngine", "SchemaManager", "UPSTREAM_DEFAULT_SETTINGS", "selectPprSeeds", "loadRelevantPagesForQuery", "UPSTREAM_VERSION"]) {
+test("the facade exports upstream's engine, schema manager and settings", () => {
+  for (const name of ["WikiEngine", "SchemaManager", "UPSTREAM_DEFAULT_SETTINGS", "UPSTREAM_VERSION"]) {
     assert.notEqual(up[name], undefined, `${name} is exported`);
   }
   assert.equal(typeof up.WikiEngine, "function");
   assert.equal(typeof up.SchemaManager, "function");
-  assert.equal(typeof up.selectPprSeeds, "function");
-  assert.equal(typeof up.loadRelevantPagesForQuery, "function");
   assert.equal(typeof up.UPSTREAM_DEFAULT_SETTINGS, "object");
+});
+
+// Ask on upstream's retrieval (Task 5) was parked; nothing calls these.
+test("the facade carries nothing for the parked retrieval task", () => {
+  for (const name of ["selectPprSeeds", "loadRelevantPagesForQuery"]) {
+    assert.equal(up[name], undefined, `${name} is not exported`);
+  }
 });
 
 test("UPSTREAM_VERSION is the version in the vendored manifest, and that is 1.27.2", () => {

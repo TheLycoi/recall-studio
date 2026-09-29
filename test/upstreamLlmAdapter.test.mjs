@@ -143,15 +143,16 @@ test("lint tasks follow the lint role, which here is the main choice", async () 
   }
 });
 
-// Upstream's seed selection sends no task label, so the caller says which
-// role an unlabelled call belongs to.
-test("an unlabelled call runs on the digest role unless the client was made for the query role", async () => {
+// Every call the ingest engine makes is labelled; one that is not is ingest
+// work too. The option that sent unlabelled calls to the query role served
+// only the parked retrieval task, and is gone.
+test("an unlabelled call runs on the digest role, and no option sends it elsewhere", async () => {
   const { calls, lookup } = fakeBackends();
   await a.createUpstreamClient(() => settings(), lookup).createMessage({ model: "m", max_tokens: 10, messages: userMessage("x") });
   await a.createUpstreamClient(() => settings(), lookup, { untagged: "query" }).createMessage({ model: "m", max_tokens: 10, messages: userMessage("x") });
   assert.deepEqual(
     calls.map((c) => c.provider),
-    ["codex", "gemini"],
+    ["codex", "codex"],
   );
 });
 

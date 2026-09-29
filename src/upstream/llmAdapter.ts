@@ -26,24 +26,15 @@ export type BackendLookup = (provider: ProviderName) => Pick<LlmBackend, "comple
 type CreateMessageParams = Parameters<UpstreamLLMClient["createMessage"]>[0];
 type UpstreamMessage = CreateMessageParams["messages"][number];
 
-export interface UpstreamClientOptions {
-  /**
-   * The role for a call that carries no task label. The engine labels every
-   * ingest call, but upstream's seed selection (select-seeds.ts, seed-selector.ts,
-   * query-keywords.ts) labels none, so a client made for seed selection says
-   * "query" here. Defaults to "digest".
-   */
-  untagged?: ModelRole;
-}
-
 /**
  * The role an upstream task label belongs to. Upstream names its steps at each
  * call site (`task: "extract"`, `"merge-triage"`, `"query-wiki"`...). Its query
  * steps start with "query", its lint steps with "lint" plus two fix runners;
- * every other labelled step builds pages from a source, which is digest work.
+ * every other step, labelled or not, builds pages from a source, which is
+ * digest work.
  */
-export function roleForTask(task: string | undefined, untagged: ModelRole = "digest"): ModelRole {
-  if (!task) return untagged;
+export function roleForTask(task: string | undefined): ModelRole {
+  if (!task) return "digest";
   if (task.startsWith("query")) return "query";
   if (task.startsWith("lint") || task === "fix-dead-link" || task === "link-orphan") return "lint";
   return "digest";
@@ -130,13 +121,12 @@ function untilAborted<T>(call: Promise<T>, signal: AbortSignal): Promise<T> {
  * is cancelled never reports. A backend that says nothing leaves the reason
  * "unknown".
  */
-export function createUpstreamClient(getSettings: () => WikiLmSettings, backends: BackendLookup, options: UpstreamClientOptions = {}): UpstreamLLMClient {
-  const untagged = options.untagged ?? "digest";
+export function createUpstreamClient(getSettings: () => WikiLmSettings, backends: BackendLookup): UpstreamLLMClient {
   return {
     async createMessage(params: CreateMessageParams): Promise<string> {
       const signal = params.abortSignal;
       if (signal?.aborted) throw abortError();
-      const { provider, model } = resolveRole(getSettings(), roleForTask(params.task, untagged));
+      const { provider, model } = resolveRole(getSettings(), roleForTask(params.task));
       let stop: TextStop = "unknown";
       const call = backends(provider).completeText({
         system: params.system ?? "",

@@ -101,13 +101,11 @@ interface Built {
 export class UpstreamHost {
   private built: Built | null = null;
   private readonly ingestClient: UpstreamLLMClient;
-  private readonly seedClient: UpstreamLLMClient;
 
   constructor(private readonly plugin: WikiLmPlugin) {
     const settings = () => plugin.settings;
     const backends = (provider: ProviderName) => plugin.llm.backendFor(provider);
     this.ingestClient = createUpstreamClient(settings, backends);
-    this.seedClient = createUpstreamClient(settings, backends, { untagged: "query" });
   }
 
   engine(): WikiEngine {
@@ -129,14 +127,6 @@ export class UpstreamHost {
     const engine = new WikiEngine(this.plugin.app, next, getClient, schema, () => {});
     this.built = { engine, schema, settings: next };
     return engine;
-  }
-
-  /**
-   * A client for upstream's seed selection (`selectPprSeeds`), whose model
-   * calls carry no task label: they run on WikiLM's query role.
-   */
-  queryClient(): UpstreamLLMClient {
-    return this.seedClient;
   }
 
   /** Stops a running ingest and drops the engine; the next `engine()` call builds afresh. */
