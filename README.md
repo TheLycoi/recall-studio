@@ -1335,13 +1335,28 @@ Layout, one line per module:
 
 WikiLM is MIT licensed; see [LICENSE](LICENSE).
 
-Parts of it were written against the published design of
-[obsidian-llm-wiki](https://github.com/gd4ai/obsidian-llm-wiki) (Apache-2.0,
-Copyright 2025-2026 Greener-Dalii) — the retrieval cascade, the vault lint
-scanners, dead-link repair with count-gated fix buttons, and filing new
-material into a section of an existing page. None of its source code is
-included here: each part was reimplemented against this plugin's own types and
-credits it in a comment at the point of use. [NOTICE](NOTICE) lists them.
+### Built on
+
+WikiLM includes the source of
+[obsidian-llm-wiki](https://github.com/GD4AI/obsidian-llm-wiki) 1.27.2
+(commit `acabfcb`) under `vendor/llm-wiki/`, and the parts of it that WikiLM
+imports are compiled into `main.js`. Its NOTICE reads "Copyright 2025-2026
+Greener-Dalii" and lists as contributors CCRRAY-DESIGN (Ray), Dima Marchevsky
+(dmarchevsky), DocTpoint, eucher, Franco Tampieri (FrancoTampieri),
+Greener-Dalii (green-dalii), Hashim1999164, joffroy59, Matthew Harper
+(Indexed-Apogrypha), Roman Kuzmin (rkuzmin) and Younian (YounianC,
+xiaochuanlu). That code is licensed under the Apache License, Version 2.0, and
+remains so: its own `LICENSE` and `NOTICE` are in `vendor/llm-wiki/`, a copy of
+the licence is at [LICENSE-APACHE-2.0.txt](LICENSE-APACHE-2.0.txt), and every
+file WikiLM changes there is listed in
+[vendor/llm-wiki.CHANGES.md](vendor/llm-wiki.CHANGES.md). [NOTICE](NOTICE)
+has the details.
+
+Separately, parts of WikiLM's own code were written against the published
+design of obsidian-llm-wiki: the retrieval cascade, the vault lint scanners,
+dead-link repair with count-gated fix buttons, and filing new material into a
+section of an existing page. Each part was reimplemented against this plugin's
+own types. [NOTICE](NOTICE) lists them and credits the design for each.
 
 Where the two disagree, WikiLM keeps its own policy. The clearest case is what
 happens to a new subject: upstream gives every entity and concept a page of its
