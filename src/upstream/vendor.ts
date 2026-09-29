@@ -17,6 +17,13 @@ export { SchemaManager } from "@llm-wiki/schema/schema-manager";
 export { DEFAULT_SETTINGS as UPSTREAM_DEFAULT_SETTINGS } from "@llm-wiki/types";
 export { selectPprSeeds } from "@llm-wiki/wiki/query-engine/pipeline/select-seeds";
 export { loadRelevantPagesForQuery } from "@llm-wiki/wiki/query-engine/pipeline/load-pages";
+// What upstream's folder ingest (main-commands/ingest-commands.ts) decides
+// before it calls the engine: which files count as sources, and which already
+// have their sources/ page.
+export { COMPATIBLE_SOURCE_EXTENSIONS as UPSTREAM_SOURCE_EXTENSIONS } from "@llm-wiki/constants";
+export { isIngestableSource } from "@llm-wiki/core/folder-scope";
+export { pageBelongsToNote } from "@llm-wiki/core/ingest-state";
+export { slugify } from "@llm-wiki/core/slug";
 
 export type {
   LLMWikiSettings,

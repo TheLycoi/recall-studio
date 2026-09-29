@@ -1,6 +1,7 @@
 import { CLAUDE_CLI_MODELS, CODEX_FALLBACK_MODELS, DEFAULT_ROLES, modelOptions, providerModel, type ModelRole, type RoleChoice } from "./modelRoles";
 import { App, Notice, PluginSettingTab, Setting, ButtonComponent } from "obsidian";
 import type WikiLmPlugin from "./main";
+import { UPSTREAM_VERSION } from "./upstream/vendor";
 
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 export type Provider = "anthropic" | "gemini" | "codex" | "claudecli";
@@ -1126,5 +1127,12 @@ export class WikiLmSettingTab extends PluginSettingTab {
           save();
         }),
       );
+
+    // Credit for the wiki engine the ingest commands run on; the version is
+    // read from the vendored manifest, so it follows an update of vendor/llm-wiki.
+    containerEl.createEl("p", {
+      cls: "setting-item-description",
+      text: `Wiki building by obsidian-llm-wiki ${UPSTREAM_VERSION} (Greener-Dalii, DocTpoint and contributors), Apache-2.0`,
+    });
   }
 }
