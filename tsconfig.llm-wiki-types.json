@@ -1,0 +1,17 @@
+{
+  "extends": "./vendor/llm-wiki/tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "rootDir": "./vendor/llm-wiki/src",
+    "outDir": "./.types/llm-wiki",
+    "inlineSourceMap": false,
+    "inlineSources": false,
+    "typeRoots": ["./vendor/llm-wiki/node_modules/@types"]
+  },
+  "exclude": [
+    "./vendor/llm-wiki/src/__tests__/**",
+    "./vendor/llm-wiki/src/**/*.test.ts"
+  ]
+}

@@ -1,4 +1,6 @@
 node_modules/
+# Declarations for vendor/llm-wiki, written by `npm run vendor:types`
+.types/
 main.js
 *.map
 .DS_Store
