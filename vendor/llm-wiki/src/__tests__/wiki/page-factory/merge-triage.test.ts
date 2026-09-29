@@ -1,0 +1,546 @@
+// Module-level unit tests for page-factory/merge-triage.ts
+//
+// v1.24.1 Phase 2 refactor: classifyMergeNeed and buildNewInfoSummary were
+// lifted out of the PageFactory class. The tests pin the LLM triage validation
+// rules so future refactors cannot accidentally accept an unknown strategy,
+// an empty complementary list, or malformed item shapes.
+
+import { describe, it, expect } from 'vitest';
+import {
+  classifyMergeNeed,
+  buildNewInfoSummary,
+  isSourceOwnPageLemma,
+  type MergeTriageContext,
+} from '../../../wiki/page-factory/merge-triage';
+import { createMockEntity } from '../../__support__/factories';
+import type { LLMWikiSettings } from '../../../types';
+
+function makeCtx(client: { createMessage: (...a: unknown[]) => Promise<string> } | null): MergeTriageContext {
+  return {
+    settings: { wikiFolder: 'wiki', wikiLanguage: 'en', disableThinking: false } as LLMWikiSettings,
+    getClient: () => client,
+    buildSystemPrompt: async () => 'system',
+  };
+}
+
+describe('buildNewInfoSummary (#216)', () => {
+  it('emits Source / Summary / Key details lines', () => {
+    const info = createMockEntity({
+      name: 'Caching',
+      summary: 'A short summary.',
+      mentions_in_source: ['quote-A', 'quote-B'],
+    });
+    const out = buildNewInfoSummary(info, { path: 'notes/article.md', basename: 'article.md' });
+    expect(out).toContain('Source: article.md');
+    expect(out).toContain('Summary: A short summary.');
+    expect(out).toContain('Key details: quote-A; quote-B');
+  });
+
+  it('includes related_entities and related_concepts when present', () => {
+    const info = createMockEntity({
+      name: 'X',
+      related_entities: ['Y', 'Z'],
+      related_concepts: ['A', 'B'],
+    });
+    const out = buildNewInfoSummary(info, { path: 'p.md', basename: 'p.md' });
+    expect(out).toContain('Related entities: Y, Z');
+    expect(out).toContain('Related concepts: A, B');
+  });
+
+  it('omits optional sections when absent (no trailing empty Key details)', () => {
+    const info = createMockEntity({ name: 'X', mentions_in_source: [] });
+    const out = buildNewInfoSummary(info, { path: 'p.md', basename: 'p.md' });
+    expect(out).not.toContain('Key details');
+    expect(out).not.toContain('Related entities');
+  });
+});
+
+describe('classifyMergeNeed — strategy validation', () => {
+  it('returns the LLM-supplied strategy and reason', async () => {
+    const ctx = makeCtx({
+      createMessage: async () => JSON.stringify({ strategy: 'skip', reason: 'no new info' }),
+    });
+    const result = await classifyMergeNeed(
+      ctx,
+      createMockEntity({ name: 'X' }),
+      'entity',
+      { path: 'p.md', basename: 'p.md' },
+      '# existing content',
+    );
+    expect(result.strategy).toBe('skip');
+    expect(result.reason).toBe('no new info');
+    expect(result.items).toEqual([]);
+  });
+
+  it('accepts all four valid strategies', async () => {
+    for (const strat of ['merge', 'skip', 'complementary', 'contradictory'] as const) {
+      const ctx = makeCtx({
+        createMessage: async () =>
+          JSON.stringify({
+            strategy: strat,
+            reason: `test ${strat}`,
+            items: strat === 'complementary'
+              ? [{ kind: 'complementary', content: 'x', target_section: '## A' }]
+              : [],
+          }),
+      });
+      const result = await classifyMergeNeed(
+        ctx,
+        createMockEntity({ name: 'X' }),
+        'entity',
+        { path: 'p.md', basename: 'p.md' },
+        '# existing',
+      );
+      expect(result.strategy).toBe(strat);
+    }
+  });
+
+  it('throws on unknown strategy', async () => {
+    const ctx = makeCtx({
+      createMessage: async () => JSON.stringify({ strategy: 'bogus' }),
+    });
+    await expect(
+      classifyMergeNeed(ctx, createMockEntity({ name: 'X' }), 'entity', { path: 'p.md', basename: 'p.md' }, '# x'),
+    ).rejects.toThrow(/invalid strategy/);
+  });
+
+  it('throws when LLM response is empty', async () => {
+    const ctx = makeCtx({
+      createMessage: async () => '',
+    });
+    await expect(
+      classifyMergeNeed(ctx, createMockEntity({ name: 'X' }), 'entity', { path: 'p.md', basename: 'p.md' }, '# x'),
+    ).rejects.toThrow();
+  });
+});
+
+describe('classifyMergeNeed — complementary path validation', () => {
+  it('populates items for complementary strategy with valid items', async () => {
+    const ctx = makeCtx({
+      createMessage: async () =>
+        JSON.stringify({
+          strategy: 'complementary',
+          reason: 'new info to add',
+          items: [
+            { kind: 'complementary', content: 'new fact', target_section: '## Background', reason: 'expands context' },
+          ],
+        }),
+    });
+    const result = await classifyMergeNeed(
+      ctx,
+      createMockEntity({ name: 'X' }),
+      'entity',
+      { path: 'p.md', basename: 'p.md' },
+      '# existing',
+    );
+    expect(result.strategy).toBe('complementary');
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]?.content).toBe('new fact');
+    expect(result.items[0]?.target_section).toBe('## Background');
+    expect(result.items[0]?.reason).toBe('expands context');
+  });
+
+  it('throws when complementary strategy has empty items array', async () => {
+    const ctx = makeCtx({
+      createMessage: async () =>
+        JSON.stringify({ strategy: 'complementary', reason: 'x', items: [] }),
+    });
+    await expect(
+      classifyMergeNeed(ctx, createMockEntity({ name: 'X' }), 'entity', { path: 'p.md', basename: 'p.md' }, '# x'),
+    ).rejects.toThrow(/empty items/);
+  });
+
+  it('throws when complementary item is missing content', async () => {
+    const ctx = makeCtx({
+      createMessage: async () =>
+        JSON.stringify({
+          strategy: 'complementary',
+          items: [{ kind: 'complementary', target_section: '## A' }],
+        }),
+    });
+    await expect(
+      classifyMergeNeed(ctx, createMockEntity({ name: 'X' }), 'entity', { path: 'p.md', basename: 'p.md' }, '# x'),
+    ).rejects.toThrow(/invalid complementary item/);
+  });
+
+  it('throws when complementary item has empty target_section', async () => {
+    const ctx = makeCtx({
+      createMessage: async () =>
+        JSON.stringify({
+          strategy: 'complementary',
+          items: [{ kind: 'complementary', content: 'x', target_section: '   ' }],
+        }),
+    });
+    await expect(
+      classifyMergeNeed(ctx, createMockEntity({ name: 'X' }), 'entity', { path: 'p.md', basename: 'p.md' }, '# x'),
+    ).rejects.toThrow(/invalid complementary item/);
+  });
+});
+
+describe('classifyMergeNeed — client precondition', () => {
+  it('throws when no LLM client is configured', async () => {
+    const ctx = makeCtx(null);
+    await expect(
+      classifyMergeNeed(ctx, createMockEntity({ name: 'X' }), 'entity', { path: 'p.md', basename: 'p.md' }, '# x'),
+    ).rejects.toThrow(/LLM client not initialized/);
+  });
+});
+// Issue #312 part 2 — the deterministic half of the fix. Pure string
+// comparison: no LLM, no IO. The predicate answers "is this source the page's
+// subject", which the triage prompt never asks.
+describe('isSourceOwnPageLemma — deterministic ownership', () => {
+  const ctx = { sourceTitle: 'Silent Inflammation', summary: 's', sourcePath: 'Notes/Silent Inflammation.md' };
+
+  it('matches across the space/dash spelling difference between note and page', () => {
+    expect(isSourceOwnPageLemma({
+      pageName: 'Silent-Inflammation',
+      sourceBasename: 'Silent Inflammation',
+      sourceContext: ctx,
+    })).toBe(true);
+  });
+
+  it('matches on the analyzer source title when the file name differs', () => {
+    expect(isSourceOwnPageLemma({
+      pageName: 'Silent-Inflammation',
+      sourceBasename: '2026-03-11 notes',
+      sourceContext: ctx,
+    })).toBe(true);
+  });
+
+  it('matches on a curated note alias', () => {
+    expect(isSourceOwnPageLemma({
+      pageName: 'Chronische-Inflammation',
+      sourceBasename: 'Silent Inflammation',
+      sourceContext: { ...ctx, noteAliases: ['Chronische Inflammation'] },
+    })).toBe(true);
+  });
+
+  it('matches on one of the page aliases', () => {
+    expect(isSourceOwnPageLemma({
+      pageName: 'CoQ10',
+      pageAliases: ['Coenzym Q10'],
+      sourceBasename: 'Coenzym-Q10',
+      sourceContext: { sourceTitle: 'Coenzym Q10', summary: 's', sourcePath: 'n.md' },
+    })).toBe(true);
+  });
+
+  it('does not match a source that merely mentions the page', () => {
+    expect(isSourceOwnPageLemma({
+      pageName: 'Silent-Inflammation',
+      sourceBasename: 'Omega-3',
+      sourceContext: { sourceTitle: 'Omega-3', summary: 's', sourcePath: 'n.md' },
+    })).toBe(false);
+  });
+
+  it('never fires without a source context, even on an exact name match', () => {
+    expect(isSourceOwnPageLemma({
+      pageName: 'Silent-Inflammation',
+      sourceBasename: 'Silent Inflammation',
+    })).toBe(false);
+  });
+
+  it('returns false for an empty page name instead of matching everything', () => {
+    expect(isSourceOwnPageLemma({
+      pageName: '   ',
+      sourceBasename: 'Silent Inflammation',
+      sourceContext: ctx,
+    })).toBe(false);
+  });
+});
+
+// Issue #312 part 1 — the source-level summary plus the question that makes it
+// usable. Both are placeholder-rendered, so a caller without an ingest
+// upstream gets the prompt it got before, character for character.
+describe('classifyMergeNeed — source context in the triage prompt (#312)', () => {
+  const CONTEXT = {
+    sourceTitle: 'Silent Inflammation',
+    summary: 'A note on low-grade chronic inflammation and its markers.',
+    sourcePath: 'Notes/Silent Inflammation.md',
+  };
+
+  async function renderPrompt(sourceContext?: typeof CONTEXT): Promise<string> {
+    let seen = '';
+    const ctx = makeCtx({
+      createMessage: async (...a: unknown[]) => {
+        const req = a[0] as { messages: Array<{ content: string }> };
+        seen = req.messages[0].content;
+        return JSON.stringify({ strategy: 'skip', reason: 'r' });
+      },
+    });
+    await classifyMergeNeed(
+      ctx,
+      createMockEntity({ name: 'Silent Inflammation' }),
+      'entity',
+      { path: 'Notes/Silent Inflammation.md', basename: 'Silent Inflammation' },
+      '## Description\nExisting.',
+      sourceContext,
+    );
+    return seen;
+  }
+
+  it('adds the source summary under its own label, distinct from the item summary', async () => {
+    const prompt = await renderPrompt(CONTEXT);
+    expect(prompt).toContain('Source summary: A note on low-grade chronic inflammation');
+    // The item-level `Summary:` from buildNewInfoSummary is still there and is
+    // a different line — the collision the fix set out to avoid.
+    expect(prompt).toMatch(/^Summary: /m);
+    expect(prompt.match(/Source summary:/g)).toHaveLength(1);
+  });
+
+  it('asks whether the source is the page subject, not only whether the info is new', async () => {
+    const prompt = await renderPrompt(CONTEXT);
+    expect(prompt).toContain('primarily ABOUT this page or only mentions it in passing');
+  });
+
+  it('does not repeat the source name that {{new_info}} already carries', async () => {
+    const prompt = await renderPrompt(CONTEXT);
+    expect(prompt.match(/Silent Inflammation/g)?.length).toBeGreaterThan(0);
+    expect(prompt).not.toContain('Source being merged:');
+  });
+
+  it('renders the pre-change prompt exactly when no context is supplied', async () => {
+    const prompt = await renderPrompt(undefined);
+    expect(prompt).not.toContain('Source summary:');
+    expect(prompt).not.toContain('primarily ABOUT this page');
+    // No placeholder survives, and no blank line drifts in where the block
+    // would have gone: `{{new_info}}` is still followed directly by the
+    // sections header.
+    expect(prompt).not.toMatch(/\{\{\w+\}\}/);
+    expect(prompt).toMatch(/\n\n\*\*Available sections/);
+    // An empty placeholder must not leave a blank line behind anywhere.
+    expect(prompt).not.toContain('\n\n\n');
+  });
+});
+
+// v1.26.3 PATCH Phase B (Issue #443): typed-output path for merge triage.
+// When the client implements createMessageWithOutput, classifyMergeNeed
+// prefers result.output (Tier 0 json_schema) and passes the Zod schema
+// on the wire; falls back to parseJsonResponse(text) when output is
+// undefined (Tier 1/2) or the client lacks the typed method.
+describe('classifyMergeNeed — typed-output path (createMessageWithOutput)', () => {
+  function makeTypedCtx(
+    createMessageWithOutput: (params: Record<string, unknown>) => Promise<{
+      text: string;
+      output?: unknown;
+      outputMode: string;
+      finishReason: string;
+    }>,
+  ): MergeTriageContext {
+    return {
+      settings: { wikiFolder: 'wiki', wikiLanguage: 'en', disableThinking: false } as LLMWikiSettings,
+      getClient: () => ({
+        createMessage: async () => '',
+        createMessageWithOutput: createMessageWithOutput as unknown as NonNullable<ReturnType<MergeTriageContext['getClient']>>['createMessageWithOutput'],
+      }),
+      buildSystemPrompt: async () => 'system',
+    };
+  }
+
+  it('uses result.output when Tier 0 succeeds (schema on wire)', async () => {
+    const createMessageWithOutput = async () => ({
+      text: JSON.stringify({ strategy: 'skip', reason: 'typed' }),
+      output: { strategy: 'skip', reason: 'typed' },
+      outputMode: 'json_schema',
+      finishReason: 'stop',
+    });
+    const result = await classifyMergeNeed(
+      makeTypedCtx(createMessageWithOutput),
+      createMockEntity({ name: 'X' }),
+      'entity',
+      { path: 'p.md', basename: 'p.md' },
+      '# existing',
+    );
+    expect(result.strategy).toBe('skip');
+    expect(result.reason).toBe('typed');
+  });
+
+  it('falls back to parseJsonResponse(text) when output undefined (Tier 1/2)', async () => {
+    const createMessageWithOutput = async () => ({
+      text: JSON.stringify({ strategy: 'complementary', items: [{ content: 'x', target_section: 'Sec', kind: 'complementary', reason: 'r' }], reason: 'c' }),
+      output: undefined,
+      outputMode: 'json_object',
+      finishReason: 'stop',
+    });
+    const result = await classifyMergeNeed(
+      makeTypedCtx(createMessageWithOutput),
+      createMockEntity({ name: 'X' }),
+      'entity',
+      { path: 'p.md', basename: 'p.md' },
+      '# existing',
+    );
+    expect(result.strategy).toBe('complementary');
+    expect(result.items[0].content).toBe('x');
+  });
+
+  it('passes the Zod schema on the wire (Tier 0 shape)', async () => {
+    let seenSchema: unknown;
+    const createMessageWithOutput = async (params: Record<string, unknown>) => {
+      const rf = params.response_format as { schema?: unknown } | undefined;
+      seenSchema = rf?.schema;
+      return { text: '{"strategy":"skip"}', output: { strategy: 'skip' }, outputMode: 'json_schema', finishReason: 'stop' };
+    };
+    await classifyMergeNeed(
+      makeTypedCtx(createMessageWithOutput),
+      createMockEntity({ name: 'X' }),
+      'entity',
+      { path: 'p.md', basename: 'p.md' },
+      '# existing',
+    );
+    expect(seenSchema).toBeDefined();
+  });
+});
+
+describe('classifyMergeNeed — item-level contradiction lane', () => {
+  it('carries kind=contradictory through validation', async () => {
+    const ctx = makeCtx({
+      createMessage: async () =>
+        JSON.stringify({
+          strategy: 'complementary',
+          reason: 'mixed batch',
+          items: [
+            { kind: 'complementary', content: 'new fact', target_section: '## Background', reason: 'expands' },
+            { kind: 'contradictory', content: 'conflicting claim', target_section: '## Background', reason: 'conflicts with the stated dose', existing_statement: 'existing' },
+          ],
+        }),
+    });
+    const result = await classifyMergeNeed(
+      ctx,
+      createMockEntity({ name: 'X' }),
+      'entity',
+      { path: 'p.md', basename: 'p.md' },
+      '# existing',
+    );
+    expect(result.items.map(i => i.kind)).toEqual(['complementary', 'contradictory']);
+  });
+
+  it('defaults an unknown kind to complementary', async () => {
+    const ctx = makeCtx({
+      createMessage: async () =>
+        JSON.stringify({
+          strategy: 'complementary',
+          items: [{ kind: 'novel', content: 'fact', target_section: '## A' }],
+        }),
+    });
+    const result = await classifyMergeNeed(
+      ctx,
+      createMockEntity({ name: 'X' }),
+      'entity',
+      { path: 'p.md', basename: 'p.md' },
+      '# x',
+    );
+    expect(result.items[0]?.kind).toBe('complementary');
+  });
+});
+
+describe('classifyMergeNeed — contradiction gate 1 (existing statement on the page)', () => {
+  const PAGE = '## Description\nThe standard dose is 5mg once daily.\n';
+
+  it('keeps a contradiction whose quote matches the page only in part, without the quote', async () => {
+    const ctx = makeCtx({
+      createMessage: async () => JSON.stringify({
+        strategy: 'complementary',
+        items: [{ kind: 'contradictory', content: 'Dose is 10mg', target_section: '## Description', reason: 'conflicts', existing_statement: 'The page says the standard dose is 5mg once daily for adults' }],
+      }),
+    });
+    const r = await classifyMergeNeed(ctx, createMockEntity({ name: 'X' }), 'entity', { path: 'p.md', basename: 'p' }, PAGE);
+    expect(r.items[0].kind).toBe('contradictory');
+    expect(r.items[0].existing_statement).toBeUndefined();
+    expect(r.demoted).toEqual([]);
+  });
+
+  it('keeps a contradiction whose quoted statement is on the page, and carries the quote', async () => {
+    const ctx = makeCtx({
+      createMessage: async () => JSON.stringify({
+        strategy: 'complementary',
+        items: [{ kind: 'contradictory', content: 'Dose is 10mg', target_section: '## Description', reason: 'conflicts', existing_statement: 'The standard dose is 5mg once daily.' }],
+      }),
+    });
+    const r = await classifyMergeNeed(ctx, createMockEntity({ name: 'X' }), 'entity', { path: 'p.md', basename: 'p' }, PAGE);
+    expect(r.items[0].kind).toBe('contradictory');
+    expect(r.items[0].existing_statement).toBe('The standard dose is 5mg once daily.');
+    expect(r.demoted).toEqual([]);
+  });
+
+  it('demotes a contradiction that quotes nothing — a conflict with nothing on the page is not a contradiction', async () => {
+    const ctx = makeCtx({
+      createMessage: async () => JSON.stringify({
+        strategy: 'complementary',
+        items: [{ kind: 'contradictory', content: 'Dose is 10mg', target_section: '## Description', reason: 'conflicts with the known dose' }],
+      }),
+    });
+    const r = await classifyMergeNeed(ctx, createMockEntity({ name: 'X' }), 'entity', { path: 'p.md', basename: 'p' }, PAGE);
+    expect(r.items[0].kind).toBe('complementary');
+    expect(r.items[0].existing_statement).toBeUndefined();
+    expect(r.demoted).toEqual([{ content: 'Dose is 10mg', target_section: '## Description', gate: 'existing-statement', detail: '' }]);
+  });
+
+  it('demotes a contradiction whose quote is not on the page (world knowledge dressed as a quote)', async () => {
+    const ctx = makeCtx({
+      createMessage: async () => JSON.stringify({
+        strategy: 'complementary',
+        items: [{ kind: 'contradictory', content: 'Dose is 10mg', target_section: '## Description', existing_statement: 'Guidelines recommend 5mg twice daily.' }],
+      }),
+    });
+    const r = await classifyMergeNeed(ctx, createMockEntity({ name: 'X' }), 'entity', { path: 'p.md', basename: 'p' }, PAGE);
+    expect(r.items[0].kind).toBe('complementary');
+    expect(r.demoted[0].gate).toBe('existing-statement');
+    expect(r.demoted[0].detail).toBe('Guidelines recommend 5mg twice daily.');
+  });
+
+  it('asks for the verbatim existing statement in the prompt', async () => {
+    let prompt = '';
+    const ctx = makeCtx({
+      createMessage: async (req: unknown) => { prompt = (req as { messages: Array<{ content: string }> }).messages[0].content; return JSON.stringify({ strategy: 'skip', items: [] }); },
+    });
+    await classifyMergeNeed(ctx, createMockEntity({ name: 'X' }), 'entity', { path: 'p.md', basename: 'p' }, PAGE);
+    expect(prompt).toContain('`existing_statement` (contradictory only) = the sentence on the page that the piece conflicts with, copied VERBATIM');
+  });
+});
+
+describe('classifyMergeNeed — contradiction gate 2 (the source holds the claim)', () => {
+  const PAGE = '## Description\nRed light acts through cytochrome c oxidase.\n';
+  const EXCERPT = 'A 2019 paper argues that CCO is not the primary photoacceptor. Most reviews keep CCO as the main pathway.';
+  const triage = JSON.stringify({
+    strategy: 'complementary',
+    items: [{ kind: 'contradictory', content: 'CCO is not the primary photoacceptor', target_section: '## Description', existing_statement: 'Red light acts through cytochrome c oxidase.' }],
+  });
+
+  function seqCtx(responses: string[]) {
+    let i = 0; const prompts: string[] = [];
+    const ctx = makeCtx({ createMessage: async (req: unknown) => { prompts.push((req as { messages: Array<{ content: string }> }).messages[0].content); return responses[i++] ?? '{}'; } });
+    return { ctx, prompts };
+  }
+
+  it('a reported position is demoted, with the excerpt sentence as the reason', async () => {
+    const { ctx, prompts } = seqCtx([triage, JSON.stringify({ holds: 'no', evidence: 'A 2019 paper argues that CCO is not the primary photoacceptor.' })]);
+    const r = await classifyMergeNeed(ctx, createMockEntity({ name: 'ATP' }), 'entity', { path: 'p.md', basename: 'p' }, PAGE, undefined, EXCERPT);
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain(EXCERPT);
+    expect(prompts[1]).not.toContain('cytochrome c oxidase.\n'); // page content is not sent
+    expect(r.items[0].kind).toBe('complementary');
+    expect(r.items[0].existing_statement).toBeUndefined();
+    expect(r.demoted).toEqual([{ content: 'CCO is not the primary photoacceptor', target_section: '## Description', gate: 'source-stance', detail: 'A 2019 paper argues that CCO is not the primary photoacceptor.' }]);
+  });
+
+  it('a held position stays contradictory', async () => {
+    const { ctx } = seqCtx([triage, JSON.stringify({ holds: 'yes', evidence: 'Most reviews keep CCO as the main pathway.' })]);
+    const r = await classifyMergeNeed(ctx, createMockEntity({ name: 'ATP' }), 'entity', { path: 'p.md', basename: 'p' }, PAGE, undefined, EXCERPT);
+    expect(r.items[0].kind).toBe('contradictory');
+    expect(r.demoted).toEqual([]);
+  });
+
+  it('without an excerpt gate 2 is not asked and the item stays', async () => {
+    const { ctx, prompts } = seqCtx([triage]);
+    const r = await classifyMergeNeed(ctx, createMockEntity({ name: 'ATP' }), 'entity', { path: 'p.md', basename: 'p' }, PAGE);
+    expect(prompts).toHaveLength(1);
+    expect(r.items[0].kind).toBe('contradictory');
+  });
+
+  it('gate 2 is not asked for an item gate 1 already demoted', async () => {
+    const t = JSON.stringify({ strategy: 'complementary', items: [{ kind: 'contradictory', content: 'c', target_section: '## Description' }] });
+    const { ctx, prompts } = seqCtx([t]);
+    const r = await classifyMergeNeed(ctx, createMockEntity({ name: 'ATP' }), 'entity', { path: 'p.md', basename: 'p' }, PAGE, undefined, EXCERPT);
+    expect(prompts).toHaveLength(1);
+    expect(r.demoted[0].gate).toBe('existing-statement');
+  });
+});
