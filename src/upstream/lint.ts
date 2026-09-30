@@ -17,13 +17,15 @@
  * What WikiLM adds is around each lint operation, the scan's and each fix's,
  * through the engine's lint callbacks: WikiLM's run token (so the status bar
  * shows it and a cancel reaches the engine's cancelLint), a fresh guard run
- * (src/upstream/guardedVault.ts: one snapshot folder, nothing held), and when
- * the operation ends a Notice with the pages the operation created and
- * overwrote and each write the guard refused, the refusals in the lines the
- * ingest report uses. Upstream's own
- * notices and its log count a refused write as done: a merge whose source
- * page was kept reads "merged", an empty stub that was kept reads "deleted".
- * WikiLM's Notice, which comes after them, is the one that says what happened.
+ * (src/upstream/guardedVault.ts: one snapshot folder, nothing held, nothing
+ * written outside the wiki folder), and when the operation ends a Notice with
+ * the pages the operation created and overwrote, each duplicate pair it
+ * linked and each polluted page it left in place (the host's replacements for
+ * upstream's merge and rename, src/upstream/host.ts), and each write the
+ * guard refused, the refusals in the lines the ingest report uses. Upstream's
+ * own notices and its log count a refused write as done: an empty stub that
+ * was kept reads "deleted". WikiLM's Notice, which comes after them, is the
+ * one that says what happened.
  *
  * Every model call in a lint operation runs on WikiLM's lint role: the
  * controller's client is the host's lint client, and the engine's own client
@@ -61,7 +63,7 @@ export async function lintWithUpstream(plugin: WikiLmPlugin): Promise<void> {
         llmClient: host.clientFor("lint"),
         wikiEngine: engine,
         buildSystemPrompt: (task) => engine.buildSystemPrompt(task as SchemaTask),
-        onAnalyzeSchema: (context) => void suggestSchema(engine, schema, context),
+        onAnalyzeSchema: (context) => void suggestSchema(runs, engine, schema, context),
       },
       signal,
       "manual",
@@ -82,7 +84,8 @@ export async function lintWithUpstream(plugin: WikiLmPlugin): Promise<void> {
  * what they want by hand. It runs as a lint operation, so on the lint role
  * and in a guard run of its own.
  */
-async function suggestSchema(engine: WikiEngine, schema: SchemaManager, context: string | undefined): Promise<void> {
+async function suggestSchema(runs: LintRuns, engine: WikiEngine, schema: SchemaManager, context: string | undefined): Promise<void> {
+  runs.next = "schema";
   const signal = engine.startLintOperation();
   try {
     if (signal.aborted) return;
@@ -102,16 +105,33 @@ async function suggestSchema(engine: WikiEngine, schema: SchemaManager, context:
 // ---------------------------------------------------------------- lint operations
 
 interface OpenRun {
-  kind: "scan" | "fix";
+  kind: "scan" | "fix" | "schema";
   owner: number;
-  stop: () => void;
+  /** Stops listening for a cancel. */
+  off: () => void;
+  /** Set when the reader stopped it. */
+  stopped: boolean;
 }
+
+/** The notice's first line: what ran and how it ended. */
+function heading(run: OpenRun): string {
+  const what = run.kind === "schema" ? "schema analysis" : `lint ${run.kind}`;
+  return `WikiLM: llm-wiki ${what} ${run.stopped ? "stopped" : "finished"}.`;
+}
+
+const LABEL: Record<OpenRun["kind"], string> = { scan: "linting the wiki", fix: "fixing the wiki", schema: "analysing the wiki's schema" };
 
 /**
  * Watches one engine's lint operations for the plugin's lifetime. Upstream
  * keeps a single lint operation per engine, and so does this: an operation
  * that starts while one is open (a fix pressed in the moment between the
  * modal opening and the scan's end) joins it, and the run ends with it.
+ *
+ * A fix that WikiLM stops (a cancel from the status bar, or a fix pressed
+ * while another run holds the token) ends in upstream's AbortError, thrown
+ * out of a promise the controller does not await (controller.ts,
+ * runFixPhase and Smart Fix All). Nothing upstream catches it, so the
+ * window's "unhandledrejection" listener here does, once per stop.
  */
 class LintRuns {
   /** What the next operation to start is; anything WikiLM did not start itself is a fix. */
@@ -119,6 +139,8 @@ class LintRuns {
   /** Set when an operation started while the scan's was still open. */
   takenOver = false;
   private open: OpenRun | null = null;
+  /** Set when WikiLM stopped a fix whose AbortError has not yet reached the window. */
+  private stopping = false;
 
   constructor(
     private readonly plugin: WikiLmPlugin,
@@ -128,6 +150,17 @@ class LintRuns {
       () => this.started(),
       () => this.ended(),
     );
+    plugin.registerDomEvent(window, "unhandledrejection", (e) => {
+      if (!this.stopping || (e.reason as { name?: unknown } | null)?.name !== "AbortError") return;
+      this.stopping = false;
+      e.preventDefault();
+    });
+  }
+
+  /** Stop the engine's open lint operation; upstream's runners then throw AbortError. */
+  private stop(): void {
+    this.stopping = true;
+    this.engine.cancelLint();
   }
 
   private started(): void {
@@ -144,34 +177,36 @@ class LintRuns {
       // fix runner checks the signal before it writes, except Delete empty
       // stubs and the polluted-page step; the guard still stands between
       // those and any page the other run did not create.
-      this.engine.cancelLint();
+      this.stop();
       new Notice(`WikiLM: the lint fix did not run: ${sentence(running)}`, 8000);
       return;
     }
-    const owner = p.cancel.begin(kind === "scan" ? "linting the wiki" : "fixing the wiki");
+    const owner = p.cancel.begin(LABEL[kind]);
     // One snapshot folder per operation, nothing held from the last run, and
     // no write outside the wiki folder.
     p.upstreamHost().guard.begin(this.engine.settings.wikiFolder);
     p.upstreamHost().declined = [];
-    this.engine.setStatusBarUpdateCallback((text) => p.cancel.progress(text || "linting the wiki", owner));
+    this.engine.setStatusBarUpdateCallback((text) => p.cancel.progress(text || LABEL[kind], owner));
     // Once per operation: upstream's cancelLint shows a Notice each time.
-    let asked = false;
-    const off = p.cancel.onChange(() => {
-      if (asked || !p.cancel.cancelled || !this.engine.isLintRunning()) return;
-      asked = true;
-      this.engine.cancelLint();
+    const run: OpenRun = { kind, owner, off: () => {}, stopped: false };
+    run.off = p.cancel.onChange(() => {
+      if (run.stopped || !p.cancel.cancelled || !this.engine.isLintRunning()) return;
+      run.stopped = true;
+      // The scan catches its own AbortError (controller.ts); a fix does not.
+      if (kind === "scan") this.engine.cancelLint();
+      else this.stop();
     });
-    this.open = { kind, owner, stop: off };
+    this.open = run;
   }
 
   private ended(): void {
     const run = this.open;
     if (!run) return;
     this.open = null;
-    run.stop();
+    run.off();
     this.engine.setStatusBarUpdateCallback(null);
     this.plugin.cancel.end(run.owner);
-    const report = renderLintGuardReport(this.plugin, run.kind);
+    const report = renderLintGuardReport(this.plugin, run);
     // Stays until clicked, as the ingest report does: a list of paths to read.
     if (report) new Notice(report, 0);
   }
@@ -190,22 +225,22 @@ function lintRuns(plugin: WikiLmPlugin, engine: WikiEngine): LintRuns {
 
 /**
  * What the guard saw in the lint operation that just ended, or null when it
- * created, overwrote and refused nothing. "Created" lists each file the
+ * created, overwrote and refused nothing and was not stopped. "Created" lists each file the
  * operation made (a stub for a dead link, a page's copy under a clean name);
  * "Updated" each page it overwrote, the text before saved first, marked when
  * a later rewrite of it was refused. Upstream's
  * index and log, which every operation rewrites, are left out of both. The
  * rest is the ingest report's own ending (guardLines in src/upstream/report.ts).
  */
-function renderLintGuardReport(plugin: WikiLmPlugin, kind: OpenRun["kind"]): string | null {
+function renderLintGuardReport(plugin: WikiLmPlugin, run: OpenRun): string | null {
   const host = plugin.upstreamHost();
   const guard = host.guard;
   const kept = guard.refusals;
   const created = guard.createdPaths().filter((p) => !host.rewrittenEachRun(p));
   const updated = guard.updatedPaths().filter((p) => !host.rewrittenEachRun(p));
   const declined = host.declined;
-  if (kept.length === 0 && created.length === 0 && updated.length === 0 && declined.length === 0) return null;
-  const lines = [`WikiLM: llm-wiki lint ${kind} finished.`];
+  if (!run.stopped && kept.length === 0 && created.length === 0 && updated.length === 0 && declined.length === 0) return null;
+  const lines = [heading(run)];
   if (created.length > 0) lines.push(`Created ${plural(created.length, "page")}:`, ...created.map((p) => `- ${p}`));
   if (updated.length > 0) lines.push(`Updated ${plural(updated.length, "page")}:`, ...updated.map((p) => updatedLine(p, kept)));
   lines.push(...declined.map(declinedLine));

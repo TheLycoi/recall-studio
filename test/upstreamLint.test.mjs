@@ -60,7 +60,15 @@ const quiet = ["debug", "log", "info", "warn", "error"];
 const realConsole = Object.fromEntries(quiet.map((k) => [k, console[k]]));
 before(async () => {
   // Upstream waits on window.setTimeout between batches.
-  globalThis.window = { setTimeout: (fn) => setTimeout(fn, 0), clearTimeout: (h) => clearTimeout(h) };
+  // It also holds the listeners the plugin registers, as Obsidian's window would.
+  const listeners = [];
+  globalThis.window = {
+    setTimeout: (fn) => setTimeout(fn, 0),
+    clearTimeout: (h) => clearTimeout(h),
+    listeners,
+    addEventListener: (type, fn) => listeners.push({ type, fn }),
+    removeEventListener: (type, fn) => listeners.splice(listeners.findIndex((l) => l.type === type && l.fn === fn) >>> 0, 1),
+  };
   // Upstream narrates every step on the console, and logs each refused merge
   // it cannot tell apart from a failure; the assertions read the vault.
   for (const k of quiet) console[k] = () => {};
@@ -148,6 +156,8 @@ function setup(initial, answer = () => "{}") {
     manifest: { id: "wikilm", dir: PLUGIN_DIR },
     settings: wikilmSettings(),
     cancel: new m.CancelToken(),
+    // Obsidian's Component.registerDomEvent, without the unload.
+    registerDomEvent: (el, type, fn) => el.addEventListener(type, fn),
     llm: {
       backendFor: (provider) => ({
         async completeText(req) {
@@ -633,6 +643,62 @@ test("the lint shows its stage on WikiLM's status bar, and a cancel from there s
   assert.ok(notices().includes("Ingestion cancelled"), notices().join(" | "));
   assert.equal(plugin.cancel.active, false, "the lint let go of WikiLM's run token");
   assert.equal(plugin.upstreamHost().engine().isLintRunning(), false);
+});
+
+/**
+ * Run `body` with promise rejections nobody handled sent to the window's
+ * "unhandledrejection" listeners, as a browser does; returns those no
+ * listener prevented. Node's own handling (which fails the test) is set
+ * aside meanwhile.
+ */
+async function browserRejections(body) {
+  const unhandled = [];
+  const saved = process.listeners("unhandledRejection");
+  process.removeAllListeners("unhandledRejection");
+  process.on("unhandledRejection", (reason) => {
+    let prevented = false;
+    const event = { reason, preventDefault: () => void (prevented = true) };
+    for (const l of globalThis.window.listeners.filter((x) => x.type === "unhandledrejection")) l.fn(event);
+    if (!prevented) unhandled.push(reason);
+  });
+  try {
+    await body();
+    await new Promise((r) => setTimeout(r, 20));
+  } finally {
+    process.removeAllListeners("unhandledRejection");
+    for (const l of saved) process.on("unhandledRejection", l);
+  }
+  return unhandled;
+}
+
+test("a cancel during a fix stops it: the notice says stopped, and upstream's AbortError is not left unhandled", async () => {
+  let plugin;
+  const ctx = setup(
+    { "wiki/concepts/receptors.md": RECEPTORS, "wiki/concepts/receptor.md": RECEPTOR_DUP, "wiki/concepts/ligands.md": LIGANDS },
+    (kind) => {
+      // The reader clicks the status bar while the first phase is asking the model.
+      if (kind === "aliases" && plugin.cancel.active) plugin.cancel.cancel();
+      return duplicatePair("{}")(kind);
+    },
+  );
+  plugin = ctx.plugin;
+  const modal = await lint(plugin);
+  const unhandled = await browserRejections(() => press(plugin, modal, "onFixAll"));
+  assert.deepEqual(unhandled.map((e) => `${e?.name}: ${e?.message}`), [], "no rejection left unhandled");
+  assert.match(notices().at(-1), /^WikiLM: llm-wiki lint fix stopped\./);
+  assert.equal(plugin.cancel.active, false);
+  assert.ok(ctx.files.has("wiki/concepts/receptor.md"));
+});
+
+test("Analyze schema's notice is headed as a schema analysis, not a fix", async () => {
+  const { plugin } = setup(
+    { "wiki/concepts/receptors.md": RECEPTORS, "wiki/concepts/ligands.md": LIGANDS },
+    (kind) => (kind === "schema" ? JSON.stringify({ changes_needed: true, suggestions: "Add a Mechanism section.", new_schema_body: "# Schema\n" }) : "{}"),
+  );
+  const modal = await lint(plugin);
+  await press(plugin, modal, "onAnalyzeSchema");
+  assert.ok(notices().some((n) => n.startsWith("WikiLM: llm-wiki schema analysis finished.\nCreated 1 page:\n- wiki/schema/suggestions.md")), notices().join(" | "));
+  assert.ok(!notices().some((n) => n.includes("lint fix finished")), notices().join(" | "));
 });
 
 test("a lint does not start while another run holds WikiLM's token, and says why", async () => {
