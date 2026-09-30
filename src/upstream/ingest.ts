@@ -35,8 +35,9 @@
 import { Notice, TFile, type TFolder } from "obsidian";
 import type WikiLmPlugin from "../main";
 import type { WikiLmSettings } from "../settings";
-import { describeLoss, type GuardRefusal } from "./guardedVault";
+import type { GuardRefusal } from "./guardedVault";
 import { upstreamWikiFolder } from "./host";
+import { busy, guardLines, plural, sentence } from "./report";
 import {
   isExcludedFromSourcePicker,
   isInFolderScope,
@@ -452,13 +453,6 @@ async function alreadyIngested(plugin: WikiLmPlugin, engine: WikiEngine, file: T
   }
 }
 
-/** What stops a run from starting: another run holding the token. Null when nothing does. */
-export function busy(plugin: WikiLmPlugin): string | null {
-  if (!plugin.cancel.active) return null;
-  const running = plugin.cancel.label ? ` (${plugin.cancel.label})` : "";
-  return `another run is still going${running}. Start this once it finishes, or stop it from the status bar`;
-}
-
 function showReport(r: WikiLmIngestReport): void {
   // Stays until clicked: the report is a list of paths to read, not a toast.
   new Notice(renderIngestReport(r), 0);
@@ -494,26 +488,6 @@ function failed(path: string, message: string): IngestReport {
 }
 
 /**
- * What the guard did in a run, as the reader reads it: each page it kept as
- * it was and why, then where the earlier texts are saved. Ingest's report and
- * the lint's (src/upstream/lint.ts) end with these lines.
- */
-export function guardLines(kept: GuardRefusal[], snapshots: string | undefined): string[] {
-  const lines: string[] = [];
-  if (kept.length > 0) lines.push("Not updated, to keep what was there:", ...kept.map(keptLine));
-  if (snapshots) lines.push(`The text each page had before this run is saved in ${snapshots}.`);
-  return lines;
-}
-
-/** A page the guard kept, and why, as the reader reads it. */
-function keptLine(k: GuardRefusal): string {
-  if (k.action === "remove") return `- ${k.path}: the engine asked to remove it; it was left in place.`;
-  if (k.action === "rename") return `- ${k.path}: the engine asked to move it to ${k.to}; it was left where it is.`;
-  if (k.detail) return `- ${k.path}: ${k.detail}; it was left as it was.`;
-  return `- ${k.path}: the rewrite would have dropped ${describeLoss(k.lost)}. The proposed text is saved at ${k.proposal}.`;
-}
-
-/**
  * The files not ingested, one line each; files turned away for the same
  * reason share one line and are listed beneath it, so a folder run over the
  * vault root names every wiki page without repeating why a hundred times.
@@ -543,18 +517,9 @@ function rejectionText(x: Rejection): string {
   }
 }
 
-/** A message as a sentence: one full stop at the end, never two. */
-export function sentence(s: string): string {
-  return `${s.trim().replace(/[.\s]+$/, "")}.`;
-}
-
 /** A sentence, unless it already ends in a stop or a closing quote. */
 function closed(s: string): string {
   return /[.!?…”"]$/.test(s.trim()) ? s.trim() : sentence(s);
-}
-
-export function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
 function elapsed(seconds: number | undefined): string {

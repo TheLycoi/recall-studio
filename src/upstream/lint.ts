@@ -31,7 +31,7 @@
  */
 import { Notice } from "obsidian";
 import type WikiLmPlugin from "../main";
-import { busy, guardLines, plural, sentence } from "./ingest";
+import { busy, guardLines, plural, sentence } from "./report";
 import { runLintWiki, type SchemaManager, type SchemaTask, type WikiEngine } from "./vendor";
 
 /**
@@ -191,7 +191,7 @@ function lintRuns(plugin: WikiLmPlugin, engine: WikiEngine): LintRuns {
  * operation made (a stub for a dead link, a page's copy under a clean name);
  * "Updated" each page it overwrote, the text before saved first. Upstream's
  * index and log, which every operation rewrites, are left out of both. The
- * rest is the ingest report's own ending (guardLines in src/upstream/ingest.ts).
+ * rest is the ingest report's own ending (guardLines in src/upstream/report.ts).
  */
 function renderLintGuardReport(plugin: WikiLmPlugin, kind: OpenRun["kind"]): string | null {
   const host = plugin.upstreamHost();
