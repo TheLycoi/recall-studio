@@ -23,14 +23,16 @@ before(async () => {
 
 // The ids and names in the table, in order. An id change orphans a user's
 // hotkey, a name change moves the entry in the palette. Updated for the
-// command simplification (2026-09-28): the twelve palette commands first, then
+// command simplification (2026-09-28): the palette commands first, then
 // the four the chat still reaches by alias. Five commands were removed outright
-// and their aliases moved onto the command that absorbed them.
+// and their aliases moved onto the command that absorbed them. Upstream's lint
+// (lint-wiki-upstream) joined the palette on 2026-09-29, beside WikiLM's.
 const EXPECTED = [
   ["ai-highlight", "AI highlight…"],
   ["digest-pdf-highlights", "Digest: PDF highlights into concept and entity notes…"],
   ["digest-folder", "Digest folder: every highlighted PDF under a folder…"],
   ["lint-wiki", "Lint wiki: find gaps, dead links and ungrounded quotes"],
+  ["lint-wiki-upstream", "Lint wiki (llm-wiki): scan and Smart Fix All"],
   ["capture-selection", "Send selection to inbox"],
   ["capture-selection-with-instruction", "Send selection to inbox with instructions…"],
   ["open-chat", "Open chat: ask the notes"],
@@ -48,8 +50,8 @@ const EXPECTED = [
 const HIDDEN = ["ingest-source", "ingest-folder", "capture-markdown-highlights", "retry-failed"];
 const REMOVED = ["capture-pdf-selection", "capture-pdf-selection-with-instruction", "ai-highlight-with-instruction", "ai-highlight-pdf", "add-transcript"];
 
-test("COMMAND_TABLE holds the sixteen (id, name) pairs verbatim and in order", () => {
-  assert.equal(table.COMMAND_TABLE.length, 16);
+test("COMMAND_TABLE holds the seventeen (id, name) pairs verbatim and in order", () => {
+  assert.equal(table.COMMAND_TABLE.length, 17);
   assert.deepEqual(
     table.COMMAND_TABLE.map((c) => [c.id, c.name]),
     EXPECTED,
@@ -64,12 +66,12 @@ test("exactly the four chat-only commands are hidden, and the removed ones are g
   for (const id of REMOVED) assert.ok(!table.COMMAND_TABLE.some((c) => c.id === id), `${id} should be removed`);
 });
 
-test("the palette gets the twelve visible commands and none of the hidden ones", () => {
+test("the palette gets the thirteen visible commands and none of the hidden ones", () => {
   const palette = table.paletteCommands(table.COMMAND_TABLE);
-  assert.equal(palette.length, 12);
+  assert.equal(palette.length, 13);
   assert.deepEqual(
     palette.map((c) => c.id),
-    EXPECTED.slice(0, 12).map(([id]) => id),
+    EXPECTED.slice(0, 13).map(([id]) => id),
   );
   for (const id of HIDDEN) assert.ok(!palette.some((c) => c.id === id), `${id} must not reach the palette`);
 });

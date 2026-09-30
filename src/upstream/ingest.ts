@@ -35,8 +35,9 @@
 import { Notice, TFile, type TFolder } from "obsidian";
 import type WikiLmPlugin from "../main";
 import type { WikiLmSettings } from "../settings";
-import { describeLoss, type GuardRefusal } from "./guardedVault";
+import type { GuardRefusal } from "./guardedVault";
 import { upstreamWikiFolder } from "./host";
+import { busy, guardLines, plural, sentence, updatedLine } from "./report";
 import {
   isExcludedFromSourcePicker,
   isInFolderScope,
@@ -311,13 +312,12 @@ export function renderIngestReport(r: WikiLmIngestReport | FolderIngestReport): 
   }
 
   if (r.createdPages.length > 0) lines.push(`Created ${plural(r.createdPages.length, "page")}:`, ...r.createdPages.map((p) => `- ${p}`));
-  if (r.updatedPages.length > 0) lines.push(`Updated ${plural(r.updatedPages.length, "page")}:`, ...r.updatedPages.map((p) => `- ${p}`));
-  if (also.length > 0) lines.push("Also written:", ...also.map((p) => `- ${p}`));
+  const kept = r.kept ?? [];
+  if (r.updatedPages.length > 0) lines.push(`Updated ${plural(r.updatedPages.length, "page")}:`, ...r.updatedPages.map((p) => updatedLine(p, kept)));
+  if (also.length > 0) lines.push("Also written:", ...also.map((p) => updatedLine(p, kept)));
   if (written === 0) lines.push("Nothing was written.");
   else if (r.cancelled) lines.push("The pages above were written before the stop and are kept.");
-  const kept = r.kept ?? [];
-  if (kept.length > 0) lines.push("Not updated, to keep what was there:", ...kept.map(keptLine));
-  if (r.snapshots) lines.push(`The text each page had before this run is saved in ${r.snapshots}.`);
+  lines.push(...guardLines(kept, r.snapshots));
 
   if (r.failedItems.length > 0) {
     lines.push(`Failed ${plural(r.failedItems.length, "item")}:`, ...r.failedItems.map((f) => `- ${f.type} “${f.name}”: ${f.reason}`));
@@ -351,8 +351,9 @@ async function withEngineRun<T>(
 ): Promise<T> {
   const owner = plugin.cancel.begin(label);
   // One snapshot folder per run, and nothing the engine created or the guard
-  // held carries over from the last one.
-  plugin.upstreamHost().guard.begin();
+  // held carries over from the last one. Ingest writes its pages, index, log
+  // and schema note, all inside the wiki folder; nothing else is written.
+  plugin.upstreamHost().guard.begin(engine.settings.wikiFolder);
   let prefix = "";
   const relabel = (p: string) => {
     prefix = p;
@@ -396,7 +397,8 @@ async function withEngineRun<T>(
  *
  * A page the guard held (src/upstream/guardedVault.ts) is still in the
  * engine's report as updated, because the engine's write returned; it is
- * taken out of the updated and written lists and reported as kept.
+ * taken out of the updated and written lists and reported as kept, unless an
+ * earlier write to it in the run landed, when it stays in both.
  */
 async function runOne(plugin: WikiLmPlugin, engine: WikiEngine, file: TFile, opts: IngestOptions): Promise<WikiLmIngestReport> {
   const { vault } = plugin.app;
@@ -423,7 +425,7 @@ async function runOne(plugin: WikiLmPlugin, engine: WikiEngine, file: TFile, opt
 
   if (!hadSchema && vault.getAbstractFileByPath(schemaNote) !== null) writes.add(schemaNote);
   const listed = new Set([...report.createdPages, ...report.updatedPages]);
-  const written = (p: string) => !guard.isHeld(p);
+  const written = (p: string) => !guard.isHeld(p) || guard.wasUpdated(p);
   // A path no longer in the vault was trashed by the engine: the summary page
   // of a cancelled run, which upstream removes so the note re-ingests cleanly.
   const alsoWritten = [...writes].filter((p) => !listed.has(p) && written(p) && vault.getAbstractFileByPath(p) !== null);
@@ -452,13 +454,6 @@ async function alreadyIngested(plugin: WikiLmPlugin, engine: WikiEngine, file: T
   } catch {
     return true;
   }
-}
-
-/** What stops a run from starting: another run holding the token. Null when nothing does. */
-function busy(plugin: WikiLmPlugin): string | null {
-  if (!plugin.cancel.active) return null;
-  const running = plugin.cancel.label ? ` (${plugin.cancel.label})` : "";
-  return `another run is still going${running}. Start this once it finishes, or stop it from the status bar`;
 }
 
 function showReport(r: WikiLmIngestReport): void {
@@ -495,14 +490,6 @@ function failed(path: string, message: string): IngestReport {
   return { ...emptyReport(path), success: false, errorMessage: message };
 }
 
-/** A page the guard kept, and why, as the reader reads it. */
-function keptLine(k: GuardRefusal): string {
-  if (k.action === "remove") return `- ${k.path}: the engine asked to remove it; it was left in place.`;
-  if (k.action === "rename") return `- ${k.path}: the engine asked to move it to ${k.to}; it was left where it is.`;
-  if (k.detail) return `- ${k.path}: ${k.detail}; it was left as it was.`;
-  return `- ${k.path}: the rewrite would have dropped ${describeLoss(k.lost)}. The proposed text is saved at ${k.proposal}.`;
-}
-
 /**
  * The files not ingested, one line each; files turned away for the same
  * reason share one line and are listed beneath it, so a folder run over the
@@ -533,18 +520,9 @@ function rejectionText(x: Rejection): string {
   }
 }
 
-/** A message as a sentence: one full stop at the end, never two. */
-function sentence(s: string): string {
-  return `${s.trim().replace(/[.\s]+$/, "")}.`;
-}
-
 /** A sentence, unless it already ends in a stop or a closing quote. */
 function closed(s: string): string {
   return /[.!?…”"]$/.test(s.trim()) ? s.trim() : sentence(s);
-}
-
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
 function elapsed(seconds: number | undefined): string {

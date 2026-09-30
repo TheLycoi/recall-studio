@@ -161,6 +161,10 @@ const UNATTENDED_OFF = {
   // list, so the converter refuses before it writes to its cache.
   forcePdfSupport: false,
   provider: "wikilm",
+  // Not unattended, but a page written that the reader did not ask for: Fix
+  // dead links and Smart Fix All create a stub page for each link they cannot
+  // match, and upstream counts every link into a PDF as dead (scanners.ts).
+  createStubsForUnresolvableLinks: false,
 };
 
 test("upstreamSettings turns off every unattended write, whatever the input carries", () => {
@@ -178,6 +182,7 @@ test("upstreamSettings turns off every unattended write, whatever the input carr
     writePdfMarkdownToVault: true,
     markdownConversionBackend: "mineru",
     forcePdfSupport: true,
+    createStubsForUnresolvableLinks: true,
   });
   // WikiLM's own `provider` key shares upstream's name; "anthropic" is one of
   // upstream's native-PDF providers, so it must not pass through.

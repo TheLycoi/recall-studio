@@ -195,7 +195,7 @@ function fakePlugin(engine, { files = [], pages = {} } = {}) {
         return engine;
       },
       // The fake engine writes nothing through a vault, so its guard never refuses.
-      guard: { begin: () => host.runs++, refusals: [], runFolder: null, isHeld: () => false },
+      guard: { begin: () => host.runs++, refusals: [], runFolder: null, isHeld: () => false, wasUpdated: () => false },
     }),
   };
   return plugin;
@@ -260,6 +260,19 @@ test("a source upstream's gate skipped is reported as not ingested, with the rea
   );
   assert.match(text, /sources\/Note\.md not ingested: its content is already in the wiki\./);
   assert.match(text, /Nothing was written\./);
+});
+
+test("a page written earlier in the run and refused later is listed as updated, and says so", () => {
+  const run = ".obsidian/plugins/wikilm/snapshots/2026-09-29T12-00-00-000Z";
+  const text = m.renderIngestReport(
+    report({
+      updatedPages: ["wiki/concepts/receptors.md", "wiki/concepts/other.md"],
+      kept: [{ path: "wiki/concepts/receptors.md", action: "rewrite", dropped: 1, lost: [{ kind: "heading", key: "## a", line: "## A" }], proposal: `${run}/wiki/concepts/receptors.proposed.md`, held: 0 }],
+      snapshots: run,
+    }),
+  );
+  assert.match(text, /Updated 2 pages:\n- wiki\/concepts\/receptors\.md \(a later rewrite was refused; see the saved proposal\)\n- wiki\/concepts\/other\.md\n/);
+  assert.match(text, /Not updated, to keep what was there:\n- wiki\/concepts\/receptors\.md: the rewrite would have dropped 1 line \(1 heading\)\./);
 });
 
 test("a report names each page the guard kept, why, and where the texts were saved", () => {

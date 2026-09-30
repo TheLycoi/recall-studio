@@ -156,6 +156,18 @@ test("an unlabelled call runs on the digest role, and no option sends it elsewhe
   );
 });
 
+// Upstream's lint leaves its duplicate merge and empty-page fill unlabelled;
+// the lint hands upstream a client fixed on the lint role instead.
+test("a role client runs every call on its role, labelled or not", async () => {
+  const { calls, lookup } = fakeBackends();
+  const client = a.createRoleClient(() => settings({ roles: { ...settings().roles, lint: { provider: "gemini", model: "gemini-lint" } } }), lookup, "lint");
+  for (const task of [undefined, "extract", "query-wiki", "lint-alias"]) await client.createMessage({ model: "m", max_tokens: 10, messages: userMessage("x"), task });
+  assert.deepEqual(
+    calls.map((c) => [c.provider, c.model]),
+    Array(4).fill(["gemini", "gemini-lint"]),
+  );
+});
+
 test("the settings are read at call time, so a role change reaches the next call", async () => {
   const { calls, lookup } = fakeBackends();
   let s = settings();

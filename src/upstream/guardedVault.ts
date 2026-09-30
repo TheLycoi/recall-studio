@@ -15,8 +15,9 @@
  * - Before an existing file is overwritten, its text is saved under the
  *   plugin's own folder, in one folder per run named by its start time,
  *   keeping the file's vault path. The last 20 runs are kept.
- * - A rewrite that would drop a heading, a quote or callout line, a PDF link,
- *   an embed or a frontmatter key (lostContent) is refused: the page keeps
+ * - A rewrite that would drop a heading, a quote or callout line, a PDF link
+ *   (in the body or in a frontmatter value), an embed or a frontmatter key
+ *   (lostContent) is refused: the page keeps
  *   its text, the proposed text is saved beside the snapshot as
  *   `<name>.proposed.md`, and the page is held for the rest of the run. The
  *   engine's write returns as if it had landed, so it neither fails the
@@ -27,9 +28,17 @@
  *   unchecked (the summary page of a cancelled run is trashed so the note
  *   re-ingests).
  *
+ * A run begun with a folder (the wiki folder, for every lint and ingest run)
+ * writes nothing outside it: any write, creation, move or removal elsewhere is
+ * refused and recorded, before the rules above are looked at. Upstream's
+ * merge re-points links in every note of the vault; the reader's own notes are
+ * not the engine's to rewrite.
+ *
  * New files are written normally. The wiki's index.md and log.md, which
- * upstream regenerates on every run, skip the loss check (the host says which
- * paths through `exempt`) but are still saved first.
+ * upstream regenerates on every run, skip the loss check and are not saved
+ * (the host says which paths through `exempt`): every lint scan and fix
+ * writes the log, and a snapshot of it would give each one a run folder and
+ * push an ingest's snapshots out of the last 20.
  */
 import type { App, DataAdapter, DataWriteOptions, FileManager, TAbstractFile, TFile, Vault } from "obsidian";
 
@@ -55,32 +64,45 @@ const EMBED = /!\[\[([^\]]+)\]\]/g;
 // A top-level frontmatter key; an indented line or a list item is part of a value.
 const KEY = /^([^\s\-#:][^:]*?)\s*:(?:\s|$)/;
 
-/** The frontmatter's key lines and the body's lines. Frontmatter values are not protected. */
-function splitFrontmatter(text: string): { keys: Array<{ key: string; line: string }>; body: string[] } {
-  const lines = text.replace(/^﻿/, "").split(/\r?\n/);
+/**
+ * The frontmatter's key lines, all its lines, and the body's lines. Of a
+ * frontmatter value only a PDF link in it is protected.
+ */
+function splitFrontmatter(text: string): { keys: Array<{ key: string; line: string }>; front: string[]; body: string[] } {
+  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/);
   if (lines[0]?.trim() === "---") {
     const end = lines.findIndex((l, i) => i > 0 && (l.trim() === "---" || l.trim() === "..."));
     if (end > 0) {
-      const keys = lines.slice(1, end).flatMap((raw) => {
+      const front = lines.slice(1, end);
+      const keys = front.flatMap((raw) => {
         const k = KEY.exec(raw);
         return k ? [{ key: k[1].trim(), line: raw.trimEnd() }] : [];
       });
-      return { keys, body: lines.slice(end + 1) };
+      return { keys, front, body: lines.slice(end + 1) };
     }
   }
-  return { keys: [], body: lines };
+  return { keys: [], front: [], body: lines };
+}
+
+/** The PDF links on one line, wiki or Markdown, by target and subpath. */
+function pdfLinks(line: string): Loss[] {
+  return [...line.matchAll(WIKI_PDF), ...line.matchAll(MD_PDF)].map((p) => ({ kind: "pdf-link", key: p[1] + (p[2] ?? ""), line }));
 }
 
 /** Everything in a text the loss check protects, in the order it appears. */
 function protectedItems(text: string): Loss[] {
-  const { keys, body } = splitFrontmatter(text);
+  const { keys, front, body } = splitFrontmatter(text);
   const out: Loss[] = keys.map((k) => ({ kind: "frontmatter-key", key: k.key, line: k.line }));
+  // A `sources:` entry naming the PDF a page was digested from is the page's
+  // provenance; upstream's sources normaliser rewrites it to a sources/ slug
+  // no file has (core/sources-normalizer.ts).
+  for (const raw of front) out.push(...pdfLinks(raw.trimEnd()));
   for (const raw of body) {
     const line = raw.trimEnd();
     if (HEADING.test(line)) out.push({ kind: "heading", key: line.trim().toLowerCase(), line });
     if (QUOTE.test(line)) out.push({ kind: "quote", key: line, line });
     for (const e of line.matchAll(EMBED)) out.push({ kind: "embed", key: e[1].split("|")[0].trim(), line });
-    for (const p of [...line.matchAll(WIKI_PDF), ...line.matchAll(MD_PDF)]) out.push({ kind: "pdf-link", key: p[1] + (p[2] ?? ""), line });
+    out.push(...pdfLinks(line));
   }
   return out;
 }
@@ -95,7 +117,8 @@ function protectedItems(text: string): Loss[] {
  * - a link or embed to a PDF, wiki or Markdown, by its target including the
  *   `#page=` and selection or rect parameters (the display text may change);
  * - an embed of any kind, by its target;
- * - a frontmatter key; its value may change (`updated`, `sources`).
+ * - a frontmatter key; its value may change (`updated`, `sources`), except
+ *   that a PDF link in a value is protected as a PDF link.
  *
  * Prose may change and lines may move. Each thing lost is listed once. A
  * heading, quote or link inside a code block counts too: the check errs
@@ -141,6 +164,9 @@ export function describeLoss(lost: Loss[]): string {
 
 // ---------------------------------------------------------------- the guard
 
+/** Why a change outside the run's folder was refused, as the report reads it. */
+const OUTSIDE = "outside the wiki folder";
+
 /** A change the guard would not let through. */
 export interface GuardRefusal {
   path: string;
@@ -158,7 +184,11 @@ export interface GuardRefusal {
   held: number;
 }
 
-/** Runs of snapshots kept under the plugin folder; older ones are removed when a run saves its first. */
+/**
+ * Runs of snapshots kept under the plugin folder; older ones are removed when
+ * a run saves its first. A run that saved nothing (one that wrote only the
+ * index and log) has no folder, so it neither counts nor pushes one out.
+ */
 export const SNAPSHOT_RUNS_KEPT = 20;
 
 /**
@@ -176,7 +206,9 @@ export class WriteGuard {
 
   private created = new Set<string>();
   private saved = new Set<string>();
+  private updated = new Set<string>();
   private held = new Map<string, GuardRefusal>();
+  private scope: string | null = null;
   private folder: Promise<string> | null = null;
   private chains = new Map<string, Promise<unknown>>();
 
@@ -263,13 +295,18 @@ export class WriteGuard {
     this.app = overlay<App>(real, { vault: guardedVault, fileManager: guardedFiles });
   }
 
-  /** Start a run: a fresh snapshot folder on first use, nothing created, held or refused yet. */
-  begin(): void {
+  /**
+   * Start a run: a fresh snapshot folder on first use, nothing created, held
+   * or refused yet. With `scope`, a folder, the run writes only inside it.
+   */
+  begin(scope?: string): void {
+    this.scope = scope ? scope.replace(/\/+$/, "") : null;
     this.refusals = [];
     this.runFolder = null;
     this.folder = null;
     this.created.clear();
     this.saved.clear();
+    this.updated.clear();
     this.held.clear();
   }
 
@@ -278,9 +315,30 @@ export class WriteGuard {
     return this.held.has(path);
   }
 
+  /**
+   * Every file that existed before the run and was overwritten in it, the
+   * index and log included. A page refused a later rewrite is still here: its
+   * earlier one landed.
+   */
+  updatedPaths(): string[] {
+    return [...this.updated];
+  }
+
+  /** Whether a rewrite of the file landed in this run (updatedPaths). */
+  wasUpdated(path: string): boolean {
+    return this.updated.has(path);
+  }
+
+  /** Every file the engine created in this run and has not removed since, where it is now. */
+  createdPaths(): string[] {
+    return [...this.created];
+  }
+
   // ---- the three rules
 
   private async creating<T>(path: string, write: () => Promise<T>): Promise<T> {
+    // There is no file to hand back, so the engine is told.
+    if (this.outside(path, "rewrite")) throw new Error(`WikiLM did not write ${path}: it is outside the wiki folder.`);
     const out = await write();
     const made = (out as { path?: unknown } | undefined)?.path;
     this.created.add(typeof made === "string" ? made : path);
@@ -293,6 +351,7 @@ export class WriteGuard {
    */
   private rewrite(path: string, read: () => Promise<string>, compute: (old: string) => string, set: (expect: string, next: string) => Promise<boolean>): Promise<string> {
     return this.serial(path, async () => {
+      if (this.outside(path, "rewrite")) return read();
       for (let attempt = 0; attempt < 3; attempt++) {
         const old = await read();
         const hold = this.held.get(path);
@@ -302,15 +361,18 @@ export class WriteGuard {
         }
         const next = compute(old);
         if (next === old) return old;
-        if (!this.created.has(path)) {
-          const lost = this.exempt(path) ? [] : lostContent(old, next);
+        if (!this.created.has(path) && !this.exempt(path)) {
+          const lost = lostContent(old, next);
           if (lost.length > 0) {
             await this.refuse(path, old, next, lost);
             return old;
           }
           await this.snapshot(path, old);
         }
-        if (await set(old, next)) return next;
+        if (await set(old, next)) {
+          if (!this.created.has(path)) this.updated.add(path);
+          return next;
+        }
         // Changed between the read and the write (the reader typing into it):
         // check again against what it holds now.
       }
@@ -330,6 +392,7 @@ export class WriteGuard {
   /** A change the loss check cannot read: allowed on the engine's own files, refused on any other. */
   private unchecked(path: string, what: string, write: () => Promise<void>): Promise<void> {
     return this.serial(path, async () => {
+      if (this.outside(path, "rewrite")) return;
       if (this.created.has(path)) return write();
       const entry: GuardRefusal = { path, action: "rewrite", dropped: 0, lost: [], proposal: null, detail: `the engine asked for ${what}`, held: 0 };
       this.refusals.push(entry);
@@ -339,6 +402,7 @@ export class WriteGuard {
 
   private removing(path: string, remove: () => Promise<void>): Promise<void> {
     return this.serial(path, async () => {
+      if (this.outside(path, "remove")) return;
       if (!this.created.has(path)) {
         this.refusals.push({ path, action: "remove", dropped: 0, lost: [], proposal: null, held: 0 });
         return;
@@ -350,6 +414,7 @@ export class WriteGuard {
 
   private moving(path: string, to: string, move: () => Promise<void>): Promise<void> {
     return this.serial(path, async () => {
+      if (this.outside(path, "rename", to) || this.outside(to, "rename", to, path)) return;
       if (!this.created.has(path)) {
         this.refusals.push({ path, action: "rename", dropped: 0, lost: [], proposal: null, to, held: 0 });
         return;
@@ -358,6 +423,22 @@ export class WriteGuard {
       this.created.delete(path);
       this.created.add(to);
     });
+  }
+
+  /**
+   * Whether `path` is outside the run's folder; if so the change is refused
+   * and recorded, once per file, later ones counted on the first. `from` is
+   * the file a move outside would have taken there; it stays where it is and
+   * is not held.
+   */
+  private outside(path: string, action: GuardRefusal["action"], to?: string, from?: string): boolean {
+    const scope = this.scope;
+    if (!scope || path === scope || path.startsWith(`${scope}/`)) return false;
+    const at = from ?? path;
+    const had = this.refusals.find((r) => r.path === at && r.detail === OUTSIDE);
+    if (had) had.held++;
+    else this.refusals.push({ path: at, action, dropped: 0, lost: [], proposal: null, detail: OUTSIDE, held: 0, ...(to ? { to } : {}) });
+    return true;
   }
 
   // ---- snapshots, under the plugin folder through the real adapter

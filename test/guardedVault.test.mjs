@@ -88,7 +88,7 @@ const lines = (text) => g.lostContent(PAGE, text).map((x) => x.line);
 
 test("nothing is lost when prose changes, lines move, headings change case, and frontmatter values change", () => {
   const moved = PAGE.replace("updated: 2026-09-01", "updated: 2026-09-29")
-    .replace('  - "[[HBIO 250 Lecture 3.pdf]]"', '  - "[[sources/hbio-250-lecture-3-pdf]]"\n  - "[[sources/lecture]]"\ngeneration_complete: true')
+    .replace('  - "[[HBIO 250 Lecture 3.pdf]]"', '  - "[[HBIO 250 Lecture 3.pdf]]"\n  - "[[sources/lecture]]"\ngeneration_complete: true')
     .replace("Receptors are proteins that bind a ligand.", "Receptors are proteins. They bind a ligand, and antagonists bind without transducing.")
     .replace("## Two Properties", "## two properties   ")
     .replace("> > Receptors bind a ligand and transduce a signal.", "> > Receptors bind a ligand and transduce a signal.   ");
@@ -142,13 +142,25 @@ test("an embed of any kind is lost when it goes, and a PDF embed is lost as an e
   assert.equal(g.droppedLines(lost), 1, "one line, however many rules it breaks");
 });
 
+test("a PDF link in a frontmatter value is protected: upstream's sources normaliser turning it into a sources/ slug is a loss", () => {
+  const before = `---\ntype: concept\nsources:\n  - "[[Lecture 3.pdf]]"\n---\n# Receptors\n\nBody.\n`;
+  const after = `---\ntype: concept\nsources:\n  - "[[sources/lecture-3-pdf]]"\n---\n# Receptors\n\nBody.\n`;
+  assert.deepEqual(
+    g.lostContent(before, after).map((x) => [x.kind, x.key, x.line]),
+    [["pdf-link", "Lecture 3.pdf", '  - "[[Lecture 3.pdf]]"']],
+  );
+  // Re-quoted, or written inline, the link is still there.
+  assert.deepEqual(g.lostContent(before, before.replace('  - "[[Lecture 3.pdf]]"', "  - '[[Lecture 3.pdf]]'")), []);
+  assert.deepEqual(g.lostContent(before, before.replace('sources:\n  - "[[Lecture 3.pdf]]"', 'sources: ["[[Lecture 3.pdf]]"]')), []);
+});
+
 test("a dropped frontmatter key is lost; its value may change and new keys may come", () => {
   assert.deepEqual(
     g.lostContent(PAGE, PAGE.replace("class: HBIO250\n", "")).map((x) => [x.kind, x.key]),
     [["frontmatter-key", "class"]],
   );
   const noFrontmatter = PAGE.slice(PAGE.indexOf("# Receptors"));
-  assert.deepEqual(g.lostContent(PAGE, noFrontmatter).map((x) => x.key).sort(), ["class", "sources", "updated"]);
+  assert.deepEqual(g.lostContent(PAGE, noFrontmatter).map((x) => x.key).sort(), ["HBIO 250 Lecture 3.pdf", "class", "sources", "updated"]);
 });
 
 test("describeLoss names the kinds of line a rewrite would drop", () => {
@@ -231,12 +243,30 @@ test("a later write to a refused page in the same run is held too, so the page k
   assert.ok(!guard.isHeld("wiki/concepts/receptors.md"), "a new run starts with nothing held");
 });
 
-test("index.md and log.md in the wiki folder skip the loss check but are still saved", async () => {
+test("the guard lists each page whose rewrite landed in the run, including one refused later", async () => {
+  const { guard, files, vault } = guarded({ "wiki/concepts/receptors.md": PAGE, "wiki/concepts/other.md": "# Other\n", "wiki/concepts/kept.md": "# Kept\n" });
+  await vault.process(file(vault, "wiki/concepts/receptors.md"), (t) => t.replace("class: HBIO250", "class: HBIO250\naliases:\n  - Receptor"));
+  await vault.process(file(vault, "wiki/concepts/receptors.md"), (t) => t.replace("## Two Properties\n", ""));
+  await vault.process(file(vault, "wiki/concepts/other.md"), (t) => `${t}\nMore.\n`);
+  await vault.process(file(vault, "wiki/concepts/kept.md"), () => "Gone.\n");
+  await vault.create("wiki/concepts/new.md", "# New\n");
+  await vault.process(file(vault, "wiki/concepts/new.md"), (t) => `${t}\nMore.\n`);
+  assert.match(files.get("wiki/concepts/receptors.md"), /aliases:\n {2}- Receptor/, "the first rewrite landed");
+  assert.deepEqual(guard.updatedPaths(), ["wiki/concepts/receptors.md", "wiki/concepts/other.md"], "overwritten pages only: not the refused one, not the one created in this run");
+  assert.ok(guard.isHeld("wiki/concepts/receptors.md"));
+  guard.begin();
+  assert.deepEqual(guard.updatedPaths(), []);
+});
+
+test("index.md and log.md in the wiki folder skip the loss check and are not saved: a run that writes only them makes no snapshot folder", async () => {
   const exempt = (p) => p === "wiki/index.md" || p === "wiki/log.md";
-  const { guard, files, vault } = guarded({ "wiki/index.md": "# Index\n\n## Entities\n", "wiki/concepts/x.md": "# X\n" }, { exempt });
+  const { guard, files, vault } = guarded({ "wiki/index.md": "# Index\n\n## Entities\n", "wiki/log.md": "# Log\n", "wiki/concepts/x.md": "# X\n" }, { exempt });
   await vault.process(file(vault, "wiki/index.md"), () => "# Wiki Index\n\n## Concepts\n");
+  await vault.adapter.write("wiki/log.md", "# Log\n\n## [2026-09-29] lint\n");
   assert.equal(files.get("wiki/index.md"), "# Wiki Index\n\n## Concepts\n");
-  assert.equal(files.get(under(files, "/wiki/index.md")[0]), "# Index\n\n## Entities\n");
+  assert.equal(files.get("wiki/log.md"), "# Log\n\n## [2026-09-29] lint\n");
+  assert.deepEqual(under(files, ".md"), [], "nothing saved for the index and log");
+  assert.equal(guard.runFolder, null, "no run folder for a run that wrote only the index and log");
   await vault.process(file(vault, "wiki/concepts/x.md"), () => "Y\n");
   assert.equal(files.get("wiki/concepts/x.md"), "# X\n", "an ordinary page is still checked");
   assert.deepEqual(guard.refusals.map((r) => r.path), ["wiki/concepts/x.md"]);
@@ -253,6 +283,40 @@ test("a new file is written normally, and one created in this run is the engine'
   assert.deepEqual(under(files, ".md"), []);
   assert.deepEqual(guard.refusals, []);
   assert.equal(guard.runFolder, null, "nothing was saved, so no run folder was made");
+});
+
+test("a run begun with a folder writes only inside it: every write elsewhere is refused and recorded once", async () => {
+  const classNote = "# HBIO 250\n\nWeek 3 covers each [[receptor]].\n";
+  const { guard, files, vault } = guarded({ "classes/HBIO250.md": classNote, "wiki/concepts/x.md": "# X\n", "wikis/y.md": "# Y\n" });
+  guard.begin("wiki");
+  // What upstream's link retargeting does to a note that links a merged page (core/link-retarget.ts).
+  await vault.process(file(vault, "classes/HBIO250.md"), (t) => t.replace("[[receptor]]", "[[receptors]]"));
+  await vault.adapter.write("classes/HBIO250.md", "gone\n");
+  await vault.modify(file(vault, "wikis/y.md"), "# Y\n\nMore.\n");
+  await assert.rejects(vault.create("classes/new.md", "# New\n"), /outside the wiki folder/);
+  await assert.rejects(vault.adapter.write("new.md", "# New\n"), /outside the wiki folder/);
+  await vault.rename(file(vault, "wiki/concepts/x.md"), "classes/x.md");
+  assert.equal(files.get("classes/HBIO250.md"), classNote);
+  assert.equal(files.get("wikis/y.md"), "# Y\n");
+  assert.ok(!files.has("classes/new.md") && !files.has("new.md") && !files.has("classes/x.md"));
+  assert.deepEqual(
+    guard.refusals.map((r) => [r.path, r.action, r.detail ?? null, r.held]),
+    [
+      ["classes/HBIO250.md", "rewrite", "outside the wiki folder", 1],
+      ["wikis/y.md", "rewrite", "outside the wiki folder", 0],
+      ["classes/new.md", "rewrite", "outside the wiki folder", 0],
+      ["new.md", "rewrite", "outside the wiki folder", 0],
+      ["wiki/concepts/x.md", "rename", "outside the wiki folder", 0],
+    ],
+  );
+  assert.equal(guard.runFolder, null, "nothing outside the folder was saved");
+  // Inside the folder the usual rules hold.
+  await vault.process(file(vault, "wiki/concepts/x.md"), (t) => `${t}\nMore.\n`);
+  assert.equal(files.get("wiki/concepts/x.md"), "# X\n\nMore.\n");
+  // A run begun without a folder has no such limit.
+  guard.begin();
+  await vault.process(file(vault, "wikis/y.md"), (t) => `${t}\nMore.\n`);
+  assert.equal(files.get("wikis/y.md"), "# Y\n\nMore.\n");
 });
 
 test("removing or moving a page that existed before the run is refused and recorded; the engine's own pages may go", async () => {
@@ -324,4 +388,18 @@ test("each run saves into its own folder, and only the last 20 runs are kept", a
   assert.equal(runs.length, 20);
   assert.equal(runs.at(-1), guard.runFolder.split("/").pop());
   assert.ok(!runs.includes("2026-01-01T00-00-00-000Z") && !runs.includes("2026-01-04T00-00-00-000Z"), runs.join(" "));
+});
+
+test("a run that writes only the index and log removes no earlier run's snapshots", async () => {
+  const exempt = (p) => p === "wiki/index.md" || p === "wiki/log.md";
+  const old = {};
+  for (let i = 0; i < 20; i++) old[`${PLUGIN_DIR}/snapshots/2026-01-${String(i + 1).padStart(2, "0")}T00-00-00-000Z/wiki/x.md`] = "old";
+  const { guard, files, vault } = guarded({ ...old, "wiki/index.md": "# Index\n", "wiki/log.md": "# Log\n" }, { exempt });
+  for (let run = 0; run < 25; run++) {
+    guard.begin();
+    await vault.process(file(vault, "wiki/index.md"), (t) => `${t}- page ${run}\n`);
+    await vault.process(file(vault, "wiki/log.md"), (t) => `${t}- lint ${run}\n`);
+  }
+  const runs = [...new Set([...files.keys()].filter((p) => p.startsWith(`${PLUGIN_DIR}/snapshots/`)).map((p) => p.split("/")[4]))].sort();
+  assert.deepEqual(runs, Object.keys(old).map((p) => p.split("/")[4]).sort(), "the twenty earlier runs are all still there, and no new one");
 });

@@ -23,6 +23,9 @@ export { COMPATIBLE_SOURCE_EXTENSIONS as UPSTREAM_SOURCE_EXTENSIONS } from "@llm
 export { isExcludedFromSourcePicker, isInFolderScope } from "@llm-wiki/core/folder-scope";
 export { pageBelongsToNote } from "@llm-wiki/core/ingest-state";
 export { slugify } from "@llm-wiki/core/slug";
+// Upstream's lint: the scan, its report modal (LintReportModal, which the
+// controller opens itself) and every fix runner behind the modal's buttons.
+export { runLintWiki } from "@llm-wiki/wiki/lint/controller";
 
 export type {
   LLMWikiSettings,
@@ -31,6 +34,8 @@ export type {
   IngestReport,
   IngestOptions,
 } from "@llm-wiki/types";
+export type { LintContext } from "@llm-wiki/wiki/lint/controller";
+export type { SchemaTask } from "@llm-wiki/schema/schema-manager";
 
 /** The upstream release vendored under vendor/llm-wiki, read from its manifest at build time. */
 export const UPSTREAM_VERSION: string = upstreamManifest.version;
