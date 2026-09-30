@@ -88,6 +88,10 @@ export function upstreamSettings(s: WikiLmSettings): LLMWikiSettings {
     writePdfMarkdownToVault: false,
     markdownConversionBackend: "native",
     forcePdfSupport: false,
+    // Read by upstream's dead-link fixer (lint/fix-dead-link.ts): a link it
+    // cannot match to a page is left as it is, not given a stub page.
+    // Upstream counts every link into a PDF as dead, so each PDF would get one.
+    createStubsForUnresolvableLinks: false,
   };
 }
 

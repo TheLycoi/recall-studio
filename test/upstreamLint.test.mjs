@@ -478,42 +478,44 @@ test("every model call a lint makes, the scan's and every fix runner's, runs on 
 
 // ---- the other runners, under the guard -----------------------------------------------------
 
-test("Fix dead links creates a stub page and re-points the link, and the page keeps everything else", async () => {
+test("Fix dead links re-points a link the model matches to a page, and creates no stub page for one it cannot", async () => {
   // No links into a PDF here: upstream counts each of those as dead too (the next test).
-  const linking = ALBUMIN.replace("[[receptors]].", "[[receptors]], and not an [[agonist-drugs]] either.");
+  const linking = ALBUMIN.replace("[[receptors]].", "[[receptors]], nor a [[receptr]], and not an [[agonist-drugs]] either.");
   const receptors = page({ aliases: ["Receptor"], body: "# Receptors\n\n## Definition\nReceptors are proteins that bind a ligand; [[albumin]] is not one.\n" });
   const { plugin, files } = setup(
     { "wiki/concepts/receptors.md": receptors, "wiki/concepts/albumin.md": linking },
-    (kind, req) =>
-      kind === "dead-link" && req.user.includes("agonist-drugs")
-        ? JSON.stringify({ action: "create_stub", stub_title: "Agonist drugs", stub_type: "concept" })
-        : JSON.stringify({ action: "none" }),
+    (kind, req) => {
+      if (kind !== "dead-link") return "{}";
+      if (/Dead Link Target \(link text\):\nreceptr\n/.test(req.user)) return JSON.stringify({ action: "correct", correct_link: "[[concepts/receptors|Receptors]]" });
+      return JSON.stringify({ action: "create_stub", stub_title: "Agonist drugs", stub_type: "concept" });
+    },
   );
   const modal = await lint(plugin);
   await press(plugin, modal, "onFixDeadLinks");
-  assert.ok(files.has("wiki/concepts/agonist-drugs.md"), `a stub page was created: ${[...files.keys()].join(", ")}`);
+  assert.ok(!files.has("wiki/concepts/agonist-drugs.md"), `no stub page was created: ${[...files.keys()].join(", ")}`);
   const now = files.get("wiki/concepts/albumin.md");
-  assert.doesNotMatch(now, /\[\[agonist-drugs\]\]/, "the dead link was re-pointed");
-  assert.match(now, /\[\[concepts\/agonist-drugs\|Agonist drugs\]\]/, now);
-  assert.deepEqual(missingLines(linking, now).filter((l) => !l.includes("agonist-drugs")), [], "nothing else was dropped");
-  assert.match(notices().at(-1), /Created 1 page:\n- wiki\/concepts\/agonist-drugs\.md\nUpdated 1 page:\n- wiki\/concepts\/albumin\.md\n/);
-  assert.doesNotMatch(notices().at(-1), /Not updated, to keep what was there/);
+  assert.match(now, /\[\[agonist-drugs\]\]/, "the link the model could not match is left as it was");
+  assert.match(now, /nor a \[\[concepts\/receptors\|Receptors\]\]/, "the link the model matched is re-pointed");
+  assert.deepEqual(missingLines(linking, now).filter((l) => !l.includes("receptr")), [], "nothing else was dropped");
+  assert.doesNotMatch(notices().at(-1) ?? "", /Created/);
+  assert.doesNotMatch(notices().at(-1) ?? "", /Not updated, to keep what was there/);
 });
 
-test("upstream counts every link into a PDF as a dead link, even with the PDF in the vault: the callout rewrite is refused, the stub for the PDF is created", async () => {
-  // A model answer upstream cannot act on sends it to its own fallback
-  // (fix-dead-link.ts): a stub page named after the PDF, and the link re-pointed to it.
-  const { plugin, files, calls } = setup({ "wiki/concepts/receptors.md": RECEPTORS, "wiki/concepts/ligands.md": LIGANDS, [`${PDF}.pdf`]: "<binary>" });
+test("upstream counts every link into a PDF as a dead link; Fix dead links leaves each callout as it was and creates no page", async () => {
+  // Two callouts into the same PDF on one page, one on another.
+  const both = page({ aliases: ["Agonist"], body: `# Agonists\n\n## Definition\nAn agonist binds and activates a [[receptors|receptor]].\n\n${QUOTE}\n\n${QUOTE_2}\n` });
+  const pages = { "wiki/concepts/receptors.md": RECEPTORS, "wiki/concepts/ligands.md": LIGANDS, "wiki/concepts/agonists.md": both, [`${PDF}.pdf`]: "<binary>" };
+  const { plugin, files, calls } = setup(pages);
   const modal = await lint(plugin);
   assert.match(modal.report, new RegExp(`\\[\\[concepts/receptors\\]\\] → \\*\\*${PDF}\\.pdf\\*\\*`), modal.report);
+  const before = new Map(files);
   await press(plugin, modal, "onFixDeadLinks");
-  assert.ok(calls.some((c) => c.kind === "dead-link"), "the fix asked the model about the PDF link");
-  assert.equal(files.get("wiki/concepts/receptors.md"), RECEPTORS, "the callout keeps its link into the PDF");
-  assert.equal(files.get("wiki/concepts/ligands.md"), LIGANDS);
-  assert.match(files.get("wiki/concepts/hbio-250-lecture-3-pdf.md"), /stub: true[\s\S]*# HBIO 250 Lecture 3\.pdf/, "a stub page for the PDF was created");
-  const shown = notices().at(-1);
-  assert.match(shown, /Created 1 page:\n- wiki\/concepts\/hbio-250-lecture-3-pdf\.md\n/);
-  assert.match(shown, /- wiki\/concepts\/receptors\.md: the rewrite would have dropped 1 line \(1 quote line\)\./);
+  for (const [p, text] of Object.entries(pages)) assert.equal(files.get(p), text, `${p} keeps its callouts`);
+  const added = [...files.keys()].filter((p) => !before.has(p) && !p.startsWith(`${PLUGIN_DIR}/`));
+  assert.deepEqual(added, [], "no stub page for the PDF");
+  // One model call per page and PDF: upstream lists a PDF once per page that links it, whatever the page number.
+  const asked = calls.filter((c) => c.kind === "dead-link").length;
+  assert.equal(asked, 3, `${asked} dead-link calls for 4 links into one PDF on 3 pages`);
 });
 
 test("Link orphans appends a link on a related page, and that page keeps everything else", async () => {
