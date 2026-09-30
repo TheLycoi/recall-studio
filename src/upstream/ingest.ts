@@ -37,7 +37,7 @@ import type WikiLmPlugin from "../main";
 import type { WikiLmSettings } from "../settings";
 import type { GuardRefusal } from "./guardedVault";
 import { upstreamWikiFolder } from "./host";
-import { busy, guardLines, plural, sentence } from "./report";
+import { busy, guardLines, plural, sentence, updatedLine } from "./report";
 import {
   isExcludedFromSourcePicker,
   isInFolderScope,
@@ -312,11 +312,12 @@ export function renderIngestReport(r: WikiLmIngestReport | FolderIngestReport): 
   }
 
   if (r.createdPages.length > 0) lines.push(`Created ${plural(r.createdPages.length, "page")}:`, ...r.createdPages.map((p) => `- ${p}`));
-  if (r.updatedPages.length > 0) lines.push(`Updated ${plural(r.updatedPages.length, "page")}:`, ...r.updatedPages.map((p) => `- ${p}`));
-  if (also.length > 0) lines.push("Also written:", ...also.map((p) => `- ${p}`));
+  const kept = r.kept ?? [];
+  if (r.updatedPages.length > 0) lines.push(`Updated ${plural(r.updatedPages.length, "page")}:`, ...r.updatedPages.map((p) => updatedLine(p, kept)));
+  if (also.length > 0) lines.push("Also written:", ...also.map((p) => updatedLine(p, kept)));
   if (written === 0) lines.push("Nothing was written.");
   else if (r.cancelled) lines.push("The pages above were written before the stop and are kept.");
-  lines.push(...guardLines(r.kept ?? [], r.snapshots));
+  lines.push(...guardLines(kept, r.snapshots));
 
   if (r.failedItems.length > 0) {
     lines.push(`Failed ${plural(r.failedItems.length, "item")}:`, ...r.failedItems.map((f) => `- ${f.type} “${f.name}”: ${f.reason}`));
@@ -396,7 +397,8 @@ async function withEngineRun<T>(
  *
  * A page the guard held (src/upstream/guardedVault.ts) is still in the
  * engine's report as updated, because the engine's write returned; it is
- * taken out of the updated and written lists and reported as kept.
+ * taken out of the updated and written lists and reported as kept, unless an
+ * earlier write to it in the run landed, when it stays in both.
  */
 async function runOne(plugin: WikiLmPlugin, engine: WikiEngine, file: TFile, opts: IngestOptions): Promise<WikiLmIngestReport> {
   const { vault } = plugin.app;
@@ -423,7 +425,7 @@ async function runOne(plugin: WikiLmPlugin, engine: WikiEngine, file: TFile, opt
 
   if (!hadSchema && vault.getAbstractFileByPath(schemaNote) !== null) writes.add(schemaNote);
   const listed = new Set([...report.createdPages, ...report.updatedPages]);
-  const written = (p: string) => !guard.isHeld(p);
+  const written = (p: string) => !guard.isHeld(p) || guard.wasUpdated(p);
   // A path no longer in the vault was trashed by the engine: the summary page
   // of a cancelled run, which upstream removes so the note re-ingests cleanly.
   const alsoWritten = [...writes].filter((p) => !listed.has(p) && written(p) && vault.getAbstractFileByPath(p) !== null);

@@ -243,6 +243,21 @@ test("a later write to a refused page in the same run is held too, so the page k
   assert.ok(!guard.isHeld("wiki/concepts/receptors.md"), "a new run starts with nothing held");
 });
 
+test("the guard lists each page whose rewrite landed in the run, including one refused later", async () => {
+  const { guard, files, vault } = guarded({ "wiki/concepts/receptors.md": PAGE, "wiki/concepts/other.md": "# Other\n", "wiki/concepts/kept.md": "# Kept\n" });
+  await vault.process(file(vault, "wiki/concepts/receptors.md"), (t) => t.replace("class: HBIO250", "class: HBIO250\naliases:\n  - Receptor"));
+  await vault.process(file(vault, "wiki/concepts/receptors.md"), (t) => t.replace("## Two Properties\n", ""));
+  await vault.process(file(vault, "wiki/concepts/other.md"), (t) => `${t}\nMore.\n`);
+  await vault.process(file(vault, "wiki/concepts/kept.md"), () => "Gone.\n");
+  await vault.create("wiki/concepts/new.md", "# New\n");
+  await vault.process(file(vault, "wiki/concepts/new.md"), (t) => `${t}\nMore.\n`);
+  assert.match(files.get("wiki/concepts/receptors.md"), /aliases:\n {2}- Receptor/, "the first rewrite landed");
+  assert.deepEqual(guard.updatedPaths(), ["wiki/concepts/receptors.md", "wiki/concepts/other.md"], "overwritten pages only: not the refused one, not the one created in this run");
+  assert.ok(guard.isHeld("wiki/concepts/receptors.md"));
+  guard.begin();
+  assert.deepEqual(guard.updatedPaths(), []);
+});
+
 test("index.md and log.md in the wiki folder skip the loss check and are not saved: a run that writes only them makes no snapshot folder", async () => {
   const exempt = (p) => p === "wiki/index.md" || p === "wiki/log.md";
   const { guard, files, vault } = guarded({ "wiki/index.md": "# Index\n\n## Entities\n", "wiki/log.md": "# Log\n", "wiki/concepts/x.md": "# X\n" }, { exempt });

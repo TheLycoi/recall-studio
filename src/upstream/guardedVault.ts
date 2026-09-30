@@ -206,6 +206,7 @@ export class WriteGuard {
 
   private created = new Set<string>();
   private saved = new Set<string>();
+  private updated = new Set<string>();
   private held = new Map<string, GuardRefusal>();
   private scope: string | null = null;
   private folder: Promise<string> | null = null;
@@ -305,6 +306,7 @@ export class WriteGuard {
     this.folder = null;
     this.created.clear();
     this.saved.clear();
+    this.updated.clear();
     this.held.clear();
   }
 
@@ -313,9 +315,18 @@ export class WriteGuard {
     return this.held.has(path);
   }
 
-  /** Every file this run saved a snapshot of: each one it overwrote, and each whose rewrite it refused. */
-  savedPaths(): string[] {
-    return [...this.saved];
+  /**
+   * Every file that existed before the run and was overwritten in it, the
+   * index and log included. A page refused a later rewrite is still here: its
+   * earlier one landed.
+   */
+  updatedPaths(): string[] {
+    return [...this.updated];
+  }
+
+  /** Whether a rewrite of the file landed in this run (updatedPaths). */
+  wasUpdated(path: string): boolean {
+    return this.updated.has(path);
   }
 
   /** Every file the engine created in this run and has not removed since, where it is now. */
@@ -358,7 +369,10 @@ export class WriteGuard {
           }
           await this.snapshot(path, old);
         }
-        if (await set(old, next)) return next;
+        if (await set(old, next)) {
+          if (!this.created.has(path)) this.updated.add(path);
+          return next;
+        }
         // Changed between the read and the write (the reader typing into it):
         // check again against what it holds now.
       }

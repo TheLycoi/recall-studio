@@ -394,6 +394,25 @@ test("Smart Fix All with a duplicate pair keeps both pages, each linking the oth
   assert.match(notices().at(-1), /Kept both pages and linked them: wiki\/concepts\/receptors\.md and wiki\/concepts\/receptor\.md\./);
 });
 
+test("Smart Fix All: a page given aliases and later refused a rewrite is listed as updated, with the refusal", async () => {
+  const { plugin, files } = setup(
+    { "wiki/concepts/receptors.md": RECEPTORS, "wiki/concepts/receptor.md": RECEPTOR_DUP, "wiki/concepts/ligands.md": LIGANDS, [`${PDF}.pdf`]: "<binary>" },
+    (kind, req) => {
+      // A model that "corrects" the link into the PDF to a page: upstream rewrites the callout line.
+      if (kind === "dead-link" && req.user.includes("A ligand is a molecule")) return JSON.stringify({ action: "correct", correct_link: "[[concepts/receptors|Receptors]]" });
+      return duplicatePair("{}")(kind);
+    },
+  );
+  const modal = await lint(plugin);
+  await press(plugin, modal, "onFixAll");
+  const now = files.get("wiki/concepts/ligands.md");
+  assert.match(now, /aliases:\n\s+- "?Ligand"?\n/, "phase 0's aliases are on disk");
+  assert.ok(now.includes(QUOTE_2), "the callout into the PDF is still there");
+  const shown = notices().at(-1);
+  assert.match(shown, /Updated \d+ pages?:\n(- .*\n)*- wiki\/concepts\/ligands\.md \(a later rewrite was refused; see the saved proposal\)\n/);
+  assert.match(shown, /Not updated, to keep what was there:\n(- .*\n)*- wiki\/concepts\/ligands\.md: the rewrite would have dropped 1 line \(1 quote line\)\. The proposed text is saved at [^ ]+ligands\.proposed\.md\./);
+});
+
 // ---- 3. delete empty stubs: refused ------------------------------------------------------
 
 test("Delete empty stubs on a stub the reader had before the run: refused and reported", async () => {

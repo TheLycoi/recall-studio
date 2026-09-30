@@ -32,7 +32,7 @@
 import { Notice } from "obsidian";
 import type WikiLmPlugin from "../main";
 import type { Declined } from "./host";
-import { busy, guardLines, plural, sentence } from "./report";
+import { busy, guardLines, plural, sentence, updatedLine } from "./report";
 import { runLintWiki, type SchemaManager, type SchemaTask, type WikiEngine } from "./vendor";
 
 /**
@@ -192,7 +192,8 @@ function lintRuns(plugin: WikiLmPlugin, engine: WikiEngine): LintRuns {
  * What the guard saw in the lint operation that just ended, or null when it
  * created, overwrote and refused nothing. "Created" lists each file the
  * operation made (a stub for a dead link, a page's copy under a clean name);
- * "Updated" each page it overwrote, the text before saved first. Upstream's
+ * "Updated" each page it overwrote, the text before saved first, marked when
+ * a later rewrite of it was refused. Upstream's
  * index and log, which every operation rewrites, are left out of both. The
  * rest is the ingest report's own ending (guardLines in src/upstream/report.ts).
  */
@@ -200,14 +201,13 @@ function renderLintGuardReport(plugin: WikiLmPlugin, kind: OpenRun["kind"]): str
   const host = plugin.upstreamHost();
   const guard = host.guard;
   const kept = guard.refusals;
-  const refused = new Set(kept.filter((k) => k.action === "rewrite").map((k) => k.path));
   const created = guard.createdPaths().filter((p) => !host.rewrittenEachRun(p));
-  const updated = guard.savedPaths().filter((p) => !refused.has(p) && !host.rewrittenEachRun(p));
+  const updated = guard.updatedPaths().filter((p) => !host.rewrittenEachRun(p));
   const declined = host.declined;
   if (kept.length === 0 && created.length === 0 && updated.length === 0 && declined.length === 0) return null;
   const lines = [`WikiLM: llm-wiki lint ${kind} finished.`];
   if (created.length > 0) lines.push(`Created ${plural(created.length, "page")}:`, ...created.map((p) => `- ${p}`));
-  if (updated.length > 0) lines.push(`Updated ${plural(updated.length, "page")}:`, ...updated.map((p) => `- ${p}`));
+  if (updated.length > 0) lines.push(`Updated ${plural(updated.length, "page")}:`, ...updated.map((p) => updatedLine(p, kept)));
   lines.push(...declined.map(declinedLine));
   lines.push(...guardLines(kept, guard.runFolder ?? undefined));
   return lines.join("\n");

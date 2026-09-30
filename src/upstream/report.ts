@@ -26,6 +26,17 @@ export function guardLines(kept: GuardRefusal[], snapshots: string | undefined):
   return lines;
 }
 
+/**
+ * An updated page in a report's list. A page the guard refused a later
+ * rewrite of in the same run was still updated by the earlier one, and is
+ * listed under "Not updated" as well; this says so.
+ */
+export function updatedLine(path: string, kept: GuardRefusal[]): string {
+  const later = kept.find((k) => k.path === path && k.action === "rewrite");
+  if (!later) return `- ${path}`;
+  return later.proposal ? `- ${path} (a later rewrite was refused; see the saved proposal)` : `- ${path} (a later rewrite was refused)`;
+}
+
 /** A page the guard kept, and why, as the reader reads it. */
 function keptLine(k: GuardRefusal): string {
   if (k.detail) return `- ${k.path}: ${k.detail}; it was left as it was.`;
