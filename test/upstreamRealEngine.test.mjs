@@ -320,19 +320,22 @@ test("a rewrite that drops a quote callout linking into a PDF is refused", async
 
 // ---- what the guard lets through ---------------------------------------------------
 
+/** One new fact for the Definition section, and nothing else. */
+const complementaryAppend = () =>
+  script([RECEPTORS], {
+    "merge-triage": () =>
+      JSON.stringify({
+        strategy: "complementary",
+        reason: "one new fact",
+        items: [{ kind: "complementary", content: "An antagonist binds receptors without transducing.", target_section: "Definition", reason: "new" }],
+      }),
+    complementary: () => "An antagonist binds receptors without transducing.",
+  });
+
 test("a complementary append that only adds is written, and the old text is saved first", async () => {
-  const { plugin, files, calls } = setup(
-    { [NOTE_PATH]: NOTE, "wiki/concepts/receptors.md": DIGEST_PAGE },
-    script([RECEPTORS], {
-      "merge-triage": () =>
-        JSON.stringify({
-          strategy: "complementary",
-          reason: "one new fact",
-          items: [{ kind: "complementary", content: "An antagonist binds receptors without transducing.", target_section: "Definition", reason: "new" }],
-        }),
-      complementary: () => "An antagonist binds receptors without transducing.",
-    }),
-  );
+  // WikiLM's digest writes no `sources:` key (topicNote.ts); the next test is a page that has one.
+  const digest = DIGEST_PAGE.replace(`sources:\n  - "[[${PDF}.pdf]]"\n`, "");
+  const { plugin, files, calls } = setup({ [NOTE_PATH]: NOTE, "wiki/concepts/receptors.md": digest }, complementaryAppend());
   const r = await m.ingestWithUpstream(plugin, tfile(NOTE_PATH));
   assert.ok(calls.includes("complementary"), calls.join(", "));
   const page = files.get("wiki/concepts/receptors.md");
@@ -341,9 +344,19 @@ test("a complementary append that only adds is written, and the old text is save
     assert.ok(page.includes(kept), `the page still holds ${kept}`);
   }
   const [snapshot] = saved(files, "/wiki/concepts/receptors.md");
-  assert.equal(files.get(snapshot), DIGEST_PAGE, "the old text was saved before the write");
+  assert.equal(files.get(snapshot), digest, "the old text was saved before the write");
   assert.ok(r.updatedPages.includes("wiki/concepts/receptors.md"));
   assert.doesNotMatch(notices().at(-1), /Not updated, to keep what was there/);
+});
+
+test("an append to a page whose `sources:` names a PDF is refused: upstream rewrites the entry to a sources/ slug no file has", async () => {
+  const { plugin, files } = setup({ [NOTE_PATH]: NOTE, "wiki/concepts/receptors.md": DIGEST_PAGE }, complementaryAppend());
+  const r = await m.ingestWithUpstream(plugin, tfile(NOTE_PATH));
+  assert.equal(files.get("wiki/concepts/receptors.md"), DIGEST_PAGE, "the page keeps its PDF source");
+  const [proposal] = saved(files, "/wiki/concepts/receptors.proposed.md");
+  assert.match(files.get(proposal), /sources:\n\s+- "\[\[sources\/hbio-250-lecture-3-pdf\]\]"/, "what upstream would have written");
+  assert.ok(!r.updatedPages.includes("wiki/concepts/receptors.md"));
+  assert.match(notices().at(-1), /- wiki\/concepts\/receptors\.md: the rewrite would have dropped 1 line \(1 PDF link\)\./);
 });
 
 test("a brand-new page is created normally, with nothing saved for it", async () => {

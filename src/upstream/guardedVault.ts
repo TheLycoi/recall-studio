@@ -15,8 +15,9 @@
  * - Before an existing file is overwritten, its text is saved under the
  *   plugin's own folder, in one folder per run named by its start time,
  *   keeping the file's vault path. The last 20 runs are kept.
- * - A rewrite that would drop a heading, a quote or callout line, a PDF link,
- *   an embed or a frontmatter key (lostContent) is refused: the page keeps
+ * - A rewrite that would drop a heading, a quote or callout line, a PDF link
+ *   (in the body or in a frontmatter value), an embed or a frontmatter key
+ *   (lostContent) is refused: the page keeps
  *   its text, the proposed text is saved beside the snapshot as
  *   `<name>.proposed.md`, and the page is held for the rest of the run. The
  *   engine's write returns as if it had landed, so it neither fails the
@@ -55,32 +56,45 @@ const EMBED = /!\[\[([^\]]+)\]\]/g;
 // A top-level frontmatter key; an indented line or a list item is part of a value.
 const KEY = /^([^\s\-#:][^:]*?)\s*:(?:\s|$)/;
 
-/** The frontmatter's key lines and the body's lines. Frontmatter values are not protected. */
-function splitFrontmatter(text: string): { keys: Array<{ key: string; line: string }>; body: string[] } {
-  const lines = text.replace(/^﻿/, "").split(/\r?\n/);
+/**
+ * The frontmatter's key lines, all its lines, and the body's lines. Of a
+ * frontmatter value only a PDF link in it is protected.
+ */
+function splitFrontmatter(text: string): { keys: Array<{ key: string; line: string }>; front: string[]; body: string[] } {
+  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/);
   if (lines[0]?.trim() === "---") {
     const end = lines.findIndex((l, i) => i > 0 && (l.trim() === "---" || l.trim() === "..."));
     if (end > 0) {
-      const keys = lines.slice(1, end).flatMap((raw) => {
+      const front = lines.slice(1, end);
+      const keys = front.flatMap((raw) => {
         const k = KEY.exec(raw);
         return k ? [{ key: k[1].trim(), line: raw.trimEnd() }] : [];
       });
-      return { keys, body: lines.slice(end + 1) };
+      return { keys, front, body: lines.slice(end + 1) };
     }
   }
-  return { keys: [], body: lines };
+  return { keys: [], front: [], body: lines };
+}
+
+/** The PDF links on one line, wiki or Markdown, by target and subpath. */
+function pdfLinks(line: string): Loss[] {
+  return [...line.matchAll(WIKI_PDF), ...line.matchAll(MD_PDF)].map((p) => ({ kind: "pdf-link", key: p[1] + (p[2] ?? ""), line }));
 }
 
 /** Everything in a text the loss check protects, in the order it appears. */
 function protectedItems(text: string): Loss[] {
-  const { keys, body } = splitFrontmatter(text);
+  const { keys, front, body } = splitFrontmatter(text);
   const out: Loss[] = keys.map((k) => ({ kind: "frontmatter-key", key: k.key, line: k.line }));
+  // A `sources:` entry naming the PDF a page was digested from is the page's
+  // provenance; upstream's sources normaliser rewrites it to a sources/ slug
+  // no file has (core/sources-normalizer.ts).
+  for (const raw of front) out.push(...pdfLinks(raw.trimEnd()));
   for (const raw of body) {
     const line = raw.trimEnd();
     if (HEADING.test(line)) out.push({ kind: "heading", key: line.trim().toLowerCase(), line });
     if (QUOTE.test(line)) out.push({ kind: "quote", key: line, line });
     for (const e of line.matchAll(EMBED)) out.push({ kind: "embed", key: e[1].split("|")[0].trim(), line });
-    for (const p of [...line.matchAll(WIKI_PDF), ...line.matchAll(MD_PDF)]) out.push({ kind: "pdf-link", key: p[1] + (p[2] ?? ""), line });
+    out.push(...pdfLinks(line));
   }
   return out;
 }
@@ -95,7 +109,8 @@ function protectedItems(text: string): Loss[] {
  * - a link or embed to a PDF, wiki or Markdown, by its target including the
  *   `#page=` and selection or rect parameters (the display text may change);
  * - an embed of any kind, by its target;
- * - a frontmatter key; its value may change (`updated`, `sources`).
+ * - a frontmatter key; its value may change (`updated`, `sources`), except
+ *   that a PDF link in a value is protected as a PDF link.
  *
  * Prose may change and lines may move. Each thing lost is listed once. A
  * heading, quote or link inside a code block counts too: the check errs

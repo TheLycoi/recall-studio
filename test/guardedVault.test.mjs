@@ -88,7 +88,7 @@ const lines = (text) => g.lostContent(PAGE, text).map((x) => x.line);
 
 test("nothing is lost when prose changes, lines move, headings change case, and frontmatter values change", () => {
   const moved = PAGE.replace("updated: 2026-09-01", "updated: 2026-09-29")
-    .replace('  - "[[HBIO 250 Lecture 3.pdf]]"', '  - "[[sources/hbio-250-lecture-3-pdf]]"\n  - "[[sources/lecture]]"\ngeneration_complete: true')
+    .replace('  - "[[HBIO 250 Lecture 3.pdf]]"', '  - "[[HBIO 250 Lecture 3.pdf]]"\n  - "[[sources/lecture]]"\ngeneration_complete: true')
     .replace("Receptors are proteins that bind a ligand.", "Receptors are proteins. They bind a ligand, and antagonists bind without transducing.")
     .replace("## Two Properties", "## two properties   ")
     .replace("> > Receptors bind a ligand and transduce a signal.", "> > Receptors bind a ligand and transduce a signal.   ");
@@ -142,13 +142,25 @@ test("an embed of any kind is lost when it goes, and a PDF embed is lost as an e
   assert.equal(g.droppedLines(lost), 1, "one line, however many rules it breaks");
 });
 
+test("a PDF link in a frontmatter value is protected: upstream's sources normaliser turning it into a sources/ slug is a loss", () => {
+  const before = `---\ntype: concept\nsources:\n  - "[[Lecture 3.pdf]]"\n---\n# Receptors\n\nBody.\n`;
+  const after = `---\ntype: concept\nsources:\n  - "[[sources/lecture-3-pdf]]"\n---\n# Receptors\n\nBody.\n`;
+  assert.deepEqual(
+    g.lostContent(before, after).map((x) => [x.kind, x.key, x.line]),
+    [["pdf-link", "Lecture 3.pdf", '  - "[[Lecture 3.pdf]]"']],
+  );
+  // Re-quoted, or written inline, the link is still there.
+  assert.deepEqual(g.lostContent(before, before.replace('  - "[[Lecture 3.pdf]]"', "  - '[[Lecture 3.pdf]]'")), []);
+  assert.deepEqual(g.lostContent(before, before.replace('sources:\n  - "[[Lecture 3.pdf]]"', 'sources: ["[[Lecture 3.pdf]]"]')), []);
+});
+
 test("a dropped frontmatter key is lost; its value may change and new keys may come", () => {
   assert.deepEqual(
     g.lostContent(PAGE, PAGE.replace("class: HBIO250\n", "")).map((x) => [x.kind, x.key]),
     [["frontmatter-key", "class"]],
   );
   const noFrontmatter = PAGE.slice(PAGE.indexOf("# Receptors"));
-  assert.deepEqual(g.lostContent(PAGE, noFrontmatter).map((x) => x.key).sort(), ["class", "sources", "updated"]);
+  assert.deepEqual(g.lostContent(PAGE, noFrontmatter).map((x) => x.key).sort(), ["HBIO 250 Lecture 3.pdf", "class", "sources", "updated"]);
 });
 
 test("describeLoss names the kinds of line a rewrite would drop", () => {

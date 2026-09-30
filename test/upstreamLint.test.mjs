@@ -306,21 +306,21 @@ test("the scan reports the orphan page and the page missing aliases, and modifie
   assert.doesNotMatch(notices().join("\n"), /Not updated, to keep what was there/);
 });
 
-test("the scan rewrites a digest page's PDF `sources:` entries: frontmatter values may change, and the old text is saved", async () => {
-  const digest = RECEPTORS.replace("class: HBIO250", `class: HBIO250\nsources:\n  - "[[${PDF}.pdf]]"`);
-  const { plugin, files } = setup({
-    "wiki/concepts/receptors.md": digest,
-    "wiki/concepts/ligands.md": LIGANDS,
-    "wiki/concepts/albumin.md": ALBUMIN,
-  });
-  await lint(plugin);
-  const now = files.get("wiki/concepts/receptors.md");
-  assert.notEqual(now, digest, "upstream's preparation phase normalised the sources entry");
-  assert.deepEqual(missingLines(digest, now), [`  - "[[${PDF}.pdf]]"`], "only the sources value changed");
-  const [snapshot] = saved(files, "/wiki/concepts/receptors.md");
-  assert.equal(files.get(snapshot), digest, "the text before the scan is saved under the plugin's folder");
-  assert.match(notices().at(-1), /Updated 1 page:\n- wiki\/concepts\/receptors\.md/);
-  assert.match(notices().at(-1), /The text each page had before this run is saved in \.obsidian\/plugins\/wikilm\/snapshots\//);
+test("the scan's rewrite of a digest page's PDF `sources:` entry into a sources/ slug is refused, and so is alias completion's copy of it", async () => {
+  const digest = LIGANDS.replace("class: HBIO250", `class: HBIO250\nsources:\n  - "[[${PDF}.pdf]]"`);
+  const { plugin, files } = setup(
+    { "wiki/concepts/receptors.md": RECEPTORS, "wiki/concepts/ligands.md": digest, "wiki/concepts/albumin.md": ALBUMIN },
+    (kind) => (kind === "aliases" ? JSON.stringify({ aliases: ["Ligand"] }) : "{}"),
+  );
+  const modal = await lint(plugin);
+  assert.equal(files.get("wiki/concepts/ligands.md"), digest, "upstream's preparation phase did not rewrite the sources entry");
+  assert.match(notices().at(-1), /- wiki\/concepts\/ligands\.md: the rewrite would have dropped 1 line \(1 PDF link\)\. The proposed text is saved at [^ ]+ligands\.proposed\.md\./);
+  // Preparation keeps its normalised copy of the page (preparation.ts), and
+  // alias completion writes from that copy.
+  await press(plugin, modal, "onCompleteAliases");
+  const now = files.get("wiki/concepts/ligands.md");
+  assert.ok(now.includes(`  - "[[${PDF}.pdf]]"`), now);
+  assert.doesNotMatch(now, /sources\/hbio-250/);
 });
 
 // ---- 2. merge duplicates: the source is never removed ---------------------------------
