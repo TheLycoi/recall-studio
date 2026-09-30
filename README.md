@@ -38,7 +38,7 @@ length (setting, default 12 characters) are ignored, already-highlighted
 spans are captured without being re-wrapped, and the same passage is never
 captured twice in a row.
 
-Twelve commands are in the palette, in the order the workflow runs. Each one
+Thirteen commands are in the palette, in the order the workflow runs. Each one
 also runs from the chat box by any of its aliases, with or without a leading
 slash; the whole table is `COMMAND_TABLE` in `src/commandTable.ts`, and `help`
 in the chat lists the phrases.
@@ -47,14 +47,15 @@ in the chat lists the phrases.
 2. **Digest: PDF highlights into concept and entity notes…** (`digest`), on an open PDF or a note with PDF++ links: your PDF++ highlights grouped into concept and entity pages, previewed before anything is written.
 3. **Digest folder: every highlighted PDF under a folder…** (`digest-folder`), always: pick a folder, answer the digest form once, and every PDF under it with highlights is digested in turn, each behind its own preview.
 4. **Lint wiki: find gaps, dead links and ungrounded quotes** (`lint`, `wiki`), always.
-5. **Send selection to inbox** (`capture`, `send`, `pdf`), on an open note (editor or reading view) or PDF: the selection, or in the editor the paragraph under the cursor, queued for card writing; a PDF selection keeps its page number and the page text as context.
-6. **Send selection to inbox with instructions…** (`capture-instruct`, `pdf-instruct`), the same, with a one-line instruction for the writer first ("one cloze on the number", "cards in Dutch").
-7. **Open chat: ask the notes** (`chat`, `ask`), always.
-8. **Open inbox** (`inbox`), always.
-9. **Export all reviewed cards to Anki** (`export`), always.
-10. **Cancel the running AI highlight, digest or ingest** (`cancel`, `stop-run`), while a run is in progress.
-11. **Open the schema note** (`schema`), always.
-12. **Review schema suggestions** (`suggestions`), always.
+5. **Lint wiki (llm-wiki): scan and Smart Fix All** (`llm-wiki-lint`, `smart-fix`), always: obsidian-llm-wiki's own lint in its own report modal, with its fix buttons and Smart Fix All. Every write goes through WikiLM's guard and stays inside the wiki folder. A duplicate pair is linked both ways, never merged; a polluted title is left as it is; a dead link it cannot match is left, with no stub page. Upstream lists every link into a PDF as dead and asks the model once per page and PDF when fixing them; the callouts are kept. After each fix a notice lists the pages created and updated and each change the guard refused.
+6. **Send selection to inbox** (`capture`, `send`, `pdf`), on an open note (editor or reading view) or PDF: the selection, or in the editor the paragraph under the cursor, queued for card writing; a PDF selection keeps its page number and the page text as context.
+7. **Send selection to inbox with instructions…** (`capture-instruct`, `pdf-instruct`), the same, with a one-line instruction for the writer first ("one cloze on the number", "cards in Dutch").
+8. **Open chat: ask the notes** (`chat`, `ask`), always.
+9. **Open inbox** (`inbox`), always.
+10. **Export all reviewed cards to Anki** (`export`), always.
+11. **Cancel the running AI highlight, digest or ingest** (`cancel`, `stop-run`), while a run is in progress.
+12. **Open the schema note** (`schema`), always.
+13. **Review schema suggestions** (`suggestions`), always.
 
 **Chat-only commands.** These left the palette but still run from the chat box
 by alias:
@@ -1340,6 +1341,7 @@ Layout, one line per module:
 - `src/upstream/host.ts` — builds upstream's wiki engine from WikiLM's settings, with its watcher, scheduled lint and startup fixes never constructed
 - `src/upstream/llmAdapter.ts` — upstream's model client on WikiLM's provider backends, reporting why the model stopped
 - `src/upstream/ingest.ts` — the two ingest commands on upstream's wiki engine: PDFs refused to the digest, notes inside the wiki refused, cancel passed to the engine, and a report of every file written and every page kept
+- `src/upstream/lint.ts` — upstream's lint command on upstream's engine: its scan, report modal and fix runners behind the guard, every model call on the lint role, and a notice after each fix of what was created, updated and kept
 - `src/upstream/guardedVault.ts` — the vault the engine writes through: each page saved before it is overwritten, a rewrite that would drop the reader's headings, quotes, PDF links, embeds or frontmatter keys refused, no existing page removed or moved
 - `src/vaultFix.ts` — repairs for what the vault lint finds: the dead link that is only a spelling apart from its page, and the unwrap that withdraws one whose page was never written
 - `src/vaultLint.ts` — structural checks over the notes themselves: what can be found, what links anywhere, what Ask could quote
