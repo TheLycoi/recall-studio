@@ -15,8 +15,18 @@
  * existing page is saved before it is overwritten, a rewrite that would drop
  * the reader's headings, quotes, PDF links, embeds or frontmatter keys is
  * refused, and no existing file is removed or moved.
+ *
+ * Two of the engine's methods are replaced on the instance the host builds,
+ * because the guard can only half-block them. Upstream's lint merges a
+ * duplicate pair by fusing the text into one page, re-pointing links to the
+ * other across the vault and deleting it; WikiLM links the two pages to each
+ * other instead and fuses nothing (two pages about one subject are
+ * cross-linked, never merged). Its polluted-title fix copies a page to a
+ * clean name and deletes the old one; WikiLM leaves the page as it is.
  */
+import { TFile } from "obsidian";
 import type { ProviderName } from "../backend";
+import { planCrossLinks, type FixPageInfo } from "../fixPlan";
 import type WikiLmPlugin from "../main";
 import { resolveRole, type ModelRole } from "../modelRoles";
 import type { WikiLmSettings } from "../settings";
@@ -95,6 +105,13 @@ export function upstreamSettings(s: WikiLmSettings): LLMWikiSettings {
   };
 }
 
+/**
+ * What WikiLM did in place of one of upstream's merges or renames: a
+ * duplicate pair kept and linked (`linked` false when the guard refused a
+ * link), or a polluted page left where it is.
+ */
+export type Declined = { kind: "kept-both"; paths: [string, string]; linked: boolean } | { kind: "left"; path: string };
+
 interface Built {
   engine: WikiEngine;
   schema: SchemaManager;
@@ -122,6 +139,8 @@ export class UpstreamHost {
   private readonly roleClients = new Map<ModelRole, UpstreamLLMClient>();
   private readonly settings: () => WikiLmSettings;
   private readonly backends: BackendLookup;
+  /** What the replaced engine methods did in the lint operation now open; the lint clears it when one starts. */
+  declined: Declined[] = [];
 
   constructor(private readonly plugin: WikiLmPlugin) {
     this.settings = () => plugin.settings;
@@ -158,8 +177,70 @@ export class UpstreamHost {
     // The fifth argument is upstream's write hook, which its own plugin wires
     // to AutoMaintainManager.watchWrite. There is no watcher here.
     const engine = new WikiEngine(app, next, getClient, schema, () => {});
+    // Called by upstream's lint (fix-runners.ts, runDuplicateMerges; controller.ts,
+    // the polluted-page fix and Smart Fix All). Each counts a call that returns
+    // as done and one that throws as not done, so these throw once WikiLM has
+    // acted; the lint's notice says what was done instead.
+    engine.mergeDuplicatePages = (targetPath, sourcePath) => this.crossLinkInstead(engine, targetPath, sourcePath);
+    engine.fixPollutedPage = (oldPath) => this.leaveInPlace(oldPath);
     this.built = { engine, schema, settings: next };
     return engine;
+  }
+
+  /**
+   * In place of upstream's merge of a duplicate pair: each page gains a link
+   * to the other in its related section, the way WikiLM's own cross-link fix
+   * writes it (planCrossLinks in src/fixPlan.ts), through the guard. Nothing
+   * is fused, re-pointed or removed.
+   */
+  private async crossLinkInstead(engine: WikiEngine, targetPath: string, sourcePath: string): Promise<never> {
+    const vault = this.guard.app.vault;
+    const infos = new Map<string, FixPageInfo>();
+    for (const path of [targetPath, sourcePath]) {
+      const file = vault.getAbstractFileByPath(path);
+      if (!(file instanceof TFile)) throw new Error(`WikiLM did not link the pair: ${path} is not in the vault.`);
+      infos.set(path, this.pageInfo(path, await vault.read(file)));
+    }
+    const issue = { id: "duplicate-pages" as const, path: targetPath, title: "", target: sourcePath };
+    let linked = true;
+    for (const fix of planCrossLinks([issue], infos, engine.settings.wikiFolder)) {
+      const file = vault.getAbstractFileByPath(fix.path);
+      if (!(file instanceof TFile)) continue;
+      // The text the page holds afterwards: the old text when the guard refused.
+      const now = await vault.process(file, fix.apply);
+      if (fix.apply(now) !== now) linked = false;
+    }
+    this.declined.push({ kind: "kept-both", paths: [targetPath, sourcePath], linked });
+    throw new Error(linked ? "WikiLM kept both pages and linked them; it does not merge pages" : "WikiLM kept both pages; a link between them was not added");
+  }
+
+  /** In place of upstream's polluted-title fix, which copies the page to a clean name and deletes the old one. */
+  private async leaveInPlace(oldPath: string): Promise<never> {
+    this.declined.push({ kind: "left", path: oldPath });
+    throw new Error(`WikiLM left ${oldPath} as it is; it does not rename pages`);
+  }
+
+  /**
+   * What planCrossLinks needs to know of a page, read the way the fixer reads
+   * it (src/fixer.ts, pageInfos): a `type: concept` or `entity` page in one of
+   * the reader's wiki folders is a karpathy page, any other a class page.
+   */
+  private pageInfo(path: string, content: string): FixPageInfo {
+    const front = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content)?.[1] ?? "";
+    const type = (/^type:\s*["']?([^"'\s]+)/m.exec(front)?.[1] ?? "").toLowerCase();
+    const s = this.plugin.settings;
+    const folders = [s.wikiConceptsFolder, s.wikiEntitiesFolder].map((f) => f.trim().replace(/\/$/, "")).filter(Boolean);
+    const karpathy = (type === "concept" || type === "entity") && folders.some((f) => path.startsWith(`${f}/`));
+    const body = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
+    return {
+      path,
+      title: (path.split("/").pop() ?? path).replace(/\.md$/i, ""),
+      displayTitle: /^#\s+(.+?)\s*$/m.exec(body)?.[1].trim(),
+      schema: karpathy ? "karpathy" : "class",
+      kind: type === "entity" ? "entity" : "concept",
+      classCodes: [],
+      content,
+    };
   }
 
   /** Upstream's schema manager, the one the current engine was built with. */

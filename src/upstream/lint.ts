@@ -31,6 +31,7 @@
  */
 import { Notice } from "obsidian";
 import type WikiLmPlugin from "../main";
+import type { Declined } from "./host";
 import { busy, guardLines, plural, sentence } from "./report";
 import { runLintWiki, type SchemaManager, type SchemaTask, type WikiEngine } from "./vendor";
 
@@ -151,6 +152,7 @@ class LintRuns {
     // One snapshot folder per operation, nothing held from the last run, and
     // no write outside the wiki folder.
     p.upstreamHost().guard.begin(this.engine.settings.wikiFolder);
+    p.upstreamHost().declined = [];
     this.engine.setStatusBarUpdateCallback((text) => p.cancel.progress(text || "linting the wiki", owner));
     // Once per operation: upstream's cancelLint shows a Notice each time.
     let asked = false;
@@ -201,10 +203,19 @@ function renderLintGuardReport(plugin: WikiLmPlugin, kind: OpenRun["kind"]): str
   const refused = new Set(kept.filter((k) => k.action === "rewrite").map((k) => k.path));
   const created = guard.createdPaths().filter((p) => !host.rewrittenEachRun(p));
   const updated = guard.savedPaths().filter((p) => !refused.has(p) && !host.rewrittenEachRun(p));
-  if (kept.length === 0 && created.length === 0 && updated.length === 0) return null;
+  const declined = host.declined;
+  if (kept.length === 0 && created.length === 0 && updated.length === 0 && declined.length === 0) return null;
   const lines = [`WikiLM: llm-wiki lint ${kind} finished.`];
   if (created.length > 0) lines.push(`Created ${plural(created.length, "page")}:`, ...created.map((p) => `- ${p}`));
   if (updated.length > 0) lines.push(`Updated ${plural(updated.length, "page")}:`, ...updated.map((p) => `- ${p}`));
+  lines.push(...declined.map(declinedLine));
   lines.push(...guardLines(kept, guard.runFolder ?? undefined));
   return lines.join("\n");
+}
+
+/** What WikiLM did in place of upstream's merge or rename (src/upstream/host.ts), as the reader reads it. */
+function declinedLine(d: Declined): string {
+  if (d.kind === "left") return `Left as it is: ${d.path}.`;
+  const [a, b] = d.paths;
+  return d.linked ? `Kept both pages and linked them: ${a} and ${b}.` : `Kept both pages: ${a} and ${b}. A link between them was not added (see below).`;
 }

@@ -344,57 +344,54 @@ function duplicatePair(mergeAnswer) {
   };
 }
 
-test("Smart Fix All with a duplicate pair: the source is not removed, a lossy merge is refused, and both are reported", async () => {
-  const lossy = JSON.stringify({ body: "# Receptors\n\n## Definition\nReceptors bind ligands and pass a signal on.\n", aliases: ["Receptor"] });
-  const { plugin, files, calls } = setup(
-    { "wiki/concepts/receptors.md": RECEPTORS, "wiki/concepts/receptor.md": RECEPTOR_DUP, "wiki/concepts/ligands.md": LIGANDS },
-    duplicatePair(lossy),
-  );
-  const modal = await lint(plugin);
-  assert.ok(modal.counts.duplicates >= 1, `the scan found the pair: ${JSON.stringify(modal.counts)}; calls ${calls.map((c) => c.kind).join(", ")}`);
-  await press(plugin, modal, "onFixAll");
-  assert.ok(calls.some((c) => c.kind === "merge"), `the merge ran: ${calls.map((c) => c.kind).join(", ")}`);
+/** The vault's files outside the plugin's own folder, as they are now. */
+function vaultFiles(files) {
+  return new Map([...files].filter(([p]) => !p.startsWith(`${PLUGIN_DIR}/`)));
+}
 
-  assert.ok(files.has("wiki/concepts/receptor.md"), "the source page is not deleted");
-  const target = files.get("wiki/concepts/receptors.md");
-  assert.deepEqual(missingLines(RECEPTORS, target), [], "the target keeps every line it had");
-  for (const kept of ["## Definition", "## Two Properties", QUOTE, `${PDF}.pdf#page=4`]) assert.ok(target.includes(kept), `the target keeps ${kept}`);
-
-  const shown = notices().at(-1);
-  assert.match(shown, /Not updated, to keep what was there:/);
-  assert.match(shown, /- wiki\/concepts\/receptors\.md: the rewrite would have dropped \d+ lines? \(.*heading.*\)\. The proposed text is saved at \.obsidian\/plugins\/wikilm\/snapshots\/[^ ]+\/wiki\/concepts\/receptors\.proposed\.md\./);
-  assert.match(shown, /- wiki\/concepts\/receptor\.md: the engine asked to remove it; it was left in place\./);
-  assert.match(shown, /The text each page had before this run is saved in \.obsidian\/plugins\/wikilm\/snapshots\//);
-});
-
-test("Merge duplicates with a merge that loses nothing: the target is written, the reader's note outside the wiki is not re-pointed, the source is still not removed", async () => {
-  const fused = JSON.stringify({
-    body: `# Receptors\n\n${QUOTE}\n\n## Definition\nReceptors are proteins that bind a ligand and pass a signal on into the cell; the same concept is also called a receptor. See [[ligands]] for what binds them.\n\n## Two Properties\nBinding and transduction are separate properties of a receptor, and a drug can have one without the other.\n`,
-    aliases: ["Receptor"],
-  });
-  // A note of the reader's outside the wiki that links the duplicate.
+test("Merge duplicates keeps both pages and links each to the other; no other file in the vault changes", async () => {
+  // A note of the reader's outside the wiki that links the duplicate:
+  // upstream's merge re-pointed it (merge-duplicates.ts, retargetLinksToPage).
   const classNote = "# HBIO 250\n\nWeek 3 covers each [[receptor]] and its ligands.\n";
-  const { plugin, files } = setup(
+  const { plugin, files, calls } = setup(
     { "wiki/concepts/receptors.md": RECEPTORS, "wiki/concepts/receptor.md": RECEPTOR_DUP, "wiki/concepts/ligands.md": LIGANDS, "classes/HBIO250.md": classNote },
-    duplicatePair(fused),
+    duplicatePair(JSON.stringify({ body: "# Receptors\n\nFused.\n", aliases: [] })),
   );
   linkIndex(plugin.app, files);
   const modal = await lint(plugin);
+  assert.ok(modal.counts.duplicates >= 1, JSON.stringify(modal.counts));
+  const before = vaultFiles(files);
   await press(plugin, modal, "onMergeDuplicates");
-  // Upstream re-points every link to the source, vault-wide, before it deletes
-  // the source (merge-duplicates.ts, retargetLinksToPage); outside the wiki
-  // folder that is refused, and so is the delete.
-  assert.equal(files.get("classes/HBIO250.md"), classNote);
+  assert.ok(!calls.some((c) => c.kind === "merge"), "no model was asked to fuse the pages");
+
   const target = files.get("wiki/concepts/receptors.md");
-  assert.match(target, /also called a receptor/, "the fused text was written");
-  for (const kept of ["## Definition", "## Two Properties", QUOTE, "class: HBIO250"]) assert.ok(target.includes(kept), `the target keeps ${kept}`);
-  const [snapshot] = saved(files, "/wiki/concepts/receptors.md");
-  assert.equal(files.get(snapshot), RECEPTORS, "the target's old text was saved first");
-  assert.ok(files.has("wiki/concepts/receptor.md"), "the source page is not deleted");
+  const source = files.get("wiki/concepts/receptor.md");
+  assert.equal(target, RECEPTORS.replace(/\n$/, "") + "\n\n## Related Concepts\n- [[concepts/receptor|Receptor]]\n", target);
+  assert.equal(source, RECEPTOR_DUP.replace(/\n$/, "") + "\n\n## Related Concepts\n- [[concepts/receptors|Receptors]]\n", source);
+  const after = vaultFiles(files);
+  const changed = [...new Set([...before.keys(), ...after.keys()])].filter((p) => before.get(p) !== after.get(p)).sort();
+  assert.deepEqual(changed, ["wiki/concepts/receptor.md", "wiki/concepts/receptors.md"], "only the two pages changed");
+
   const shown = notices().at(-1);
-  assert.match(shown, /Updated \d+ pages?:\n(- .*\n)*- wiki\/concepts\/receptors\.md/);
-  assert.match(shown, /- classes\/HBIO250\.md: outside the wiki folder; it was left as it was\./);
-  assert.match(shown, /- wiki\/concepts\/receptor\.md: the engine asked to remove it; it was left in place\./);
+  assert.match(shown, /^WikiLM: llm-wiki lint fix finished\./);
+  assert.match(shown, /Updated 2 pages:\n- wiki\/concepts\/(receptors?)\.md\n- wiki\/concepts\/(receptors?)\.md\n/);
+  assert.match(shown, /Kept both pages and linked them: wiki\/concepts\/receptors\.md and wiki\/concepts\/receptor\.md\./);
+  assert.doesNotMatch(shown, /Not updated/);
+  // Upstream's own count: the pair is not merged (fix-runners.ts, runDuplicateMerges).
+  assert.ok(notices().includes("Duplicate merge complete. Merged 0/1 pairs."), notices().join(" | "));
+});
+
+test("Smart Fix All with a duplicate pair keeps both pages, each linking the other", async () => {
+  const { plugin, files, calls } = setup(
+    { "wiki/concepts/receptors.md": RECEPTORS, "wiki/concepts/receptor.md": RECEPTOR_DUP, "wiki/concepts/ligands.md": LIGANDS },
+    duplicatePair(JSON.stringify({ body: "# Receptors\n\nFused.\n", aliases: [] })),
+  );
+  const modal = await lint(plugin);
+  await press(plugin, modal, "onFixAll");
+  assert.ok(!calls.some((c) => c.kind === "merge"), calls.map((c) => c.kind).join(", "));
+  assert.match(files.get("wiki/concepts/receptors.md"), /## Two Properties[\s\S]*- \[\[concepts\/receptor\|Receptor\]\]/);
+  assert.match(files.get("wiki/concepts/receptor.md"), /- \[\[concepts\/receptors\|Receptors\]\]/);
+  assert.match(notices().at(-1), /Kept both pages and linked them: wiki\/concepts\/receptors\.md and wiki\/concepts\/receptor\.md\./);
 });
 
 // ---- 3. delete empty stubs: refused ------------------------------------------------------
@@ -471,7 +468,8 @@ test("every model call a lint makes, the scan's and every fix runner's, runs on 
   await press(plugin, modal, "onFixAll");
   await press(plugin, modal, "onAnalyzeSchema");
   const kinds = new Set(calls.map((c) => c.kind));
-  for (const k of ["dedup", "aliases", "merge", "dead-link", "orphan", "fill", "schema"]) assert.ok(kinds.has(k), `a ${k} call was made: ${[...kinds].join(", ")}`);
+  // A duplicate pair is linked, not fused, so no merge call is made (src/upstream/host.ts).
+  for (const k of ["dedup", "aliases", "dead-link", "orphan", "fill", "schema"]) assert.ok(kinds.has(k), `a ${k} call was made: ${[...kinds].join(", ")}`);
   assert.ok(scanCalls > 0, "the scan itself called the model");
   for (const c of calls) assert.deepEqual({ provider: c.provider, model: c.model }, LINT_ROLE, `the ${c.kind} call ran on the lint role`);
 });
@@ -567,21 +565,21 @@ test("Retag violations rewrites the tags value and nothing else", async () => {
   assert.equal(now.slice(now.indexOf("# Receptors")), tagged.slice(tagged.indexOf("# Receptors")), "the body is untouched");
 });
 
-test("Fix polluted pages: the copy at the clean name is created, the move of the reader's page is refused and reported", async () => {
+test("Fix polluted pages leaves the page as it is: no copy, no link moved, and upstream counts it as not fixed", async () => {
   const polluted = page({ aliases: ["Kinase"], body: "# Kinases\n\n## Definition\nA kinase moves a phosphate group onto a protein, which switches many receptors on and off. See [[receptors]].\n" });
+  const linking = LIGANDS.replace("[[receptors]].", "[[receptors]], switched by [[concepts/concepts·Kinases|kinases]].");
   const { plugin, files } = setup({
     "wiki/concepts/receptors.md": RECEPTORS,
-    "wiki/concepts/ligands.md": LIGANDS,
+    "wiki/concepts/ligands.md": linking,
     "wiki/concepts/concepts·Kinases.md": polluted,
   });
   const modal = await lint(plugin);
+  const before = vaultFiles(files);
   await press(plugin, modal, "onFixPollutedPages");
-  assert.equal(files.get("wiki/concepts/concepts·Kinases.md"), polluted, "the reader's page is where it was, as it was");
-  // Upstream renames by writing a copy and deleting the old page (fix-polluted-page.ts), so the copy stays.
-  assert.match(files.get("wiki/concepts/·Kinases.md") ?? "", /A kinase moves a phosphate group/, "the copy under the clean name was written");
-  const shown = notices().at(-1);
-  assert.match(shown, /Created 1 page:\n- wiki\/concepts\/·Kinases\.md\n/);
-  assert.match(shown, /- wiki\/concepts\/concepts·Kinases\.md: the engine asked to remove it; it was left in place\./);
+  assert.deepEqual(vaultFiles(files), before, "nothing in the vault changed");
+  assert.ok(!files.has("wiki/concepts/·Kinases.md"), "no copy under the clean name");
+  assert.equal(notices().at(-1), "WikiLM: llm-wiki lint fix finished.\nLeft as it is: wiki/concepts/concepts·Kinases.md.");
+  assert.ok(notices().includes("Polluted pages fixed: 0/1. Index regenerated."), notices().join(" | "));
 });
 
 test("Analyze schema appends upstream's suggestion to its suggestions note and changes no schema", async () => {
