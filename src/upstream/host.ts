@@ -178,7 +178,7 @@ export class UpstreamHost {
    * Upstream's index and log, which it writes on every run: the index is
    * rebuilt whole from the pages (engine-internals/index-generator.ts) and
    * the log gains an entry and is trimmed when long (log-writer.ts). They hold
-   * no text of the reader's, so they skip the loss check; they are still saved.
+   * no text of the reader's, so they skip the loss check and are not saved.
    */
   rewrittenEachRun(path: string): boolean {
     const wiki = this.built?.settings.wikiFolder;

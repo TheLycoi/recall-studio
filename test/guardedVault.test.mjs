@@ -243,12 +243,15 @@ test("a later write to a refused page in the same run is held too, so the page k
   assert.ok(!guard.isHeld("wiki/concepts/receptors.md"), "a new run starts with nothing held");
 });
 
-test("index.md and log.md in the wiki folder skip the loss check but are still saved", async () => {
+test("index.md and log.md in the wiki folder skip the loss check and are not saved: a run that writes only them makes no snapshot folder", async () => {
   const exempt = (p) => p === "wiki/index.md" || p === "wiki/log.md";
-  const { guard, files, vault } = guarded({ "wiki/index.md": "# Index\n\n## Entities\n", "wiki/concepts/x.md": "# X\n" }, { exempt });
+  const { guard, files, vault } = guarded({ "wiki/index.md": "# Index\n\n## Entities\n", "wiki/log.md": "# Log\n", "wiki/concepts/x.md": "# X\n" }, { exempt });
   await vault.process(file(vault, "wiki/index.md"), () => "# Wiki Index\n\n## Concepts\n");
+  await vault.adapter.write("wiki/log.md", "# Log\n\n## [2026-09-29] lint\n");
   assert.equal(files.get("wiki/index.md"), "# Wiki Index\n\n## Concepts\n");
-  assert.equal(files.get(under(files, "/wiki/index.md")[0]), "# Index\n\n## Entities\n");
+  assert.equal(files.get("wiki/log.md"), "# Log\n\n## [2026-09-29] lint\n");
+  assert.deepEqual(under(files, ".md"), [], "nothing saved for the index and log");
+  assert.equal(guard.runFolder, null, "no run folder for a run that wrote only the index and log");
   await vault.process(file(vault, "wiki/concepts/x.md"), () => "Y\n");
   assert.equal(files.get("wiki/concepts/x.md"), "# X\n", "an ordinary page is still checked");
   assert.deepEqual(guard.refusals.map((r) => r.path), ["wiki/concepts/x.md"]);
@@ -336,4 +339,18 @@ test("each run saves into its own folder, and only the last 20 runs are kept", a
   assert.equal(runs.length, 20);
   assert.equal(runs.at(-1), guard.runFolder.split("/").pop());
   assert.ok(!runs.includes("2026-01-01T00-00-00-000Z") && !runs.includes("2026-01-04T00-00-00-000Z"), runs.join(" "));
+});
+
+test("a run that writes only the index and log removes no earlier run's snapshots", async () => {
+  const exempt = (p) => p === "wiki/index.md" || p === "wiki/log.md";
+  const old = {};
+  for (let i = 0; i < 20; i++) old[`${PLUGIN_DIR}/snapshots/2026-01-${String(i + 1).padStart(2, "0")}T00-00-00-000Z/wiki/x.md`] = "old";
+  const { guard, files, vault } = guarded({ ...old, "wiki/index.md": "# Index\n", "wiki/log.md": "# Log\n" }, { exempt });
+  for (let run = 0; run < 25; run++) {
+    guard.begin();
+    await vault.process(file(vault, "wiki/index.md"), (t) => `${t}- page ${run}\n`);
+    await vault.process(file(vault, "wiki/log.md"), (t) => `${t}- lint ${run}\n`);
+  }
+  const runs = [...new Set([...files.keys()].filter((p) => p.startsWith(`${PLUGIN_DIR}/snapshots/`)).map((p) => p.split("/")[4]))].sort();
+  assert.deepEqual(runs, Object.keys(old).map((p) => p.split("/")[4]).sort(), "the twenty earlier runs are all still there, and no new one");
 });

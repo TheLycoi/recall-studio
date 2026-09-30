@@ -29,8 +29,10 @@
  *   re-ingests).
  *
  * New files are written normally. The wiki's index.md and log.md, which
- * upstream regenerates on every run, skip the loss check (the host says which
- * paths through `exempt`) but are still saved first.
+ * upstream regenerates on every run, skip the loss check and are not saved
+ * (the host says which paths through `exempt`): every lint scan and fix
+ * writes the log, and a snapshot of it would give each one a run folder and
+ * push an ingest's snapshots out of the last 20.
  */
 import type { App, DataAdapter, DataWriteOptions, FileManager, TAbstractFile, TFile, Vault } from "obsidian";
 
@@ -173,7 +175,11 @@ export interface GuardRefusal {
   held: number;
 }
 
-/** Runs of snapshots kept under the plugin folder; older ones are removed when a run saves its first. */
+/**
+ * Runs of snapshots kept under the plugin folder; older ones are removed when
+ * a run saves its first. A run that saved nothing (one that wrote only the
+ * index and log) has no folder, so it neither counts nor pushes one out.
+ */
 export const SNAPSHOT_RUNS_KEPT = 20;
 
 /**
@@ -327,8 +333,8 @@ export class WriteGuard {
         }
         const next = compute(old);
         if (next === old) return old;
-        if (!this.created.has(path)) {
-          const lost = this.exempt(path) ? [] : lostContent(old, next);
+        if (!this.created.has(path) && !this.exempt(path)) {
+          const lost = lostContent(old, next);
           if (lost.length > 0) {
             await this.refuse(path, old, next, lost);
             return old;
