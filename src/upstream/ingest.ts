@@ -315,9 +315,7 @@ export function renderIngestReport(r: WikiLmIngestReport | FolderIngestReport): 
   if (also.length > 0) lines.push("Also written:", ...also.map((p) => `- ${p}`));
   if (written === 0) lines.push("Nothing was written.");
   else if (r.cancelled) lines.push("The pages above were written before the stop and are kept.");
-  const kept = r.kept ?? [];
-  if (kept.length > 0) lines.push("Not updated, to keep what was there:", ...kept.map(keptLine));
-  if (r.snapshots) lines.push(`The text each page had before this run is saved in ${r.snapshots}.`);
+  lines.push(...guardLines(r.kept ?? [], r.snapshots));
 
   if (r.failedItems.length > 0) {
     lines.push(`Failed ${plural(r.failedItems.length, "item")}:`, ...r.failedItems.map((f) => `- ${f.type} “${f.name}”: ${f.reason}`));
@@ -455,7 +453,7 @@ async function alreadyIngested(plugin: WikiLmPlugin, engine: WikiEngine, file: T
 }
 
 /** What stops a run from starting: another run holding the token. Null when nothing does. */
-function busy(plugin: WikiLmPlugin): string | null {
+export function busy(plugin: WikiLmPlugin): string | null {
   if (!plugin.cancel.active) return null;
   const running = plugin.cancel.label ? ` (${plugin.cancel.label})` : "";
   return `another run is still going${running}. Start this once it finishes, or stop it from the status bar`;
@@ -493,6 +491,18 @@ function refused(path: string, reason: Rejection["reason"], detail?: string): Wi
 
 function failed(path: string, message: string): IngestReport {
   return { ...emptyReport(path), success: false, errorMessage: message };
+}
+
+/**
+ * What the guard did in a run, as the reader reads it: each page it kept as
+ * it was and why, then where the earlier texts are saved. Ingest's report and
+ * the lint's (src/upstream/lint.ts) end with these lines.
+ */
+export function guardLines(kept: GuardRefusal[], snapshots: string | undefined): string[] {
+  const lines: string[] = [];
+  if (kept.length > 0) lines.push("Not updated, to keep what was there:", ...kept.map(keptLine));
+  if (snapshots) lines.push(`The text each page had before this run is saved in ${snapshots}.`);
+  return lines;
 }
 
 /** A page the guard kept, and why, as the reader reads it. */
@@ -534,7 +544,7 @@ function rejectionText(x: Rejection): string {
 }
 
 /** A message as a sentence: one full stop at the end, never two. */
-function sentence(s: string): string {
+export function sentence(s: string): string {
   return `${s.trim().replace(/[.\s]+$/, "")}.`;
 }
 
@@ -543,7 +553,7 @@ function closed(s: string): string {
   return /[.!?…”"]$/.test(s.trim()) ? s.trim() : sentence(s);
 }
 
-function plural(n: number, word: string): string {
+export function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 

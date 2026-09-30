@@ -122,11 +122,26 @@ function untilAborted<T>(call: Promise<T>, signal: AbortSignal): Promise<T> {
  * "unknown".
  */
 export function createUpstreamClient(getSettings: () => WikiLmSettings, backends: BackendLookup): UpstreamLLMClient {
+  return clientOn(getSettings, backends, roleForTask);
+}
+
+/**
+ * The same client with every call on one role, whatever upstream labels it.
+ * Upstream's lint leaves some of its calls unlabelled (the duplicate merge,
+ * the empty-page fill: wiki/lint/merge-duplicates.ts, fill-empty-page.ts),
+ * and an unlabelled call is digest work to `roleForTask`; a lint run hands
+ * upstream this client on the lint role instead.
+ */
+export function createRoleClient(getSettings: () => WikiLmSettings, backends: BackendLookup, role: ModelRole): UpstreamLLMClient {
+  return clientOn(getSettings, backends, () => role);
+}
+
+function clientOn(getSettings: () => WikiLmSettings, backends: BackendLookup, roleFor: (task: string | undefined) => ModelRole): UpstreamLLMClient {
   return {
     async createMessage(params: CreateMessageParams): Promise<string> {
       const signal = params.abortSignal;
       if (signal?.aborted) throw abortError();
-      const { provider, model } = resolveRole(getSettings(), roleForTask(params.task));
+      const { provider, model } = resolveRole(getSettings(), roleFor(params.task));
       let stop: TextStop = "unknown";
       const call = backends(provider).completeText({
         system: params.system ?? "",

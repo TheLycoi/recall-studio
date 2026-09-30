@@ -61,6 +61,15 @@ export const COMMAND_TABLE: CommandSpec[] = [
     hint: "always available",
   },
   {
+    // obsidian-llm-wiki's own lint, in its own report modal with its fix
+    // buttons, every write behind WikiLM's guard (src/upstream/lint.ts).
+    // WikiLM's lint is the entry above.
+    id: "lint-wiki-upstream",
+    name: "Lint wiki (llm-wiki): scan and Smart Fix All",
+    aliases: ["llm-wiki-lint", "smart-fix"],
+    hint: "always available",
+  },
+  {
     id: "capture-selection",
     name: "Send selection to inbox",
     aliases: ["capture", "send", "pdf"],

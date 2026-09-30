@@ -16,6 +16,7 @@ import type WikiLmPlugin from "./main";
 import { COMMAND_TABLE, type CommandSpec } from "./commandTable";
 import { ingestSourceNote } from "./ingestSource";
 import { ingestFolderWithUpstream, ingestWithUpstream } from "./upstream/ingest";
+import { lintWithUpstream } from "./upstream/lint";
 import { aiHighlightNote, captureMarkdownHighlights, capturePdfSelection, captureReadingSelection, captureSelection } from "./capture";
 import { isPdfFile, pdfsLinkedFrom, readPdfSelection } from "./pdf";
 import { digestFolder, digestPdf } from "./digest";
@@ -214,6 +215,12 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
   "lint-wiki": {
     available: () => true,
     run: (p) => void p.lintWiki(),
+  },
+  // Upstream's lint on upstream's engine; the scan ends with its report
+  // modal open, and each fix runs from a button there.
+  "lint-wiki-upstream": {
+    available: () => true,
+    run: (p) => void lintWithUpstream(p),
   },
   "open-inbox": {
     available: () => true,

@@ -278,6 +278,16 @@ export class WriteGuard {
     return this.held.has(path);
   }
 
+  /** Every file this run saved a snapshot of: each one it overwrote, and each whose rewrite it refused. */
+  savedPaths(): string[] {
+    return [...this.saved];
+  }
+
+  /** Every file the engine created in this run and has not removed since, where it is now. */
+  createdPaths(): string[] {
+    return [...this.created];
+  }
+
   // ---- the three rules
 
   private async creating<T>(path: string, write: () => Promise<T>): Promise<T> {

@@ -18,10 +18,10 @@
  */
 import type { ProviderName } from "../backend";
 import type WikiLmPlugin from "../main";
-import { resolveRole } from "../modelRoles";
+import { resolveRole, type ModelRole } from "../modelRoles";
 import type { WikiLmSettings } from "../settings";
 import { WriteGuard } from "./guardedVault";
-import { createUpstreamClient } from "./llmAdapter";
+import { createRoleClient, createUpstreamClient, type BackendLookup } from "./llmAdapter";
 import { SchemaManager, UPSTREAM_DEFAULT_SETTINGS, WikiEngine, type LLMWikiSettings, type UpstreamLLMClient } from "./vendor";
 
 /**
@@ -104,16 +104,35 @@ interface Built {
  * the same instance takes new settings in place, and a moved wiki folder
  * builds a new engine, because its index, log and graph helpers keep the
  * folder they were built with. A running ingest is never touched.
+ *
+ * The engine and its schema manager ask for their model client on every
+ * call. While a lint operation is open on the engine (upstream's
+ * startLintOperation, which its lint takes for the scan and for each fix)
+ * they are handed the lint role's client; otherwise the ingest client, which
+ * picks the role from upstream's task label.
  */
 export class UpstreamHost {
   private built: Built | null = null;
   private writeGuard: WriteGuard | null = null;
   private readonly ingestClient: UpstreamLLMClient;
+  private readonly roleClients = new Map<ModelRole, UpstreamLLMClient>();
+  private readonly settings: () => WikiLmSettings;
+  private readonly backends: BackendLookup;
 
   constructor(private readonly plugin: WikiLmPlugin) {
-    const settings = () => plugin.settings;
-    const backends = (provider: ProviderName) => plugin.llm.backendFor(provider);
-    this.ingestClient = createUpstreamClient(settings, backends);
+    this.settings = () => plugin.settings;
+    this.backends = (provider: ProviderName) => plugin.llm.backendFor(provider);
+    this.ingestClient = createUpstreamClient(this.settings, this.backends);
+  }
+
+  /** A client with every call on `role` (src/modelRoles.ts), one per role, read from the settings at call time. */
+  clientFor(role: ModelRole): UpstreamLLMClient {
+    let client = this.roleClients.get(role);
+    if (!client) {
+      client = createRoleClient(this.settings, this.backends, role);
+      this.roleClients.set(role, client);
+    }
+    return client;
   }
 
   engine(): WikiEngine {
@@ -128,7 +147,8 @@ export class UpstreamHost {
       }
       return b.engine;
     }
-    const getClient = () => this.ingestClient;
+    // Read when a call is made, after `engine` below is assigned.
+    const getClient = () => (engine.isLintRunning() ? this.clientFor("lint") : this.ingestClient);
     const app = this.guard.app;
     const schema = new SchemaManager(app, next, getClient);
     // The fifth argument is upstream's write hook, which its own plugin wires
@@ -136,6 +156,12 @@ export class UpstreamHost {
     const engine = new WikiEngine(app, next, getClient, schema, () => {});
     this.built = { engine, schema, settings: next };
     return engine;
+  }
+
+  /** Upstream's schema manager, the one the current engine was built with. */
+  schema(): SchemaManager {
+    this.engine();
+    return (this.built as Built).schema;
   }
 
   /**
@@ -154,7 +180,7 @@ export class UpstreamHost {
    * the log gains an entry and is trimmed when long (log-writer.ts). They hold
    * no text of the reader's, so they skip the loss check; they are still saved.
    */
-  private rewrittenEachRun(path: string): boolean {
+  rewrittenEachRun(path: string): boolean {
     const wiki = this.built?.settings.wikiFolder;
     return !!wiki && (path === `${wiki}/index.md` || path === `${wiki}/log.md`);
   }
