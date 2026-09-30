@@ -1,6 +1,6 @@
 {
   "name": "obsidian-wikilm",
-  "version": "0.12.1",
+  "version": "0.13.0",
   "description": "Highlight-centric flashcard pipeline for Obsidian: highlight, write cards in the background, triage in an inbox, export to Anki.",
   "main": "main.js",
   "private": true,
