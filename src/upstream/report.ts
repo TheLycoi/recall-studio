@@ -28,9 +28,9 @@ export function guardLines(kept: GuardRefusal[], snapshots: string | undefined):
 
 /** A page the guard kept, and why, as the reader reads it. */
 function keptLine(k: GuardRefusal): string {
+  if (k.detail) return `- ${k.path}: ${k.detail}; it was left as it was.`;
   if (k.action === "remove") return `- ${k.path}: the engine asked to remove it; it was left in place.`;
   if (k.action === "rename") return `- ${k.path}: the engine asked to move it to ${k.to}; it was left where it is.`;
-  if (k.detail) return `- ${k.path}: ${k.detail}; it was left as it was.`;
   return `- ${k.path}: the rewrite would have dropped ${describeLoss(k.lost)}. The proposed text is saved at ${k.proposal}.`;
 }
 

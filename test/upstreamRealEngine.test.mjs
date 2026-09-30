@@ -359,6 +359,26 @@ test("an append to a page whose `sources:` names a PDF is refused: upstream rewr
   assert.match(notices().at(-1), /- wiki\/concepts\/receptors\.md: the rewrite would have dropped 1 line \(1 PDF link\)\./);
 });
 
+test("an ingest run writes only inside the wiki folder: an engine write to the reader's class note is refused and reported", async () => {
+  const classNote = "# HBIO 250\n\nWeek 3 covers each [[receptors]].\n";
+  let plugin;
+  const ctx = setup(
+    { [NOTE_PATH]: NOTE, "classes/HBIO250.md": classNote },
+    script([RECEPTORS], {
+      "source-page": async () => {
+        await plugin.upstreamHost().engine().createOrUpdateFile("classes/HBIO250.md", "# HBIO 250\n\nRewritten.\n");
+        return "Receptors and drug action.\n\n## Summary\n\nReceptors bind and transduce.";
+      },
+    }),
+  );
+  plugin = ctx.plugin;
+  const r = await m.ingestWithUpstream(plugin, tfile(NOTE_PATH));
+  assert.equal(r.success, true, r.errorMessage);
+  assert.equal(ctx.files.get("classes/HBIO250.md"), classNote);
+  assert.ok(ctx.files.has("wiki/concepts/receptors.md"), "the pages inside the wiki are written");
+  assert.match(notices().at(-1), /- classes\/HBIO250\.md: outside the wiki folder; it was left as it was\./);
+});
+
 test("a brand-new page is created normally, with nothing saved for it", async () => {
   const { plugin, files } = setup({ [NOTE_PATH]: NOTE }, script([RECEPTORS]));
   const r = await m.ingestWithUpstream(plugin, tfile(NOTE_PATH));

@@ -270,6 +270,40 @@ test("a new file is written normally, and one created in this run is the engine'
   assert.equal(guard.runFolder, null, "nothing was saved, so no run folder was made");
 });
 
+test("a run begun with a folder writes only inside it: every write elsewhere is refused and recorded once", async () => {
+  const classNote = "# HBIO 250\n\nWeek 3 covers each [[receptor]].\n";
+  const { guard, files, vault } = guarded({ "classes/HBIO250.md": classNote, "wiki/concepts/x.md": "# X\n", "wikis/y.md": "# Y\n" });
+  guard.begin("wiki");
+  // What upstream's link retargeting does to a note that links a merged page (core/link-retarget.ts).
+  await vault.process(file(vault, "classes/HBIO250.md"), (t) => t.replace("[[receptor]]", "[[receptors]]"));
+  await vault.adapter.write("classes/HBIO250.md", "gone\n");
+  await vault.modify(file(vault, "wikis/y.md"), "# Y\n\nMore.\n");
+  await assert.rejects(vault.create("classes/new.md", "# New\n"), /outside the wiki folder/);
+  await assert.rejects(vault.adapter.write("new.md", "# New\n"), /outside the wiki folder/);
+  await vault.rename(file(vault, "wiki/concepts/x.md"), "classes/x.md");
+  assert.equal(files.get("classes/HBIO250.md"), classNote);
+  assert.equal(files.get("wikis/y.md"), "# Y\n");
+  assert.ok(!files.has("classes/new.md") && !files.has("new.md") && !files.has("classes/x.md"));
+  assert.deepEqual(
+    guard.refusals.map((r) => [r.path, r.action, r.detail ?? null, r.held]),
+    [
+      ["classes/HBIO250.md", "rewrite", "outside the wiki folder", 1],
+      ["wikis/y.md", "rewrite", "outside the wiki folder", 0],
+      ["classes/new.md", "rewrite", "outside the wiki folder", 0],
+      ["new.md", "rewrite", "outside the wiki folder", 0],
+      ["wiki/concepts/x.md", "rename", "outside the wiki folder", 0],
+    ],
+  );
+  assert.equal(guard.runFolder, null, "nothing outside the folder was saved");
+  // Inside the folder the usual rules hold.
+  await vault.process(file(vault, "wiki/concepts/x.md"), (t) => `${t}\nMore.\n`);
+  assert.equal(files.get("wiki/concepts/x.md"), "# X\n\nMore.\n");
+  // A run begun without a folder has no such limit.
+  guard.begin();
+  await vault.process(file(vault, "wikis/y.md"), (t) => `${t}\nMore.\n`);
+  assert.equal(files.get("wikis/y.md"), "# Y\n\nMore.\n");
+});
+
 test("removing or moving a page that existed before the run is refused and recorded; the engine's own pages may go", async () => {
   const pages = { "wiki/a.md": "# A\n", "wiki/b.md": "# B\n", "wiki/c.md": "# C\n", "wiki/d.md": "# D\n", "wiki/e.md": "# E\n", "wiki/f.md": "# F\n", "wiki/g.md": "# G\n" };
   const { guard, files, vault } = guarded(pages);

@@ -350,8 +350,9 @@ async function withEngineRun<T>(
 ): Promise<T> {
   const owner = plugin.cancel.begin(label);
   // One snapshot folder per run, and nothing the engine created or the guard
-  // held carries over from the last one.
-  plugin.upstreamHost().guard.begin();
+  // held carries over from the last one. Ingest writes its pages, index, log
+  // and schema note, all inside the wiki folder; nothing else is written.
+  plugin.upstreamHost().guard.begin(engine.settings.wikiFolder);
   let prefix = "";
   const relabel = (p: string) => {
     prefix = p;

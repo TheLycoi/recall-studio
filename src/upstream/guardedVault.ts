@@ -28,6 +28,12 @@
  *   unchecked (the summary page of a cancelled run is trashed so the note
  *   re-ingests).
  *
+ * A run begun with a folder (the wiki folder, for every lint and ingest run)
+ * writes nothing outside it: any write, creation, move or removal elsewhere is
+ * refused and recorded, before the rules above are looked at. Upstream's
+ * merge re-points links in every note of the vault; the reader's own notes are
+ * not the engine's to rewrite.
+ *
  * New files are written normally. The wiki's index.md and log.md, which
  * upstream regenerates on every run, skip the loss check and are not saved
  * (the host says which paths through `exempt`): every lint scan and fix
@@ -158,6 +164,9 @@ export function describeLoss(lost: Loss[]): string {
 
 // ---------------------------------------------------------------- the guard
 
+/** Why a change outside the run's folder was refused, as the report reads it. */
+const OUTSIDE = "outside the wiki folder";
+
 /** A change the guard would not let through. */
 export interface GuardRefusal {
   path: string;
@@ -198,6 +207,7 @@ export class WriteGuard {
   private created = new Set<string>();
   private saved = new Set<string>();
   private held = new Map<string, GuardRefusal>();
+  private scope: string | null = null;
   private folder: Promise<string> | null = null;
   private chains = new Map<string, Promise<unknown>>();
 
@@ -284,8 +294,12 @@ export class WriteGuard {
     this.app = overlay<App>(real, { vault: guardedVault, fileManager: guardedFiles });
   }
 
-  /** Start a run: a fresh snapshot folder on first use, nothing created, held or refused yet. */
-  begin(): void {
+  /**
+   * Start a run: a fresh snapshot folder on first use, nothing created, held
+   * or refused yet. With `scope`, a folder, the run writes only inside it.
+   */
+  begin(scope?: string): void {
+    this.scope = scope ? scope.replace(/\/+$/, "") : null;
     this.refusals = [];
     this.runFolder = null;
     this.folder = null;
@@ -312,6 +326,8 @@ export class WriteGuard {
   // ---- the three rules
 
   private async creating<T>(path: string, write: () => Promise<T>): Promise<T> {
+    // There is no file to hand back, so the engine is told.
+    if (this.outside(path, "rewrite")) throw new Error(`WikiLM did not write ${path}: it is outside the wiki folder.`);
     const out = await write();
     const made = (out as { path?: unknown } | undefined)?.path;
     this.created.add(typeof made === "string" ? made : path);
@@ -324,6 +340,7 @@ export class WriteGuard {
    */
   private rewrite(path: string, read: () => Promise<string>, compute: (old: string) => string, set: (expect: string, next: string) => Promise<boolean>): Promise<string> {
     return this.serial(path, async () => {
+      if (this.outside(path, "rewrite")) return read();
       for (let attempt = 0; attempt < 3; attempt++) {
         const old = await read();
         const hold = this.held.get(path);
@@ -361,6 +378,7 @@ export class WriteGuard {
   /** A change the loss check cannot read: allowed on the engine's own files, refused on any other. */
   private unchecked(path: string, what: string, write: () => Promise<void>): Promise<void> {
     return this.serial(path, async () => {
+      if (this.outside(path, "rewrite")) return;
       if (this.created.has(path)) return write();
       const entry: GuardRefusal = { path, action: "rewrite", dropped: 0, lost: [], proposal: null, detail: `the engine asked for ${what}`, held: 0 };
       this.refusals.push(entry);
@@ -370,6 +388,7 @@ export class WriteGuard {
 
   private removing(path: string, remove: () => Promise<void>): Promise<void> {
     return this.serial(path, async () => {
+      if (this.outside(path, "remove")) return;
       if (!this.created.has(path)) {
         this.refusals.push({ path, action: "remove", dropped: 0, lost: [], proposal: null, held: 0 });
         return;
@@ -381,6 +400,7 @@ export class WriteGuard {
 
   private moving(path: string, to: string, move: () => Promise<void>): Promise<void> {
     return this.serial(path, async () => {
+      if (this.outside(path, "rename", to) || this.outside(to, "rename", to, path)) return;
       if (!this.created.has(path)) {
         this.refusals.push({ path, action: "rename", dropped: 0, lost: [], proposal: null, to, held: 0 });
         return;
@@ -389,6 +409,22 @@ export class WriteGuard {
       this.created.delete(path);
       this.created.add(to);
     });
+  }
+
+  /**
+   * Whether `path` is outside the run's folder; if so the change is refused
+   * and recorded, once per file, later ones counted on the first. `from` is
+   * the file a move outside would have taken there; it stays where it is and
+   * is not held.
+   */
+  private outside(path: string, action: GuardRefusal["action"], to?: string, from?: string): boolean {
+    const scope = this.scope;
+    if (!scope || path === scope || path.startsWith(`${scope}/`)) return false;
+    const at = from ?? path;
+    const had = this.refusals.find((r) => r.path === at && r.detail === OUTSIDE);
+    if (had) had.held++;
+    else this.refusals.push({ path: at, action, dropped: 0, lost: [], proposal: null, detail: OUTSIDE, held: 0, ...(to ? { to } : {}) });
+    return true;
   }
 
   // ---- snapshots, under the plugin folder through the real adapter

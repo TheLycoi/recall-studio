@@ -148,8 +148,9 @@ class LintRuns {
       return;
     }
     const owner = p.cancel.begin(kind === "scan" ? "linting the wiki" : "fixing the wiki");
-    // One snapshot folder per operation, and nothing held from the last run.
-    p.upstreamHost().guard.begin();
+    // One snapshot folder per operation, nothing held from the last run, and
+    // no write outside the wiki folder.
+    p.upstreamHost().guard.begin(this.engine.settings.wikiFolder);
     this.engine.setStatusBarUpdateCallback((text) => p.cancel.progress(text || "linting the wiki", owner));
     // Once per operation: upstream's cancelLint shows a Notice each time.
     let asked = false;

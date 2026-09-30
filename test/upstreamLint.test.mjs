@@ -367,7 +367,7 @@ test("Smart Fix All with a duplicate pair: the source is not removed, a lossy me
   assert.match(shown, /The text each page had before this run is saved in \.obsidian\/plugins\/wikilm\/snapshots\//);
 });
 
-test("Merge duplicates with a merge that loses nothing: the target is written, links across the vault are re-pointed, the source is still not removed", async () => {
+test("Merge duplicates with a merge that loses nothing: the target is written, the reader's note outside the wiki is not re-pointed, the source is still not removed", async () => {
   const fused = JSON.stringify({
     body: `# Receptors\n\n${QUOTE}\n\n## Definition\nReceptors are proteins that bind a ligand and pass a signal on into the cell; the same concept is also called a receptor. See [[ligands]] for what binds them.\n\n## Two Properties\nBinding and transduction are separate properties of a receptor, and a drug can have one without the other.\n`,
     aliases: ["Receptor"],
@@ -382,9 +382,9 @@ test("Merge duplicates with a merge that loses nothing: the target is written, l
   const modal = await lint(plugin);
   await press(plugin, modal, "onMergeDuplicates");
   // Upstream re-points every link to the source, vault-wide, before it deletes
-  // the source (merge-duplicates.ts, retargetLinksToPage); the delete is refused.
-  assert.doesNotMatch(files.get("classes/HBIO250.md"), /\[\[receptor\]\]/, files.get("classes/HBIO250.md"));
-  assert.equal(files.get("classes/HBIO250.md"), classNote.replace("[[receptor]]", "[[receptors]]"));
+  // the source (merge-duplicates.ts, retargetLinksToPage); outside the wiki
+  // folder that is refused, and so is the delete.
+  assert.equal(files.get("classes/HBIO250.md"), classNote);
   const target = files.get("wiki/concepts/receptors.md");
   assert.match(target, /also called a receptor/, "the fused text was written");
   for (const kept of ["## Definition", "## Two Properties", QUOTE, "class: HBIO250"]) assert.ok(target.includes(kept), `the target keeps ${kept}`);
@@ -393,8 +393,8 @@ test("Merge duplicates with a merge that loses nothing: the target is written, l
   assert.ok(files.has("wiki/concepts/receptor.md"), "the source page is not deleted");
   const shown = notices().at(-1);
   assert.match(shown, /Updated \d+ pages?:\n(- .*\n)*- wiki\/concepts\/receptors\.md/);
-  assert.match(shown, /Updated \d+ pages?:\n(- .*\n)*- classes\/HBIO250\.md/);
-  assert.match(shown, /Not updated, to keep what was there:\n- wiki\/concepts\/receptor\.md: the engine asked to remove it; it was left in place\./);
+  assert.match(shown, /- classes\/HBIO250\.md: outside the wiki folder; it was left as it was\./);
+  assert.match(shown, /- wiki\/concepts\/receptor\.md: the engine asked to remove it; it was left in place\./);
 });
 
 // ---- 3. delete empty stubs: refused ------------------------------------------------------
@@ -428,6 +428,25 @@ test("alias completion writes the aliases and the page keeps everything else", a
   const [snapshot] = saved(files, "/wiki/concepts/ligands.md");
   assert.equal(files.get(snapshot), LIGANDS, "the old text was saved first");
   assert.doesNotMatch(notices().at(-1), /Not updated, to keep what was there/);
+});
+
+test("a lint run writes only inside the wiki folder: an engine write to the reader's class note is refused and reported", async () => {
+  const classNote = "# HBIO 250\n\nWeek 3 covers each [[receptors]] and its ligands.\n";
+  let plugin;
+  const ctx = setup(
+    { "wiki/concepts/receptors.md": RECEPTORS, "wiki/concepts/ligands.md": LIGANDS, "wiki/concepts/albumin.md": ALBUMIN, "classes/HBIO250.md": classNote },
+    async (kind) => {
+      if (kind !== "aliases") return "{}";
+      // A runner that reached outside the wiki, as upstream's merge did.
+      await plugin.upstreamHost().engine().createOrUpdateFile("classes/HBIO250.md", "# HBIO 250\n\nWeek 3 covers each [[concepts/receptors|receptor]].\n");
+      return JSON.stringify({ aliases: ["Ligand"] });
+    },
+  );
+  plugin = ctx.plugin;
+  const modal = await lint(plugin);
+  await press(plugin, modal, "onCompleteAliases");
+  assert.equal(ctx.files.get("classes/HBIO250.md"), classNote);
+  assert.match(notices().at(-1), /Not updated, to keep what was there:\n(- .*\n)*- classes\/HBIO250\.md: outside the wiki folder; it was left as it was\./);
 });
 
 // ---- 5. every model call runs on the lint role --------------------------------------------
