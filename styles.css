@@ -570,6 +570,39 @@
   color: var(--text-faint);
 }
 
+/* Digest picker -------------------------------------------------------- */
+.wikilm-pick-filter {
+  width: 100%;
+  margin-bottom: var(--size-4-2);
+}
+.wikilm-pick-list {
+  max-height: 50vh;
+  overflow-y: auto;
+  margin-bottom: var(--size-4-2);
+}
+.wikilm-pick-row {
+  display: flex;
+  gap: var(--size-4-2);
+  align-items: center;
+  padding: var(--size-4-1) 0;
+  padding-left: calc(var(--wikilm-depth, 0) * var(--size-4-4));
+}
+.wikilm-pick-toggle {
+  width: 1em;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.wikilm-pick-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.wikilm-pick-folder .wikilm-pick-name {
+  font-weight: var(--font-semibold);
+}
+
 /* Status bar ----------------------------------------------------------- */
 .wikilm-statusbar {
   cursor: pointer;

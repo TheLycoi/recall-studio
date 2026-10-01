@@ -38,41 +38,41 @@ length (setting, default 12 characters) are ignored, already-highlighted
 spans are captured without being re-wrapped, and the same passage is never
 captured twice in a row.
 
-Thirteen commands are in the palette, in the order the workflow runs. Each one
+Eleven commands are in the palette, in the order the workflow runs. Each one
 also runs from the chat box by any of its aliases, with or without a leading
 slash; the whole table is `COMMAND_TABLE` in `src/commandTable.ts`, and `help`
 in the chat lists the phrases.
 
 1. **AI highlight…** (`ai`, `ai-instruct`, `suggest`, `transcript`), on an open note or PDF: one form for what to look for (remembered per file), the guide (a study guide or lecture transcript; pick a note, paste one, or clear it), and on a note whether to make cards or wiki notes; a PDF always makes wiki notes behind a preview.
-2. **Digest: PDF highlights into concept and entity notes…** (`digest`), on an open PDF or a note with PDF++ links: your PDF++ highlights grouped into concept and entity pages, previewed before anything is written.
-3. **Digest folder: every highlighted PDF under a folder…** (`digest-folder`), always: pick a folder, answer the digest form once, and every PDF under it with highlights is digested in turn, each behind its own preview.
-4. **Lint wiki: find gaps, dead links and ungrounded quotes** (`lint`, `wiki`), always.
-5. **Lint wiki (llm-wiki): scan and Smart Fix All** (`llm-wiki-lint`, `smart-fix`), always: obsidian-llm-wiki's own lint in its own report modal, with its fix buttons and Smart Fix All. Every write goes through WikiLM's guard and stays inside the wiki folder. A duplicate pair is linked both ways, never merged; a polluted title is left as it is; a dead link it cannot match is left, with no stub page. Upstream lists every link into a PDF as dead and asks the model once per page and PDF when fixing them; the callouts are kept. After each fix a notice lists the pages created and updated and each change the guard refused.
-6. **Send selection to inbox** (`capture`, `send`, `pdf`), on an open note (editor or reading view) or PDF: the selection, or in the editor the paragraph under the cursor, queued for card writing; a PDF selection keeps its page number and the page text as context.
-7. **Send selection to inbox with instructions…** (`capture-instruct`, `pdf-instruct`), the same, with a one-line instruction for the writer first ("one cloze on the number", "cards in Dutch").
-8. **Open chat: ask the notes** (`chat`, `ask`), always.
-9. **Open inbox** (`inbox`), always.
-10. **Export all reviewed cards to Anki** (`export`), always.
-11. **Cancel the running AI highlight, digest or ingest** (`cancel`, `stop-run`), while a run is in progress.
-12. **Open the schema note** (`schema`), always.
-13. **Review schema suggestions** (`suggestions`), always.
+2. **Digest…** (`digest`, `digest-folder`), always: a picker over every PDF in the vault, the open PDF (or the PDFs the open note cites) already ticked. Tick a folder to tick every PDF under it, or tick files one by one. One PDF is digested behind its preview as before; several are digested in turn, the digest form answered once, each behind its own preview.
+3. **Lint wiki: create missing links, fix dead links, check quotes** (`lint`, `wiki`), always. The fix plan opens on the rows that write links — missing links the review found, a way in for unlinked pages, cross-links between duplicate pages — then dead links, aliases and quotes.
+4. **Send selection to inbox** (`capture`, `send`, `pdf`), on an open note (editor or reading view) or PDF: the selection, or in the editor the paragraph under the cursor, queued for card writing; a PDF selection keeps its page number and the page text as context.
+5. **Send selection to inbox with instructions…** (`capture-instruct`, `pdf-instruct`), the same, with a one-line instruction for the writer first ("one cloze on the number", "cards in Dutch").
+6. **Open chat: ask the notes** (`chat`, `ask`), always.
+7. **Open inbox** (`inbox`), always.
+8. **Export all reviewed cards to Anki** (`export`), always.
+9. **Cancel the running AI highlight, digest or ingest** (`cancel`, `stop-run`), while a run is in progress.
+10. **Open the schema note** (`schema`), always.
+11. **Review schema suggestions** (`suggestions`), always.
 
 **Chat-only commands.** These left the palette but still run from the chat box
 by alias:
 
+- **Lint wiki (llm-wiki): scan and Smart Fix All** (`llm-wiki-lint`, `smart-fix`): obsidian-llm-wiki's own lint in its own report modal, with its fix buttons and Smart Fix All. Every write goes through WikiLM's guard and stays inside the wiki folder. A duplicate pair is linked both ways, never merged; a polluted title is left as it is; a dead link it cannot match is left, with no stub page. Upstream lists every link into a PDF as dead and asks the model once per page and PDF when fixing them; the callouts are kept. After each fix a notice lists the pages created and updated and each change the guard refused.
 - **Ingest source: read this markdown into the wiki** (`ingest`, `read-source`), on an open note outside the wiki folder; a note inside it is refused, with the reason. It runs the included obsidian-llm-wiki engine, which gives each entity and concept a page of its own, merges into an existing page that denotes the same thing, and writes as it goes, with WikiLM's guard between it and your pages (see [Built on](#built-on)). **AI highlight…** with *Wiki notes* reads a markdown note with WikiLM's own pipeline instead: it shows a preview first and appends into a related page wherever there is one.
 - **Ingest folder: read every note in a folder into the wiki** (`ingest-folder`, `read-folder`). Notes inside the wiki folder or one of WikiLM's own folders (concepts, entities, schema, text export, topic notes) are not read; the report names each one.
 - **Send all ==highlights== in this note to inbox** (`highlights`, `sweep`): sweeps a note you highlighted while reading and queues every span not already in the inbox.
 - **Retry failed highlights** (`retry`); the inbox's more menu has the same item.
 
 **Hotkeys bound to old commands are lost.** The palette went from twenty
-commands to twelve. A hotkey bound to one of these ids no longer fires; bind
+commands to eleven. A hotkey bound to one of these ids no longer fires; bind
 the command that replaced it instead:
 
 - `capture-pdf-selection` → **Send selection to inbox**
 - `capture-pdf-selection-with-instruction` → **Send selection to inbox with instructions…**
 - `ai-highlight-with-instruction`, `ai-highlight-pdf`, `add-transcript` → **AI highlight…**
-- `ingest-source`, `ingest-folder`, `capture-markdown-highlights`, `retry-failed` → chat only, above
+- `digest-folder` → **Digest…** (tick the folder in its picker)
+- `lint-wiki-upstream`, `ingest-source`, `ingest-folder`, `capture-markdown-highlights`, `retry-failed` → chat only, above
 
 A hotkey still bound to `ai-highlight` keeps firing, since that command id
 was not one of the ones replaced; it now opens the AI highlight form instead
@@ -217,8 +217,7 @@ The commands:
 
 | Command | What it does |
 | --- | --- |
-| **Digest: PDF highlights into concept and entity notes…** | Asks the configured model to group the PDF's highlights into topic notes and write each one's summary, then shows a preview before writing anything. |
-| **Digest folder: every highlighted PDF under a folder…** | Picks a folder, reads every PDF under it, asks Notes / Flashcards / Both and the instruction once, then digests each PDF with highlights in path order, each behind its own preview. Closing a preview skips that PDF; cancelling the run stops before the next one. Ends on a notice such as "digested 3 of 5 PDFs, 2 skipped". |
+| **Digest…** | Opens a picker over every PDF in the vault, with the open PDF (or the PDFs the open note cites) ticked; a folder's box ticks every PDF under it. One PDF: asks the configured model to group its highlights into topic notes and write each one's summary, then shows a preview before writing anything. Several: reads each, asks Notes / Flashcards / Both and the instruction once, then digests each PDF with highlights in path order, each behind its own preview. Closing a preview skips that PDF; cancelling the run stops before the next one. Ends on a notice such as "digested 3 of 5 PDFs, 2 skipped". |
 | **Open chat: ask the notes** | Opens the WikiLM sidebar in Chat mode (`src/main.ts`). |
 
 **Pages are concept or entity pages.** A new page carries `type: concept` or
@@ -228,8 +227,8 @@ headings, a line of summary — and reuses a page wherever it lives: a concept
 first met in physiology gains `class: [HBIO408, PHED163]` when biomechanics
 meets it, rather than a second page. A topic that belongs inside a page is
 filed under a heading there; only a topic with no home becomes a page, and
-the preview says why. The command also runs on a class note that holds PDF++
-links, digesting the PDFs it cites.
+the preview says why. Run from a class note that holds PDF++ links, the
+picker opens with the PDFs it cites ticked.
 
 **No manifest on disk.** The highlights are collected fresh on every run —
 the PDF++ links in the notes that cite the PDF, plus any annotations

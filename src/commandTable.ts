@@ -31,6 +31,9 @@ export interface CommandSpec {
 // ai-highlight-with-instruction, ai-highlight-pdf, add-transcript); their
 // aliases now live on the command that absorbed each one, so a chat habit
 // survives the merge even though a hotkey bound to the old id does not.
+// On 2026-10-01 the reader asked for one Digest and one Lint: digest-folder
+// was absorbed into "Digest…" (a picker that takes a folder or several PDFs)
+// and upstream's lint left the palette for the chat.
 export const COMMAND_TABLE: CommandSpec[] = [
   {
     id: "ai-highlight",
@@ -39,34 +42,26 @@ export const COMMAND_TABLE: CommandSpec[] = [
     hint: "needs an open note or PDF",
   },
   {
+    // One Digest for one PDF or many. The picker (src/modals.ts
+    // DigestPickerModal) starts from the open PDF, or the PDFs a note cites,
+    // and lets the reader tick a whole folder or several files under it. The
+    // id is the one the single-PDF command had, so its hotkey keeps firing;
+    // digest-folder's alias moved here, its hotkey did not.
     id: "digest-pdf-highlights",
-    name: "Digest: PDF highlights into concept and entity notes…",
-    aliases: ["digest"],
-    hint: "needs an open PDF, or a note with PDF++ links",
-  },
-  {
-    id: "digest-folder",
-    name: "Digest folder: every highlighted PDF under a folder…",
-    aliases: ["digest-folder"],
-    hint: "always",
+    name: "Digest…",
+    aliases: ["digest", "digest-folder"],
+    hint: "always; starts from the open PDF, or the PDFs a note cites",
   },
   {
     id: "lint-wiki",
     // The name has to carry the word a reader searches for. "Check the wiki
     // for gaps and dead links" described it well and was unfindable: the
     // palette matches on the name only, so typing "lint" returned nothing.
-    // Aliases are a chat affordance and never reach the palette.
-    name: "Lint wiki: find gaps, dead links and ungrounded quotes",
+    // Aliases are a chat affordance and never reach the palette. It leads
+    // with links because the reader's rule (2026-10-01) is that creating
+    // links is the first job of a lint; the fix plan opens on those rows.
+    name: "Lint wiki: create missing links, fix dead links, check quotes",
     aliases: ["wiki", "lint"],
-    hint: "always available",
-  },
-  {
-    // obsidian-llm-wiki's own lint, in its own report modal with its fix
-    // buttons, every write behind WikiLM's guard (src/upstream/lint.ts).
-    // WikiLM's lint is the entry above.
-    id: "lint-wiki-upstream",
-    name: "Lint wiki (llm-wiki): scan and Smart Fix All",
-    aliases: ["llm-wiki-lint", "smart-fix"],
     hint: "always available",
   },
   {
@@ -116,6 +111,17 @@ export const COMMAND_TABLE: CommandSpec[] = [
     name: "Review schema suggestions",
     aliases: ["suggestions"],
     hint: "always",
+  },
+  {
+    // obsidian-llm-wiki's own lint, in its own report modal with its fix
+    // buttons, every write behind WikiLM's guard (src/upstream/lint.ts).
+    // Chat-only since 2026-10-01 so the palette has one Lint wiki, the entry
+    // above; "/smart-fix" still runs this one.
+    id: "lint-wiki-upstream",
+    name: "Lint wiki (llm-wiki): scan and Smart Fix All",
+    aliases: ["llm-wiki-lint", "smart-fix"],
+    hint: "always available",
+    hidden: true,
   },
   {
     id: "ingest-source",

@@ -19,9 +19,9 @@ import { ingestFolderWithUpstream, ingestWithUpstream } from "./upstream/ingest"
 import { lintWithUpstream } from "./upstream/lint";
 import { aiHighlightNote, captureMarkdownHighlights, capturePdfSelection, captureReadingSelection, captureSelection } from "./capture";
 import { isPdfFile, pdfsLinkedFrom, readPdfSelection } from "./pdf";
-import { digestFolder, digestPdf } from "./digest";
+import { digestFiles, digestPdf } from "./digest";
 import { suggestPdfHighlights } from "./suggest";
-import { askHighlightOptions, askInstruction, pickFolder, pickPdf, SchemaSuggestionsModal } from "./modals";
+import { askHighlightOptions, askInstruction, pickDigestFiles, pickFolder, SchemaSuggestionsModal } from "./modals";
 
 export interface WikiLmCommand extends CommandSpec {
   /** True when the command can run right now; the palette hides it otherwise. */
@@ -182,30 +182,22 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
       }
     },
   },
+  // One Digest for one PDF or many (2026-10-01). The picker opens with the
+  // active PDF ticked, or the PDFs the active note cites, and the reader can
+  // tick a whole folder or several files under it. One PDF runs as the
+  // single-PDF digest always did; more run in turn behind one options form.
   "digest-pdf-highlights": {
-    available: (p) => {
-      const file = p.app.workspace.getActiveFile();
-      if (!file) return false;
-      const isMd = file.extension === "md";
-      return isPdfFile(file) || (isMd && pdfsLinkedFrom(p.app, file).length > 0);
-    },
-    run: async (p) => {
-      const file = p.app.workspace.getActiveFile();
-      if (!file) return;
-      if (isPdfFile(file)) {
-        await digestPdf(p, file);
-        return;
-      }
-      const pdfs = pdfsLinkedFrom(p.app, file);
-      const pdf = pdfs.length === 1 ? pdfs[0] : await pickPdf(p.app, pdfs);
-      if (pdf) await digestPdf(p, pdf);
-    },
-  },
-  "digest-folder": {
     available: () => true,
     run: async (p) => {
-      const folder = await pickFolder(p.app);
-      if (folder) await digestFolder(p, folder);
+      const active = p.app.workspace.getActiveFile();
+      // A plain boolean, not the `isPdfFile` guard: the guard would narrow
+      // `active` to `never` on the note branch (see "ai-highlight" above).
+      const pdf = !!active && active.extension.toLowerCase() === "pdf";
+      const preselected = !active ? [] : pdf ? [active] : active.extension === "md" ? pdfsLinkedFrom(p.app, active) : [];
+      const files = await pickDigestFiles(p.app, preselected);
+      if (!files || files.length === 0) return;
+      if (files.length === 1) await digestPdf(p, files[0]);
+      else await digestFiles(p, files);
     },
   },
   "open-chat": {

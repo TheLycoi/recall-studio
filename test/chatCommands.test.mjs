@@ -25,14 +25,15 @@ before(async () => {
 // hotkey, a name change moves the entry in the palette. Updated for the
 // command simplification (2026-09-28): the palette commands first, then
 // the four the chat still reaches by alias. Five commands were removed outright
-// and their aliases moved onto the command that absorbed them. Upstream's lint
-// (lint-wiki-upstream) joined the palette on 2026-09-29, beside WikiLM's.
+// and their aliases moved onto the command that absorbed them. On 2026-10-01
+// the two digest commands became one "Digest…" with a picker (digest-folder
+// removed, its alias absorbed) and upstream's lint (lint-wiki-upstream, in
+// the palette since 2026-09-29) went chat-only, leaving one Lint wiki whose
+// name leads with links.
 const EXPECTED = [
   ["ai-highlight", "AI highlight…"],
-  ["digest-pdf-highlights", "Digest: PDF highlights into concept and entity notes…"],
-  ["digest-folder", "Digest folder: every highlighted PDF under a folder…"],
-  ["lint-wiki", "Lint wiki: find gaps, dead links and ungrounded quotes"],
-  ["lint-wiki-upstream", "Lint wiki (llm-wiki): scan and Smart Fix All"],
+  ["digest-pdf-highlights", "Digest…"],
+  ["lint-wiki", "Lint wiki: create missing links, fix dead links, check quotes"],
   ["capture-selection", "Send selection to inbox"],
   ["capture-selection-with-instruction", "Send selection to inbox with instructions…"],
   ["open-chat", "Open chat: ask the notes"],
@@ -41,24 +42,25 @@ const EXPECTED = [
   ["cancel-ingestion", "Cancel the running AI highlight, digest or ingest"],
   ["open-schema", "Open the schema note"],
   ["review-schema-suggestions", "Review schema suggestions"],
+  ["lint-wiki-upstream", "Lint wiki (llm-wiki): scan and Smart Fix All"],
   ["ingest-source", "Ingest source: read this markdown into the wiki"],
   ["ingest-folder", "Ingest folder: read every note in a folder into the wiki"],
   ["capture-markdown-highlights", "Send all ==highlights== in this note to inbox"],
   ["retry-failed", "Retry failed highlights"],
 ];
 
-const HIDDEN = ["ingest-source", "ingest-folder", "capture-markdown-highlights", "retry-failed"];
-const REMOVED = ["capture-pdf-selection", "capture-pdf-selection-with-instruction", "ai-highlight-with-instruction", "ai-highlight-pdf", "add-transcript"];
+const HIDDEN = ["lint-wiki-upstream", "ingest-source", "ingest-folder", "capture-markdown-highlights", "retry-failed"];
+const REMOVED = ["capture-pdf-selection", "capture-pdf-selection-with-instruction", "ai-highlight-with-instruction", "ai-highlight-pdf", "add-transcript", "digest-folder"];
 
-test("COMMAND_TABLE holds the seventeen (id, name) pairs verbatim and in order", () => {
-  assert.equal(table.COMMAND_TABLE.length, 17);
+test("COMMAND_TABLE holds the sixteen (id, name) pairs verbatim and in order", () => {
+  assert.equal(table.COMMAND_TABLE.length, 16);
   assert.deepEqual(
     table.COMMAND_TABLE.map((c) => [c.id, c.name]),
     EXPECTED,
   );
 });
 
-test("exactly the four chat-only commands are hidden, and the removed ones are gone", () => {
+test("exactly the five chat-only commands are hidden, and the removed ones are gone", () => {
   assert.deepEqual(
     table.COMMAND_TABLE.filter((c) => c.hidden).map((c) => c.id),
     HIDDEN,
@@ -66,12 +68,12 @@ test("exactly the four chat-only commands are hidden, and the removed ones are g
   for (const id of REMOVED) assert.ok(!table.COMMAND_TABLE.some((c) => c.id === id), `${id} should be removed`);
 });
 
-test("the palette gets the thirteen visible commands and none of the hidden ones", () => {
+test("the palette gets the eleven visible commands and none of the hidden ones", () => {
   const palette = table.paletteCommands(table.COMMAND_TABLE);
-  assert.equal(palette.length, 13);
+  assert.equal(palette.length, 11);
   assert.deepEqual(
     palette.map((c) => c.id),
-    EXPECTED.slice(0, 13).map(([id]) => id),
+    EXPECTED.slice(0, 11).map(([id]) => id),
   );
   for (const id of HIDDEN) assert.ok(!palette.some((c) => c.id === id), `${id} must not reach the palette`);
 });
@@ -189,7 +191,10 @@ test("the aliases of removed commands reach the command that absorbed them", () 
   for (const alias of ["ai", "ai-instruct", "suggest", "transcript"]) {
     assert.deepEqual(cc.matchIntent(alias, CTX), { kind: "command", id: "ai-highlight" }, alias);
   }
-  assert.deepEqual(cc.matchIntent("digest-folder", CTX), { kind: "command", id: "digest-folder" });
+  assert.deepEqual(cc.matchIntent("digest-folder", CTX), { kind: "command", id: "digest-pdf-highlights" });
+  for (const alias of ["llm-wiki-lint", "smart-fix"]) {
+    assert.deepEqual(cc.matchIntent(alias, CTX), { kind: "command", id: "lint-wiki-upstream" }, alias);
+  }
 });
 
 test("help lists the hidden commands on a chat-only line", () => {

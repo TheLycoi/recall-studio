@@ -45,7 +45,7 @@ export interface DigestFolderPlan<T extends FolderFile> {
 }
 
 /**
- * Which files under a folder a "Digest folder" run digests. Only PDFs are
+ * Which of the chosen files a "Digest…" run digests. Only PDFs are
  * asked about, since `qualifies` is the digest gate and reading a PDF's
  * highlights is the costly part; a markdown note is never a digest source.
  * Path order so a run over lecture decks goes L01, L02, … the way the reader
@@ -60,7 +60,7 @@ export function planDigestFolder<T extends FolderFile>(files: T[], qualifies: (f
   return { queue, bare };
 }
 
-/** How a folder run went, counted as it goes. */
+/** How a run over several PDFs went, counted as it goes. */
 export interface DigestFolderTally {
   /** PDFs planned to be digested. */
   queued: number;
@@ -70,16 +70,16 @@ export interface DigestFolderTally {
   skipped: number;
   /** The model call or a write threw. */
   failed: number;
-  /** PDFs under the folder with no highlights that carry text. */
+  /** PDFs chosen with no highlights that carry text. */
   bare: number;
-  /** PDFs under the folder whose highlights could not even be read (a parse or resolve failure); never double-counted in `bare`. */
+  /** PDFs chosen whose highlights could not even be read (a parse or resolve failure); never double-counted in `bare`. */
   unreadable: number;
   /** The reader stopped the run; the rest of the queue was never reached. */
   stopped: boolean;
 }
 
 /**
- * The one line a folder run ends on: "digested 3 of 5 PDFs, 2 skipped". The
+ * The one line a run over several PDFs ends on: "digested 3 of 5 PDFs, 2 skipped". The
  * counts that are zero are left out, so the common case reads as one clause.
  *
  * `unreadable` is reported apart from `bare`: a bare PDF was read fine and
@@ -95,4 +95,48 @@ export function digestFolderSummary(t: DigestFolderTally): string {
   if (t.bare) bits.push(`${t.bare} with no highlights`);
   if (t.unreadable) bits.push(`${t.unreadable} could not be read`);
   return bits.join(", ");
+}
+
+/** A row of the Digest picker: a folder with a PDF somewhere under it. */
+export interface PickerFolder<T extends FolderFile> {
+  /** Vault-relative folder path; "" for the vault root. */
+  path: string;
+  /** How many folders deep, for indenting: 0 at the top. */
+  depth: number;
+  /** PDFs directly in this folder, path order. */
+  pdfs: T[];
+  /** Every PDF under this folder, recursive, path order: what ticking the folder ticks. */
+  all: T[];
+}
+
+/**
+ * The folders the Digest picker lists, in path order, each with the PDFs it
+ * holds and every PDF below it.
+ *
+ * Every ancestor of a PDF gets a row, with or without PDFs of its own, so a
+ * course folder whose decks sit in week subfolders can still be ticked as
+ * one. A folder with no PDF anywhere under it is not a row: the picker is
+ * for choosing what to digest, and such a folder offers nothing. Notes are
+ * never listed; a markdown note is not a digest source (see
+ * `planDigestFolder`).
+ */
+export function pickerFolders<T extends FolderFile>(files: T[]): PickerFolder<T>[] {
+  const pdfs = files.filter((f) => f.extension.toLowerCase() === "pdf").sort((a, b) => a.path.localeCompare(b.path));
+  const rows = new Map<string, PickerFolder<T>>();
+  const row = (path: string): PickerFolder<T> => {
+    let r = rows.get(path);
+    if (!r) {
+      r = { path, depth: path === "" ? 0 : path.split("/").length - 1, pdfs: [], all: [] };
+      rows.set(path, r);
+    }
+    return r;
+  };
+  for (const f of pdfs) {
+    const parts = f.path.split("/");
+    parts.pop();
+    row(parts.join("/")).pdfs.push(f);
+    if (parts.length === 0) row("").all.push(f);
+    for (let i = 1; i <= parts.length; i++) row(parts.slice(0, i).join("/")).all.push(f);
+  }
+  return [...rows.values()].sort((a, b) => a.path.localeCompare(b.path));
 }

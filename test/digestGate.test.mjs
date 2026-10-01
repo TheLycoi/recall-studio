@@ -99,3 +99,37 @@ test("digestFolderSummary keeps 'with no highlights' for the bare count and 'cou
     "digested 3 of 3 PDFs, 2 with no highlights, 1 could not be read",
   );
 });
+
+// The Digest picker's folder rows: every folder with a PDF somewhere under
+// it, so ticking a folder can tick what is below it even when the PDFs sit
+// two levels down. Pure, so the modal only draws what this returns.
+const pdf = (path) => ({ path, extension: path.toLowerCase().endsWith(".pdf") ? path.slice(-3) : "md" });
+
+test("pickerFolders lists each folder with PDFs under it, with its own and all PDFs in path order", () => {
+  const files = [pdf("HBIO408/L02.pdf"), pdf("HBIO408/L01.pdf"), pdf("HBIO408/labs/Lab4.pdf"), pdf("PHED163/notes.md"), pdf("PSYC360/week1/reading.pdf")];
+  const rows = dg.pickerFolders(files);
+  assert.deepEqual(
+    rows.map((r) => [r.path, r.depth, r.pdfs.map((f) => f.path), r.all.map((f) => f.path)]),
+    [
+      ["HBIO408", 0, ["HBIO408/L01.pdf", "HBIO408/L02.pdf"], ["HBIO408/L01.pdf", "HBIO408/L02.pdf", "HBIO408/labs/Lab4.pdf"]],
+      ["HBIO408/labs", 1, ["HBIO408/labs/Lab4.pdf"], ["HBIO408/labs/Lab4.pdf"]],
+      ["PSYC360", 0, [], ["PSYC360/week1/reading.pdf"]],
+      ["PSYC360/week1", 1, ["PSYC360/week1/reading.pdf"], ["PSYC360/week1/reading.pdf"]],
+    ],
+  );
+});
+
+test("pickerFolders puts a PDF at the vault root under the empty path and ignores notes", () => {
+  const rows = dg.pickerFolders([pdf("root.pdf"), pdf("a note.md")]);
+  assert.deepEqual(rows.map((r) => [r.path, r.depth, r.all.map((f) => f.path)]), [["", 0, ["root.pdf"]]]);
+  assert.deepEqual(dg.pickerFolders([pdf("only.md")]), []);
+});
+
+test("pickerFolders matches extensions case-insensitively, as the folder planner does", () => {
+  const rows = dg.pickerFolders([pdf("x/Deck.PDF")]);
+  assert.deepEqual(rows.map((r) => r.all.map((f) => f.path)), [["x/Deck.PDF"]]);
+});
+
+test("digestFilesSummary speaks of the PDFs chosen, not a folder", () => {
+  assert.equal(dg.digestFolderSummary({ queued: 2, digested: 1, skipped: 1, failed: 0, bare: 1, unreadable: 0, stopped: false }), "digested 1 of 2 PDFs, 1 skipped, 1 with no highlights");
+});

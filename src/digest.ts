@@ -7,7 +7,7 @@
  * lives in a pure module with its own tests. This file only decides what to
  * read, what to ask, and what to write.
  */
-import { Notice, TFile, TFolder, normalizePath } from "obsidian";
+import { Notice, TFile, normalizePath } from "obsidian";
 import type WikiLmPlugin from "./main";
 import { captureManifestHighlights } from "./capture";
 import { decideGate, digestFolderSummary, planDigestFolder, type DigestFolderTally, type GateDecision } from "./digestGate";
@@ -381,37 +381,31 @@ export async function digestPdf(plugin: WikiLmPlugin, source: TFile, opts: Diges
 }
 
 /**
- * "Digest folder…": every PDF under a folder that has highlights with text,
- * digested in turn with one answer to the product-and-instruction form.
+ * "Digest…" with more than one PDF ticked: every chosen PDF that has
+ * highlights with text, digested in turn with one answer to the
+ * product-and-instruction form.
  *
  * Each PDF still gets its own preview, because the preview is where the reader
  * decides what is written; closing it skips that PDF, not the run. Stopping
  * from the status bar (or "Cancel the running AI highlight, digest or ingest")
  * lets the PDF in hand finish and stops before the next. No model call is made
  * here beyond the one per PDF that `digestPdf` already makes.
+ *
+ * The list comes from the picker (src/modals.ts pickDigestFiles), which
+ * already turned any ticked folder into its PDFs, so nothing is walked here.
  */
-export async function digestFolder(plugin: WikiLmPlugin, folder: TFolder): Promise<void> {
-  const files: TFile[] = [];
-  const visit = (f: TFolder): void => {
-    for (const child of f.children) {
-      if (child instanceof TFolder) visit(child);
-      else if (child instanceof TFile && isPdfFile(child)) files.push(child);
-    }
-  };
-  visit(folder);
-  if (files.length === 0) {
-    new Notice(`WikiLM: there are no PDFs under ${folder.path}.`);
-    return;
-  }
+export async function digestFiles(plugin: WikiLmPlugin, files: TFile[]): Promise<void> {
+  if (files.length === 0) return;
+  const noun = `${files.length} PDF${files.length === 1 ? "" : "s"}`;
 
   // Same rule as the folder ingest: one run holds the token at a time, and
   // taking it from a run already going would leave that run unstoppable.
   if (plugin.cancel.active) {
     const running = plugin.cancel.label ? ` (${plugin.cancel.label})` : "";
-    new Notice(`WikiLM: another run is still going${running}. Digest ${folder.name} once it finishes, or stop it from the status bar.`, 8000);
+    new Notice(`WikiLM: another run is still going${running}. Digest the ${noun} once it finishes, or stop it from the status bar.`, 8000);
     return;
   }
-  const owner = plugin.cancel.begin(`digesting ${folder.name}`);
+  const owner = plugin.cancel.begin(`digesting ${noun}`);
   try {
     // Every PDF is read once, here, to apply the same gate `digestPdf` applies
     // (a highlight with text), and the read is handed to `digestPdf` so the
@@ -441,14 +435,13 @@ export async function digestFolder(plugin: WikiLmPlugin, folder: TFolder): Promi
       return !!r && decideGate(r.manifest).action === "digest";
     });
     if (plan.queue.length === 0) {
-      const noun = `${files.length} PDF${files.length === 1 ? "" : "s"}`;
       // "Has highlights with text" is a claim the read backs up; when every
       // PDF failed to read, or some did, say that instead of implying the
       // reader never highlighted them.
       const msg =
         unreadable.size === files.length
-          ? `WikiLM: none of the ${noun} under ${folder.path} could be read.`
-          : `WikiLM: none of the ${noun} under ${folder.path} has highlights with text${unreadable.size > 0 ? ` (${unreadable.size} could not be read)` : ""}. Highlight them in PDF++, or run “AI highlight…” on each first.`;
+          ? `WikiLM: none of the ${noun} chosen could be read.`
+          : `WikiLM: none of the ${noun} chosen has highlights with text${unreadable.size > 0 ? ` (${unreadable.size} could not be read)` : ""}. Highlight them in PDF++, or run “AI highlight…” on each first.`;
       new Notice(msg, 10000);
       return;
     }
@@ -456,7 +449,7 @@ export async function digestFolder(plugin: WikiLmPlugin, folder: TFolder): Promi
     const options = await askDigestOptions(
       plugin.app,
       { product: "notes", instruction: "" },
-      `Digest ${plan.queue.length} PDF${plan.queue.length === 1 ? "" : "s"} under ${folder.name}`,
+      `Digest ${plan.queue.length} PDF${plan.queue.length === 1 ? "" : "s"}`,
     );
     if (options === null) return;
 
