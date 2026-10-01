@@ -21,7 +21,8 @@ import { aiHighlightNote, captureMarkdownHighlights, capturePdfSelection, captur
 import { isPdfFile, pdfsLinkedFrom, readPdfSelection } from "./pdf";
 import { digestFiles, digestPdf } from "./digest";
 import { suggestPdfHighlights } from "./suggest";
-import { askHighlightOptions, askInstruction, pickDigestFiles, pickFolder, SchemaSuggestionsModal } from "./modals";
+import { pickDigestFiles } from "./digestPicker";
+import { askHighlightOptions, askInstruction, pickFolder, SchemaSuggestionsModal } from "./modals";
 
 export interface WikiLmCommand extends CommandSpec {
   /** True when the command can run right now; the palette hides it otherwise. */

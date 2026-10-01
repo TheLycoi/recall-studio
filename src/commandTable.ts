@@ -42,8 +42,8 @@ export const COMMAND_TABLE: CommandSpec[] = [
     hint: "needs an open note or PDF",
   },
   {
-    // One Digest for one PDF or many. The picker (src/modals.ts
-    // DigestPickerModal) starts from the open PDF, or the PDFs a note cites,
+    // One Digest for one PDF or many. The picker (
+    // DigestPickerModal, src/digestPicker.ts) starts from the open PDF, or the PDFs a note cites,
     // and lets the reader tick a whole folder or several files under it. The
     // id is the one the single-PDF command had, so its hotkey keeps firing;
     // digest-folder's alias moved here, its hotkey did not.

@@ -391,7 +391,7 @@ export async function digestPdf(plugin: WikiLmPlugin, source: TFile, opts: Diges
  * lets the PDF in hand finish and stops before the next. No model call is made
  * here beyond the one per PDF that `digestPdf` already makes.
  *
- * The list comes from the picker (src/modals.ts pickDigestFiles), which
+ * The list comes from the picker (src/digestPicker.ts pickDigestFiles), which
  * already turned any ticked folder into its PDFs, so nothing is walked here.
  */
 export async function digestFiles(plugin: WikiLmPlugin, files: TFile[]): Promise<void> {
