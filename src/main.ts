@@ -117,6 +117,7 @@ export default class WikiLmPlugin extends Plugin {
     this.upstream = null;
     await this.llm.abort();
     await this.store.flush();
+    this.store.close();
   }
 
   // ---------------------------------------------------------------- helpers

@@ -24,12 +24,21 @@ export class InboxStore {
   private saveTimer: number | null = null;
   private path: string;
   /**
-   * Set when inbox.json was unreadable and could not even be moved aside.
+   * Set when inbox.json could not be read at all, or was unreadable and
+   * could not even be moved aside.
    * Writing in that state would still destroy whatever the reader has —
    * only now there is no copy at all, not even the renamed original — so
    * every save is a no-op until the plugin is reloaded.
    */
   private readOnly = false;
+  /**
+   * Set by close() when the plugin unloads. A model call that completes in
+   * an unloaded instance would otherwise write its stale copy of the inbox
+   * over the one the reloaded plugin is keeping.
+   */
+  private closed = false;
+  /** The write in progress, if any. Each flush waits on it, so writes land in the order they were asked for. */
+  private flushing: Promise<void> = Promise.resolve();
 
   private legacyPath: string | null;
 
@@ -92,29 +101,47 @@ export class InboxStore {
         }
       }
     } catch (e) {
+      // The file may be there and simply unreadable right now (evicted by
+      // iCloud, locked by a sync). Writing would put an empty inbox over it,
+      // so nothing is saved until the plugin is loaded again.
       console.error("WikiLM: failed to read inbox.json", e);
+      this.readOnly = true;
+      new Notice("WikiLM: inbox.json could not be read; the inbox is read-only until Obsidian is restarted.");
     }
     // Anything interrupted mid-generation goes back to the queue.
     for (const h of this.data.highlights) if (h.status === "generating") h.status = "queued";
   }
 
   private scheduleSave() {
-    if (this.readOnly) return;
+    if (this.readOnly || this.closed) return;
     if (this.saveTimer !== null) window.clearTimeout(this.saveTimer);
     this.saveTimer = window.setTimeout(() => void this.flush(), 400);
   }
 
   async flush(): Promise<void> {
-    if (this.readOnly) return;
+    if (this.readOnly || this.closed) return;
     if (this.saveTimer !== null) {
       window.clearTimeout(this.saveTimer);
       this.saveTimer = null;
     }
-    try {
-      await this.app.vault.adapter.write(this.path, JSON.stringify(this.data, null, 2));
-    } catch (e) {
-      console.error("WikiLM: failed to write inbox.json", e);
+    const snapshot = JSON.stringify(this.data, null, 2);
+    this.flushing = this.flushing.then(async () => {
+      try {
+        await this.app.vault.adapter.write(this.path, snapshot);
+      } catch (e) {
+        console.error("WikiLM: failed to write inbox.json", e);
+      }
+    });
+    await this.flushing;
+  }
+
+  /** Stop saving for good. Called on unload, after the last flush. */
+  close(): void {
+    if (this.saveTimer !== null) {
+      window.clearTimeout(this.saveTimer);
+      this.saveTimer = null;
     }
+    this.closed = true;
   }
 
   onChange(fn: Listener): () => void {
