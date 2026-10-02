@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.14.1
+
+- Digest sections are written as a mind map: a lead line, then bullets, never a paragraph. The output schema now says so, and the default schema note no longer asks for raw links or the old `## Highlights` shape.
+- A digest merge sees the reader's `###` branches. Before, only `##` headings were matched, so a new section was founded beside a branch of the same name instead of filing into it.
+- On a page that nests its branches, a new digest section is a `###` inside the `##` named for the page, founded when missing. Flat digest pages keep `##`.
+- Text spliced into an empty section no longer runs into its heading.
+
 ## 0.14.0
 
 The first public release.
