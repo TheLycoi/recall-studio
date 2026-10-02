@@ -161,11 +161,52 @@ test("checkRecallGrade gives every point one mark, missing entries as missed", (
   assert.equal(marks[1].verified, true);
 });
 
-test("checkRecallGrade marks a recalled point unverified when its words are not in the answer", () => {
+test("checkRecallGrade counts a recalled point as missed when its words are not in the answer, and keeps the cue", () => {
   const item = r.buildItems(coaching())[2];
-  const { marks } = r.checkRecallGrade(grade(["recalled", "missed", "missed", "missed"], { said: ["only with permission"] }), item.points, "you use it when they ask");
-  assert.equal(marks[0].status, "recalled");
+  const draft = grade(["recalled", "missed", "missed", "missed"], { said: ["only with permission"], cue: ["when it is used", "", "", ""] });
+  const { marks } = r.checkRecallGrade(draft, item.points, "you use it when they ask");
+  assert.equal(marks[0].status, "missed");
+  assert.equal(marks[0].verified, false, "the badge still says unverified");
+  assert.equal(marks[0].cue, "when it is used");
+});
+
+test("an unverified recalled mark is not counted: the review's reproduction", () => {
+  let s = session();
+  const item = r.nextItem(s);
+  s = r.acceptCue(s, item, "Recall it.", "concept", true);
+  const answer = "I have no idea at all";
+  const { marks } = r.checkRecallGrade(grade(["recalled"], { said: ["receptors bind ligands with high affinity"] }), item.points, answer);
+  assert.equal(marks[0].status, "missed");
+  s = r.afterFirstAttempt(s, answer, marks, "");
+  assert.equal(r.resultVerdict(s.results[0]), "incorrect");
+  assert.equal(r.recallMisses(s).length, 1);
+});
+
+test("an unverified partial mark counts as missed", () => {
+  const item = r.buildItems(coaching())[2];
+  const draft = grade(["partial", "missed", "missed", "missed"], { said: ["only with permission"], note: ["left out the permission", "", "", ""], cue: ["when it is used", "", "", ""] });
+  const { marks } = r.checkRecallGrade(draft, item.points, "no idea");
+  assert.equal(marks[0].status, "missed");
   assert.equal(marks[0].verified, false);
+  assert.equal(marks[0].cue, "when it is used");
+});
+
+test("an unverified wrong mark counts as missed and sends no misconception", () => {
+  let s = session();
+  const item = r.nextItem(s);
+  s = r.acceptCue(s, item, "Recall it.", "concept", true);
+  const answer = "I have no idea at all";
+  const draft = grade(["wrong"], { said: ["coaching is telling people what to do"], note: ["thinks coaching is directive"] });
+  const { marks } = r.checkRecallGrade(draft, item.points, answer);
+  assert.equal(marks[0].status, "missed");
+  assert.equal(marks[0].verified, false);
+  s = r.afterFirstAttempt(s, answer, marks, "");
+  assert.equal(r.resultCounts(s.results[0]).wrong, 0);
+  const misses = r.recallMisses(s);
+  assert.equal(misses.length, 1);
+  assert.equal(misses[0].gap, "detail");
+  assert.equal(misses[0].verdict, "skipped");
+  assert.doesNotMatch(misses[0].gapNote, /directive/, "the unverified wrong belief is not passed on");
 });
 
 test("checkRecallGrade blanks a cue that gives its point away", () => {
@@ -212,8 +253,9 @@ test("a first attempt with points missing and cues to give arms the cued attempt
 
 test("a first attempt that recalls everything reveals at once", () => {
   const { s, item } = onEpe();
-  const answer = "a b c d";
-  const { marks } = r.checkRecallGrade(grade(["recalled", "recalled", "recalled", "recalled"]), item.points, answer);
+  const answer = "when a client asks. ask permission. share in small doses. check understanding";
+  const said = ["when a client asks", "ask permission", "share in small doses", "check understanding"];
+  const { marks } = r.checkRecallGrade(grade(["recalled", "recalled", "recalled", "recalled"], { said }), item.points, answer);
   const next = r.afterFirstAttempt(s, answer, marks, "All four.");
   assert.equal(next.current, null);
   assert.equal(next.results.length, 1);
@@ -292,13 +334,13 @@ test("recallSummary counts points across sections and lists the weakest first", 
   // Section 1 (lead): recalled. Section 2: skipped. Section 3: 1 of 4.
   let item = r.nextItem(s);
   s = r.acceptCue(s, item, "Recall it.", "concept", true);
-  s = r.afterFirstAttempt(s, "x", r.checkRecallGrade(grade(["recalled"]), item.points, "x").marks, "");
+  s = r.afterFirstAttempt(s, "a partnership", r.checkRecallGrade(grade(["recalled"], { said: ["a partnership"] }), item.points, "a partnership").marks, "");
   item = r.nextItem(s);
   s = r.acceptCue(s, item, "Recall it.", "concept", true);
   s = r.skipRecall(s, "");
   item = r.nextItem(s);
   s = r.acceptCue(s, item, "Recall it.", "procedure", true);
-  s = r.afterFirstAttempt(s, "x", r.checkRecallGrade(grade(["recalled", "missed", "missed", "missed"]), item.points, "x").marks, "");
+  s = r.afterFirstAttempt(s, "when a client asks", r.checkRecallGrade(grade(["recalled", "missed", "missed", "missed"], { said: ["when a client asks"] }), item.points, "when a client asks").marks, "");
   const { line, weak } = r.recallSummary(s);
   assert.equal(line, "Recalled 2 of 6 points across 3 sections");
   assert.deepEqual(weak.map((w) => [w.item.section, w.recalled, w.total]), [["Motivational interviewing", 0, 1], [EPE, 1, 4]]);

@@ -151,7 +151,7 @@ export interface PointMark {
   status: PointStatus;
   /** The reader's words for the point, as the grader copied them. */
   said: string;
-  /** `said` was found in the reader's answer. A point with no words to find is verified trivially. */
+  /** `said` was found in the reader's answer. A point with no words to find is verified trivially; an unverified point is always missed. */
   verified: boolean;
   /** The missing part or the wrong belief. */
   note: string;
@@ -262,9 +262,11 @@ export function acceptCue(session: RecallSession, item: RecallItem, cue: string,
  *
  * A point the grader left out is missed. A point marked as produced must come
  * with the reader's own words for it, and those words must be in the answer;
- * when they are not, the mark stands but says unverified, so the reader can
- * overrule it. A cue that states its point is dropped, and a point marked
- * missed while the answer holds most of its words is flagged.
+ * when they are not, the point counts as missed (keeping its cue) and says
+ * unverified, so only marks code could check are counted. An unverified
+ * "wrong" is missed too, so it never becomes a misconception card. A cue that
+ * states its point is dropped, and a point marked missed while the answer
+ * holds most of its words is flagged.
  */
 export function checkRecallGrade(
   draft: QuizRecallGradeDraft,
@@ -274,10 +276,11 @@ export function checkRecallGrade(
   const plainAnswer = normalizePlain(answer);
   const marks = points.map((p, i): PointMark => {
     const d = draft.points.find((e) => e.n === i + 1);
-    const status: PointStatus = d ? d.status : "missed";
-    const said = d && status !== "missed" ? d.said.trim() : "";
+    const claimed: PointStatus = d ? d.status : "missed";
+    const said = d && claimed !== "missed" ? d.said.trim() : "";
     const verified =
-      status === "missed" || (!!said && significantTokens(said).length > 0 && plainAnswer.includes(normalizePlain(said)));
+      claimed === "missed" || (!!said && significantTokens(said).length > 0 && plainAnswer.includes(normalizePlain(said)));
+    const status: PointStatus = verified ? claimed : "missed";
     const cue = d && (status === "missed" || status === "partial") && !statesPoint(d.cue, p.text) ? d.cue.trim() : "";
     const cov = wordCoverage(p.text, answer);
     return {

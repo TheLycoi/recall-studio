@@ -1438,7 +1438,9 @@ export class ChatPanel {
    * cue that fails `checkCue` (src/recall.ts) is asked for once more with the
    * failure named, and a second failure falls back to a cue written by code
    * from the heading path. A section is never set aside because the model
-   * could not phrase it, so the quiz cannot loop or stall on one.
+   * could not phrase it, so the quiz cannot loop or stall on one. A cue call
+   * that throws falls back the same way; anything else that throws finishes
+   * the quiz, so the sections already graded keep their summary and misses.
    */
   private async nextQuestion(): Promise<void> {
     const session = this.session;
@@ -1457,11 +1459,17 @@ export class ChatPanel {
       let failure = "";
       let accepted: { cue: string; shape: CueShape; fallback: boolean } | null = null;
       for (let attempt = 0; attempt < 2 && !accepted; attempt++) {
-        const draft = await this.plugin.llm.quizCue({
-          ...sectionIn(item),
-          standingInstructions: this.plugin.settings.quizInstructions,
-          failure,
-        });
+        let draft;
+        try {
+          draft = await this.plugin.llm.quizCue({
+            ...sectionIn(item),
+            standingInstructions: this.plugin.settings.quizInstructions,
+            failure,
+          });
+        } catch (e) {
+          console.debug("[wikilm] quiz cue failed, using the heading cue:", e);
+          break;
+        }
         const check = checkCue(draft, item);
         if (check.ok) accepted = { cue: check.cue, shape: check.shape, fallback: false };
         else failure = check.reason;
@@ -1475,7 +1483,7 @@ export class ChatPanel {
       this.turns.push({ role: "assistant", text: renderCueMarkdown(next.current, item), quiz: { kind: "question", index: next.current.n } });
     } catch (e) {
       this.turns.push({ role: "assistant", text: "", error: describeError(e) });
-      this.session = null;
+      await this.finishQuiz();
     } finally {
       this.busy = false;
       this.status = "";
@@ -1663,6 +1671,11 @@ export class ChatPanel {
     const last = this.lastQuiz;
     if (!last) {
       this.pushSystem("No quiz to repeat. Say “quiz me”.");
+      return;
+    }
+    // The button is disabled while a quiz runs; this covers any other caller.
+    if (this.session) {
+      this.pushSystem("A quiz is running. Finish it, or say “quiz me” twice to restart it.");
       return;
     }
     const scope = last.scope.kind === "all" ? "all" : last.scope.kind === "note" ? "this" : "query";
@@ -2028,7 +2041,8 @@ export class ChatPanel {
    * The misses are on the turn, and the send button sends that turn's misses
    * and remembers it did, so an old summary sends its own quiz and reads
    * "Sent to inbox" afterwards, like the button under an answer. "Quiz again"
-   * reads `lastQuiz` and so always repeats the most recent quiz. Sending
+   * reads `lastQuiz` and so always repeats the most recent quiz; it is
+   * disabled while a quiz runs, because starting one would drop it. Sending
    * nothing is not offered: the chip is disabled at zero rather than writing
    * an empty batch to the inbox.
    */
@@ -2043,7 +2057,7 @@ export class ChatPanel {
     send.addEventListener("click", () => void this.sendMissesToInbox(turn));
 
     const again = row.createEl("button", { text: "Quiz again" });
-    again.disabled = this.busy;
+    again.disabled = this.busy || !!this.session;
     again.addEventListener("click", () => void this.quizAgain());
   }
 
