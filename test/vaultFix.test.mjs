@@ -63,12 +63,12 @@ test("a target nothing matches returns null", () => {
 
 test("the replacement carries the page's heading, not its filename", () => {
   const page = PAGES()[0];
-  assert.equal(vf.buildReplacement(page, "wiki/"), "[[concepts/spaced-repetition|Spaced repetition]]");
+  assert.deepEqual(vf.buildReplacement(page, "wiki/"), { text: "[[concepts/spaced-repetition|Spaced repetition]]", display: "Spaced repetition" });
 });
 
 test("a link the author named keeps that name; only the path changes", () => {
   const body = "See [[Spaced repetition]] and [[Spaced repetition|the spacing effect]].";
-  const out = vf.applyLinkFix(body, "Spaced repetition", "[[concepts/spaced-repetition|Spaced repetition]]");
+  const out = vf.applyLinkFix(body, "Spaced repetition", { text: "[[concepts/spaced-repetition|Spaced repetition]]", display: "Spaced repetition" });
   // First occurrence takes the page's own title, the second keeps the prose.
   assert.equal(
     out,
@@ -78,14 +78,14 @@ test("a link the author named keeps that name; only the path changes", () => {
 
 test("an embed stays an embed and an anchor survives", () => {
   const body = "![[Spaced repetition]]\n[[Spaced repetition#Definition]]";
-  const out = vf.applyLinkFix(body, "Spaced repetition", "[[concepts/spaced-repetition|Spaced repetition]]");
+  const out = vf.applyLinkFix(body, "Spaced repetition", { text: "[[concepts/spaced-repetition|Spaced repetition]]", display: "Spaced repetition" });
   assert.ok(out.startsWith("![[concepts/spaced-repetition|Spaced repetition]]"), out);
   assert.ok(out.includes("[[concepts/spaced-repetition#Definition|Spaced repetition]]"), out);
 });
 
 test("a different target on the same line is untouched", () => {
   const body = "[[Spaced repetition]] and [[Mnemonic medium]]";
-  const out = vf.applyLinkFix(body, "Spaced repetition", "[[concepts/spaced-repetition|Spaced repetition]]");
+  const out = vf.applyLinkFix(body, "Spaced repetition", { text: "[[concepts/spaced-repetition|Spaced repetition]]", display: "Spaced repetition" });
   assert.ok(out.includes("[[Mnemonic medium]]"), out);
 });
 
@@ -116,8 +116,8 @@ test("a link already pointing at its page is not rewritten forever", () => {
 test("applyFixesToNote applies every fix for one note in one pass", () => {
   const body = "[[Spaced repetition]] and [[Mnemonic medium]]";
   const out = vf.applyFixesToNote(body, [
-    { path: "n", from: "Spaced repetition", toPath: "x", to: "[[concepts/spaced-repetition|Spaced repetition]]" },
-    { path: "n", from: "Mnemonic medium", toPath: "y", to: "[[concepts/mnemonic-medium|Mnemonic medium]]" },
+    { path: "n", from: "Spaced repetition", toPath: "x", to: "[[concepts/spaced-repetition|Spaced repetition]]", display: "Spaced repetition" },
+    { path: "n", from: "Mnemonic medium", toPath: "y", to: "[[concepts/mnemonic-medium|Mnemonic medium]]", display: "Mnemonic medium" },
   ]);
   assert.equal(out, "[[concepts/spaced-repetition|Spaced repetition]] and [[concepts/mnemonic-medium|Mnemonic medium]]");
 });
@@ -246,13 +246,13 @@ test("applyLinkFix leaves a link inside a fence or a code span alone", () => {
   // already honours the mask; a relink that rewrites the example inside a ```md
   // fence edits documentation while reporting a repair on a link.
   const body = "Docs:\n\n```md\n[[Missing]]\n```\n\ninline `[[Missing]]` too.\n";
-  assert.equal(vf.applyLinkFix(body, "Missing", "[[concepts/real|Real]]"), body);
+  assert.equal(vf.applyLinkFix(body, "Missing", { text: "[[concepts/real|Real]]", display: "Real" }), body);
 });
 
 test("applyLinkFix leaves a link in the frontmatter alone", () => {
   const body = '---\nrelated: "[[Missing]]"\n---\n\nSee [[Missing]].\n';
   assert.equal(
-    vf.applyLinkFix(body, "Missing", "[[concepts/real|Real]]"),
+    vf.applyLinkFix(body, "Missing", { text: "[[concepts/real|Real]]", display: "Real" }),
     '---\nrelated: "[[Missing]]"\n---\n\nSee [[concepts/real|Real]].\n',
   );
 });
@@ -260,7 +260,7 @@ test("applyLinkFix leaves a link in the frontmatter alone", () => {
 test("applyLinkFix still rewrites prose that follows a code block", () => {
   const body = "```\ncode\n```\n\nSee [[Missing]] here.";
   assert.equal(
-    vf.applyLinkFix(body, "Missing", "[[concepts/real|Real]]"),
+    vf.applyLinkFix(body, "Missing", { text: "[[concepts/real|Real]]", display: "Real" }),
     "```\ncode\n```\n\nSee [[concepts/real|Real]] here.",
   );
 });
@@ -272,7 +272,7 @@ test("buildReplacement escapes a heading that itself holds a wikilink", () => {
   // broken markup that no later repair can recognise or undo.
   const page = { path: "wiki/concepts/y.md", title: "y", displayTitle: "See [[Other]]", aliases: [] };
   const rep = vf.buildReplacement(page, "wiki/");
-  assert.ok(!/\]\]/.test(rep.slice(2, -2)), `display text still closes the link: ${rep}`);
+  assert.ok(!/\]\]/.test(rep.text.slice(2, -2)), `display text still closes the link: ${rep.text}`);
   // Applying it yields one well-formed link, not a nest of them.
   const out = vf.applyLinkFix("A [[Missing]] b.\n", "Missing", rep);
   assert.equal(out.match(/\[\[/g).length, 1);
@@ -284,12 +284,57 @@ test("buildReplacement escapes a pipe in the display text", () => {
   // so the reader sees a truncated name.
   const page = { path: "wiki/concepts/z.md", title: "z", displayTitle: "A|B", aliases: [] };
   const rep = vf.buildReplacement(page, "wiki/");
-  assert.equal(rep.split("|").length, 2, `display text holds a second pipe: ${rep}`);
+  assert.equal(rep.text.split("|").length, 2, `display text holds a second pipe: ${rep.text}`);
 });
 
 test("buildReplacement leaves an ordinary heading untouched", () => {
   const page = { path: "wiki/concepts/y.md", title: "y", displayTitle: "Spaced repetition", aliases: [] };
-  assert.equal(vf.buildReplacement(page, "wiki/"), "[[concepts/y|Spaced repetition]]");
+  assert.deepEqual(vf.buildReplacement(page, "wiki/"), { text: "[[concepts/y|Spaced repetition]]", display: "Spaced repetition" });
+});
+
+// ------------------------------------- rewrites keep the markup valid (B7)
+
+const SPACING = { path: "wiki/concepts/spacing.md", title: "spacing", displayTitle: "Spacing", aliases: [] };
+
+test("a heading holding a lone bracket gives one link, not a nest of them", () => {
+  // "Array [i] access": the `]` used to defeat the display parse, so the whole
+  // replacement was dropped in as the display and the link nested itself.
+  const page = { path: "wiki/concepts/array-access.md", title: "array-access", displayTitle: "Array [i] access", aliases: [] };
+  const rep = vf.buildReplacement(page, "wiki/");
+  assert.equal(rep.text, "[[concepts/array-access|Array i access]]");
+  const out = vf.applyLinkFix("See [[Array access]].\n", "Array access", rep);
+  assert.equal(out, "See [[concepts/array-access|Array i access]].\n");
+});
+
+test("safeDisplay folds brackets and pipes to characters that render as themselves", () => {
+  assert.equal(vf.safeDisplay("Array [i] access"), "Array i access");
+  assert.equal(vf.safeDisplay("TCP | IP [[old]]"), "TCP ｜ IP 【old】");
+});
+
+test("a rewrite inside a table row escapes its pipe", () => {
+  // An unescaped `|` inside a table cell ends the cell and splits the row.
+  const rep = vf.buildReplacement(SPACING, "wiki/");
+  const body = "| [[SR]] | x |\n\nProse [[SR]].\n";
+  const out = vf.applyLinkFix(body, "SR", rep);
+  assert.equal(out, "| [[concepts/spacing\\|Spacing]] | x |\n\nProse [[concepts/spacing|Spacing]].\n");
+});
+
+test("an escaped pipe already in a table link is kept, with its display text", () => {
+  const rep = vf.buildReplacement(SPACING, "wiki/");
+  // The lint reads the target as written, backslash and all; the plain name works too.
+  for (const target of ["SR", "SR\\"]) {
+    assert.equal(vf.applyLinkFix("| [[SR\\|short]] |\n", target, rep), "| [[concepts/spacing\\|short]] |\n", target);
+  }
+  // An anchor before the escaped pipe keeps both.
+  assert.equal(vf.applyLinkFix("| [[SR#Def\\|short]] |\n", "SR", rep), "| [[concepts/spacing#Def\\|short]] |\n");
+});
+
+test("case variants of one dead target are repaired in one pass", () => {
+  // The lint dedupes dead links by lowercase, so it reports one of these; the
+  // repair must reach both or the second needs another apply.
+  assert.equal(vf.unwrapDeadLink("[[Ghost page]] and [[ghost page]]", "Ghost page"), "Ghost page and ghost page");
+  const rep = vf.buildReplacement(SPACING, "wiki/");
+  assert.equal(vf.applyLinkFix("[[SR]] and [[sr]]", "SR", rep), "[[concepts/spacing|Spacing]] and [[concepts/spacing|Spacing]]");
 });
 
 // ------------------------------------------------ unwrap: the leftover bullet

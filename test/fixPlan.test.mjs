@@ -184,6 +184,17 @@ test("addRelatedLink appends a class page's new Related topics at EOF with no Fl
   assert.equal(fp.addRelatedLink(out, "concepts/x", "X", "class", "concept"), out);
 });
 
+test("addRelatedLink and hubListLink fold a heading that would break the link", () => {
+  // A heading is prose and may hold a `|` or a wikilink; inserted raw, the
+  // first truncates the name and the second closes the link early.
+  const heading = "TCP | IP [[old]]";
+  const want = "- [[concepts/tcp-ip|TCP ｜ IP 【old】]]";
+  const related = fp.addRelatedLink(KARPATHY_PAGE, "concepts/tcp-ip", heading, "karpathy", "concept");
+  assert.ok(related.split("\n").includes(want), related);
+  const hub = fp.hubListLink(HUB, "concepts/tcp-ip", heading);
+  assert.ok(hub.split("\n").includes(want), hub);
+});
+
 // -------------------------------------------------------------- hubListLink
 
 test("hubListLink appends after the last list line before ## Sources", () => {
@@ -409,6 +420,7 @@ test("planRelinks wraps the fixable rows the link fixer already found", () => {
       from: "Spaced repetition",
       toPath: "wiki/concepts/spaced-repetition.md",
       to: "[[concepts/spaced-repetition|Spaced repetition]]",
+      display: "Spaced repetition",
       confidence: "slug",
     },
   ];
@@ -679,7 +691,7 @@ test("planUnwraps rows start unticked: withdrawing a link is the reader's call",
   );
   assert.equal(rows.length, 1);
   assert.equal(rows[0].enabled, false);
-  assert.equal(rows[0].label, "Unlink Iterative refinement (no note found) — keep the words, drop the link");
+  assert.equal(rows[0].label, "Unlink Iterative refinement (no note found): keep the words, drop the link");
 });
 
 test("the review's reproduction: links outside the wiki and attachment embeds survive scan, plan and apply", () => {

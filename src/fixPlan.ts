@@ -26,7 +26,7 @@ import { compareIssues, type VaultIssue, type VaultLintReport } from "./vaultLin
 import type { ReviewKind, ReviewLink } from "./lintReview";
 import { pairKey, type DuplicateFinding } from "./duplicates";
 import type { FixPage, LinkFix, FixConfidence } from "./vaultFix";
-import { applyLinkFix, buildReplacement, unwrapDeadLink } from "./vaultFix";
+import { applyLinkFix, buildReplacement, safeDisplay, unwrapDeadLink } from "./vaultFix";
 import { findAllPdfReferences, highlightKey, parsePdfSubpath, renderCallout } from "./pdflink";
 import { linkKey } from "./graph";
 import { findSection, spliceIntoSection, insertBeforeTrailing } from "./topicNote";
@@ -168,7 +168,7 @@ export function addRelatedLink(
   const wanted = targetKey(linkPath);
   if (!wanted) return md;
 
-  const line = `- [[${linkPath}|${display}]]`;
+  const line = `- [[${linkPath}|${safeDisplay(display)}]]`;
   const found = findSection(md, heading);
   if (!found) {
     // Nowhere to look, so nothing can already be there.
@@ -214,7 +214,7 @@ export function hubListLink(md: string, linkPath: string, display: string): stri
   if (!wanted) return md;
   if (linkedKeys(md).has(wanted)) return md;
 
-  const line = `- [[${linkPath}|${display}]]`;
+  const line = `- [[${linkPath}|${safeDisplay(display)}]]`;
   const sources = /^##\s+Sources\s*$/m.exec(md);
   const limit = sources ? sources.index : md.length;
   const head = md.slice(0, limit);
@@ -574,7 +574,7 @@ export function planRelinks(fixable: LinkFix[]): Fix[] {
     path: fix.path,
     label: `Rewrite → ${linkPathOf(fix.toPath, "wiki/")} (${CONFIDENCE_WORDS[fix.confidence]})`,
     enabled: true,
-    apply: (content: string) => applyLinkFix(content, fix.from, fix.to),
+    apply: (content: string) => applyLinkFix(content, fix.from, { text: fix.to, display: fix.display }),
   }));
 }
 
@@ -655,7 +655,7 @@ export function planUnwraps(unresolved: VaultIssue[], contents: Map<string, stri
       id: `unwrap:${issue.path}:${n++}`,
       kind: "unwrap",
       path: issue.path,
-      label: `Unlink ${target} (no note found) — keep the words, drop the link`,
+      label: `Unlink ${target} (no note found): keep the words, drop the link`,
       // Never pre-ticked: a link the lint cannot resolve may still be one the
       // reader meant, and one Apply must not delete it.
       enabled: false,

@@ -43,6 +43,8 @@ export interface LinkFix {
   toPath: string;
   /** The replacement link text, e.g. "[[concepts/spaced-repetition|Spaced repetition]]". */
   to: string;
+  /** The name the reader reads in it, already made safe: "Spaced repetition". */
+  display: string;
   /** Which tier matched: an exact title, an exact alias, a slug-folded title, or a slug-folded alias. */
   confidence: FixConfidence;
 }
@@ -99,29 +101,54 @@ export function findLinkTarget(
 /**
  * The display half of a link, made safe to sit inside one.
  *
- * A page's `# Heading` is prose the reader wrote, and prose may hold anything —
+ * A page's `# Heading` is prose the reader wrote, and prose may hold anything,
  * including a wikilink. Dropped in verbatim, its `]]` closes the link early and
  * the result is markup no reader and no later repair can untangle:
  * `[[concepts/y|[[concepts/y|See [[Other]]]]]]`. A second `|` is milder but
  * still wrong: Obsidian reads it as a further field and the name shows
- * truncated. Both are folded to characters that render as themselves.
+ * truncated. Both are folded to characters that render as themselves. A lone
+ * `[` or `]` ("Array [i] access") is dropped: Obsidian ends a link at the
+ * first `]`, so one left in would cut the name short.
  */
-function safeDisplay(text: string): string {
-  return text.replace(/\[\[/g, "【").replace(/\]\]/g, "】").replace(/\|/g, "｜");
+export function safeDisplay(text: string): string {
+  return text
+    .replace(/\[\[/g, "【")
+    .replace(/\]\]/g, "】")
+    .replace(/\|/g, "｜")
+    .replace(/[[\]]/g, "");
 }
 
-/** The link text that replaces a dead one: a vault-relative path, and the name the reader reads. */
-export function buildReplacement(page: FixPage, wikiPrefix: string): string {
+/** A built replacement: the whole link, and the name it shows, kept apart so nothing has to parse one back out. */
+export interface Replacement {
+  /** e.g. "[[concepts/spaced-repetition|Spaced repetition]]". */
+  text: string;
+  /** e.g. "Spaced repetition", already through `safeDisplay`. */
+  display: string;
+}
+
+/** The link that replaces a dead one: a vault-relative path, and the name the reader reads. */
+export function buildReplacement(page: FixPage, wikiPrefix: string): Replacement {
   const prefix = wikiPrefix.endsWith("/") ? wikiPrefix : `${wikiPrefix}/`;
   const rel = page.path.startsWith(prefix) ? page.path.slice(prefix.length) : page.path;
-  return `[[${rel.replace(/\.md$/i, "")}|${safeDisplay(page.displayTitle || page.title)}]]`;
+  const display = safeDisplay(page.displayTitle || page.title);
+  return { text: `[[${rel.replace(/\.md$/i, "")}|${display}]]`, display };
 }
 
-/** The display text of a built replacement link, or its path when it carries none. */
-function displayOf(replacement: string): string {
-  const m = /^\[\[([^\]|]+)(?:\|([^\]]+))?\]\]$/.exec(replacement.trim());
-  if (!m) return replacement;
-  return (m[2] ?? m[1]).trim();
+/**
+ * A link target as the repairs compare it: trimmed, lowercased, and without
+ * the `\` that escapes the pipe of a link inside a table row. Obsidian
+ * resolves names without regard to case, and the lint reports one dead link
+ * per lowercased target, so a repair that matched case exactly would leave
+ * `[[ghost page]]` behind after fixing `[[Ghost page]]`.
+ */
+function compareKey(target: string): string {
+  return target.trim().replace(/\\$/, "").trim().toLowerCase();
+}
+
+/** Whether the line holding offset `at` is a Markdown table row. */
+function inTableRow(content: string, at: number): boolean {
+  const start = content.lastIndexOf("\n", at - 1) + 1;
+  return /^[ \t]*\|/.test(content.slice(start, at));
 }
 
 /**
@@ -143,11 +170,15 @@ function displayOf(replacement: string): string {
  * decides that, and this repair honours it for the same reason `unwrapDeadLink`
  * does — a note documenting how to write a wikilink has its example silently
  * edited otherwise, and the two repairs in one file must agree on what prose is.
+ *
+ * Inside a table row the pipe between path and name is written `\|`, or it
+ * would end the cell and split the row. A link already written that way keeps
+ * its backslash, and one written in a row without it gains one.
  */
-export function applyLinkFix(content: string, target: string, replacement: string): string {
-  const wanted = target.trim();
-  const path = /^\[\[([^\]|]+)/.exec(replacement)?.[1];
-  if (!path) return content;
+export function applyLinkFix(content: string, target: string, replacement: Replacement): string {
+  const wanted = compareKey(target);
+  const path = /^\[\[([^\]|]+)/.exec(replacement.text)?.[1];
+  if (!path || !wanted) return content;
   const skip = proseRanges(content);
 
   return content.replace(
@@ -160,11 +191,16 @@ export function applyLinkFix(content: string, target: string, replacement: strin
       alias: string | undefined,
       at: number,
     ) => {
-      if (rawTarget.trim() !== wanted) return whole;
+      if (compareKey(rawTarget) !== wanted) return whole;
       if (inSkipped(skip, at)) return whole;
-      const tail = anchor ?? "";
-      const shown = alias === undefined ? displayOf(replacement) : alias.trim();
-      return `${bang}[[${path}${tail}|${shown}]]`;
+      // The `\` of an escaped pipe is captured by whichever group sits before
+      // the pipe: the anchor when there is one, the target otherwise.
+      const beforePipe = anchor ?? rawTarget;
+      const escaped = alias !== undefined && beforePipe.endsWith("\\");
+      const tail = (anchor ?? "").replace(/\\$/, "");
+      const pipe = escaped || inTableRow(content, at) ? "\\|" : "|";
+      const shown = alias === undefined ? replacement.display : alias.trim();
+      return `${bang}[[${path}${tail}${pipe}${shown}]]`;
     },
   );
 }
@@ -202,7 +238,14 @@ export function planLinkFixes(
     const replacement = buildReplacement(found.page, wikiPrefix);
     const body = contents.get(issue.path);
     if (body === undefined || applyLinkFix(body, issue.target, replacement) === body) continue;
-    fixable.push({ path: issue.path, from: issue.target, toPath: found.page.path, to: replacement, confidence: found.confidence });
+    fixable.push({
+      path: issue.path,
+      from: issue.target,
+      toPath: found.page.path,
+      to: replacement.text,
+      display: replacement.display,
+      confidence: found.confidence,
+    });
   }
 
   return { fixable, unresolved, ambiguous };
@@ -211,7 +254,7 @@ export function planLinkFixes(
 /** The fixes for one note, applied in one pass so a note is written once. */
 export function applyFixesToNote(content: string, fixes: LinkFix[]): string {
   let out = content;
-  for (const fix of fixes) out = applyLinkFix(out, fix.from, fix.to);
+  for (const fix of fixes) out = applyLinkFix(out, fix.from, { text: fix.to, display: fix.display });
   return out;
 }
 
@@ -315,7 +358,7 @@ function inSkipped(skip: Array<[number, number]>, at: number): boolean {
  * with it, since a leftover "- " renders as a stray bullet.
  */
 export function unwrapDeadLink(content: string, target: string): string {
-  const wanted = target.trim();
+  const wanted = compareKey(target);
   if (!wanted) return content;
   const skip = proseRanges(content);
 
@@ -331,7 +374,7 @@ export function unwrapDeadLink(content: string, target: string): string {
       eol: string,
       at: number,
     ) => {
-      if (rawTarget.trim() !== wanted) return whole;
+      if (compareKey(rawTarget) !== wanted) return whole;
       // A link that only looks like prose: inside a fence, a code span or the
       // frontmatter. Left exactly as written.
       if (inSkipped(skip, at + (lead ? lead.length : 0))) return whole;
