@@ -36,9 +36,13 @@
  *
  * New files are written normally. The wiki's index.md and log.md, which
  * upstream regenerates on every run, skip the loss check and are not saved
- * (the host says which paths through `exempt`): every lint scan and fix
- * writes the log, and a snapshot of it would give each one a run folder and
- * push an ingest's snapshots out of the last 20.
+ * while they carry upstream's header (writtenByUpstream; the host says which
+ * files through `exempt`, handed each file's current text): every lint scan
+ * and fix writes the log, and a snapshot of it would give each one a run
+ * folder and push an ingest's snapshots out of the last 20. An index.md or
+ * log.md without that header is the reader's own (with the concepts folder at
+ * `Notes/concepts` the wiki folder is `Notes/`) and is checked and saved like
+ * any page.
  */
 import type { App, DataAdapter, DataWriteOptions, FileManager, TAbstractFile, TFile, Vault } from "obsidian";
 
@@ -162,6 +166,30 @@ export function describeLoss(lost: Loss[]): string {
   return `${n} line${n === 1 ? "" : "s"} (${counts.map(([k, c]) => `${c} ${KIND_WORD[k][c === 1 ? 0 : 1]}`).join(", ")})`;
 }
 
+// ---------------------------------------------------------------- upstream's own index and log
+
+// The first lines upstream writes: its index opens with `# Wiki Index`, a blank
+// line and a `>` line (engine-internals/index-generator.ts, generateFlatIndex
+// and generateEmptyIndex), its log with an HTML comment (core/log-header.ts,
+// HEADER_MARKER_START), which the log writer keeps at the top when it appends
+// or trims (engine-internals/log-writer.ts).
+const UPSTREAM_INDEX = /^# Wiki Index\r?\n\r?\n> /;
+const UPSTREAM_LOG = "<!-- llm-wiki-log-header-start -->";
+
+/**
+ * Whether `text`, the current text of an index.md or log.md, opens with the
+ * header upstream writes at the top of that file. A heading of the reader's
+ * own, even `# Wiki Index` over their own words, is not it. Any other file
+ * is never upstream's by its header. Pure.
+ */
+export function writtenByUpstream(path: string, text: string): boolean {
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  const body = text.replace(/^\uFEFF/, "");
+  if (name === "index.md") return UPSTREAM_INDEX.test(body);
+  if (name === "log.md") return body.startsWith(UPSTREAM_LOG);
+  return false;
+}
+
 // ---------------------------------------------------------------- the guard
 
 /** Why a change outside the run's folder was refused, as the report reads it. */
@@ -215,7 +243,8 @@ export class WriteGuard {
   constructor(
     private readonly real: App,
     private readonly pluginDir: string,
-    private readonly exempt: (path: string) => boolean,
+    /** Whether a file, given its current text, skips the loss check and the snapshot. */
+    private readonly exempt: (path: string, text: string) => boolean,
     private readonly now: () => Date = () => new Date(),
   ) {
     const vault = real.vault;
@@ -361,7 +390,7 @@ export class WriteGuard {
         }
         const next = compute(old);
         if (next === old) return old;
-        if (!this.created.has(path) && !this.exempt(path)) {
+        if (!this.created.has(path) && !this.exempt(path, old)) {
           const lost = lostContent(old, next);
           if (lost.length > 0) {
             await this.refuse(path, old, next, lost);

@@ -30,7 +30,7 @@ import { planCrossLinks, type FixPageInfo } from "../fixPlan";
 import type WikiLmPlugin from "../main";
 import { resolveRole, type ModelRole } from "../modelRoles";
 import type { WikiLmSettings } from "../settings";
-import { WriteGuard } from "./guardedVault";
+import { WriteGuard, writtenByUpstream } from "./guardedVault";
 import { createRoleClient, createUpstreamClient, type BackendLookup } from "./llmAdapter";
 import { SchemaManager, UPSTREAM_DEFAULT_SETTINGS, WikiEngine, type LLMWikiSettings, type UpstreamLLMClient } from "./vendor";
 
@@ -255,7 +255,7 @@ export class UpstreamHost {
    */
   get guard(): WriteGuard {
     const p = this.plugin;
-    this.writeGuard ??= new WriteGuard(p.app, p.manifest.dir ?? `${p.app.vault.configDir}/plugins/wikilm`, (path) => this.rewrittenEachRun(path));
+    this.writeGuard ??= new WriteGuard(p.app, p.manifest.dir ?? `${p.app.vault.configDir}/plugins/wikilm`, (path, text) => this.rewrittenEachRun(path, text));
     return this.writeGuard;
   }
 
@@ -264,10 +264,18 @@ export class UpstreamHost {
    * rebuilt whole from the pages (engine-internals/index-generator.ts) and
    * the log gains an entry and is trimmed when long (log-writer.ts). They hold
    * no text of the reader's, so they skip the loss check and are not saved.
+   *
+   * Given the file's current `text` (the guard always passes it), that holds
+   * only while upstream's header is on it (writtenByUpstream): an index.md or
+   * log.md the reader wrote, such as `Notes/index.md` when the concepts folder
+   * is `Notes/concepts`, is saved and checked like any page. Without `text`
+   * the answer is by path alone, which is what the lint report uses to leave
+   * the two files out of its page lists.
    */
-  rewrittenEachRun(path: string): boolean {
+  rewrittenEachRun(path: string, text?: string): boolean {
     const wiki = this.built?.settings.wikiFolder;
-    return !!wiki && (path === `${wiki}/index.md` || path === `${wiki}/log.md`);
+    if (!wiki || (path !== `${wiki}/index.md` && path !== `${wiki}/log.md`)) return false;
+    return text === undefined || writtenByUpstream(path, text);
   }
 
   /** Stops a running ingest and drops the engine; the next `engine()` call builds afresh. */

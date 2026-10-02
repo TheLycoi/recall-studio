@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { sharedBuildOptions } from "../scripts/esbuild-shared.mjs";
+import { memoryVault } from "./memoryVault.mjs";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -43,7 +44,12 @@ before(async () => {
     ...shared,
     // Upstream's defaults ride along from the facade, in the same module graph.
     stdin: {
-      contents: ['export * from "./src/upstream/host.ts";', 'export { UPSTREAM_DEFAULT_SETTINGS } from "./src/upstream/vendor.ts";'].join("\n"),
+      contents: [
+        'export * from "./src/upstream/host.ts";',
+        'export { UPSTREAM_DEFAULT_SETTINGS } from "./src/upstream/vendor.ts";',
+        // For the in-memory vault: its files are made from the bundle's own TFile.
+        'export { TFile, TFolder } from "obsidian";',
+      ].join("\n"),
       resolveDir: ROOT,
       sourcefile: "upstream-host-probe.ts",
       loader: "ts",
@@ -293,4 +299,34 @@ test("dispose drops the engine, so the next engine() call builds afresh", () => 
   const first = host.engine();
   host.dispose();
   assert.notEqual(host.engine(), first);
+});
+
+test("with concepts at Notes/concepts, the reader's own Notes/index.md is saved and loss-checked; upstream's own index and log are not", async () => {
+  const mine = "# My notes\n\n## Courses\n- [[BIO 101]]\n";
+  const engineIndex = "# Wiki Index\n\n> Auto-generated.\n\n## Concepts\n";
+  const { plugin } = fakePlugin(wikilmSettings({ wikiConceptsFolder: "Notes/concepts", wikiEntitiesFolder: "Notes/entities" }));
+  const { app, files } = memoryVault({ "Notes/index.md": mine }, h);
+  plugin.app = { ...app, workspace: {} };
+  const host = new h.UpstreamHost(plugin);
+  assert.equal(host.engine().settings.wikiFolder, "Notes");
+  assert.ok(!host.rewrittenEachRun("Notes/index.md", mine), "a reader's index is not upstream's to rewrite unchecked");
+  assert.ok(host.rewrittenEachRun("Notes/index.md", engineIndex));
+  assert.ok(host.rewrittenEachRun("Notes/log.md", "<!-- llm-wiki-log-header-start -->\n# Wiki Log\n"));
+  assert.ok(!host.rewrittenEachRun("Notes/concepts/index.md", engineIndex), "only the wiki folder's own index");
+
+  const guard = host.guard;
+  guard.begin("Notes");
+  await guard.app.vault.adapter.write("Notes/index.md", engineIndex);
+  assert.equal(files.get("Notes/index.md"), mine, "the heading-dropping rewrite is refused");
+  assert.equal(files.get(`${guard.runFolder}/Notes/index.md`), mine, "and the reader's index is saved under the plugin folder");
+  assert.match(guard.runFolder, /^\.obsidian\/plugins\/wikilm\/snapshots\//);
+  assert.deepEqual(guard.refusals.map((r) => r.path), ["Notes/index.md"]);
+
+  // Once upstream's own index is there, it is rebuilt each run without a snapshot.
+  files.set("Notes/index.md", engineIndex);
+  guard.begin("Notes");
+  await guard.app.vault.adapter.write("Notes/index.md", "# Wiki Index\n\n> Auto-generated.\n\n## Entities\n");
+  assert.equal(files.get("Notes/index.md"), "# Wiki Index\n\n> Auto-generated.\n\n## Entities\n");
+  assert.equal(guard.runFolder, null);
+  assert.deepEqual(guard.refusals, []);
 });

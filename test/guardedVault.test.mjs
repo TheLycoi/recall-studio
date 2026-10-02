@@ -258,18 +258,59 @@ test("the guard lists each page whose rewrite landed in the run, including one r
   assert.deepEqual(guard.updatedPaths(), []);
 });
 
-test("index.md and log.md in the wiki folder skip the loss check and are not saved: a run that writes only them makes no snapshot folder", async () => {
-  const exempt = (p) => p === "wiki/index.md" || p === "wiki/log.md";
-  const { guard, files, vault } = guarded({ "wiki/index.md": "# Index\n\n## Entities\n", "wiki/log.md": "# Log\n", "wiki/concepts/x.md": "# X\n" }, { exempt });
-  await vault.process(file(vault, "wiki/index.md"), () => "# Wiki Index\n\n## Concepts\n");
-  await vault.adapter.write("wiki/log.md", "# Log\n\n## [2026-09-29] lint\n");
-  assert.equal(files.get("wiki/index.md"), "# Wiki Index\n\n## Concepts\n");
-  assert.equal(files.get("wiki/log.md"), "# Log\n\n## [2026-09-29] lint\n");
+// Upstream's index and log as it writes them: the index opens with
+// `# Wiki Index` and a `>` line (engine-internals/index-generator.ts), the log
+// with an HTML comment (core/log-header.ts).
+const ENGINE_INDEX = "# Wiki Index\n\n> Auto-generated.\n\n## Entities\n";
+const ENGINE_LOG = "<!-- llm-wiki-log-header-start -->\n# Wiki Log\n\n---\n";
+
+/** The host's rule (UpstreamHost.rewrittenEachRun): the wiki's index and log, and only while upstream's header is on them. */
+const indexAndLog = (wiki) => (p, text) => (p === `${wiki}/index.md` || p === `${wiki}/log.md`) && g.writtenByUpstream(p, text);
+
+test("writtenByUpstream knows upstream's index and log by the header it writes, and nothing else by it", () => {
+  assert.ok(g.writtenByUpstream("wiki/index.md", ENGINE_INDEX));
+  assert.ok(g.writtenByUpstream("wiki/index.md", "# Wiki Index\n\n> No pages yet. Ingest sources to populate the Wiki.\n"));
+  assert.ok(g.writtenByUpstream("wiki/log.md", ENGINE_LOG));
+  assert.ok(!g.writtenByUpstream("Notes/index.md", "# My notes\n\n## Courses\n- [[BIO 101]]\n"), "a reader's own index");
+  assert.ok(!g.writtenByUpstream("Notes/index.md", "# Wiki Index\n\nMy own words.\n"), "the heading alone is not upstream's header");
+  assert.ok(!g.writtenByUpstream("Notes/log.md", "# Reading log\n\n## Monday\n"), "a reader's own log");
+  assert.ok(!g.writtenByUpstream("wiki/index.md", ENGINE_LOG) && !g.writtenByUpstream("wiki/log.md", ENGINE_INDEX), "each header on its own file only");
+  assert.ok(!g.writtenByUpstream("wiki/concepts/x.md", ENGINE_INDEX), "any other page is never upstream's by its header");
+});
+
+test("upstream's own index.md and log.md skip the loss check and are not saved: a run that writes only them makes no snapshot folder", async () => {
+  const { guard, files, vault } = guarded({ "wiki/index.md": ENGINE_INDEX, "wiki/log.md": ENGINE_LOG, "wiki/concepts/x.md": "# X\n" }, { exempt: indexAndLog("wiki") });
+  await vault.process(file(vault, "wiki/index.md"), () => "# Wiki Index\n\n> Auto-generated.\n\n## Concepts\n");
+  await vault.adapter.write("wiki/log.md", "<!-- llm-wiki-log-header-start -->\n# Wiki Log\n\n## [2026-09-29] lint\n");
+  assert.equal(files.get("wiki/index.md"), "# Wiki Index\n\n> Auto-generated.\n\n## Concepts\n", "rewritten though its Entities heading went");
+  assert.equal(files.get("wiki/log.md"), "<!-- llm-wiki-log-header-start -->\n# Wiki Log\n\n## [2026-09-29] lint\n");
   assert.deepEqual(under(files, ".md"), [], "nothing saved for the index and log");
   assert.equal(guard.runFolder, null, "no run folder for a run that wrote only the index and log");
   await vault.process(file(vault, "wiki/concepts/x.md"), () => "Y\n");
   assert.equal(files.get("wiki/concepts/x.md"), "# X\n", "an ordinary page is still checked");
   assert.deepEqual(guard.refusals.map((r) => r.path), ["wiki/concepts/x.md"]);
+});
+
+test("a reader's own index.md in the wiki folder (concepts at Notes/concepts) is saved and loss-checked: a rewrite that drops its heading is refused", async () => {
+  const mine = "# My notes\n\n## Courses\n- [[BIO 101]]\n";
+  const { guard, files, vault } = guarded({ "Notes/index.md": mine }, { exempt: indexAndLog("Notes") });
+  guard.begin("Notes");
+  await vault.adapter.write("Notes/index.md", ENGINE_INDEX);
+  assert.equal(files.get("Notes/index.md"), mine, "the reader's index keeps its text");
+  assert.equal(files.get(`${guard.runFolder}/Notes/index.md`), mine, "and is saved before the engine's write");
+  assert.equal(files.get(`${guard.runFolder}/Notes/index.proposed.md`), ENGINE_INDEX);
+  assert.deepEqual(guard.refusals.map((r) => [r.path, r.lost.map((x) => x.key)]), [["Notes/index.md", ["# my notes", "## courses"]]]);
+});
+
+test("a reader's own log.md is saved before the engine appends to it; the append loses nothing and lands", async () => {
+  const mine = "# Reading log\n\n## Monday\nRead chapter 3.\n";
+  const entry = "\n\n## [2026-10-01 12:00] ingest | Lecture 3\n";
+  const { guard, files, vault } = guarded({ "Notes/log.md": mine }, { exempt: indexAndLog("Notes") });
+  guard.begin("Notes");
+  await vault.adapter.write("Notes/log.md", mine + entry);
+  assert.equal(files.get("Notes/log.md"), mine + entry);
+  assert.equal(files.get(`${guard.runFolder}/Notes/log.md`), mine);
+  assert.deepEqual(guard.refusals, []);
 });
 
 test("a new file is written normally, and one created in this run is the engine's own: no check, no snapshot", async () => {
@@ -391,10 +432,10 @@ test("each run saves into its own folder, and only the last 20 runs are kept", a
 });
 
 test("a run that writes only the index and log removes no earlier run's snapshots", async () => {
-  const exempt = (p) => p === "wiki/index.md" || p === "wiki/log.md";
+  const exempt = indexAndLog("wiki");
   const old = {};
   for (let i = 0; i < 20; i++) old[`${PLUGIN_DIR}/snapshots/2026-01-${String(i + 1).padStart(2, "0")}T00-00-00-000Z/wiki/x.md`] = "old";
-  const { guard, files, vault } = guarded({ ...old, "wiki/index.md": "# Index\n", "wiki/log.md": "# Log\n" }, { exempt });
+  const { guard, files, vault } = guarded({ ...old, "wiki/index.md": ENGINE_INDEX, "wiki/log.md": ENGINE_LOG }, { exempt });
   for (let run = 0; run < 25; run++) {
     guard.begin();
     await vault.process(file(vault, "wiki/index.md"), (t) => `${t}- page ${run}\n`);
