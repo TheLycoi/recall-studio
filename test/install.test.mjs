@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { install, INSTALLED_FILES } from "../scripts/install.mjs";
 
 function tmp(prefix) {
@@ -65,4 +66,12 @@ test("install copies nothing when a source file is missing", () => {
   const vault = tmp("wikilm-install-vault-");
   assert.throws(() => install(vault, src), /NOTICE/);
   assert.ok(!fs.existsSync(path.join(vault, ".obsidian", "plugins", "wikilm", "main.js")));
+});
+
+test("running the script with no vault argument and no WIKILM_VAULT exits 2 and prints Usage", () => {
+  const env = { ...process.env };
+  delete env.WIKILM_VAULT;
+  const result = spawnSync(process.execPath, ["scripts/install.mjs"], { encoding: "utf8", env });
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /Usage:/);
 });

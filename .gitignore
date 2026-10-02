@@ -10,3 +10,6 @@ installed-backups/
 
 # Local agent worktree state
 .claude/
+
+.eval-build/
+data.json

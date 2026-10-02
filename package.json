@@ -1,9 +1,13 @@
 {
   "name": "obsidian-wikilm",
   "version": "0.13.0",
-  "description": "Highlight-centric flashcard pipeline for Obsidian: highlight, write cards in the background, triage in an inbox, export to Anki.",
+  "description": "Turn your sources into a wiki you can question: highlight-grounded concept and entity pages, a chat that answers only from them, and flashcards pushed to Anki for long-term retention.",
   "main": "main.js",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TheLycoi/wikipedia-lm.git"
+  },
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "node scripts/vendor-types-guard.mjs && tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
@@ -17,6 +21,7 @@
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^26.5.0",
+    "ai": "6.0.230",
     "builtin-modules": "^5.3.0",
     "esbuild": "^0.28.2",
     "obsidian": "^1.13.1",
@@ -24,11 +29,7 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "3.0.98",
-    "@ai-sdk/openai": "3.0.86",
-    "@ai-sdk/openai-compatible": "2.0.62",
     "@anthropic-ai/sdk": "^0.124.0",
-    "ai": "6.0.230",
     "fflate": "0.8.3",
     "zod": "^4.5.4"
   }

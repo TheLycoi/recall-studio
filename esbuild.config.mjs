@@ -3,8 +3,10 @@ import process from "process";
 import { sharedBuildOptions } from "./scripts/esbuild-shared.mjs";
 
 const banner = `/*
-Recall — highlight-centric flashcard pipeline for Obsidian.
-Bundled with esbuild; source lives in ~/dev/obsidian-recall.
+WikiLM for Obsidian. MIT License, Copyright (c) 2026 Conrad Kelonu.
+Includes code from obsidian-llm-wiki (Apache-2.0, Copyright 2025-2026 Greener-Dalii);
+see NOTICE and LICENSE-APACHE-2.0.txt in the source repository.
+Source: https://github.com/TheLycoi/wikipedia-lm
 */
 `;
 

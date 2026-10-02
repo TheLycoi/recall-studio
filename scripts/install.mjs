@@ -1,13 +1,10 @@
 // Copies the built plugin and its licence notices into the vault's
 // .obsidian/plugins/wikilm folder. Nothing else in that folder is touched:
 // data.json there holds the reader's settings and keys.
-// Usage: node scripts/install.mjs [vault-path]
+// Usage: node scripts/install.mjs <vault-path>   (or set WIKILM_VAULT)
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-
-const DEFAULT_VAULT =
-  "/Users/conradkelonu/Library/Mobile Documents/iCloud~md~obsidian/Documents/projects";
 
 /**
  * What is installed, relative to the repository root, and the name it takes in
@@ -41,6 +38,11 @@ export function install(vault, srcDir = ".") {
 
 // Installs only when run as a script, never when a test imports this module.
 if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url))) {
-  const dest = install(process.argv[2] ?? DEFAULT_VAULT);
+  const vault = process.argv[2] ?? process.env.WIKILM_VAULT;
+  if (!vault) {
+    console.error("Usage: node scripts/install.mjs <vault-path>   (or set WIKILM_VAULT)");
+    process.exit(2);
+  }
+  const dest = install(vault);
   console.log(`Installed WikiLM into ${dest}`);
 }
