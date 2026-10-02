@@ -40,7 +40,7 @@ export type Intent =
   | { kind: "ambiguous"; verb: "digest" | "highlight"; words: string; candidates: Target[] }
   | {
       kind: "question";
-      /** The class the question is scoped to, when the phrase named one: "ask HBIO408 …", "… in HBIO408". */
+      /** The class the question is scoped to, when the phrase named one: "ask BIO101 …", "… in BIO101". */
       classCode?: string;
       /** The question with the scope words removed; absent for an unscoped question. */
       text?: string;
@@ -262,8 +262,8 @@ export function matchIntent(text: string, ctx: IntentContext): Intent {
 }
 
 /**
- * A question that names its class: "ask HBIO408 what is impulse", "what is
- * impulse in HBIO408", "in HBIO408, what is impulse". The code has to be one
+ * A question that names its class: "ask BIO101 what is impulse", "what is
+ * impulse in BIO101", "in BIO101, what is impulse". The code has to be one
  * some page carries, or the words are left as an ordinary question — "in the
  * cell" is not a scope. The question keeps its own casing; only the scope
  * words and a trailing question mark are removed.
@@ -285,7 +285,7 @@ function scopedQuestion(text: string, ctx: IntentContext): Intent | null {
     const hit = scoped(m[1], m[2]);
     if (hit) return hit;
   }
-  // "… in CODE", including "ask about impulse in HBIO408": the word after
+  // "… in CODE", including "ask about impulse in BIO101": the word after
   // "ask" was not a class, so the leading "ask" (and "about") is the
   // request, not the question.
   m = /^(.+?)\s+in\s+(\S+?)\s*[?!.]*$/i.exec(raw);
@@ -308,7 +308,7 @@ function chatOnlyLine(): string {
 /** What the box understands, one phrase per line. Shown for "help". */
 export function renderHelp(): string {
   return [
-    "- **quiz me** — one question per passage of the open note, the misses become cards; **quiz me on Receptors**, **quiz me on HBIO250**, **quiz me on everything**",
+    "- **quiz me** — one section of the open note at a time, the misses become cards; **quiz me on Receptors**, **quiz me on BIO101**, **quiz me on everything**",
     "- **digest** — group the open PDF's highlights into concept and entity pages; **digest Doping** names a PDF or a note with PDF++ links",
     "- **highlight** — let the model pick spans in the open PDF, each checked against the text layer; **highlight Ch3**",
     "- **lint** — check the wiki for wrong quotes, dead links and duplicate pages",
@@ -318,6 +318,6 @@ export function renderHelp(): string {
     "- while a quiz runs: **hint**, **skip**, **stop**",
     chatOnlyLine(),
     "",
-    "Anything else is a question for your notes. **ask HBIO250 …** or **… in HBIO250** keeps it to one class.",
+    "Anything else is a question for your notes. **ask BIO101 …** or **… in BIO101** keeps it to one class.",
   ].join("\n");
 }

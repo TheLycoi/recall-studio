@@ -31,7 +31,7 @@ const ALREADY_SELECTED_CHARS = 80;
  * concepts and entities folders that either carries this class code in its
  * frontmatter or already links to this PDF (the manifest's sources). The second
  * test catches the hand-written notes that have no frontmatter at all, which
- * secondbrain has plenty of.
+ * some vaults have plenty of.
  */
 export async function wikiNotes(plugin: WikiLmPlugin, classCode: string, sources: string[]): Promise<WikiNoteIn[]> {
   const s = plugin.settings;
@@ -224,7 +224,7 @@ export async function suggestPdfHighlights(
     // (2) Class code: the wiki notes are filtered by it and every new note gets it.
     let classCode = manifest.classCode;
     if (!classCode) {
-      const asked = await askInstruction(plugin.app, "Class code for this PDF", "e.g. HBIO250");
+      const asked = await askInstruction(plugin.app, "Class code for this PDF", "e.g. BIO101");
       if (asked === null) return;
       classCode = asked.trim();
       if (!classCode) {

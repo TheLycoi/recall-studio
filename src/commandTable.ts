@@ -24,7 +24,7 @@ export interface CommandSpec {
   hidden?: boolean;
 }
 
-// The palette order is the workflow order the reader asked for on 2026-09-28:
+// The palette order is the workflow order the reader asked for:
 // AI highlight, Digest, Lint first, the capture and housekeeping commands
 // after. The chat-only commands come last. Five commands were removed in that
 // change (capture-pdf-selection, capture-pdf-selection-with-instruction,

@@ -14,9 +14,9 @@ type Listener = () => void;
 /**
  * Persistent inbox. Lives in the wiki's schema folder as inbox.json, beside
  * the house rules, so everything the plugin keeps for the reader sits in one
- * vault folder (the reader's layout, 2026-09-25) and syncs with it. Earlier
- * versions kept it in the plugin folder; that file is moved in on first
- * load. Writes are debounced.
+ * vault folder (by design) and syncs with it. Earlier versions kept it in
+ * the plugin folder; that file is moved in on first load. Writes are
+ * debounced.
  */
 export class InboxStore {
   private data: InboxData = emptyInbox();
@@ -54,7 +54,7 @@ export class InboxStore {
     if (dir && !(await adapter.exists(dir))) await adapter.mkdir(dir);
     if (!this.legacyPath || (await adapter.exists(this.path)) || !(await adapter.exists(this.legacyPath))) return;
     await adapter.rename(this.legacyPath, this.path);
-    console.log(`WikiLM: inbox moved from the plugin folder to ${this.path}`);
+    console.debug(`WikiLM: inbox moved from the plugin folder to ${this.path}`);
   }
 
   async load(): Promise<void> {

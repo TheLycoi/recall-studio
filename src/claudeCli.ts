@@ -24,8 +24,8 @@ import type { WikiLmSettings } from "./settings";
  *     login lives in the keychain, so every call would fail "Not logged in".
  *   - ANTHROPIC_API_KEY is stripped from the child's environment, so a key
  *     exported in the user's shell can never silently move billing from the
- *     subscription to the metered API (the rule Loopback's claude-cli adapter
- *     follows).
+ *     subscription to the metered API (the rule an earlier version of this
+ *     plugin's claude-cli adapter follows).
  *
  * The prompt goes on stdin rather than as a positional argument, so 60,000
  * character paper texts never hit argument-length limits.

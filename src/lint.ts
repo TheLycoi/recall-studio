@@ -52,7 +52,7 @@ export function lintCard(card: Card, highlight: Highlight, siblings: Card[]): Li
     // {{c1::a}} ... {{c1::b}} is one deletion tested in two places (a
     // legitimate overlapping-cloze pattern), not two deletions. 2 to 3
     // distinct numbers inclusive: a sentence with one deletion is a basic
-    // card wearing cloze markup (the reader's rule, 2026-09-25), and the
+    // card wearing cloze markup (by design), and the
     // generator demotes such a draft before it gets here.
     if (distinctNumbers.length < 2 || distinctNumbers.length > 3) {
       failures.push("cloze-count");

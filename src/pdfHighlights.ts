@@ -173,8 +173,8 @@ function linktextOf(md: string, ref: PdfReference, pdfFilename: string): string 
 }
 
 /**
- * Class code from either vault convention: `sources/class notes/<CODE>/…` or
- * `wiki/sources/classes/<CODE>/…`.
+ * Class code from a `…/sources/classes/<CODE>/…` or
+ * `…/sources/class notes/<CODE>/…` path, when the vault uses that layout.
  */
 function classCodeFromPath(pdfPath: string): string {
   const m = /sources\/(?:class notes|classes)\/([^/]+)\//.exec(pdfPath);
@@ -242,7 +242,6 @@ export async function collectPdfHighlights(
       warnings.push(
         "pdf.js text content has no per-character geometry; embedded annotations and rect embeds carry no text",
       );
-      console.debug("WikiLM: pdf.js textContent sample", firstWithItems.items[0], firstWithItems.annots[0]);
     }
 
     // (3a) References from notes.
@@ -338,7 +337,7 @@ export async function collectPdfHighlights(
  * Every code in a note's `class:` frontmatter, in order; empty when it has
  * none.
  *
- * A list, not a string: the digest writes `class: [HBIO408, PHED163]` on a
+ * A list, not a string: the digest writes `class: [BIO101, CHEM102]` on a
  * page it merges across classes (src/topicNote.ts `addClassCode`), and a
  * reader of that key that only understood a scalar saw such a page as having
  * no class at all — which quietly dropped it out of the suggester's writable

@@ -33,10 +33,10 @@ export interface EvidenceUnit {
 
 /**
  * The separator between a claim's text and its source link. The vault writes
- * an em dash and only an em dash: 106 ` — [[` bullets under `## Key claims`
- * across 12 notes in `projects/classes`, zero ` - [[`. A hyphen-minus is
- * accepted as well so a hand-typed bullet still indexes; it cannot collide
- * with a list marker because the pattern requires a following wikilink.
+ * an em dash and only an em dash: every bullet under `## Key claims` uses
+ * ` — [[`, never ` - [[`. A hyphen-minus is accepted as well so a hand-typed
+ * bullet still indexes; it cannot collide with a list marker because the
+ * pattern requires a following wikilink.
  */
 const CLAIM_SEP_RE = /\s+[—-]\s+(?=\[\[[^\]]+\]\]\s*$)/;
 
@@ -676,7 +676,7 @@ function firstProse(body: string): string {
 
 /** Where a class code came from. A code the reader typed is an instruction; one read off the open note is a guess. */
 export interface ScopeRequest {
-  /** A class named in the phrase: "ask HBIO408 …", "… in HBIO408". */
+  /** A class named in the phrase: "ask BIO101 …", "… in BIO101". */
   named?: string | null;
   /** The class of the note the reader happens to be looking at. */
   inferred?: string | null;
@@ -684,7 +684,7 @@ export interface ScopeRequest {
 
 export interface ScopeResult {
   units: EvidenceUnit[];
-  /** What the status line says: "in HBIO408", a sentence about the fallback, or nothing. */
+  /** What the status line says: "in BIO101", a sentence about the fallback, or nothing. */
   scope: string;
 }
 

@@ -4,10 +4,10 @@ import { execFileSync } from "child_process";
  * API key resolution, in order: the plugin setting, an environment variable,
  * then the macOS keychain under two service names.
  *
- * The keychain matters here because this vault syncs through iCloud: a key
- * typed into the settings tab lands in data.json and is replicated in
- * plaintext to every device and backup. A key kept in the keychain never
- * touches the vault. Carried over from Loopback's key handling.
+ * The keychain matters here because the vault may sync: a key typed into the
+ * settings tab lands in data.json and is replicated in plaintext to every
+ * device and backup. A key kept in the keychain never touches the vault.
+ * Carried over from an earlier version of this plugin's key handling.
  *
  * A key value is never logged or included in an error message.
  */

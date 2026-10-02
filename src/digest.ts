@@ -59,7 +59,7 @@ async function existingPages(plugin: WikiLmPlugin, topicFolder: string): Promise
     const parsed = parseTopicNote(md);
     const type = /^type:\s*(.+)$/m.exec(/^---\r?\n([\s\S]*?)\r?\n---/.exec(md)?.[1] ?? "")?.[1]?.trim() ?? "";
     // A hub says so in its frontmatter, or says it by name: the class index is
-    // the page carrying its own folder's name (classes/HBIO250/HBIO250.md),
+    // the page carrying its own folder's name (classes/BIO101/BIO101.md),
     // which is how the old title list kept it out. A hub is a table of
     // contents, never somewhere a highlight belongs.
     if (type === "topic-index" || file.basename === file.parent?.name) continue;
@@ -261,7 +261,7 @@ export async function digestPdf(plugin: WikiLmPlugin, source: TFile, opts: Diges
 
     let classCode = manifest.classCode;
     if (!classCode) {
-      const asked = await askInstruction(plugin.app, "Class code for this PDF", "e.g. HBIO250");
+      const asked = await askInstruction(plugin.app, "Class code for this PDF", "e.g. BIO101");
       if (asked === null) return "skipped";
       classCode = asked.trim();
       manifest.classCode = classCode;

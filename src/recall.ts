@@ -7,10 +7,9 @@
  * everything they remember in any order, and the grade marks each point of
  * the section recalled, partial, missed or wrong. Points still missing get a
  * cue each and one more attempt, then the whole section is shown. Design:
- * `projects/LLM/projects/Wikipedia LM/outputs/2026-09-30-free-recall-quiz-design.md`
- * in the vault.
+ * free-recall quiz design note.
  *
- * Why a section and not a passage. The projects wiki's free-recall page:
+ * Why a section and not a passage. The free-recall literature:
  * study a set of items, then produce them with no cue beyond the instruction
  * to recall, the most demanding form of retrieval practice. Its pages on the
  * danger of flashcards and on understanding before memorising say the other
@@ -19,8 +18,8 @@
  * connections as well as the facts. The flashcard rules (one detail, no sets)
  * belong to the cards written from the misses, not to this test.
  *
- * Principles taken from amosblomqvist/learn (vendored at vendor/learn, read
- * for its design; no code or prose of it is used here): sections are asked in
+ * Principles taken from amosblomqvist/learn (read for its design; no code or
+ * prose of it is used here): sections are asked in
  * note order so the definitions and lead lines, the unconditional truths the
  * rest builds on, come first; and what the reader could not produce is the
  * edge of what they know, found here by the points missed within a section.

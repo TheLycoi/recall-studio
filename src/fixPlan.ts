@@ -204,7 +204,7 @@ export function addRelatedLink(
 /**
  * Add the page to a hub's list of pages.
  *
- * A hub reads `# PHED163`, then a module heading with `- [[Page]]` lines under
+ * A hub reads `# BIO101`, then a module heading with `- [[Page]]` lines under
  * it, then `## Sources` with the PDFs. The new line goes after the last list
  * line that comes before Sources — the end of the last module — rather than at
  * EOF, where it would land among the sources and read as one.

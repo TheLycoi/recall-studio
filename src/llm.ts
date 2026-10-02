@@ -252,8 +252,9 @@ Before returning, run both litmus tests on each card and check it against the hi
  * Critique system prompt: grades the cards already drafted for ONE highlight,
  * all of them in a single call so sibling interference is visible.
  *
- * Adapted from obsidian-loopback's prompts/critique-v1.md, which is cloze-only
- * and assumes a Back Extra field WikiLM does not have. Carried over from it:
+ * Adapted from an earlier version of this plugin's prompts/critique-v1.md,
+ * which is cloze-only and assumes a Back Extra field WikiLM does not have.
+ * Carried over from it:
  * the rule that a revision may only use facts the passage states, and the
  * preference for dropping over a fix that stretches past the text. New here:
  * Bloom fit, sibling interference, and near-tautology.
@@ -870,7 +871,7 @@ related lists the titles of other notes you are writing in this response, or of 
 
 <examples>
 <example>
-<input>Highlights H01 "Pharmacology, Pharmacodynamics and Pharmacokinetics — HBIO 250 Fall 2026" (p.1), H02 "Pharmacology is the study of the action of drugs in the human body" (p.2), H03 "Pharmacodynamics = what drugs do in the body; pharmacokinetics = what the body does to drugs" (p.2), H04 "Receptors bind ligands with relatively high affinity" (p.4), H05 "Receptors transduce a signal to produce a biological effect; this distinguishes them from inert binding sites such as albumin" (p.4). Existing notes: Pharmacology.</input>
+<input>Highlights H01 "Pharmacology, Pharmacodynamics and Pharmacokinetics — Lecture 1" (p.1), H02 "Pharmacology is the study of the action of drugs in the human body" (p.2), H03 "Pharmacodynamics = what drugs do in the body; pharmacokinetics = what the body does to drugs" (p.2), H04 "Receptors bind ligands with relatively high affinity" (p.4), H05 "Receptors transduce a signal to produce a biological effect; this distinguishes them from inert binding sites such as albumin" (p.4). Existing notes: Pharmacology.</input>
 <output>Two notes. "Pharmacology" (reusing the existing title, so kind, tag and aliases are ignored there) takes H02 and H03, with a summary that defines the field and sets its two branches against each other. "Receptors", kind concept, tag term, aliases "Drug Receptors", closest_existing empty, why_new "no listed page is about receptors themselves", takes H04 and H05, with a summary that names the two properties and says why the second one is what separates a receptor from a carrier protein. related on each names the other. H01 is a slide title and goes to unused_ids.</output>
 <note>Five highlights, two topics, one dropped. The existing title is reused verbatim so the two highlights land in the note the reader already has.</note>
 </example>
@@ -1196,12 +1197,12 @@ Before you return, read the answer back against the evidence. Ask of every sente
  * Free-recall cue system prompt.
  *
  * The quiz is a free-recall test on one section of a note at a time
- * (src/recall.ts). The prompt is built from the projects wiki: free recall,
+ * (src/recall.ts). The prompt is built from the wiki's pages on: free recall,
  * serial recall, the danger of flashcards, understanding before memorising,
  * explanation prompts, and the two litmus tests for prompts. Two ideas from
- * amosblomqvist/learn's teaching skill (vendored at vendor/learn, reworded
- * here, not copied) shape the connections section: facts held by their
- * reasons are the ones that stay, and a fact should never arrive unmotivated.
+ * amosblomqvist/learn's teaching skill (its ideas, in WikiLM's own words)
+ * shape the connections section: facts held by their reasons are the ones
+ * that stay, and a fact should never arrive unmotivated.
  *
  * What the prompt leaves out is deliberate. The five properties of a good
  * prompt and the minimum information principle are rules for flashcards,

@@ -503,7 +503,7 @@ export function captureQuizMisses(
 /**
  * Queue a chat answer as one inbox highlight: the answer itself, with the
  * passages it rested on under it, so the card writer works from the whole
- * answer and not from one passage at a time (the reader's rule, 2026-09-25).
+ * answer and not from one passage at a time (by design).
  * The question is the item's title and, with what each source contributed,
  * the writer's instruction. The row is built by `buildAskRow`
  * (src/askCapture.ts): the source is the first passage's PDF page when it has

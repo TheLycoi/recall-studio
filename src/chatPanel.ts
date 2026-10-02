@@ -933,8 +933,8 @@ export class ChatPanel {
   /**
    * The note a general-knowledge answer is carded against, since it cites
    * none: the hub of the class the question was scoped to (the page named
-   * after its own folder, classes/HBIO250/HBIO250.md, the same test the
-   * digest uses to find hubs), since "in HBIO250" says where it belongs; else
+   * after its own folder, classes/BIO101/BIO101.md, the same test the
+   * digest uses to find hubs), since "in BIO101" says where it belongs; else
    * the markdown note the reader has open.
    */
   private fallbackSourcePath(turn: ChatTurn): string | undefined {
@@ -1377,7 +1377,7 @@ export class ChatPanel {
       // as "this note has no evidence".
       const activePath = notePath ?? this.plugin.app.workspace.getActiveFile()?.path ?? null;
       // A class scope is the whole vault narrowed to one code, which is what
-      // makes "quiz me on HBIO250" different from "quiz me on everything".
+      // makes "quiz me on BIO101" different from "quiz me on everything".
       const units = classCode ? all.filter((u) => u.classCodes.includes(classCode)) : all;
       const resolved = resolveRecallPool(
         scope,
@@ -1847,7 +1847,7 @@ export class ChatPanel {
 
     if (turn.text.trim()) {
       // sourcePath "" — the evidence links the evidence rows write are
-      // vault-absolute (`[[classes/HBIO250/Receptors|Receptors]]`), so there is
+      // vault-absolute (`[[classes/BIO101/Receptors|Receptors]]`), so there is
       // no relative link for a source path to resolve (obsidian.d.ts:4143).
       void MarkdownRenderer.render(this.plugin.app, turn.text, el.createDiv(), "", this.view);
     }
@@ -1972,7 +1972,7 @@ export class ChatPanel {
     const route = routeForReport(report, turn?.route ?? "");
     if (route && route !== "none") bits.push(route);
     // The scope always, refusals included, since it is what was searched:
-    // "in HBIO408", or the whole vault when the class was too small.
+    // "in BIO101", or the whole vault when the class was too small.
     const scope = (turn?.scope ?? "").replace(/^the /, "");
     if (scope) bits.push(scope);
     line.createSpan({ text: bits.join(" · ") });

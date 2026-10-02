@@ -190,9 +190,9 @@ export function normalizePlain(s: string): string {
 
 /**
  * Deterministic check that every cloze deletion is really in the highlight.
- * Returns the deletions that are not. Borrowed from Loopback's linter idea:
- * grounding is a rule you can check by counting, so check it rather than
- * trusting the prompt.
+ * Returns the deletions that are not. Borrowed from an earlier version of
+ * this plugin's linter idea: grounding is a rule you can check by counting,
+ * so check it rather than trusting the prompt.
  */
 export function ungroundedClozes(clozeText: string, highlight: string): string[] {
   const hay = normalizePlain(highlight);

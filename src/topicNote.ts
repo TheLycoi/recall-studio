@@ -127,9 +127,9 @@ export function execHeading(body: string, re: RegExp): RegExpExecArray | null {
  *
  * These are the note's subtopics, and they are what the suggester shows the
  * model so a span can be filed under one instead of founding a new note
- * beside it. Only `##`: that is the level every page in both vaults uses for
- * its subtopics, and a deeper heading is a division of one of these rather
- * than a place of its own.
+ * beside it. Only `##`: that is the level every page uses for its subtopics,
+ * and a deeper heading is a division of one of these rather than a place of
+ * its own.
  */
 export function noteSections(md: string): string[] {
   const body = md.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
@@ -819,7 +819,7 @@ export function mergeArticle(
         // dropped, and its count says so.
         // Half is enough. A section the page has already said half of is a
         // rewrite of the reader's own words, and the rest of it is the model
-        // filling around what it just restated; measured on a real PSYC360
+        // filling around what it just restated; measured on a real digest
         // run, the sentences that survived at half were the weakest in the
         // draft.
         const mostlySaid = pruned.total >= 2 && pruned.said * 2 >= pruned.total;
@@ -1474,7 +1474,7 @@ function foldQuote(s: string): string {
 export type WikiKind = "concept" | "entity";
 
 /**
- * The closed tag vocabularies, as the 100 existing pages actually use them.
+ * The closed tag vocabularies, as existing pages actually use them.
  * Exactly one tag per page. `other` is the escape hatch, not a default.
  */
 export const CONCEPT_TAGS = ["method", "theory", "term", "phenomenon", "standard", "field", "other"] as const;
@@ -1563,7 +1563,7 @@ export interface RenderKarpathyNoteArgs {
 
 /**
  * A double-quoted YAML scalar. Always quoted, never bare: the existing pages
- * quote 262 of their 266 aliases, so emitting a bare scalar where one is
+ * quote nearly all of their aliases, so emitting a bare scalar where one is
  * allowed would rewrite that line on every page a merge touches.
  */
 function yamlStr(s: string): string {
@@ -1577,7 +1577,7 @@ function relatedLine(l: RelatedLink): string {
 }
 
 /**
- * A wiki page in karpathywiki's schema, so the 106 pages already in the vault
+ * A wiki page in karpathywiki's schema, so the pages already in the vault
  * and every page written from here share one format.
  *
  * Frontmatter key order is fixed — `type`, `created`, `updated`, `tags`,
@@ -1660,7 +1660,7 @@ export function renderKarpathyNote(a: RenderKarpathyNoteArgs): string {
  * Render a wiki page in the vault's schema.
  *
  * A thin dispatcher on purpose: Stage 2 adds `renderClassNote` for the
- * `secondbrain` vault's `class:` + `## Summary` / `## Highlights` form, chosen
+ * `class:` + `## Summary` / `## Highlights` form some vaults use, chosen
  * per vault. Keeping the seam here means that arrives as a second branch
  * rather than a rewrite of every caller.
  */

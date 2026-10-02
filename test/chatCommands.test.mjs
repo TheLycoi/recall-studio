@@ -107,11 +107,11 @@ test("aliases are unique across the table and never collide with another id", ()
 // rather than capturing an undefined at import time.
 const CTX = {
   pages: [
-    { path: "classes/HBIO250/Receptors.md", title: "Receptors", aliases: ["Drug Receptors"], classCodes: ["HBIO250"], hasPdfLinks: true },
+    { path: "classes/BIO101/Receptors.md", title: "Receptors", aliases: ["Drug Receptors"], classCodes: ["BIO101"], hasPdfLinks: true },
     { path: "classes/PHED163/Stages of Change.md", title: "Stages of Change", aliases: [], classCodes: ["PHED163"], hasPdfLinks: false },
   ],
   pdfs: [
-    { path: "sources/class notes/HBIO250/HBIO 250 History of Doping and Oversight Fall 2026.pdf", basename: "HBIO 250 History of Doping and Oversight Fall 2026" },
+    { path: "sources/class notes/BIO101/BIO101 History of Doping and Oversight.pdf", basename: "BIO101 History of Doping and Oversight" },
     { path: "sources/class notes/PSYC360/Ch3.pdf", basename: "Ch3" },
     { path: "sources/class notes/PSYC360/Ch3 notes.pdf", basename: "Ch3 notes" },
   ],
@@ -124,9 +124,9 @@ const CTX = {
 test("quiz phrases resolve their target: active, page by title or alias, class, or query", () => {
   assert.deepEqual(cc.matchIntent("quiz me", CTX), { kind: "quiz", target: { kind: "active" } });
   assert.deepEqual(cc.matchIntent("Quiz me on this note", CTX), { kind: "quiz", target: { kind: "active" } });
-  assert.deepEqual(cc.matchIntent("quiz me on receptors", CTX), { kind: "quiz", target: { kind: "page", path: "classes/HBIO250/Receptors.md", title: "Receptors" } });
-  assert.deepEqual(cc.matchIntent("test me on drug receptors", CTX).target, { kind: "page", path: "classes/HBIO250/Receptors.md", title: "Receptors" });
-  assert.deepEqual(cc.matchIntent("quiz me on hbio250", CTX).target, { kind: "class", code: "HBIO250" });
+  assert.deepEqual(cc.matchIntent("quiz me on receptors", CTX), { kind: "quiz", target: { kind: "page", path: "classes/BIO101/Receptors.md", title: "Receptors" } });
+  assert.deepEqual(cc.matchIntent("test me on drug receptors", CTX).target, { kind: "page", path: "classes/BIO101/Receptors.md", title: "Receptors" });
+  assert.deepEqual(cc.matchIntent("quiz me on bio101", CTX).target, { kind: "class", code: "BIO101" });
   assert.deepEqual(cc.matchIntent("quiz me about affinity and binding", CTX).target, { kind: "query", words: "affinity and binding" });
 });
 
@@ -135,10 +135,10 @@ test("digest and highlight phrases resolve a PDF, a manifest, a note with PDF li
   assert.deepEqual(cc.matchIntent("AI digest this", CTX), { kind: "digest", target: { kind: "active" } });
   assert.deepEqual(cc.matchIntent("digest the doping pdf", CTX).target, {
     kind: "pdf",
-    path: "sources/class notes/HBIO250/HBIO 250 History of Doping and Oversight Fall 2026.pdf",
-    basename: "HBIO 250 History of Doping and Oversight Fall 2026",
+    path: "sources/class notes/BIO101/BIO101 History of Doping and Oversight.pdf",
+    basename: "BIO101 History of Doping and Oversight",
   });
-  assert.deepEqual(cc.matchIntent("digest receptors", CTX).target, { kind: "page", path: "classes/HBIO250/Receptors.md", title: "Receptors" });
+  assert.deepEqual(cc.matchIntent("digest receptors", CTX).target, { kind: "page", path: "classes/BIO101/Receptors.md", title: "Receptors" });
   assert.equal(cc.matchIntent("digest stages of change", CTX).kind, "ambiguous", "a page with no PDF links cannot be digested");
   assert.deepEqual(cc.matchIntent("highlight ch3 notes", CTX), { kind: "highlight", target: { kind: "pdf", path: "sources/class notes/PSYC360/Ch3 notes.pdf", basename: "Ch3 notes" } });
 });
@@ -331,5 +331,5 @@ test("help describes one inbox row per answer, lists the send phrases, and the c
   assert.ok(!/one inbox item per source/.test(help), "the retired one-item-per-source wording is gone");
   assert.match(help, /one inbox row per answer, with the sources it rested on beneath it/);
   for (const p of ["send it", "add to inbox", "card it"]) assert.ok(help.includes(p), `help lists ${p}`);
-  assert.ok(help.includes("**ask HBIO250 …**") && help.includes("**… in HBIO250**"));
+  assert.ok(help.includes("**ask BIO101 …**") && help.includes("**… in BIO101**"));
 });

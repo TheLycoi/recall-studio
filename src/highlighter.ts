@@ -11,7 +11,7 @@ import { WIKILM_HIGHLIGHT_ICON } from "./icon";
  * markdown editor (source and live preview), in reading view, and in
  * Obsidian's PDF viewer.
  *
- * Gesture rules, learned the hard way in Loopback:
+ * Gesture rules, learned the hard way in an earlier version of this plugin:
  * - Only a drag that *started* inside the active file view counts. Where the
  *   mouse is released is not checked, because dragging past the bottom of
  *   the pane or over a sidebar is a normal way to select to the end.

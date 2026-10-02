@@ -1120,12 +1120,12 @@ const FIX_GROUP: Record<FixKind, string> = {
 /**
  * The order the groups are shown in: the groups that write links first.
  *
- * The reader's rule (2026-10-01) is that creating links is the first job of a
- * lint, so the plan opens on the rows that add one — a missing link the review
- * found, the cross-link between two pages about one subject, a way in for a
- * page nothing reaches — then the dead links, the quotes, and last the
- * aliases, tags and kinds. This is only what the eye meets first; the rows
- * are still applied in `orderFixes`'s causal order.
+ * By design, creating links is the first job of a lint, so the plan opens on
+ * the rows that add one — a missing link the review found, the cross-link
+ * between two pages about one subject, a way in for a page nothing reaches —
+ * then the dead links, the quotes, and last the aliases, tags and kinds.
+ * This is only what the eye meets first; the rows are still applied in
+ * `orderFixes`'s causal order.
  */
 const GROUP_ORDER = ["Missing links", "Duplicate pages", "Unlinked pages", "Dead links", "Unattributed quotes", "Rect-only notes", "Aliases and tags", "Filed wrong"];
 

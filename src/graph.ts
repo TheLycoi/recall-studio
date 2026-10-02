@@ -7,7 +7,7 @@
  * between topic notes so those neighbours can be found too.
  *
  * Adapted from gd4ai/obsidian-llm-wiki (`src/core/build-graph.ts` and
- * `src/core/monte-carlo-ppr.ts`, MIT). Monte Carlo rather than power
+ * `src/core/monte-carlo-ppr.ts`, Apache-2.0). Monte Carlo rather than power
  * iteration for the reason given there: the cost is walks x steps, which does
  * not grow with the vault, so a wiki of 2,000 notes costs what 20 costs.
  *

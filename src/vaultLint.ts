@@ -53,9 +53,9 @@ export interface VaultIssue {
 /**
  * What a page must look like for the schema checks to mean anything.
  *
- * Passed in rather than hardcoded because the two vaults this plugin runs in
- * use different schemas on purpose: one keys pages by `type` with a closed tag
- * vocabulary, the other by `class` with none. A vault with no rules configured
+ * Passed in rather than hardcoded because vaults this plugin runs in can use
+ * different schemas on purpose: one keys pages by `type` with a closed tag
+ * vocabulary, another by `class` with none. A vault with no rules configured
  * simply skips those checks instead of reporting every page as wrong.
  */
 export interface SchemaRules {
@@ -137,14 +137,13 @@ export const WIKI_SCHEMA: SchemaRules = {
  * Below this many characters of its own prose (`proseChars`) a concept or
  * entity page is reported as thin.
  *
- * Measured 2026-09-27 on the projects vault's wiki (101 concept and entity
- * pages with a body): median 684, p25 474, p10 385; 7 pages under 300, 5
- * under 250, 3 under 200. The 7 under 300 are the two dead-link stubs and
- * five pages whose whole prose is one definition sentence, which is what
- * "under a paragraph" means; the next page up has two sentences. A higher bar
- * would start flagging ordinary pages and teach the reader to skip the
- * finding. The secondbrain vault's wiki carries no `type:` key, so the rule
- * does not reach it.
+ * Measured on a real wiki (concept and entity pages with a body): median 684,
+ * p25 474, p10 385; a handful of pages were under 300, fewer under 250,
+ * fewer still under 200. The ones under 300 were dead-link stubs and pages
+ * whose whole prose is one definition sentence, which is what "under a
+ * paragraph" means; the next page up has two sentences. A higher bar would
+ * start flagging ordinary pages and teach the reader to skip the finding. A
+ * vault whose wiki carries no `type:` key is unaffected by the rule.
  */
 export const THIN_PROSE_CHARS = 300;
 

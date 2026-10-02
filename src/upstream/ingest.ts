@@ -51,7 +51,7 @@ import {
 
 /** Why a PDF is not ingested, and where the reader takes it instead. */
 export const PDF_REFUSAL =
-  "PDFs are read by WikiLM's highlight digest, not by ingest. Open the PDF and run “Digest: PDF highlights into concept and entity notes…”";
+  "PDFs are read by WikiLM's highlight digest, not by ingest. Open the PDF and run “Digest…”";
 
 type UpstreamRejection = NonNullable<IngestReport["rejectedFiles"]>[number];
 

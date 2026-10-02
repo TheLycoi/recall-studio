@@ -361,7 +361,7 @@ export class WikiLmSettingTab extends PluginSettingTab {
       new Setting(containerEl)
         .setName("Gemini API key")
         .setDesc(
-          "Leave empty to read GEMINI_API_KEY from the environment or the macOS keychain (service \u201CGEMINI_API_KEY\u201D or \u201CWikiLM Gemini API key\u201D). A key typed here is stored in data.json, which this vault syncs through iCloud in plaintext. Get one from Google AI Studio.",
+          "Leave empty to read GEMINI_API_KEY from the environment or the macOS keychain (service \u201CGEMINI_API_KEY\u201D or \u201CWikiLM Gemini API key\u201D). A key typed here is stored in data.json, which syncs with your vault in plaintext. Get one from Google AI Studio.",
         )
         .addText((t) => {
           t.inputEl.type = "password";
@@ -403,7 +403,7 @@ export class WikiLmSettingTab extends PluginSettingTab {
       new Setting(containerEl)
         .setName("Anthropic API key")
         .setDesc(
-          "Leave empty to read ANTHROPIC_API_KEY from the environment or the macOS keychain (service “ANTHROPIC_API_KEY” or “WikiLM Anthropic API key”). A key typed here is stored in data.json, which this vault syncs through iCloud in plaintext.",
+          "Leave empty to read ANTHROPIC_API_KEY from the environment or the macOS keychain (service “ANTHROPIC_API_KEY” or “WikiLM Anthropic API key”). A key typed here is stored in data.json, which syncs with your vault in plaintext.",
         )
         .addText((t) => {
           t.inputEl.type = "password";
@@ -1101,7 +1101,7 @@ export class WikiLmSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Add a source:: tag")
-      .setDesc("Adds source::<note-slug> so the Anki Wiki Sync add-on can link the card back to its vault page.")
+      .setDesc("Adds source::<note-slug> so an Anki add-on can link the card back to its vault page.")
       .addToggle((t) =>
         t.setValue(s.includeSourceTag).onChange((v) => {
           s.includeSourceTag = v;
