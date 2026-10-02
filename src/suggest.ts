@@ -22,6 +22,7 @@ import { SUGGEST_PER_PAGE } from "./settings";
 import { applyPreviewChoices, batchPages, planWikiNotes, toManifestHighlights, verifySpans, type VerifiedSpan, type WikiNoteIn } from "./suggestPlan";
 import { mergeWikiHighlights, noteSections, safeTitle, type PreparedNote, type WikiSchema } from "./topicNote";
 import { coveredBy, indexNote, type EvidenceUnit } from "./retrieval";
+import { digestSuggestedSpans } from "./digest";
 
 /** How much of an already-selected passage the prompt shows (src/prompt.ts:267). */
 const ALREADY_SELECTED_CHARS = 80;
@@ -337,6 +338,13 @@ export async function suggestPdfHighlights(
 
     // (7) Plan, then preview.
     const highlights = toManifestHighlights(accepted, maps, s.contextChars);
+    // Pages are written by the digest, the one writer of page shape: the
+    // spans join the PDF's own highlights and go through its draft, planner
+    // and preview. Flashcards alone never touch a page, so they stay here.
+    if (options.product !== "flashcards") {
+      await digestSuggestedSpans(plugin, pdf, highlights, classCode, { product: options.product, instruction: options.instruction });
+      return;
+    }
     const planOpts = {
       classCode,
       pdfBasename: manifest.pdfBasename,
@@ -347,7 +355,9 @@ export async function suggestPdfHighlights(
     };
     const plan = planWikiNotes(accepted, highlights, newNotes, wiki, planOpts);
     const alreadyPresent = plan.notes.reduce((n, x) => n + x.skipped, 0);
-    const flashcards = options.product === "notes" ? 0 : highlights.length;
+    // Flashcards only from here: the preview picks which spans to card, and
+    // nothing is written to a page.
+    const flashcards = highlights.length;
 
     const choices = await previewSuggestions(
       plugin.app,
@@ -363,43 +373,11 @@ export async function suggestPdfHighlights(
       return;
     }
     const final = planWikiNotes(applied.spans, highlights, applied.newNotes, wiki, { ...planOpts, keepAsNew: applied.keepAsNew });
-
-    // (9) Write, then queue cards. A source is never a note: a page named
-    // after the PDF, or written into the folder the PDF lives in, would put
-    // generated prose where the reader keeps their originals.
-    const refuse = (note: PreparedNote) =>
-      note.path.split("/").includes("sources") || safeTitle(note.title) === safeTitle(manifest.pdfBasename);
-    const result =
-      options.product === "flashcards"
-        ? { written: 0, newCount: 0, spansWritten: 0, refused: 0 }
-        : await writeNotes(plugin, final.notes, refuse, {
-            pdfBasename: manifest.pdfBasename,
-            classCode,
-            schema: s.wikiSchema,
-          });
     let queued = 0;
-    if (options.product !== "notes") {
-      for (const note of final.notes) {
-        if (refuse(note)) continue;
-        const topicPath = options.product === "flashcards" ? null : normalizePath(note.path);
-        queued += captureManifestHighlights(plugin, manifest, note.highlights, note.title, topicPath).added;
-      }
+    for (const note of final.notes) {
+      queued += captureManifestHighlights(plugin, manifest, note.highlights, note.title, null).added;
     }
-    const { spansWritten, newCount, refused } = result;
-
-    if (options.product === "flashcards") {
-      new Notice(`WikiLM: ${queued} highlight${queued === 1 ? "" : "s"} queued as flashcards.`, 8000);
-      return;
-    }
-    const written = result.written;
-    const tail = queued > 0 ? `, ${queued} queued as flashcards` : "";
-    const refusedTail = refused > 0 ? `, ${refused} refused (a source is never a note)` : "";
-    const filed = final.routed.length;
-    const filedTail = filed > 0 ? `, ${filed} proposed note${filed === 1 ? "" : "s"} filed into existing ones` : "";
-    new Notice(
-      `WikiLM: wrote ${spansWritten} span${spansWritten === 1 ? "" : "s"} into ${written} note${written === 1 ? "" : "s"} (${newCount} new)${filedTail}${tail}${refusedTail}.`,
-      8000,
-    );
+    new Notice(`WikiLM: ${queued} highlight${queued === 1 ? "" : "s"} queued as flashcards.`, 8000);
   } catch (e) {
     plugin.cancel.end(owner);
     console.error("WikiLM: suggesting highlights failed", e);

@@ -2,6 +2,7 @@
 
 ## 0.14.1
 
+- AI highlight on a PDF now writes pages through the digest. The spans it picks join the PDF's own highlights and go through the digest's draft, preview and merge, so the page gets an opening and branches of a lead line and cited bullets. Before, it wrote one labelled link per span and a separate heading per subject. The flashcards-only option is unchanged.
 - The digest preview says why it would write nothing: all the PDF's highlights are already on these pages, and an instruction cannot add slides nobody highlighted. It points at PDF++ highlighting or AI highlight for the rest of the deck.
 - Digest sections are written as a mind map: a lead line, then bullets, never a paragraph. The output schema now says so, and the default schema note no longer asks for raw links or the old `## Highlights` shape.
 - A digest merge sees the reader's `###` branches. Before, only `##` headings were matched, so a new section was founded beside a branch of the same name instead of filing into it.

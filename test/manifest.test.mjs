@@ -116,3 +116,12 @@ test("merging by key keeps the first non-empty notes and heading", () => {
   assert.equal(merged[0].heading, "Muscle");
   assert.deepEqual(merged[0].origins, ["a.md", "b.md"]);
 });
+
+test("withSuggested adds AI-picked spans to the reader's highlights, drops repeats by key, and numbers them in page order", () => {
+  const mine = { id: "H01", key: "page=5&selection=1,0,1,9", page: 5, kind: "selection", color: "yellow", target: { page: 5 }, text: "Reader span", before: "", after: "", origins: ["pdf++"] };
+  const aiSame = { ...mine, id: "", text: "Reader span", origins: ["ai suggestion"] };
+  const aiNew = { id: "", key: "page=2&selection=3,0,3,9", page: 2, kind: "selection", color: "yellow", target: { page: 2 }, text: "AI span", before: "", after: "", origins: ["ai suggestion"], label: "Glycolysis yield" };
+  const out = mf.withSuggested([mine], [aiSame, aiNew]);
+  assert.deepEqual(out.map((h) => [h.id, h.page, h.text]), [["H01", 2, "AI span"], ["H02", 5, "Reader span"]]);
+  assert.deepEqual(out[1].origins.sort(), ["ai suggestion", "pdf++"]);
+});

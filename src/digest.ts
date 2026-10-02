@@ -12,7 +12,7 @@ import type WikiLmPlugin from "./main";
 import { captureManifestHighlights } from "./capture";
 import { decideGate, digestFolderSummary, isDigestTarget, planDigestFolder, type DigestFolderTally, type GateDecision } from "./digestGate";
 import { describeError } from "./llm";
-import type { Manifest, ManifestHighlight } from "./manifest";
+import { withSuggested, type Manifest, type ManifestHighlight } from "./manifest";
 import { askDigestOptions, askInstruction, previewDigest, type DigestProduct } from "./modals";
 import { collectPdfHighlights } from "./pdfHighlights";
 import { isPdfFile } from "./pdf";
@@ -233,6 +233,30 @@ export interface DigestOptions {
    * parsing the document a second time.
    */
   resolved?: Resolved;
+}
+
+/**
+ * AI highlight's second half: the spans the suggester picked are added to the
+ * PDF's own highlights and digested like any others, so a page written from
+ * AI-picked spans has the same shape as one written from the reader's: an
+ * opening, then branches of a lead line and cited bullets, with the spans
+ * quoted beneath. The suggester decides what is worth keeping; the digest
+ * decides how it is written. Before, the suggester wrote its own rows (a
+ * labelled link per span, a heading per subject), a second page shape beside
+ * the digest's.
+ */
+export async function digestSuggestedSpans(
+  plugin: WikiLmPlugin,
+  pdf: TFile,
+  suggested: ManifestHighlight[],
+  classCode: string,
+  options: { product: DigestProduct; instruction: string },
+): Promise<DigestOutcome> {
+  const resolved = await resolveSource(plugin, pdf);
+  if (!resolved) return "failed";
+  resolved.manifest.highlights = withSuggested(resolved.manifest.highlights, suggested);
+  if (!resolved.manifest.classCode && classCode) resolved.manifest.classCode = classCode;
+  return digestPdf(plugin, pdf, { resolved, options });
 }
 
 /** How one PDF's digest ended, for a folder run's tally. */

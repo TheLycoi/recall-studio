@@ -158,3 +158,12 @@ export function mergeHighlights(highlights: ManifestHighlight[]): ManifestHighli
 
   return result;
 }
+
+/**
+ * The reader's highlights with AI-picked spans added: a span at a location
+ * the reader already highlighted collapses into theirs, and the whole list is
+ * renumbered in page order so the digest sees one set of ids.
+ */
+export function withSuggested(mine: ManifestHighlight[], suggested: ManifestHighlight[]): ManifestHighlight[] {
+  return sortAndAssignIds(mergeHighlights([...mine, ...suggested]));
+}
