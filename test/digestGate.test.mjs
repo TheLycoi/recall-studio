@@ -133,3 +133,46 @@ test("pickerFolders matches extensions case-insensitively, as the folder planner
 test("digestFilesSummary speaks of the PDFs chosen, not a folder", () => {
   assert.equal(dg.digestFolderSummary({ queued: 2, digested: 1, skipped: 1, failed: 0, bare: 1, unreadable: 0, stopped: false }), "digested 1 of 2 PDFs, 1 skipped, 1 with no highlights");
 });
+
+// A digest merges into topic pages only. The plugin's own notes under the
+// topic folder (schema, source transcripts, the engine's index and log) are
+// never offered as merge targets, the same rule Ask and Lint apply.
+const targetOpts = { topicFolder: "wiki", schemaFolder: "wiki/schema", transcriptFolder: "wiki/sources/wispr" };
+
+test("isDigestTarget accepts a normal topic page", () => {
+  assert.equal(dg.isDigestTarget("wiki/concepts/Pharmacokinetics.md", targetOpts), true);
+  assert.equal(dg.isDigestTarget("wiki/BIO101/Receptors.md", targetOpts), true);
+});
+
+test("isDigestTarget refuses a schema note", () => {
+  assert.equal(dg.isDigestTarget("wiki/schema/inbox.md", targetOpts), false);
+});
+
+test("isDigestTarget refuses a transcript", () => {
+  assert.equal(dg.isDigestTarget("wiki/sources/wispr/2026-09-30 lecture.md", targetOpts), false);
+});
+
+test("isDigestTarget refuses a source summary under the topic folder's sources", () => {
+  assert.equal(dg.isDigestTarget("wiki/sources/some-paper.md", targetOpts), false);
+});
+
+test("isDigestTarget refuses the topic folder's index and log", () => {
+  assert.equal(dg.isDigestTarget("wiki/index.md", targetOpts), false);
+  assert.equal(dg.isDigestTarget("wiki/log.md", targetOpts), false);
+  // Only the top-level ones: a page named index deeper down is a page.
+  assert.equal(dg.isDigestTarget("wiki/concepts/index.md", targetOpts), true);
+});
+
+test("isDigestTarget refuses anything outside the topic folder", () => {
+  assert.equal(dg.isDigestTarget("Clippings/article.md", targetOpts), false);
+  assert.equal(dg.isDigestTarget("wikis/page.md", targetOpts), false);
+  assert.equal(dg.isDigestTarget("wiki.md", targetOpts), false);
+});
+
+test("isDigestTarget tolerates slashes around the folder settings", () => {
+  const opts = { topicFolder: "/wiki/", schemaFolder: "wiki/schema/", transcriptFolder: "/wiki/sources/wispr" };
+  assert.equal(dg.isDigestTarget("wiki/concepts/a.md", opts), true);
+  assert.equal(dg.isDigestTarget("wiki/schema/x.md", opts), false);
+  assert.equal(dg.isDigestTarget("wiki/sources/wispr/x.md", opts), false);
+  assert.equal(dg.isDigestTarget("wiki/index.md", opts), false);
+});

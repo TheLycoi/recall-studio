@@ -10,7 +10,7 @@
 import { Notice, TFile, normalizePath } from "obsidian";
 import type WikiLmPlugin from "./main";
 import { captureManifestHighlights } from "./capture";
-import { decideGate, digestFolderSummary, planDigestFolder, type DigestFolderTally, type GateDecision } from "./digestGate";
+import { decideGate, digestFolderSummary, isDigestTarget, planDigestFolder, type DigestFolderTally, type GateDecision } from "./digestGate";
 import { describeError } from "./llm";
 import type { Manifest, ManifestHighlight } from "./manifest";
 import { askDigestOptions, askInstruction, previewDigest, type DigestProduct } from "./modals";
@@ -51,10 +51,11 @@ async function resolveSource(plugin: WikiLmPlugin, source: TFile): Promise<Resol
 
 /** Every page under the topic folder, all classes, minus the hub notes: what the digest may merge into or file under. */
 async function existingPages(plugin: WikiLmPlugin, topicFolder: string): Promise<ExistingPage[]> {
-  const prefix = `${normalizePath(topicFolder)}/`;
+  const { schemaFolder, transcriptFolder } = plugin.settings;
+  const folders = { topicFolder: normalizePath(topicFolder), schemaFolder, transcriptFolder };
   const out: ExistingPage[] = [];
   for (const file of plugin.app.vault.getMarkdownFiles()) {
-    if (!file.path.startsWith(prefix)) continue;
+    if (!isDigestTarget(file.path, folders)) continue;
     const md = await plugin.app.vault.cachedRead(file);
     const parsed = parseTopicNote(md);
     const type = /^type:\s*(.+)$/m.exec(/^---\r?\n([\s\S]*?)\r?\n---/.exec(md)?.[1] ?? "")?.[1]?.trim() ?? "";

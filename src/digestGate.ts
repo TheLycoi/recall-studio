@@ -13,6 +13,7 @@
  * Pure: no `obsidian` import; test/digestGate.test.mjs bundles it standalone.
  */
 import type { Manifest } from "./manifest";
+import { isUnderFolder } from "./util";
 
 export type GateAction = "digest" | "offer";
 
@@ -138,4 +139,29 @@ export function pickerFolders<T extends FolderFile>(files: T[]): PickerFolder<T>
     for (let i = 1; i <= parts.length; i++) row(parts.slice(0, i).join("/")).all.push(f);
   }
   return [...rows.values()].sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/** The folder settings that decide which notes under the topic folder are the plugin's own. */
+export interface DigestTargetFolders {
+  topicFolder: string;
+  schemaFolder: string;
+  transcriptFolder: string;
+}
+
+/**
+ * Whether a note may be offered to a digest as a page to merge into.
+ *
+ * Only topic pages qualify. Ask and Lint already skip the schema and
+ * transcript folders (isWikiPage in src/chatPanel.ts); a digest skips them
+ * too, plus the topic folder's own `sources/` (source summaries, which Lint
+ * reads as sources rather than pages) and the engine's `index.md` and
+ * `log.md` at the top of the topic folder. Without this a digest could write
+ * a section into the reader's transcript.
+ */
+export function isDigestTarget(path: string, opts: DigestTargetFolders): boolean {
+  const topic = opts.topicFolder.replace(/^\/+|\/+$/g, "");
+  if (!topic || !path.startsWith(`${topic}/`)) return false;
+  if (isUnderFolder(path, opts.schemaFolder) || isUnderFolder(path, opts.transcriptFolder)) return false;
+  if (isUnderFolder(path, `${topic}/sources`)) return false;
+  return path !== `${topic}/index.md` && path !== `${topic}/log.md`;
 }
