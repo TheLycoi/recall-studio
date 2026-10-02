@@ -176,3 +176,18 @@ test("isDigestTarget tolerates slashes around the folder settings", () => {
   assert.equal(dg.isDigestTarget("wiki/sources/wispr/x.md", opts), false);
   assert.equal(dg.isDigestTarget("wiki/index.md", opts), false);
 });
+
+test("nothingNewHint explains a preview that would write nothing, naming the highlight count and page span", () => {
+  const rows = [{ exists: true, added: 0, sections: [], highlights: [{ page: 2 }, { page: 7 }, { page: 4 }] }];
+  const hint = dg.nothingNewHint(rows);
+  assert.match(hint, /all 3 highlights/);
+  assert.match(hint, /pages 2 to 7/);
+  assert.match(hint, /AI highlight/);
+});
+
+test("nothingNewHint is empty when any row would write something", () => {
+  assert.equal(dg.nothingNewHint([{ exists: true, added: 1, sections: [], highlights: [{ page: 2 }] }]), "");
+  assert.equal(dg.nothingNewHint([{ exists: false, added: 0, sections: [], highlights: [{ page: 2 }] }]), "");
+  assert.equal(dg.nothingNewHint([{ exists: true, added: 0, sections: [{ heading: "X" }], highlights: [{ page: 2 }] }]), "");
+  assert.equal(dg.nothingNewHint([]), "");
+});

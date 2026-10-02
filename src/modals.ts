@@ -7,6 +7,7 @@ import type { ManifestHighlight } from "./manifest";
 import type { FixPage, LinkFix } from "./vaultFix";
 import { applyDuplicateVerdicts, orderFixes, type DuplicateVerdicts, type Fix, type FixKind } from "./fixPlan";
 import { describeError } from "./llm";
+import { nothingNewHint } from "./digestGate";
 
 /** Ask for a free-text instruction. Resolves null when cancelled. */
 export class InstructionModal extends Modal {
@@ -574,6 +575,8 @@ export class DigestPreviewModal extends Modal {
       `${this.extras.unknownIds.length} unknown ids dropped · ${this.extras.unassignedIds.length} unassigned`;
     if (this.extras.flashcards > 0) countsText += ` · ${this.extras.flashcards} flashcards will be queued`;
     contentEl.createEl("p", { text: countsText, cls: "wikilm-muted wikilm-preview-counts" });
+    const hint = nothingNewHint(this.notes);
+    if (hint) contentEl.createEl("p", { text: hint, cls: "wikilm-muted wikilm-preview-hint" });
 
     const list = contentEl.createDiv();
     this.notes.forEach((note, i) => {

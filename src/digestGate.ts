@@ -165,3 +165,33 @@ export function isDigestTarget(path: string, opts: DigestTargetFolders): boolean
   if (isUnderFolder(path, `${topic}/sources`)) return false;
   return path !== `${topic}/index.md` && path !== `${topic}/log.md`;
 }
+
+/** The parts of a preview row the nothing-new check reads. */
+export interface PreviewRowShape {
+  exists: boolean;
+  added: number;
+  sections?: unknown[];
+  highlights: Array<{ page: number }>;
+}
+
+/**
+ * Why a digest preview would write nothing, in one sentence the reader can
+ * act on, or "" when some row would write. The digest only arranges the
+ * highlights the PDF already carries; when every one of them is already on a
+ * page, an instruction naming another subject cannot conjure material from
+ * slides nobody highlighted. The reader's way forward is to highlight those
+ * slides, or to run AI highlight, which reads every page.
+ */
+export function nothingNewHint(rows: PreviewRowShape[]): string {
+  if (rows.length === 0) return "";
+  const writes = rows.some((r) => !r.exists || r.added > 0 || (r.sections?.length ?? 0) > 0);
+  if (writes) return "";
+  const pages = rows.flatMap((r) => r.highlights.map((h) => h.page)).filter((p) => Number.isFinite(p));
+  const count = pages.length;
+  const span = pages.length ? `pages ${Math.min(...pages)} to ${Math.max(...pages)}` : "no pages";
+  return (
+    `Nothing new to write: all ${count} highlights in this PDF (${span}) are already on these pages. ` +
+    `Digest arranges the highlights you made; it cannot add slides nobody highlighted. ` +
+    `To cover other parts of the deck, highlight them in PDF++ and run Digest again, or run AI highlight… with your instruction, which reads every page.`
+  );
+}
