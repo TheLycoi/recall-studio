@@ -31,7 +31,7 @@ security add-generic-password -s GEMINI_API_KEY -a wikilm -w
 ```
 
 **One provider or three.** Lint, Ask (query) and the digest can each run on their own provider and model.
-Turn that on in the settings tab. Card writing, the quiz and highlighting stay on the main provider.
+Turn that on in the settings tab. Card writing and the quiz stay on the main provider. AI highlight on a PDF follows the Digest choice.
 
 ## Network and data
 
@@ -41,8 +41,7 @@ WikiLM sends your text to one place: the model provider you chose.
   These go to the provider set for that job and to no one else.
 - **Which servers.** Anthropic goes to Anthropic's API. Gemini goes to `generativelanguage.googleapis.com`.
   Claude Code and Codex are programs on your machine. WikiLM starts them, and they send the request to Anthropic or OpenAI under your subscription.
-  Codex runs in an empty temporary folder with a read-only sandbox. Claude Code runs with its tools, settings and MCP servers turned off.
-  Neither one can open files in your vault.
+  Codex runs in an empty temporary folder with a read-only sandbox, so it cannot change your files, but its sandbox does not stop it reading them. Claude Code runs with its tools turned off, so it cannot open them.
 - **Lint wiki sends page bodies.** With the setting **Model reviews pages on lint** on, which is the default, **Lint wiki** sends each page that has findings to the provider, up to 6,000 characters per page.
   The fix plan's buttons for aliases and duplicate pages send page excerpts too, and only when you press them.
   Turn the review off and the scan stays on your machine.
@@ -105,7 +104,7 @@ classes/<class code>/   topic pages the digest writes (Topic notes folder)
 wiki/concepts/          concept pages from AI highlight and ingest
 wiki/entities/          entity pages from AI highlight and ingest
 wiki/sources/           source summaries the ingest engine writes
-wiki/sources/wispr/     lecture notes and transcripts (Transcript folder)
+wiki/sources/wispr/     lecture notes and transcripts (Transcript folder) (named for the Wispr Flow dictation app whose exports it was made for)
 wiki/index.md           the ingest engine's index, rebuilt on each run
 wiki/log.md             the ingest engine's log
 wiki/schema/            WikiLM's own files (Schema folder)
