@@ -36,7 +36,7 @@ export const DigestOut = z.object({
             prose: z
               .string()
               .describe(
-                "Two to six sentences of digested knowledge about the subtopic in your own words, drawn from the highlights filed here, the reader's notes under them and the paper, and from nothing outside the paper. Cite a highlight after each sentence it supports as [H03]; mention another page as {{Its Title}}.",
+                "One lead sentence that says what this branch is, then a newline and a markdown bullet list, never a paragraph: one claim per bullet, its term in bold at the front (\"- **Epimysium** covers the whole muscle [H03]\"), a sub-point nested with a tab under its parent, two levels at most. Digested knowledge in your own words from the highlights filed here, the reader's notes under them and the paper, nothing from outside it. Cite a highlight after every bullet as [H03]; mention another page as {{Its Title}}.",
               ),
             quote_ids: z
               .array(z.string())

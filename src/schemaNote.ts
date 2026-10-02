@@ -54,8 +54,8 @@ export function renderDefaultSchema(opts: DefaultSchemaOptions): string {
   const { topicFolder, schemaPath, today } = opts;
   const pageSections = [
     "1. **## Summary** — three to five sentences on the topic, in your language, close to the source's wording.",
-    "2. **## <Subtopic>** sections — each a branch of the page: one lead line that says what the branch is, then bullets a mind map can draw, one claim per bullet with its term in bold at the front, nested two levels at most, each bullet cited; a bullet that names another page is written as its `[[link]]`.",
-    "3. **## Highlights** — one PDF++ callout per highlight, in page order, grouped under `### Page N` when the page spans several.",
+    "2. **## <Subtopic>** sections — each a branch of the page, read as a mind map: one lead line that says what the branch is, then a bullet list, never a paragraph, one claim per bullet with its term in bold at the front, nested two levels at most, every bullet cited. A bullet that names another page names it as {{Its Title}} and the plugin writes the link. Inside a page that already nests its branches as `###`, new branches are `###` under the page's own `##`.",
+    "3. The highlights filed under a branch are printed beneath its bullets as PDF++ callouts, verbatim, so the reader's own marks stay on the page.",
     "4. **## Related topics** — `- [[Title]]` links to other pages, written by the plugin and never by the model.",
     "5. **## Flashcard Seeds** — left empty for you; the card writer works from the highlights, not from this section.",
   ].join("\n");

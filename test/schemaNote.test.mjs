@@ -48,7 +48,7 @@ test("the default templates state the frontmatter renderTopicNote actually write
   for (const field of ["type:", "class:", "created:", "source_file:", "tags:", "aliases:"]) {
     assert.ok(concept.includes(field), `concept template names ${field}`);
   }
-  for (const heading of ["## Summary", "## Highlights", "## Related topics", "## Flashcard Seeds"]) {
+  for (const heading of ["## Summary", "PDF++ callout", "## Related topics", "## Flashcard Seeds"]) {
     assert.ok(concept.includes(heading), `concept template names ${heading}`);
   }
   const entity = s.parseSchema(md).sections.find((x) => x.heading === "Entity Page Template").body;

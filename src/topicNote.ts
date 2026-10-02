@@ -56,9 +56,11 @@ export interface HeadingLine {
   key: string;
   /** Offset just past the heading's text, before its line break. */
   end: number;
+  /** 2 for `##`, 3 for `###`: a reader's mind map nests its branches, and a merge files into the level it finds. */
+  level: 2 | 3;
 }
 
-/** Every `##` heading in a body with its offset, skipping fenced code, where a `## ` is text. */
+/** Every `##` and `###` heading in a body with its offset, skipping fenced code, where a `## ` is text. */
 function scanHeadings(body: string): HeadingLine[] {
   const out: HeadingLine[] = [];
   let fenced = false;
@@ -67,10 +69,10 @@ function scanHeadings(body: string): HeadingLine[] {
     if (/^\s*(```|~~~)/.test(line)) {
       fenced = !fenced;
     } else if (!fenced) {
-      const m = /^ {0,3}##\s+(.+?)\s*$/.exec(line);
+      const m = /^ {0,3}(##|###)\s+(.+?)\s*$/.exec(line);
       if (m) {
-        const heading = headingDisplay(m[1]);
-        if (heading) out.push({ heading, key: heading.toLowerCase(), end: offset + line.length });
+        const heading = headingDisplay(m[2]);
+        if (heading) out.push({ heading, key: heading.toLowerCase(), end: offset + line.length, level: m[1].length === 3 ? 3 : 2 });
       }
     }
     offset += line.length + 1;
@@ -90,13 +92,16 @@ function scanHeadings(body: string): HeadingLine[] {
  * contents plus a stray closing ```. An unclosed fence runs to EOF, which is
  * how a Markdown renderer reads it too.
  */
-export function nextHeadingAfter(body: string, offset: number): number {
+export function nextHeadingAfter(body: string, offset: number, level: 2 | 3 = 2): number {
+  // A `##` section runs to the next `##`, its `###` children included; a
+  // `###` branch ends at the next heading of either level.
+  const stop = level === 3 ? /^ {0,3}###?\s/ : /^ {0,3}##\s/;
   let fenced = false;
   let at = 0;
   for (const line of body.split("\n")) {
     if (/^\s*(```|~~~)/.test(line)) {
       fenced = !fenced;
-    } else if (!fenced && at >= offset && /^ {0,3}##\s/.test(line)) {
+    } else if (!fenced && at >= offset && stop.test(line)) {
       return at;
     }
     at += line.length + 1;
@@ -136,7 +141,7 @@ export function noteSections(md: string): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const h of scanHeadings(body)) {
-    if (seen.has(h.key)) continue;
+    if (h.level !== 2 || seen.has(h.key)) continue;
     seen.add(h.key);
     out.push(h.heading);
   }
@@ -788,7 +793,7 @@ export function mergeArticle(
   existingMd: string,
   pdfBasename: string,
   article: Article,
-  opts: { section?: string; classCode?: string; covered?: (text: string) => boolean } = {},
+  opts: { section?: string; classCode?: string; covered?: (text: string) => boolean; title?: string } = {},
 ): ArticleMergeResult {
   const existingKeys = new Set(findAllPdfReferences(existingMd).map((r) => highlightKey(r.target)));
   // Links reduced to their words on both sides, so prose that was written
@@ -866,7 +871,7 @@ export function mergeArticle(
     }
     const found = findSection(body, heading);
     if (found) {
-      body = spliceIntoSection(body, found.end, text);
+      body = spliceIntoSection(body, found.end, text, found.level);
       filed.push({ heading: found.heading, keys, created: false });
       return;
     }
@@ -878,13 +883,30 @@ export function mergeArticle(
     // merge exists to avoid.
     const near = nearestHeading(body, heading);
     if (near) {
-      body = spliceIntoSection(body, near.end, text);
+      body = spliceIntoSection(body, near.end, text, near.level);
       filed.push({ heading: near.heading, keys, created: false });
       return;
     }
     // A created heading links to the slide its first quote came from, as the
     // row merge does; one the reader wrote is matched, never rewritten.
     const link = firstPage !== null ? renderPdfLink(pdfBasename, { page: firstPage }, heading) : heading;
+    // A page that nests its branches (`##` with `###` under it, the shape a
+    // mind map draws) gets the new branch as a `###` inside the `##` that
+    // carries the page's own name, founded before the trailing sections when
+    // the page has none. A flat page keeps `##`, so a digest-written page
+    // stays one level deep.
+    if (scanHeadings(body).some((h) => h.level === 3) && opts.title) {
+      let parent = scanHeadings(body).find((h) => h.level === 2 && h.key === headingKey(opts.title!)) ?? null;
+      if (!parent) {
+        body = insertBeforeTrailing(body, `## ${safeHeading(opts.title)}\n`);
+        parent = scanHeadings(body).find((h) => h.level === 2 && h.key === headingKey(opts.title!)) ?? null;
+      }
+      if (parent) {
+        body = spliceIntoSection(body, parent.end, `### ${link}\n\n${text}`, 2);
+        filed.push({ heading, keys, created: true });
+        return;
+      }
+    }
     body = insertBeforeTrailing(body, `## ${link}\n\n${text}`);
     filed.push({ heading, keys, created: true });
   };
@@ -910,7 +932,7 @@ export function mergeArticle(
     // summary belongs.
     const folded = new Set<string>();
     for (const h of quotes) {
-      const end = nextHeadingAfter(body, found.end);
+      const end = nextHeadingAfter(body, found.end, found.level);
       const next = spliceBesideCitation(body, found.end, end, pdfBasename, h.page, renderQuoteCallout(pdfBasename, h));
       if (next !== null) {
         body = next;
@@ -922,7 +944,7 @@ export function mergeArticle(
     if (loose.length) rest.push(joinRows(loose.map((h) => renderQuoteCallout(pdfBasename, h))));
     const prose = sec.prose.trim() ? text.split("\n\n").filter((part) => !part.startsWith("> ")).join("\n\n") : "";
     if (prose) rest.push(prose);
-    if (rest.length) body = spliceIntoSection(body, found.end, rest.join("\n\n"));
+    if (rest.length) body = spliceIntoSection(body, found.end, rest.join("\n\n"), found.level);
     filed.push({ heading: found.heading, keys, created: false });
   }
   return { md: opts.classCode ? addClassCode(body, opts.classCode) : body, added, skipped, said, sections: filed };
@@ -1117,7 +1139,7 @@ export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: Pl
 
     const home = byName.get(group.title.toLowerCase());
     if (home) {
-      const merged = mergeArticle(mdOf(home), manifest.pdfBasename, article, { classCode: opts.classCode, covered: coveredIn(home.path) });
+      const merged = mergeArticle(mdOf(home), manifest.pdfBasename, article, { classCode: opts.classCode, covered: coveredIn(home.path), title: home.title });
       latest.set(home.path, merged.md);
       notes.push({
         title: home.title,
@@ -1783,27 +1805,36 @@ export function replayArticles(
   current: string,
   pdfBasename: string,
   articles: Array<{ article: Article; section?: string }>,
-  opts: { classCode?: string; covered?: (text: string) => boolean },
+  opts: { classCode?: string; covered?: (text: string) => boolean; title?: string },
 ): string {
   let md = current;
   for (const { article, section } of articles) {
-    md = mergeArticle(md, pdfBasename, article, { classCode: opts.classCode, section, covered: opts.covered }).md;
+    md = mergeArticle(md, pdfBasename, article, { classCode: opts.classCode, section, covered: opts.covered, title: opts.title }).md;
   }
   return md;
 }
 
-export function spliceIntoSection(body: string, headingEnd: number, text: string): string {
-  const sectionEnd = nextHeadingAfter(body, headingEnd);
+export function spliceIntoSection(body: string, headingEnd: number, text: string, level: 2 | 3 = 2): string {
+  const sectionEnd = nextHeadingAfter(body, headingEnd, level);
   const section = body.slice(headingEnd, sectionEnd);
 
   const trailingBlanksMatch = /\n*$/.exec(section);
-  const trailingBlanks = trailingBlanksMatch ? trailingBlanksMatch[0] : "";
+  let trailingBlanks = trailingBlanksMatch ? trailingBlanksMatch[0] : "";
   const sectionCore = trailingBlanks ? section.slice(0, section.length - trailingBlanks.length) : section;
+  // An empty section is all line breaks; the text takes the heading's own
+  // break and one blank line, and keeps at most one blank line after it.
+  if (sectionCore.length === 0) trailingBlanks = trailingBlanks.slice(0, 2);
+  // Some callers measure `headingEnd` past the heading's blank lines already;
+  // only the breaks still missing are added.
+  const breaksBefore = (/\n*$/.exec(body.slice(0, headingEnd)) ?? [""])[0].length;
+  const lead = "\n\n".slice(Math.min(breaksBefore, 2));
   // A list item appended to a section that ends in a list item continues that
   // list; a blank line between them would render two lists with a gap.
   const lastLine = sectionCore.slice(sectionCore.lastIndexOf("\n") + 1);
   const gap = isListRow(lastLine) && isListRow(text) ? "\n" : "\n\n";
-  const appended = sectionCore.length > 0 ? `${sectionCore}${gap}${text}` : text;
+  // `headingEnd` sits before the heading's own line break, so an empty
+  // section still needs the break and a blank line before the text.
+  const appended = sectionCore.length > 0 ? `${sectionCore}${gap}${text}` : `${lead}${text}`;
 
   return body.slice(0, headingEnd) + appended + trailingBlanks + body.slice(sectionEnd);
 }

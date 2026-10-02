@@ -2003,3 +2003,70 @@ test("two groups coalesced into one existing page both reach the replay, in orde
   assert.ok(!tn.noteSections(firstOnly).includes("Affinity"), "the first article alone does not hold the second group");
   assert.equal(replayed, row.content, "the replay writes what the preview showed");
 });
+
+// ---- Mind-map pages: ### branches under the reader's ## ------------------------
+
+const NESTED_PAGE = `---
+class: BIO101
+---
+## Muscle Tension
+A fiber is all or none.
+### Twitch Frequency
+- **Twitch** one stimulus, one small rise in tension
+### Tension Production
+- **Cross-bridges** more pivoting, more tension
+
+## Transduction
+Signal in, force out.
+### Sarcolemma
+- **Membrane** carries the action potential
+
+## Related topics
+- [[Sarcomere]]
+`;
+
+test("mergeArticle files a section into the reader's ### branch of the same name, before the next ###", () => {
+  const article = {
+    definition: "",
+    sections: [{ heading: "Twitch Frequency, Summation, and Tetanus", prose: "Summation builds tension.\n- **Summation** stimuli arrive before relaxation ends", highlights: [] }],
+    figures: [],
+  };
+  const r = tn.mergeArticle(NESTED_PAGE, PDF_BASENAME, article, { title: "Muscle Tension" });
+  assert.deepEqual(r.sections.map((x) => [x.heading, x.created]), [["Twitch Frequency", false]]);
+  const twitch = r.md.indexOf("### Twitch Frequency");
+  const tension = r.md.indexOf("### Tension Production");
+  const summation = r.md.indexOf("**Summation**");
+  assert.ok(twitch < summation && summation < tension, r.md);
+  assert.ok(!r.md.includes("\n## Twitch Frequency, Summation"), "no new ## section beside the reader's branch");
+});
+
+test("mergeArticle creates a new branch as ### under the page's own ## when the page nests its branches", () => {
+  const article = {
+    definition: "",
+    sections: [{ heading: "Motor Unit Recruitment and Tone", prose: "Units are recruited by size.\n- **Size principle** small units first", highlights: [] }],
+    figures: [],
+  };
+  const r = tn.mergeArticle(NESTED_PAGE, PDF_BASENAME, article, { title: "Muscle Tension" });
+  assert.deepEqual(r.sections.map((x) => [x.heading, x.created]), [["Motor Unit Recruitment and Tone", true]]);
+  const created = r.md.indexOf("### Motor Unit Recruitment and Tone");
+  assert.ok(created > 0, r.md);
+  assert.ok(created > r.md.indexOf("### Tension Production") && created < r.md.indexOf("## Transduction"), "the new branch sits inside ## Muscle Tension, before the next ##");
+  assert.ok(!r.md.includes("\n## Motor Unit Recruitment"), r.md);
+});
+
+test("mergeArticle adds a ## branch named for the page when it nests branches but has none for the title", () => {
+  const page = NESTED_PAGE.replace("## Muscle Tension\nA fiber is all or none.\n", "## Contractions\nTypes of contraction.\n");
+  const article = { definition: "", sections: [{ heading: "Motor Unit Recruitment", prose: "Lead.\n- **Size principle** small units first", highlights: [] }], figures: [] };
+  const r = tn.mergeArticle(page, PDF_BASENAME, article, { title: "Muscle Tension" });
+  const branch = r.md.indexOf("## Muscle Tension\n");
+  assert.ok(branch > 0 && branch < r.md.indexOf("## Related topics"), r.md);
+  assert.ok(r.md.indexOf("### Motor Unit Recruitment") > branch, r.md);
+});
+
+test("mergeArticle keeps ## for a new section on a flat digest page", () => {
+  const existing = `---\nclass: BIO101\n---\n# Receptors\n\n## Definition\nOld opening.\n\n## Two Properties\nOld prose.\n\n## Related topics\n`;
+  const article = { definition: "", sections: [{ heading: "Albumin Contrast", prose: "Lead.\n- **Albumin** binds but never transduces", highlights: [] }], figures: [] };
+  const r = tn.mergeArticle(existing, PDF_BASENAME, article, { title: "Receptors" });
+  assert.ok(r.md.includes("## Albumin Contrast\n"), r.md);
+  assert.ok(!r.md.includes("### Albumin Contrast"), r.md);
+});

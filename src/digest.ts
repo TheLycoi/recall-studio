@@ -184,6 +184,7 @@ function remergeNote(
   if (articles.length) {
     return replayArticles(current, pdfBasename, articles, {
       classCode,
+      title: note.title,
       covered: covered ? (text) => covered(note.path, text) : undefined,
     });
   }
