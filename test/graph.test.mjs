@@ -130,3 +130,9 @@ test("buildGraph resolves a prose link to a slugified page", () => {
   ]);
   assert.deepEqual(graph.edges.get("wiki/concepts/agentic-systems.md"), ["wiki/concepts/model-context-protocol.md"]);
 });
+
+test("noteLinks drops the backslash that escapes a pipe inside a table link", () => {
+  // `| [[SR\|short]] |` is how Obsidian writes an aliased link in a table; the
+  // backslash belongs to the table, not to the target.
+  assert.deepEqual(g.noteLinks("| [[SR\\|short]] |"), [{ raw: "SR", embed: false }]);
+});

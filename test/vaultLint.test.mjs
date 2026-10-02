@@ -534,3 +534,11 @@ test("the page review prompt's worked example carries its quote in a form quoteU
   assert.ok(units[0].text.toLowerCase().includes(by.toLowerCase()), `${by} not in ${units[0].text}`);
   assert.ok(!/\[!quote\]/.test(body), "a quote callout is not a form the wiki's pages carry");
 });
+
+test("an escaped-pipe table link to an existing page is not dead", () => {
+  const r = vl.lintVault(
+    [{ path: "wiki/a.md", content: "A sentence that indexes fine.\n\n| Term | Page |\n| --- | --- |\n| x | [[SR\\|short]] |\n" }],
+    { resolve: (lp) => (lp === "SR" ? "wiki/SR.md" : null) },
+  );
+  assert.deepEqual(r.issues.filter((i) => i.id === "dead-link").map((i) => i.target), []);
+});

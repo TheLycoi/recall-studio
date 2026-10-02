@@ -68,7 +68,11 @@ export function noteLinks(content: string): Array<{ raw: string; embed: boolean 
   WIKI_LINK_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
   while ((m = WIKI_LINK_RE.exec(content)) !== null) {
-    const raw = m[2].trim();
+    // In a table an aliased link is written `[[SR\|short]]`: the backslash
+    // escapes the pipe for the table and is no part of the target. Dropped
+    // here, or the resolver is asked for `SR\` and calls the link dead
+    // (compareKey in src/vaultFix.ts strips the same backslash on repair).
+    const raw = m[2].trim().replace(/\\$/, "").trim();
     if (!raw || NON_NOTE.test(raw)) continue;
     out.push({ raw, embed: !!m[1] });
   }
