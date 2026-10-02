@@ -1,8 +1,8 @@
 // Pure manifest model: render/parse the wikilm-manifest note format, and the
 // merge/sort helpers that build it. No `obsidian` import (see src/lint.ts:1-6);
 // bundled standalone and exercised with node --test (test/manifest.test.mjs).
-import { splitFrontmatter, normalizeWs } from "./util";
-import { calloutHeader, highlightKey, parsePdfSubpath, renderPdfLink, type PdfTarget } from "./pdflink";
+import { normalizeWs } from "./util";
+import type { PdfTarget } from "./pdflink";
 
 export interface ManifestHighlight {
   id: string;
