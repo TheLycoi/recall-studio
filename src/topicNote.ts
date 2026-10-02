@@ -682,29 +682,42 @@ function proseWords(prose: string): string {
  * empty `text` means the whole paragraph was.
  */
 function pruneSaid(prose: string, covered: (text: string) => boolean): { text: string; said: number; total: number } {
-  const sentences = prose
-    .split(/(?<=[.!?])\s+/)
-    .map((x) => x.trim())
-    .filter(Boolean);
   const kept: string[] = [];
   let said = 0;
   let total = 0;
-  for (const sentence of sentences) {
-    const words = proseWords(sentence);
-    // Only a sentence long enough to carry a claim is judged; a fragment is
-    // neither counted nor dropped.
-    if (words.length < 20) {
-      kept.push(sentence);
-      continue;
-    }
+  // One claim, judged whole: counted and dropped when the page already states
+  // it, kept otherwise. A fragment too short to carry a claim is neither.
+  const keep = (words: string): boolean => {
+    if (words.length < 20) return true;
     total++;
     if (covered(words)) {
       said++;
+      return false;
+    }
+    return true;
+  };
+  // Line by line, because a section in the mindmap shape is a lead line and
+  // a list, and a list has no sentence ends: split on those alone, three
+  // bullets read as one sentence and came back as one line. A bullet is one
+  // claim and keeps its own line and indent; a paragraph line is still judged
+  // a sentence at a time, as before.
+  for (const line of prose.split("\n")) {
+    const bullet = /^\s*(?:[-*+]|\d+[.)])\s+([\s\S]*)$/.exec(line);
+    if (bullet) {
+      // The check sees the bullet's words: marker gone, emphasis marks gone.
+      if (keep(proseWords(bullet[1].replace(/\*\*|__|\*|_/g, "")))) kept.push(line);
       continue;
     }
-    kept.push(sentence);
+    const sentences = line
+      .split(/(?<=[.!?])\s+/)
+      .map((x) => x.trim())
+      .filter(Boolean);
+    const rest = sentences.filter((sentence) => keep(proseWords(sentence)));
+    // A paragraph line stays while any of it does; a blank line stays as the
+    // gap it was, so the list it separates is still a list.
+    if (rest.length > 0 || sentences.length === 0) kept.push(rest.join(" "));
   }
-  return { text: kept.join(" "), said, total };
+  return { text: kept.join("\n").trim(), said, total };
 }
 
 /** Whether a rectangle row is a figure: geometry only, no words. */

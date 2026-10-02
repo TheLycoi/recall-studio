@@ -1774,6 +1774,34 @@ test("mergeArticle with a coverage check does not quote or restate what the page
   assert.equal(tn.mergeArticle(existing, PDF_BASENAME, article).said, 0, "no check, nothing counted");
 });
 
+test("mergeArticle keeps a bulleted section line by line: indent kept, a covered bullet dropped whole, the lead and the rest untouched", () => {
+  const existing = `---\nclass: HBIO250\n---\n# Skeletal Muscle Tissue\n\n## Definition\nSkeletal muscle is voluntary striated muscle.\n\n## Related topics\n- [[x]]\n`;
+  // A bullet the page already states in other words; the check sees the bullet's own words, marker and bold stripped.
+  const covered = (text) => /collagen fibers type I plus elastin/i.test(text);
+  const prose = [
+    "Three connective tissue layers are continuous with the tendon.",
+    "- **Epimysium** — covers the whole muscle and separates it from other tissues, a sheath of collagen fibers type I plus elastin and glycoproteins that wraps the belly",
+    "- **Perimysium** — bundles muscle fibers into fascicles and carries the blood vessels and nerves that reach them",
+    "\t- composed of collagen fibers of type I and type III, which is what lets the bundle stretch and recoil",
+    "- **Endomysium** — reticular collagen type III around each fiber, holding the capillaries and nerve endings that feed it",
+  ].join("\n");
+  const article = {
+    definition: "",
+    sections: [{ heading: "Connective Tissue", prose, highlights: [wikiHighlight({ verbatim: true, text: "Muscles have 3 layers of connective tissues" })] }],
+    figures: [],
+  };
+  const r = tn.mergeArticle(existing, PDF_BASENAME, article, { covered });
+  const expected = [
+    "Three connective tissue layers are continuous with the tendon.",
+    "- **Perimysium** — bundles muscle fibers into fascicles and carries the blood vessels and nerves that reach them",
+    "\t- composed of collagen fibers of type I and type III, which is what lets the bundle stretch and recoil",
+    "- **Endomysium** — reticular collagen type III around each fiber, holding the capillaries and nerve endings that feed it",
+  ].join("\n");
+  assert.ok(r.md.includes(expected), r.md);
+  assert.ok(!r.md.includes("Epimysium"), "the covered bullet is dropped whole, not spliced into its neighbours");
+  assert.equal(r.said, 1, "one bullet the page already states");
+});
+
 test("planTopicNotes passes the coverage check per target page and flags rows a new page's class already states", () => {
   const manifest = manifestFor([{ ...SELECTION_HIGHLIGHT, id: "H01" }]);
   const home = { path: "classes/HBIO250/Receptors.md", title: "Receptors", kind: "concept", aliases: [], classCodes: ["HBIO250"], md: "---\nclass: HBIO250\n---\n# Receptors\n\n## Definition\nOld.\n" };

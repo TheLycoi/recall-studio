@@ -935,6 +935,15 @@ test("the quiz question system prompt names the knowledge types, the lenses and 
   }
 });
 
+test("the digest system prompt asks for the mindmap shape: a lead line, one claim per bullet, nested two deep, pages named for linking", () => {
+  const llm = readFileSync(new URL("../src/llm.ts", import.meta.url), "utf8");
+  const src = /const DIGEST_SYSTEM = `([\s\S]*?)`;/.exec(llm)?.[1] ?? "";
+  for (const needle of ["one lead line", "one claim per bullet", "- **", "two levels", "{{", "mind map"]) {
+    assert.ok(src.includes(needle), `digest system prompt mentions ${needle}`);
+  }
+  assert.ok(!src.includes("two to six sentences of digested knowledge"), "the paragraph instruction is gone, not merely joined by the bullet one");
+});
+
 // --- lint model review: title scan and page review ---------------------------
 
 const scanPages = [

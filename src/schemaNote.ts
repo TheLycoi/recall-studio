@@ -54,9 +54,10 @@ export function renderDefaultSchema(opts: DefaultSchemaOptions): string {
   const { topicFolder, schemaPath, today } = opts;
   const pageSections = [
     "1. **## Summary** — three to five sentences on the topic, in your language, close to the source's wording.",
-    "2. **## Highlights** — one PDF++ callout per highlight, in page order, grouped under `### Page N` when the page spans several.",
-    "3. **## Related topics** — `- [[Title]]` links to other pages, written by the plugin and never by the model.",
-    "4. **## Flashcard Seeds** — left empty for you; the card writer works from the highlights, not from this section.",
+    "2. **## <Subtopic>** sections — each a branch of the page: one lead line that says what the branch is, then bullets a mind map can draw, one claim per bullet with its term in bold at the front, nested two levels at most, each bullet cited; a bullet that names another page is written as its `[[link]]`.",
+    "3. **## Highlights** — one PDF++ callout per highlight, in page order, grouped under `### Page N` when the page spans several.",
+    "4. **## Related topics** — `- [[Title]]` links to other pages, written by the plugin and never by the model.",
+    "5. **## Flashcard Seeds** — left empty for you; the card writer works from the highlights, not from this section.",
   ].join("\n");
 
   const frontmatterFields = (kind: "concept" | "entity", tags: string) =>
