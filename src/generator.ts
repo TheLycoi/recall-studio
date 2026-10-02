@@ -4,6 +4,7 @@ import type WikiLmPlugin from "./main";
 import { makeCard, type Card, type Highlight } from "./model";
 import { describeError } from "./llm";
 import { lintCard, type LintResult, demoteSingleCloze } from "./lint";
+import { nextInstruction } from "./inboxData";
 
 /**
  * Background queue: fire a highlight in, come back later to cards in the
@@ -13,6 +14,8 @@ import { lintCard, type LintResult, demoteSingleCloze } from "./lint";
 export class Generator {
   private running = new Set<string>();
   private stopped = false;
+  /** Highlight id -> the extra instruction its next run reads, set by `more()`. Never stored on the highlight. */
+  private extra = new Map<string, string>();
 
   constructor(private plugin: WikiLmPlugin) {}
 
@@ -32,8 +35,13 @@ export class Generator {
     this.kick();
   }
 
-  /** Ask for more cards on a highlight that already has some. */
-  more(h: Highlight): void {
+  /**
+   * Ask for more cards on a highlight that already has some. `instruction`
+   * steers this run only; `h.instruction` is left as it was.
+   */
+  more(h: Highlight, instruction = ""): void {
+    if (instruction.trim()) this.extra.set(h.id, instruction.trim());
+    else this.extra.delete(h.id);
     this.enqueue(h);
   }
 
@@ -57,7 +65,8 @@ export class Generator {
     // PDF++ link's address is not something a card should quote or a cloze
     // should be checked against. The stored highlight keeps its links so the
     // inbox can still reopen the note at the passage.
-    const words: Highlight = { ...h, text: plainText(h.text) };
+    const extra = this.extra.get(h.id);
+    const words: Highlight = { ...h, text: plainText(h.text), instruction: nextInstruction(h.instruction, extra ?? "") };
     h.status = "generating";
     this.plugin.store.touch();
     try {
@@ -142,6 +151,9 @@ export class Generator {
       // widens the type TS narrowed to "generating" at the top of run() — the
       // await points above are exactly where enqueue() can have intervened.
       if ((h.status as Highlight["status"]) !== "queued") h.status = "ready";
+      // Spent on success only, so a failed run retried keeps its instruction;
+      // a newer more() that arrived mid-run replaced the entry and keeps it.
+      if (this.extra.get(h.id) === extra) this.extra.delete(h.id);
       h.generatedAt = new Date().toISOString();
       h.error = null;
       if (this.plugin.settings.notifyWhenReady) {

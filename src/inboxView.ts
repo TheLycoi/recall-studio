@@ -53,6 +53,12 @@ export class InboxView extends ItemView {
   /** Highlight ids whose flagged-card group is expanded under lintMode "hide". */
   private expandedFlagged = new Set<string>();
   private renderScheduled = false;
+  /**
+   * A store change arrived while a card editor was open and its render was
+   * held back. Every path that closes the editor renders, which draws the
+   * held change and clears this.
+   */
+  private dirty = false;
   /** Which half of the sidebar is showing. Persisted in `settings.sidebarMode`. */
   private mode: "inbox" | "chat" = "inbox";
   /**
@@ -112,13 +118,37 @@ export class InboxView extends ItemView {
     this.render();
   }
 
+  /**
+   * Redraw after a store change, unless the reader has a card editor open: a
+   * render empties the root and rebuilds the editor from the stored card, so a
+   * background card landing would wipe a half-typed edit. The change is held
+   * (`dirty`) and drawn when the editor closes.
+   */
   private scheduleRender() {
+    if (this.editorOpen()) {
+      this.dirty = true;
+      return;
+    }
     if (this.renderScheduled) return;
     this.renderScheduled = true;
     window.requestAnimationFrame(() => {
       this.renderScheduled = false;
+      if (this.editorOpen()) {
+        this.dirty = true;
+        return;
+      }
       this.render();
     });
+  }
+
+  /**
+   * True when the editor for `this.editing` is actually on screen. Checked in
+   * the DOM rather than from the flag alone, so a card the filter or chat mode
+   * hid, or a new hand-written card not drawn yet, does not hold renders back.
+   */
+  private editorOpen(): boolean {
+    if (!this.editing) return false;
+    return !!this.contentEl.querySelector(`.wikilm-card[data-id="${this.editing}"] .wikilm-editor`);
   }
 
   // ---------------------------------------------------------------- data
@@ -148,6 +178,7 @@ export class InboxView extends ItemView {
   private render(): void {
     const root = this.contentEl;
     const scrollTop = root.scrollTop;
+    this.dirty = false;
     root.empty();
     root.toggleClass("is-chat", this.mode === "chat");
 
@@ -451,8 +482,9 @@ export class InboxView extends ItemView {
       iconBtn(WIKILM_SPARK_ICON, "Write more cards for this highlight", async () => {
         const inst = await askInstruction(this.plugin.app, "More cards", "Optional: what should the extra cards cover?");
         if (inst === null) return;
-        if (inst) h.instruction = inst;
-        this.plugin.generator.more(h);
+        // For this run only: h.instruction keeps the Ask or quiz-miss
+        // instruction the highlight was captured with.
+        this.plugin.generator.more(h, inst);
       });
     }
     iconBtn(WIKILM_ADD_ICON, "Add a card by hand", () => {
@@ -848,6 +880,8 @@ export class InboxView extends ItemView {
 
   private deleteCard(h: Highlight, c: Card): void {
     c.status = "deleted";
+    // Deleting the card being edited closes its editor, so the render is not held back.
+    if (this.editing === c.id) this.editing = null;
     if (this.focusedCard === c.id) this.focusedCard = this.neighbourCardId(c.id);
     this.plugin.store.touch();
   }
@@ -906,6 +940,9 @@ export class InboxView extends ItemView {
       delete c.lintWarnings;
       delete c.critiqueReason;
       this.plugin.store.touch();
+      // The reader asked for this rewrite from the open editor's own buttons,
+      // so the fields are redrawn from the rewritten card rather than held.
+      if (this.editing === c.id) this.render();
       // A rewrite the model answered with the card it was given says nothing
       // about how the reader wants cards written, so it is not evidence.
       const now = snapshot(c);

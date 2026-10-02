@@ -153,3 +153,25 @@ test("rememberInstruction keeps the most recently used files once past the cap",
   assert.deepEqual(Object.keys(data.highlightInstructions), ["a.md", "c.md"]);
   assert.equal(data.highlightInstructions["a.md"], "1 again");
 });
+
+// "Write more cards" used to set h.instruction = extra, so the Ask or quiz-miss
+// instruction the highlight was captured with was lost for good. The extra
+// instruction now lasts one run: nextInstruction picks what that run reads.
+test("nextInstruction: an extra instruction is used for the run", () => {
+  assert.equal(d.nextInstruction("From the Ask: explain why", "cover the dates"), "cover the dates");
+});
+
+test("nextInstruction: a blank extra falls back to the stored instruction", () => {
+  assert.equal(d.nextInstruction("From the Ask: explain why", ""), "From the Ask: explain why");
+  assert.equal(d.nextInstruction("From the Ask: explain why", "   "), "From the Ask: explain why");
+});
+
+test("nextInstruction: no stored and no extra instruction is empty", () => {
+  assert.equal(d.nextInstruction(undefined, ""), "");
+});
+
+test("nextInstruction: the stored instruction is left alone", () => {
+  const h = { instruction: "From the quiz: missed the mechanism" };
+  d.nextInstruction(h.instruction, "cover the dates");
+  assert.equal(h.instruction, "From the quiz: missed the mechanism");
+});

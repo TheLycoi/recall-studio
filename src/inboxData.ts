@@ -71,3 +71,13 @@ export function rememberInstruction(data: InboxData, path: string, instruction: 
   const keys = Object.keys(map);
   for (const k of keys.slice(0, Math.max(0, keys.length - cap))) delete map[k];
 }
+
+/**
+ * The instruction one generation run reads. An extra instruction typed for
+ * "Write more cards" wins for that run only; a blank one falls back to the
+ * instruction stored on the highlight. Never writes anything back, so the
+ * Ask or quiz-miss instruction the highlight was captured with survives.
+ */
+export function nextInstruction(base: string | undefined, extra: string): string {
+  return extra.trim() ? extra.trim() : (base ?? "");
+}
