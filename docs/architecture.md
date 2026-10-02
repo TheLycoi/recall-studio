@@ -1187,7 +1187,7 @@ source link; cards captured any other way are unchanged
      WikiLM reads `ANTHROPIC_API_KEY` from the environment or from the macOS
      keychain (a generic password whose service is `ANTHROPIC_API_KEY` or
      `WikiLM Anthropic API key`). The keychain route keeps the key out of
-     `data.json`, which iCloud syncs in plaintext:
+     `data.json`, which your sync service copies in plaintext:
      `security add-generic-password -s ANTHROPIC_API_KEY -a wikilm -w`.
      Default model `claude-opus-5`.
    - **Google Gemini (API key)** — paste a key from Google AI Studio, or
@@ -1247,7 +1247,7 @@ Layout, one line per module:
 - `src/codex.ts` — the Codex backend, shelling out to `codex exec` signed in with a ChatGPT subscription
 - `src/gemini.ts` — the Google Gemini backend over the generateContent REST API with an API key
 - `src/modelRoles.ts` — which provider and model a role (lint, query, digest) runs on; the model lists behind the settings dropdowns
-- `src/commandTable.ts` — the twenty commands as pure data: ids, palette names, chat aliases, availability hints
+- `src/commandTable.ts` — the commands as pure data: ids, palette names, chat aliases, availability hints
 - `src/commands.ts` — their behaviour half: an `available` predicate and a `run` action per entry, registered by `main.ts` in one loop
 - `src/digest.ts` — digest orchestration: the glue between the highlight collector, the model or a pasted draft, the planner, the preview and the vault
 - `src/digestGate.ts` — whether a source has enough highlights to digest, or needs some made first

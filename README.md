@@ -135,7 +135,7 @@ Know its limits:
 
 - **Prose can change.** The engine can rewrite paragraphs, lists and tables under a heading it keeps. The guard does not compare prose.
 - **Pages it made are its own.** A page the engine created in the same run is not checked.
-- **Index and log.** `wiki/index.md` and `wiki/log.md` are rebuilt on every run and are not saved.
+- **Index and log.** `wiki/index.md` and `wiki/log.md`, when the engine wrote them, are rebuilt on every run and are not saved. An index or log you wrote yourself is snapshotted and loss-checked like any page.
 - **Snapshots are limited.** Before a page is overwritten, its old text is saved under `.obsidian/plugins/wikilm/snapshots/`, one folder per run.
   Only the last 20 runs are kept. Older ones are deleted.
 

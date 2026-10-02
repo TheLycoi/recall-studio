@@ -36,6 +36,9 @@ jobs:
           npm run vendor:types
           npm run build
 
+      - name: Run tests
+        run: npm test
+
       # main.js carries code compiled from the Apache-2.0 obsidian-llm-wiki,
       # so its NOTICE and the licence travel with every release. The upstream
       # NOTICE is uploaded as NOTICE-llm-wiki, the name scripts/install.mjs
