@@ -287,3 +287,66 @@ test("transcriptRecord normalizes, cuts to the limit, and records where the guid
   assert.ok(long.text.length <= 50);
   assert.equal(long.text, u.truncateTranscript(u.normalizeTranscript("word ".repeat(100)), 50).text, "the same cut add-transcript made");
 });
+
+// Review High 3: two spans on one line used to come out as
+// "==Alpha beta== gamma delta epsilon zeta. ^wikilm-id2eta. ^wikilm-id1".
+test("markSpans: two spans on one line share one block id, placed once at the line's end", () => {
+  const body = "Alpha beta gamma delta epsilon zeta.";
+  const a = body.indexOf("Alpha beta");
+  const d = body.indexOf("delta");
+  const { text, blockIds } = u.markSpans(
+    body,
+    [
+      { start: a, end: a + "Alpha beta".length },
+      { start: d, end: d + "delta".length },
+    ],
+    "highlight+block",
+  );
+  assert.match(text, /^==Alpha beta== gamma ==delta== epsilon zeta\. \^wikilm-[a-z0-9]+$/);
+  const id = text.match(/\^(wikilm-[a-z0-9]+)$/)[1];
+  assert.equal(blockIds.get(0), id);
+  assert.equal(blockIds.get(1), id);
+  assert.equal(text.match(/\^wikilm-/g).length, 1);
+});
+
+test("markSpans: a line that already ends in a block id gets no second id", () => {
+  const body = "Alpha beta gamma. ^mine\nNext line.";
+  const a = body.indexOf("beta");
+  const { text, blockIds } = u.markSpans(body, [{ start: a, end: a + 4 }], "highlight+block");
+  assert.equal(text, "Alpha ==beta== gamma. ^mine\nNext line.");
+  assert.equal(blockIds.get(0), "mine");
+});
+
+test("markSpans: spans on two lines get two ids, and highlight mode adds none", () => {
+  const body = "First line here.\nSecond line here.";
+  const f = body.indexOf("First");
+  const s = body.indexOf("Second");
+  const spans = [
+    { start: s, end: s + 6 },
+    { start: f, end: f + 5 },
+  ];
+  const { text, blockIds } = u.markSpans(body, spans, "highlight+block");
+  const m = /^==First== line here\. \^(wikilm-[a-z0-9]+)\n==Second== line here\. \^(wikilm-[a-z0-9]+)$/.exec(text);
+  assert.ok(m, text);
+  assert.notEqual(m[1], m[2]);
+  assert.equal(blockIds.get(1), m[1]);
+  assert.equal(blockIds.get(0), m[2]);
+  const plain = u.markSpans(body, spans, "highlight");
+  assert.equal(plain.text, "==First== line here.\n==Second== line here.");
+  assert.equal(plain.blockIds.size, 0);
+});
+
+// Review High 4: marking happens in the live note text, so each quote is found again there.
+test("markQuotes: a quote missing from the live text leaves the text unchanged", () => {
+  const live = "---\ntags: [x]\n---\nThe reader rewrote this paragraph while the model ran.";
+  const { text, blockIds } = u.markQuotes(live, [{ text: "Alpha beta", start: 0, end: 10 }], "highlight+block");
+  assert.equal(text, live);
+  assert.equal(blockIds.size, 0);
+});
+
+test("markQuotes: a quote that moved in the live text is found and marked where it now is", () => {
+  const live = "---\ntags: [x]\n---\nA new first line typed meanwhile.\nAlpha beta gamma.";
+  const { text, blockIds } = u.markQuotes(live, [{ text: "Alpha beta", start: 0, end: 10 }], "highlight+block");
+  assert.match(text, /^---\ntags: \[x\]\n---\nA new first line typed meanwhile\.\n==Alpha beta== gamma\. \^wikilm-[a-z0-9]+$/);
+  assert.equal(blockIds.get(0), text.match(/\^(wikilm-[a-z0-9]+)$/)[1]);
+});

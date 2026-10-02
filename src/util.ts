@@ -225,6 +225,107 @@ export function canWrapAsHighlight(sel: string): boolean {
   return true;
 }
 
+/** How a captured span is marked in its note (settings `markMode`). */
+export type SpanMarkMode = "none" | "highlight" | "highlight+block";
+
+const TRAILING_BLOCK_ID = /\^([A-Za-z0-9-]+)\s*$/;
+
+/**
+ * Mark captured spans of a note body. Every offset is taken from the original
+ * `body`, so marking one span never shifts another. A span is wrapped in ==…==
+ * only when `canWrapAsHighlight` allows it and it is not already wrapped.
+ * In "highlight+block" mode each line gets one block id, appended once at its
+ * end, shared by every span that ends on that line; a line that already ends
+ * in `^id` keeps that id and gets no second one. A span that overlaps an
+ * earlier one is left alone. `blockIds` maps an index into `spans` to the id
+ * of its line.
+ */
+export function markSpans(
+  body: string,
+  spans: Array<{ start: number; end: number; blockId?: string }>,
+  mode: SpanMarkMode,
+): { text: string; blockIds: Map<number, string> } {
+  const blockIds = new Map<number, string>();
+  if (mode === "none") return { text: body, blockIds };
+
+  const order = spans
+    .map((s, i) => ({ ...s, i }))
+    .filter((s) => s.start >= 0 && s.end > s.start && s.end <= body.length)
+    .sort((a, b) => a.start - b.start);
+  // Inserts at original offsets; at one offset a closing == goes before an
+  // opening == and both go before a block id.
+  const inserts: Array<{ at: number; rank: number; text: string }> = [];
+  const lines = new Map<number, Array<{ i: number; wrapped: boolean; blockId?: string }>>();
+  let lastEnd = -1;
+  for (const s of order) {
+    if (s.start < lastEnd) continue;
+    lastEnd = s.end;
+    const span = body.slice(s.start, s.end);
+    const enclosed = body.slice(Math.max(0, s.start - 2), s.start) === "==" && body.slice(s.end, s.end + 2) === "==";
+    const wrapped = canWrapAsHighlight(span) && !enclosed;
+    if (wrapped) {
+      inserts.push({ at: s.start, rank: 1, text: "==" });
+      inserts.push({ at: s.end, rank: 0, text: "==" });
+    }
+    // The id belongs to the line the span ends on, before any \r of a CRLF.
+    const nl = body.indexOf("\n", s.end);
+    let eol = nl === -1 ? body.length : nl;
+    if (eol > s.end && body[eol - 1] === "\r") eol--;
+    const group = lines.get(eol) ?? [];
+    group.push({ i: s.i, wrapped, blockId: s.blockId });
+    lines.set(eol, group);
+  }
+
+  if (mode === "highlight+block") {
+    for (const [eol, group] of lines) {
+      const lineText = body.slice(body.lastIndexOf("\n", eol - 1) + 1, eol);
+      let id = TRAILING_BLOCK_ID.exec(lineText)?.[1];
+      if (!id) {
+        if (!group.some((g) => g.wrapped)) continue;
+        id = group.find((g) => g.blockId)?.blockId ?? `wikilm-${newId()}`;
+        inserts.push({ at: eol, rank: 2, text: ` ^${id}` });
+      }
+      for (const g of group) blockIds.set(g.i, id);
+    }
+  }
+
+  inserts.sort((a, b) => a.at - b.at || a.rank - b.rank);
+  let text = "";
+  let pos = 0;
+  for (const ins of inserts) {
+    text += body.slice(pos, ins.at) + ins.text;
+    pos = ins.at;
+  }
+  return { text: text + body.slice(pos), blockIds };
+}
+
+/**
+ * Mark quotes in the live text of a note (frontmatter and all), for a write
+ * through `vault.process`. Each quote was located in an earlier read; when the
+ * live body still holds it at the same offsets those are used, otherwise it is
+ * found again with `locateQuote`. A quote no longer in the note is left
+ * unmarked. `blockIds` maps an index into `quotes` to its line's block id.
+ */
+export function markQuotes(
+  data: string,
+  quotes: Array<{ text: string; start: number; end: number }>,
+  mode: SpanMarkMode,
+): { text: string; blockIds: Map<number, string> } {
+  const { body, offset } = splitFrontmatter(data);
+  const found: Array<{ start: number; end: number }> = [];
+  const index: number[] = [];
+  quotes.forEach((q, i) => {
+    const loc = body.slice(q.start, q.end) === q.text ? { start: q.start, end: q.end } : locateQuote(body, q.text);
+    if (!loc) return;
+    found.push({ start: loc.start, end: loc.end });
+    index.push(i);
+  });
+  const marked = markSpans(body, found, mode);
+  const blockIds = new Map<number, string>();
+  for (const [k, id] of marked.blockIds) blockIds.set(index[k], id);
+  return { text: data.slice(0, offset) + marked.text, blockIds };
+}
+
 /** Build Anki's plain-text import format (tab-separated with header directives). */
 export function buildAnkiTextImport(
   rows: Array<{ notetype: string; deck: string; fields: string[]; tags: string[] }>,

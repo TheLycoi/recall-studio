@@ -10,6 +10,7 @@ import {
   headingAbove,
   lineOf,
   locateQuote,
+  markQuotes,
   newId,
   normalizeWs,
   splitFrontmatter,
@@ -174,8 +175,8 @@ interface LocatedSpan {
 
 /**
  * Turn located character spans of a note's body into highlights: build the
- * records, mark the spans in the file (last to first so offsets stay valid),
- * and queue card writing. Shared by AI highlighting and reading-view capture.
+ * records, mark the spans in the live note text (src/util.ts markQuotes), and
+ * queue card writing. Shared by AI highlighting and reading-view capture.
  */
 async function captureSpans(
   plugin: WikiLmPlugin,
@@ -214,27 +215,22 @@ async function captureSpans(
     });
   }
 
+  // Marked in the live text: an AI pick arrives after a model call that can
+  // take minutes, and anything the reader typed meanwhile must survive. Each
+  // quote is found again in that text; one no longer there stays unmarked.
   const mode = plugin.settings.markMode;
   if (mode !== "none" && created.length) {
-    let edited = body;
-    for (const { h, span: l } of [...created].reverse()) {
-      const span = body.slice(l.start, l.end);
-      if (!canWrapAsHighlight(span)) continue;
-      let rep = `==${span}==`;
-      let end = l.end;
-      if (mode === "highlight+block") {
-        const lineEnd = body.indexOf("\n", l.end);
-        const eol = lineEnd === -1 ? body.length : lineEnd;
-        const tail = body.slice(l.end, eol);
-        if (!/\^[A-Za-z0-9-]+\s*$/.test(tail)) {
-          h.blockId = `wikilm-${newId()}`;
-          rep = rep + tail + ` ^${h.blockId}`;
-          end = eol;
-        }
-      }
-      edited = edited.slice(0, l.start) + rep + edited.slice(end);
-    }
-    if (edited !== body) await plugin.app.vault.modify(file, raw.slice(0, offset) + edited);
+    const quotes = created.map(({ span: l }) => ({ text: body.slice(l.start, l.end), start: l.start, end: l.end }));
+    let blockIds = new Map<number, string>();
+    await plugin.app.vault.process(file, (data) => {
+      const marked = markQuotes(data, quotes, mode);
+      blockIds = marked.blockIds;
+      return marked.text;
+    });
+    created.forEach(({ h }, i) => {
+      const id = blockIds.get(i);
+      if (id) h.blockId = id;
+    });
   }
 
   for (const { h } of created) {
