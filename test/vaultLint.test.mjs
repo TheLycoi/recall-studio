@@ -49,6 +49,55 @@ test("lintVault counts one dead link per note per target, not per mention", () =
   assert.equal(r.issues.filter((i) => i.id === "dead-link").length, 1);
 });
 
+// Review finding 2: the lint must decide "dead" the way Obsidian does. A link
+// to a note outside the wiki folder, or an embed of an attachment, is a
+// working link, and calling it dead put a pre-ticked unlink row on it.
+const REPRO = "From [[Clippings/Some article|the article]].\n\n- ![[Board.excalidraw]]\n- ![[Data.base]]\n";
+const knowsClipping = (lp) => (lp === "Clippings/Some article" ? "Clippings/Some article.md" : null);
+
+test("lintVault asks the resolver, so a link to a note outside the wiki is not dead", () => {
+  const r = vl.lintVault([{ path: "wiki/concepts/a.md", content: REPRO }], { resolve: knowsClipping });
+  assert.deepEqual(r.issues.filter((i) => i.id === "dead-link").map((i) => i.target), []);
+});
+
+test("lintVault never reports an embedded .excalidraw or .base file as a dead link", () => {
+  const content = "Some prose that indexes.\n\n![[Board.excalidraw]]\n![[Data.base]]\n![[Clip.webm]]\n![[Notes.docx]]\n";
+  // Without a resolver (the fallback the tests use) and with one that knows nothing.
+  for (const options of [{}, { resolve: () => null }]) {
+    const r = vl.lintVault([{ path: "wiki/concepts/a.md", content }], options);
+    assert.deepEqual(r.issues.filter((i) => i.id === "dead-link").map((i) => i.target), []);
+  }
+});
+
+test("with a resolver, a slug-folded link Obsidian cannot open is dead", () => {
+  // `[[Spaced repetition]]` does not open `spaced-repetition.md` in Obsidian,
+  // so it is dead, and the relink's slug tier is what repairs it.
+  const r = vl.lintVault(
+    [
+      { path: "wiki/concepts/a.md", content: "A sentence that indexes. [[Spaced repetition]]" },
+      { path: "wiki/concepts/spaced-repetition.md", content: "Review at widening intervals. [[a]]" },
+    ],
+    { resolve: (lp) => (lp === "a" ? "wiki/concepts/a.md" : null) },
+  );
+  const dead = r.issues.filter((i) => i.id === "dead-link");
+  assert.equal(dead.length, 1);
+  assert.equal(dead[0].target, "Spaced repetition");
+});
+
+test("a link the resolver sends to a wiki page counts toward that page's incoming links", () => {
+  const r = vl.lintVault(
+    [
+      { path: "wiki/a.md", content: "A sentence that indexes fine here. [[Clippings/x]]" },
+      { path: "wiki/b.md", content: "Another sentence entirely. [[Bee]]" },
+    ],
+    { resolve: (lp) => ({ Bee: "wiki/a.md", "Clippings/x": "Clippings/x.md" })[lp] ?? null },
+  );
+  assert.equal(r.issues.filter((i) => i.id === "dead-link").length, 0);
+  // b reaches a; a's link leaves the wiki, which is not a wiki neighbour.
+  assert.deepEqual(ids(r, "orphan"), []);
+  assert.deepEqual(ids(r, "unlinked"), ["b"]);
+});
+
 test("lintVault calls a note with no links either way an orphan, not merely unlinked", () => {
   const r = vl.lintVault([
     { path: "wiki/a.md", content: "A sentence that indexes fine here." },

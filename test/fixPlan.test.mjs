@@ -15,7 +15,15 @@ before(async () => {
   const out = path.join(dir, "fixPlan.mjs");
   await build({ entryPoints: ["src/fixPlan.ts"], bundle: true, format: "esm", platform: "node", outfile: out, logLevel: "silent" });
   fp = await import(pathToFileURL(out).href);
+  // The lint and the link fixer too, for the tests that run the whole chain
+  // from a scan to an applied note.
+  for (const [name, entry] of [["vl", "src/vaultLint.ts"], ["vf", "src/vaultFix.ts"]]) {
+    const file = path.join(dir, `${name}.mjs`);
+    await build({ entryPoints: [entry], bundle: true, format: "esm", platform: "node", outfile: file, logLevel: "silent" });
+    chain[name] = await import(pathToFileURL(file).href);
+  }
 });
+const chain = {};
 
 // ---------------------------------------------------------------- fixtures
 
@@ -663,6 +671,49 @@ test("planUnwraps offers one row per dead link in a wiki page", () => {
   assert.equal(rows[0].apply("See [[Iterative refinement]]."), "See Iterative refinement.");
 });
 
+test("planUnwraps rows start unticked: withdrawing a link is the reader's call", () => {
+  const rows = fp.planUnwraps(
+    [{ id: "dead-link", path: "wiki/concepts/a.md", title: "A", target: "Iterative refinement" }],
+    new Map([["wiki/concepts/a.md", "See [[Iterative refinement]]."]]),
+    "wiki/",
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].enabled, false);
+  assert.equal(rows[0].label, "Unlink Iterative refinement (no note found) — keep the words, drop the link");
+});
+
+test("the review's reproduction: links outside the wiki and attachment embeds survive scan, plan and apply", () => {
+  const body = "From [[Clippings/Some article|the article]].\n\n- ![[Board.excalidraw]]\n- ![[Data.base]]\n";
+  const pages = [{ path: "wiki/concepts/a.md", content: body }];
+  const resolve = (lp) => (lp === "Clippings/Some article" ? "Clippings/Some article.md" : null);
+  const report = chain.vl.lintVault(pages, { resolve });
+  const contents = new Map([["wiki/concepts/a.md", body]]);
+  const fixPages = [{ path: "wiki/concepts/a.md", title: "a", displayTitle: "A", aliases: [] }];
+  const links = chain.vf.planLinkFixes(report.issues, fixPages, contents, "wiki/");
+  const rows = [...fp.planRelinks(links.fixable), ...fp.planRepoints(links.unresolved), ...fp.planUnwraps(links.unresolved, contents, "wiki/")];
+  assert.deepEqual(rows.map((r) => r.label), []);
+  const list = fp.groupByNote(rows).get("wiki/concepts/a.md") ?? [];
+  assert.equal(fp.applyFixesToNote(body, list), body);
+});
+
+test("a slug-folded link the resolver cannot open is relinked by the slug tier", () => {
+  const body = "A sentence that indexes. [[Spaced repetition]]";
+  const pages = [
+    { path: "wiki/concepts/a.md", content: body },
+    { path: "wiki/concepts/spaced-repetition.md", content: "# Spaced repetition\n\nReview at widening intervals." },
+  ];
+  const report = chain.vl.lintVault(pages, { resolve: () => null });
+  const fixPages = [
+    { path: "wiki/concepts/a.md", title: "a", displayTitle: "A", aliases: [] },
+    { path: "wiki/concepts/spaced-repetition.md", title: "spaced-repetition", displayTitle: "Spaced repetition", aliases: [] },
+  ];
+  const links = chain.vf.planLinkFixes(report.issues, fixPages, new Map(pages.map((p) => [p.path, p.content])), "wiki/");
+  const relinks = fp.planRelinks(links.fixable);
+  assert.equal(relinks.length, 1);
+  assert.equal(links.fixable[0].confidence, "slug");
+  assert.equal(relinks[0].apply(body), "A sentence that indexes. [[concepts/spaced-repetition|Spaced repetition]]");
+});
+
 test("planUnwraps skips the wiki's own generated and documentation notes", () => {
   // log.md is a generated report, and schema/config.md holds deliberate
   // placeholders like [[entities/page-name]]. Stripping those would corrupt
@@ -776,7 +827,8 @@ test("an unwrap for a link no repoint claimed is still applied", () => {
   const page = { path: "wiki/Missing.md", title: "Missing", aliases: [] };
   const repoints = fp.planRepoints(issues);
   const chosen = fp.repointFix(repoints.find((r) => r.target === "Missing"), page, "wiki/");
-  const rows = [chosen, ...fp.planUnwraps(issues, contents, "wiki/")];
+  // Unwrap rows start unticked; the reader ticks the one for "Other".
+  const rows = [chosen, ...fp.planUnwraps(issues, contents, "wiki/").map((r) => ({ ...r, enabled: true }))];
   const out = fp.applyFixesToNote(body, fp.groupByNote(rows).get("wiki/a.md"));
   assert.equal(out, "See [[Missing|Missing]] and Other.\n");
 });
@@ -788,7 +840,8 @@ test("an unticked repoint leaves its unwrap free to run", () => {
   const body = "See [[Missing]] here.\n";
   const issues = [{ id: "dead-link", path: "wiki/a.md", title: "A", target: "Missing" }];
   const contents = new Map([["wiki/a.md", body]]);
-  const rows = [...fp.planRepoints(issues), ...fp.planUnwraps(issues, contents, "wiki/")];
+  // Unwrap rows start unticked; the reader ticks this one.
+  const rows = [...fp.planRepoints(issues), ...fp.planUnwraps(issues, contents, "wiki/").map((r) => ({ ...r, enabled: true }))];
   const out = fp.applyFixesToNote(body, fp.groupByNote(rows).get("wiki/a.md"));
   assert.equal(out, "See Missing here.\n");
 });

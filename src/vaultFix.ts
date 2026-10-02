@@ -1,12 +1,14 @@
 /**
  * Repairs for what `src/vaultLint.ts` finds.
  *
- * The lint says a link is dead. This decides whether it is dead because the
- * page is missing or dead because the link spells the page's name differently
- * from its filename, and rewrites the second kind. In this vault that is the
- * overwhelming majority: links are written in prose ("[[Spaced repetition]]")
- * while the files are slugs ("concepts/spaced-repetition.md"), so the two never
- * compare equal and the graph cannot cross them.
+ * The lint says a link is dead, by Obsidian's own resolver. This decides
+ * whether it is dead because the page is missing or dead because the link
+ * spells the page's name differently from its filename, and rewrites the
+ * second kind. In this vault that is the overwhelming majority: links are
+ * written in prose ("[[Spaced repetition]]") while the files are slugs
+ * ("concepts/spaced-repetition.md"), and Obsidian does not open one from the
+ * other. The slug fold (`linkKey`, `nameKey`) is used here only to find the
+ * page a dead link meant, never to call a link alive.
  *
  * The matching tiers and the alias-preserving rewrite follow the design of
  * gd4ai/obsidian-llm-wiki's dead-link repair (`findDeadLinkTarget`,

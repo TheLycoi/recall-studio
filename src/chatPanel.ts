@@ -365,7 +365,11 @@ export class ChatPanel {
         sources.set(file.path, await this.plugin.app.vault.cachedRead(file));
       }
 
-      const report = lintVault(pages, { schema: WIKI_SCHEMA, sources });
+      // Obsidian's resolver decides "dead", so a link to a note outside the
+      // wiki folder is a working link, not one to offer to unlink.
+      const cache = this.plugin.app.metadataCache;
+      const resolve = (linkpath: string, from: string): string | null => cache.getFirstLinkpathDest(linkpath, from)?.path ?? null;
+      const report = lintVault(pages, { schema: WIKI_SCHEMA, sources, resolve });
       const settings = this.plugin.settings;
       const ready = providerReady(settings, "lint");
       const asked = opts.review !== false;

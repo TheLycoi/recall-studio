@@ -77,6 +77,16 @@ export interface LintOptions {
    * clipped from.
    */
   sources?: Map<string, string>;
+  /**
+   * Obsidian's own link resolver: the vault path a link opens from the note at
+   * `from`, or null when it opens nothing. The plugin passes
+   * `metadataCache.getFirstLinkpathDest`, so "dead" means what it means in the
+   * editor. A link resolves when this returns a path, whether or not that path
+   * is a wiki page. Without it (the tests) links are matched against the pages
+   * by `linkKey`, which also folds a prose title onto a slug filename, a match
+   * Obsidian does not make.
+   */
+  resolve?: (linkpath: string, from: string) => string | null;
 }
 
 /** One of a page's own sentences that no quote on the page states, numbered within the page. */
@@ -205,17 +215,42 @@ function spanTarget(t: NonNullable<EvidenceUnit["target"]>): boolean {
 }
 
 /**
- * Every note link in a body, resolved against the known notes; unresolved ones
- * come back as null.
+ * A link target that names a file other than a note: any extension but `.md`.
+ * `![[Board.excalidraw]]`, `![[Data.base]]`, `![[Clip.webm]]` are attachments,
+ * and an unresolved one is never offered as a dead link, since the lint cannot
+ * tell a missing attachment from one Obsidian opens by a route it does not see.
+ */
+function namesAttachment(raw: string): boolean {
+  const ext = /\.([^./\s]+)$/.exec(raw.split("/").pop() ?? raw);
+  return ext !== null && ext[1].toLowerCase() !== "md";
+}
+
+/**
+ * Every note link in a body. `resolved` says whether the link opens anything;
+ * `target` is the wiki page it opens, or null when it opens nothing or opens a
+ * note outside the wiki.
  *
  * Links are read with `noteLinks` (src/graph.ts), the same scanner the graph
- * walks with, so the lint cannot report a dead link the graph is traversing
- * happily — or miss one it is silently dropping.
+ * walks with. With a resolver, Obsidian decides; without one, `known` (link key
+ * to page path) stands in for it.
  */
-function linksOf(content: string, known: Map<string, string>): Array<{ raw: string; target: string | null }> {
+function linksOf(
+  content: string,
+  from: string,
+  known: Map<string, string>,
+  pagePaths: Set<string>,
+  resolve: LintOptions["resolve"],
+): Array<{ raw: string; resolved: boolean; target: string | null }> {
   // Embeds count here: `![[Some Note]]` transcludes a note that has to exist,
   // and a broken one is exactly the kind of rot this is looking for.
-  return noteLinks(content).map(({ raw }) => ({ raw, target: known.get(linkKey(raw)) ?? null }));
+  return noteLinks(content).map(({ raw }) => {
+    if (resolve) {
+      const dest = resolve(raw, from);
+      return { raw, resolved: dest !== null, target: dest !== null && pagePaths.has(dest) ? dest : null };
+    }
+    const target = known.get(linkKey(raw)) ?? null;
+    return { raw, resolved: target !== null, target };
+  });
 }
 
 
@@ -393,9 +428,9 @@ function mentionQuotes(body: string): Array<{ quote: string; cited: string | nul
  * The text a citation points at, or null when the vault does not hold it.
  *
  * A citation is a wikilink, so it may name a path, a path without `.md`, or
- * just a title. `known` already maps a link key to a real path for the
- * dead-link check, so the same resolution is reused here rather than invented
- * a second time.
+ * just a title. `known` already maps a link key to a wiki page for the
+ * dead-link check's fallback, so the same matching is reused here rather than
+ * invented a second time.
  */
 function resolveSource(cited: string, sources: Map<string, string>, known: Map<string, string>): string | null {
   const direct = sources.get(cited) ?? sources.get(`${cited}.md`);
@@ -426,6 +461,7 @@ export function lintVault(pages: LintPage[], options: LintOptions = {}): VaultLi
   for (const p of pages) {
     if (!known.has(linkKey(p.path))) known.set(linkKey(p.path), p.path);
   }
+  const pagePaths = new Set(pages.map((p) => p.path));
 
   const issues: VaultIssue[] = [];
   const incoming = new Map<string, number>();
@@ -537,8 +573,9 @@ export function lintVault(pages: LintPage[], options: LintOptions = {}): VaultLi
     }
 
     const seenTargets = new Set<string>();
-    for (const link of linksOf(page.content, known)) {
-      if (link.target === null) {
+    for (const link of linksOf(page.content, page.path, known, pagePaths, options.resolve)) {
+      if (!link.resolved) {
+        if (namesAttachment(link.raw)) continue;
         // One entry per missing target per note, as upstream: a note that
         // names the same missing page four times is one problem, not four.
         if (seenTargets.has(link.raw.toLowerCase())) continue;
@@ -546,7 +583,9 @@ export function lintVault(pages: LintPage[], options: LintOptions = {}): VaultLi
         issues.push({ id: "dead-link", path: page.path, title, target: link.raw });
         continue;
       }
-      if (link.target === page.path) continue;
+      // A working link to a note outside the wiki is not a wiki neighbour, so
+      // it counts toward neither `orphan` nor `unlinked`.
+      if (link.target === null || link.target === page.path) continue;
       outgoing.set(page.path, (outgoing.get(page.path) ?? 0) + 1);
       incoming.set(link.target, (incoming.get(link.target) ?? 0) + 1);
     }

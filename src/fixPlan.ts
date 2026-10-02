@@ -637,7 +637,8 @@ function isAuthoredPage(path: string, wikiPrefix: string): boolean {
  *
  * A row is only offered when it would actually change the note, and only for
  * pages the reader wrote — the wiki's generated log and its schema examples
- * hold broken links on purpose.
+ * hold broken links on purpose. It starts unticked, so withdrawing a link is
+ * always the reader's act.
  */
 export function planUnwraps(unresolved: VaultIssue[], contents: Map<string, string>, wikiPrefix: string): Fix[] {
   const fixes: Fix[] = [];
@@ -654,8 +655,10 @@ export function planUnwraps(unresolved: VaultIssue[], contents: Map<string, stri
       id: `unwrap:${issue.path}:${n++}`,
       kind: "unwrap",
       path: issue.path,
-      label: `Unlink ${target} (no such page) — keep the words, drop the link`,
-      enabled: true,
+      label: `Unlink ${target} (no note found) — keep the words, drop the link`,
+      // Never pre-ticked: a link the lint cannot resolve may still be one the
+      // reader meant, and one Apply must not delete it.
+      enabled: false,
       target,
       apply: (content: string) => unwrapDeadLink(content, target),
     });
