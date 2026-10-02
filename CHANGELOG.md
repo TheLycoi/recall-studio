@@ -15,7 +15,15 @@ The first public release.
 - **Lint wiki (llm-wiki)** left the palette. It still runs from the chat box as `smart-fix` or `llm-wiki-lint`.
 - Digest sections are a lead line and cited bullets.
 - The quiz is free recall, one section of a note at a time.
-- Bug fixes from the release review: see the commits. <!-- orchestrator fills -->
+- Decide dead links with Obsidian's resolver, and never pre-tick an unlink
+- Mark highlights in the live note text, one block id per line
+- Keep the open card edit when a background card lands; extra instructions last one run
+- A digest merge keeps the reader's callout whole and writes every coalesced section
+- Count only verified recall marks; a failed cue falls back and a failed grade still finishes
+- Snapshot a reader-written index or log before the engine rewrites it
+- Default the topic folder to wiki, where the rest of the plugin already writes
+- Inbox store goes read-only when it cannot read, and stops writing after unload
+- Link rewrites keep tables, brackets and case variants intact
 
 **Hotkeys lost in this release.** A hotkey bound to `digest-folder` no longer fires. Bind **Digest…** and tick the folder in its picker. `lint-wiki-upstream` is chat-only, so a hotkey bound to it no longer fires either.
 
