@@ -2,6 +2,7 @@ import { CLAUDE_CLI_MODELS, CODEX_FALLBACK_MODELS, DEFAULT_ROLES, modelOptions, 
 import { App, Notice, PluginSettingTab, Setting, ButtonComponent } from "obsidian";
 import type WikiLmPlugin from "./main";
 import { UPSTREAM_VERSION } from "./upstream/vendor";
+import { DEFAULT_TOPIC_FOLDER } from "./settingsDefaults";
 
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 export type Provider = "anthropic" | "gemini" | "codex" | "claudecli";
@@ -203,7 +204,7 @@ export const DEFAULT_SETTINGS: WikiLmSettings = {
   includeExtra: true,
   exportFolder: "wiki/schema/exports",
 
-  topicFolder: "classes",
+  topicFolder: DEFAULT_TOPIC_FOLDER,
   schemaFolder: "wiki/schema",
   digestMaxNotes: 6,
   digestInstructions: "",

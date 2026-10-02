@@ -100,7 +100,7 @@ While it is on, any passage you drag across goes to the inbox. It is off by defa
 These are the defaults. Every folder can be changed in settings.
 
 ```
-classes/<class code>/   topic pages the digest writes (Topic notes folder)
+wiki/<class code>/      topic pages the digest writes (Topic notes folder)
 wiki/concepts/          concept pages from AI highlight and ingest
 wiki/entities/          entity pages from AI highlight and ingest
 wiki/sources/           source summaries the ingest engine writes
@@ -115,9 +115,9 @@ wiki/schema/            WikiLM's own files (Schema folder)
   exports/              Anki text-file exports
 ```
 
-Ask, the quiz and **Lint wiki** read the pages under the **Topic notes folder**.
-If you want them to read the pages AI highlight and ingest write too, set that folder to `wiki`.
+Ask, the quiz and **Lint wiki** read the pages under the **Topic notes folder**, which is `wiki/` by default, so they see the pages AI highlight, ingest and the digest write.
 The schema folder and the transcript folder are skipped, so they never count as pages.
+An install from before 0.14.0 that already keeps its topic pages in `classes/` goes on using `classes/`.
 
 **The schema note.** `wiki/schema/wikilm.md` is yours to edit.
 WikiLM writes it once from a template, then reads it before every model call and hands its sections to the model as house rules.

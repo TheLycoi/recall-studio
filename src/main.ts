@@ -12,6 +12,7 @@ import { LlmClient } from "./llm";
 import { askInstruction, pickDeck } from "./modals";
 import type { Card, Highlight } from "./model";
 import { DEFAULT_SETTINGS, WikiLmSettingTab, type WikiLmSettings } from "./settings";
+import { LEGACY_TOPIC_FOLDER, resolveTopicFolderDefault } from "./settingsDefaults";
 import { SchemaFile } from "./schemaFile";
 import { InboxStore } from "./store";
 import { UpstreamHost } from "./upstream/host";
@@ -144,6 +145,20 @@ export default class WikiLmPlugin extends Plugin {
     type LegacySettings = Partial<WikiLmSettings> & { quizQuestions?: number };
     if ((saved as LegacySettings | null)?.quizQuestions !== undefined) {
       delete (this.settings as LegacySettings).quizQuestions;
+      await this.saveData(this.settings);
+    }
+    // 0.14.0: the topic folder defaults to `wiki`, where ingest writes, not
+    // `classes`. Saved settings without the key predate it and were using
+    // `classes`; such an install keeps `classes` if the vault has that folder,
+    // and the choice is saved so it holds from now on. Nothing saved is a
+    // fresh install, which takes the new default. The folder is looked up on
+    // disk as well, because the vault's file index may still be filling while
+    // plugins load.
+    if (saved && !saved.topicFolder) {
+      const hasClasses =
+        this.app.vault.getFolderByPath(LEGACY_TOPIC_FOLDER) !== null ||
+        (await this.app.vault.adapter.stat(LEGACY_TOPIC_FOLDER))?.type === "folder";
+      this.settings.topicFolder = resolveTopicFolderDefault(saved, hasClasses);
       await this.saveData(this.settings);
     }
   }
