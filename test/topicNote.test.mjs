@@ -1945,3 +1945,61 @@ test("a new section is never created under a heading the page already has, howev
   assert.ok(!r.md.includes("## Conduct Disorder and Oppositional Defiant Disorder"), `folded into the existing heading:\n${r.md}`);
   assert.ok(r.md.includes("My own notes.\n\nSomething new about CD and ODD."), r.md);
 });
+
+// ---- B5: a digest merge into an existing page (release review items 7 and 8)
+
+test("a quote folded beside a slide the reader already quoted lands after the reader's whole callout", () => {
+  const cite = "[[Deck.pdf#page=4&selection=1,0,2,5&color=yellow|Deck, p.4]]";
+  const readers = `> [!PDF|yellow] ${cite}\n> > Reader quote line one\n> > Reader quote line two\n>\n> My own comment.`;
+  const body = `# Receptors\n\n## Properties\n\n${readers}\n\nAfter.\n`;
+  const headingEnd = body.indexOf("## Properties") + "## Properties".length;
+  const quote = "> [!PDF|yellow] [[Deck.pdf#page=4&selection=3,0,4,5&color=yellow|Deck, p.4]]\n> > A new quote from slide four";
+  const out = tn.spliceBesideCitation(body, headingEnd, body.length, "Deck", 4, quote);
+  assert.ok(out, "the section cites page 4, so the quote folds");
+  assert.ok(out.includes(readers), `the reader's callout stays contiguous:\n${out}`);
+  assert.ok(out.indexOf(quote) > out.indexOf("> My own comment."), `the new callout comes after the reader's:\n${out}`);
+  assert.ok(out.indexOf(quote) < out.indexOf("After."), `and before the paragraph that followed it:\n${out}`);
+});
+
+test("two groups coalesced into one existing page both reach the replay, in order", () => {
+  const h1 = { ...SELECTION_HIGHLIGHT, id: "H01" };
+  const h2 = {
+    ...SELECTION_HIGHLIGHT,
+    id: "H02",
+    key: "page=5&selection=1,0,9,12",
+    page: 5,
+    target: { page: 5, selection: { beginIndex: 1, beginOffset: 0, endIndex: 9, endOffset: 12 }, color: "yellow" },
+    text: "Affinity is the strength with which a drug binds its receptor, read off as the dissociation constant.",
+  };
+  const manifest = manifestFor([h1, h2]);
+  const home = {
+    path: "classes/BIO101/Receptors.md",
+    title: "Receptors",
+    kind: "concept",
+    aliases: ["Drug Receptors"],
+    classCodes: ["BIO101"],
+    md: "---\nclass: BIO101\naliases:\n  - \"Drug Receptors\"\n---\n# Receptors\n\n## Definition\nOld.\n",
+  };
+  const note = (title, heading, id, prose) => ({ title, summary: "S", related: [], kind: "concept", aliases: [], tag: "term", closest_existing: "", why_new: "", sections: [{ heading, prose, quote_ids: [id] }] });
+  const draft = {
+    notes: [note("Receptors", "Properties", "H01", "Receptors have two properties [H01]."), note("Drug Receptors", "Affinity", "H02", "Affinity is binding strength [H02].")],
+    unused_ids: [],
+  };
+  const planned = tn.planTopicNotes(draft, manifest, { classCode: "BIO101", topicFolder: "classes", created: "2026-09-10", pages: [home] });
+  assert.equal(planned.notes.length, 1, "both groups coalesce into the one page");
+  const row = planned.notes[0];
+  assert.deepEqual(row.groups, ["Receptors", "Drug Receptors"]);
+  assert.equal(row.article.sections[0].heading, "Properties", "article stays the first group's");
+  assert.deepEqual(row.articles.map((a) => a.article.sections[0].heading), ["Properties", "Affinity"], "every group's article is kept, in order");
+  const replayed = tn.replayArticles(home.md, PDF_BASENAME, row.articles, { classCode: "BIO101" });
+  for (const heading of ["Properties", "Affinity"]) {
+    assert.ok(tn.noteSections(replayed).includes(heading), `replay writes the ${heading} section:\n${replayed}`);
+  }
+  for (const key of ["selection=2,0,33,19", "selection=1,0,9,12"]) {
+    assert.ok(replayed.includes(key), `replay writes the ${key} quote:\n${replayed}`);
+  }
+  // Replaying only the first article, as the write used to, loses the second group.
+  const firstOnly = tn.replayArticles(home.md, PDF_BASENAME, [{ article: row.article, section: row.articleSection }], { classCode: "BIO101" });
+  assert.ok(!tn.noteSections(firstOnly).includes("Affinity"), "the first article alone does not hold the second group");
+  assert.equal(replayed, row.content, "the replay writes what the preview showed");
+});

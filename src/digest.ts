@@ -18,7 +18,7 @@ import { collectPdfHighlights } from "./pdfHighlights";
 import { isPdfFile } from "./pdf";
 import type { DigestDraft } from "./schemas";
 import { suggestPdfHighlights } from "./suggest";
-import { applyDigestChoices, mergeArticle, mergeTopicHighlights, noteAliases, noteOutline, noteSections, parseTopicNote, planTopicNotes, type ExistingPage, type PreparedNote } from "./topicNote";
+import { applyDigestChoices, mergeTopicHighlights, noteAliases, noteOutline, noteSections, parseTopicNote, planTopicNotes, replayArticles, type ExistingPage, type PreparedNote } from "./topicNote";
 import { coveredBy, indexNote, type EvidenceUnit } from "./retrieval";
 import type { DigestExistingNote } from "./prompt";
 
@@ -177,12 +177,14 @@ function remergeNote(
   // quotes — against the page as it reads now, with the same coverage check
   // the plan used. Replaying the row merge here instead threw the prose away
   // and appended the quotes a second time under ## Highlights.
-  if (note.article) {
-    return mergeArticle(current, pdfBasename, note.article, {
+  // A row that took several groups replays each group's article in the order
+  // the planner merged them; replaying only the first left the rest unwritten.
+  const articles = note.articles ?? (note.article ? [{ article: note.article, section: note.articleSection }] : []);
+  if (articles.length) {
+    return replayArticles(current, pdfBasename, articles, {
       classCode,
-      section: note.articleSection,
       covered: covered ? (text) => covered(note.path, text) : undefined,
-    }).md;
+    });
   }
   const sectionOf = new Map<string, string>();
   for (const s of note.sections ?? []) {

@@ -546,9 +546,13 @@ export interface PreparedNote {
    * merge against the page as it reads at write time (src/digest.ts
    * remergeNote). `articleSection` is the one heading the whole article was
    * filed under, when the proposal was a subtopic of an existing page.
+   * When coalescing folds several groups into one page these two stay the
+   * first group's; `articles` holds every group's, in the order they merged.
    */
   article?: Article;
   articleSection?: string;
+  /** Every article merged into this row, in order, each with the heading it was filed under (see `replayArticles`). */
+  articles?: Array<{ article: Article; section?: string }>;
   /**
    * Notes the model proposed that the planner filed into this one instead of
    * creating: what each was called, the heading it became (empty when it was
@@ -1129,6 +1133,7 @@ export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: Pl
         kind: home.kind,
         sections: merged.sections.length ? merged.sections : undefined,
         article,
+        articles: [{ article }],
         groups: [group.title],
       });
       continue;
@@ -1170,6 +1175,7 @@ export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: Pl
         sections: merged.sections.length ? merged.sections : undefined,
         article,
         articleSection: route.heading || undefined,
+        articles: [{ article, section: route.heading || undefined }],
         routed: [{ from: group.title, heading: route.heading, why: route.why, keys: group.highlights.map((h) => h.key) }],
         groups: [group.title],
       });
@@ -1247,6 +1253,10 @@ export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: Pl
     if (note.said) seen.said = (seen.said ?? 0) + note.said;
     if (note.sections?.length) seen.sections = [...(seen.sections ?? []), ...note.sections];
     if (note.routed?.length) seen.routed = [...(seen.routed ?? []), ...note.routed];
+    // The content above is the sequential merge of every group, so the write's
+    // replay must run every group's article too, or the later ones are counted
+    // as appended and never written.
+    if (note.articles?.length) seen.articles = [...(seen.articles ?? []), ...note.articles];
     for (const r of note.related) if (!seen.related.includes(r)) seen.related.push(r);
     for (const g of note.groups) if (!seen.groups.includes(g)) seen.groups.push(g);
   }
@@ -1754,12 +1764,32 @@ export function spliceBesideCitation(body: string, headingEnd: number, sectionEn
   for (let i = at + 1; i < lines.length; i++) {
     const l = lines[i];
     if (l.trim() === "") break;
-    if (!/^\s+\S/.test(l) && !/^\s*(?:[-*+]|\d+[.)])\s/.test(l)) break;
+    // A blockquote line at any depth continues it: a PDF++ callout is the
+    // header line plus its `> >` quote and `>` comment lines, and a quote
+    // inserted after the header alone would split the reader's callout.
+    if (!/^\s+\S/.test(l) && !/^\s*(?:[-*+]|\d+[.)])\s/.test(l) && !/^\s*>/.test(l)) break;
     end = i;
   }
   const before = lines.slice(0, end + 1).join("\n").replace(/\n*$/, "");
   const after = lines.slice(end + 1).join("\n").replace(/^\n*/, "");
   return body.slice(0, headingEnd) + `${before}\n\n${text}` + (after ? `\n\n${after}` : "\n") + body.slice(sectionEnd);
+}
+
+/**
+ * Replay a planned row's articles against the page as it reads now, in the
+ * order the planner merged them, so a page that took two groups gets both.
+ */
+export function replayArticles(
+  current: string,
+  pdfBasename: string,
+  articles: Array<{ article: Article; section?: string }>,
+  opts: { classCode?: string; covered?: (text: string) => boolean },
+): string {
+  let md = current;
+  for (const { article, section } of articles) {
+    md = mergeArticle(md, pdfBasename, article, { classCode: opts.classCode, section, covered: opts.covered }).md;
+  }
+  return md;
 }
 
 export function spliceIntoSection(body: string, headingEnd: number, text: string): string {
