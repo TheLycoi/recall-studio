@@ -11,7 +11,7 @@ let sp;
 let pm;
 let mf;
 before(async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "recall-test-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "wikilm-test-"));
   const out = path.join(dir, "suggestPlan.mjs");
   await build({ entryPoints: ["src/suggestPlan.ts"], bundle: true, format: "esm", platform: "node", outfile: out, logLevel: "silent" });
   sp = await import(pathToFileURL(out).href);
@@ -25,8 +25,8 @@ before(async () => {
 
 const item = (str, hasEOL = false) => ({ str, hasEOL });
 
-const PDF_BASENAME = "HBIO 250 - Pharmacology";
-const CLASS_CODE = "HBIO 250";
+const PDF_BASENAME = "BIO 101 - Pharmacology";
+const CLASS_CODE = "BIO 101";
 
 // A page whose items give several non-overlapping quotable spans.
 const PAGE_ONE = [
@@ -219,7 +219,7 @@ test("planWikiNotes merges into an existing wiki note", () => {
   assert.ok(note.content.includes(existingCallout));
   // Ends with the Highlights section and the newly added row: the quote, then its page link.
   assert.ok(/## Highlights\n\n[\s\S]*\n$/.test(note.content));
-  assert.ok(/\n> \[!PDF\|yellow\] \[\[[^\]]+\|HBIO 250[^\]]*, p\.1\]\]\n> > Affinity rises with structural fit\.\n$/.test(note.content), note.content);
+  assert.ok(/\n> \[!PDF\|yellow\] \[\[[^\]]+\|BIO 101[^\]]*, p\.1\]\]\n> > Affinity rises with structural fit\.\n$/.test(note.content), note.content);
 });
 
 // Rebuild the subpath the same way pdflink does, so the fixture's existing

@@ -23,7 +23,7 @@ const OBSIDIAN_STUB = {
 
 let g;
 before(async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "recall-test-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "wikilm-test-"));
   const out = path.join(dir, "gemini.mjs");
   await build({
     entryPoints: ["src/gemini.ts"],

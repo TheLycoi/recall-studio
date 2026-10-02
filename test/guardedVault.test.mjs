@@ -58,9 +58,9 @@ after(() => {
 
 // ---- lostContent -------------------------------------------------------------------
 
-const PDF = "HBIO 250 Lecture 3";
+const PDF = "BIO 101 Lecture 3";
 const PAGE = `---
-class: HBIO250
+class: BIO101
 updated: 2026-09-01
 sources:
   - "[[${PDF}.pdf]]"
@@ -88,7 +88,7 @@ const lines = (text) => g.lostContent(PAGE, text).map((x) => x.line);
 
 test("nothing is lost when prose changes, lines move, headings change case, and frontmatter values change", () => {
   const moved = PAGE.replace("updated: 2026-09-01", "updated: 2026-09-29")
-    .replace('  - "[[HBIO 250 Lecture 3.pdf]]"', '  - "[[HBIO 250 Lecture 3.pdf]]"\n  - "[[sources/lecture]]"\ngeneration_complete: true')
+    .replace('  - "[[BIO 101 Lecture 3.pdf]]"', '  - "[[BIO 101 Lecture 3.pdf]]"\n  - "[[sources/lecture]]"\ngeneration_complete: true')
     .replace("Receptors are proteins that bind a ligand.", "Receptors are proteins. They bind a ligand, and antagonists bind without transducing.")
     .replace("## Two Properties", "## two properties   ")
     .replace("> > Receptors bind a ligand and transduce a signal.", "> > Receptors bind a ligand and transduce a signal.   ");
@@ -156,11 +156,11 @@ test("a PDF link in a frontmatter value is protected: upstream's sources normali
 
 test("a dropped frontmatter key is lost; its value may change and new keys may come", () => {
   assert.deepEqual(
-    g.lostContent(PAGE, PAGE.replace("class: HBIO250\n", "")).map((x) => [x.kind, x.key]),
+    g.lostContent(PAGE, PAGE.replace("class: BIO101\n", "")).map((x) => [x.kind, x.key]),
     [["frontmatter-key", "class"]],
   );
   const noFrontmatter = PAGE.slice(PAGE.indexOf("# Receptors"));
-  assert.deepEqual(g.lostContent(PAGE, noFrontmatter).map((x) => x.key).sort(), ["HBIO 250 Lecture 3.pdf", "class", "sources", "updated"]);
+  assert.deepEqual(g.lostContent(PAGE, noFrontmatter).map((x) => x.key).sort(), ["BIO 101 Lecture 3.pdf", "class", "sources", "updated"]);
 });
 
 test("describeLoss names the kinds of line a rewrite would drop", () => {
@@ -235,7 +235,7 @@ test("a later write to a refused page in the same run is held too, so the page k
   const { guard, files, vault } = guarded({ "wiki/concepts/receptors.md": PAGE });
   await vault.process(file(vault, "wiki/concepts/receptors.md"), () => PAGE.replace("## Two Properties\n", ""));
   // Upstream's markPageComplete stamps a key; its related-page pass rewrites the frontmatter.
-  await vault.process(file(vault, "wiki/concepts/receptors.md"), (t) => t.replace("class: HBIO250", "class: HBIO250\ngeneration_complete: true"));
+  await vault.process(file(vault, "wiki/concepts/receptors.md"), (t) => t.replace("class: BIO101", "class: BIO101\ngeneration_complete: true"));
   assert.equal(files.get("wiki/concepts/receptors.md"), PAGE);
   assert.equal(guard.refusals.length, 1);
   assert.equal(guard.refusals[0].held, 1);
@@ -245,7 +245,7 @@ test("a later write to a refused page in the same run is held too, so the page k
 
 test("the guard lists each page whose rewrite landed in the run, including one refused later", async () => {
   const { guard, files, vault } = guarded({ "wiki/concepts/receptors.md": PAGE, "wiki/concepts/other.md": "# Other\n", "wiki/concepts/kept.md": "# Kept\n" });
-  await vault.process(file(vault, "wiki/concepts/receptors.md"), (t) => t.replace("class: HBIO250", "class: HBIO250\naliases:\n  - Receptor"));
+  await vault.process(file(vault, "wiki/concepts/receptors.md"), (t) => t.replace("class: BIO101", "class: BIO101\naliases:\n  - Receptor"));
   await vault.process(file(vault, "wiki/concepts/receptors.md"), (t) => t.replace("## Two Properties\n", ""));
   await vault.process(file(vault, "wiki/concepts/other.md"), (t) => `${t}\nMore.\n`);
   await vault.process(file(vault, "wiki/concepts/kept.md"), () => "Gone.\n");
@@ -286,23 +286,23 @@ test("a new file is written normally, and one created in this run is the engine'
 });
 
 test("a run begun with a folder writes only inside it: every write elsewhere is refused and recorded once", async () => {
-  const classNote = "# HBIO 250\n\nWeek 3 covers each [[receptor]].\n";
-  const { guard, files, vault } = guarded({ "classes/HBIO250.md": classNote, "wiki/concepts/x.md": "# X\n", "wikis/y.md": "# Y\n" });
+  const classNote = "# BIO 101\n\nWeek 3 covers each [[receptor]].\n";
+  const { guard, files, vault } = guarded({ "classes/BIO101.md": classNote, "wiki/concepts/x.md": "# X\n", "wikis/y.md": "# Y\n" });
   guard.begin("wiki");
   // What upstream's link retargeting does to a note that links a merged page (core/link-retarget.ts).
-  await vault.process(file(vault, "classes/HBIO250.md"), (t) => t.replace("[[receptor]]", "[[receptors]]"));
-  await vault.adapter.write("classes/HBIO250.md", "gone\n");
+  await vault.process(file(vault, "classes/BIO101.md"), (t) => t.replace("[[receptor]]", "[[receptors]]"));
+  await vault.adapter.write("classes/BIO101.md", "gone\n");
   await vault.modify(file(vault, "wikis/y.md"), "# Y\n\nMore.\n");
   await assert.rejects(vault.create("classes/new.md", "# New\n"), /outside the wiki folder/);
   await assert.rejects(vault.adapter.write("new.md", "# New\n"), /outside the wiki folder/);
   await vault.rename(file(vault, "wiki/concepts/x.md"), "classes/x.md");
-  assert.equal(files.get("classes/HBIO250.md"), classNote);
+  assert.equal(files.get("classes/BIO101.md"), classNote);
   assert.equal(files.get("wikis/y.md"), "# Y\n");
   assert.ok(!files.has("classes/new.md") && !files.has("new.md") && !files.has("classes/x.md"));
   assert.deepEqual(
     guard.refusals.map((r) => [r.path, r.action, r.detail ?? null, r.held]),
     [
-      ["classes/HBIO250.md", "rewrite", "outside the wiki folder", 1],
+      ["classes/BIO101.md", "rewrite", "outside the wiki folder", 1],
       ["wikis/y.md", "rewrite", "outside the wiki folder", 0],
       ["classes/new.md", "rewrite", "outside the wiki folder", 0],
       ["new.md", "rewrite", "outside the wiki folder", 0],

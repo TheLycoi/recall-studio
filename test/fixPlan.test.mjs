@@ -37,7 +37,7 @@ Review at widening intervals.
 
 const CLASS_PAGE = `---
 type: concept
-class: HBIO250
+class: BIO101
 tags: [term]
 ---
 
@@ -70,17 +70,17 @@ Nothing links here.
 
 const HUB = `---
 type: topic-index
-class: PHED163
+class: KIN110
 ---
 
-# PHED163
+# KIN110
 
 ## Module 1 (CH 1)
 - [[Health Coach]]
 - [[Wellness]]
 
 ## Sources
-- [[PHED163 Chapter 1.pdf]]
+- [[KIN110 Chapter 1.pdf]]
 `;
 
 const RECT_NOTE = `---
@@ -91,7 +91,7 @@ type: concept
 
 ## Highlights
 
-![[HBIO 250.pdf#page=20&rect=37,49,697,348|HBIO 250, p.20]]
+![[BIO 101.pdf#page=20&rect=37,49,697,348|BIO 101, p.20]]
 `;
 
 const QUOTE_NOTE = `---
@@ -183,7 +183,7 @@ test("hubListLink appends after the last list line before ## Sources", () => {
   assert.match(out, /- \[\[Wellness\]\]\n- \[\[Doping\|Doping\]\]\n/);
   assert.ok(out.indexOf("- [[Doping|Doping]]") < out.indexOf("## Sources"));
   // The Sources list is untouched.
-  assert.match(out, /## Sources\n- \[\[PHED163 Chapter 1\.pdf\]\]/);
+  assert.match(out, /## Sources\n- \[\[KIN110 Chapter 1\.pdf\]\]/);
   assert.equal(fp.hubListLink(out, "Doping", "Doping"), out);
 });
 
@@ -193,7 +193,7 @@ test("hubListLink skips a page the hub already lists", () => {
 });
 
 test("hubListLink inserts a list when the hub has none", () => {
-  const bare = "# PHED163\n\n## Sources\n- [[a.pdf]]\n";
+  const bare = "# KIN110\n\n## Sources\n- [[a.pdf]]\n";
   const out = fp.hubListLink(bare, "Doping", "Doping");
   assert.match(out, /- \[\[Doping\|Doping\]\]/);
   assert.ok(out.indexOf("- [[Doping|Doping]]") < out.indexOf("## Sources"));
@@ -204,15 +204,15 @@ test("hubListLink inserts a list when the hub has none", () => {
 
 test("rectToCallout replaces the embed line with the PDF++ callout", () => {
   const key = "page=20&rect=37,49,697,348";
-  const out = fp.rectToCallout(RECT_NOTE, key, "HBIO 250", "Doping is the use of banned substances.");
-  assert.match(out, /> \[!PDF\] \[\[HBIO 250\.pdf#page=20&rect=37,49,697,348\|HBIO 250, p\.20\]\]\n> > Doping is the use of banned substances\./);
-  assert.doesNotMatch(out, /!\[\[HBIO 250\.pdf#page=20/);
-  assert.equal(fp.rectToCallout(out, key, "HBIO 250", "Doping is the use of banned substances."), out);
+  const out = fp.rectToCallout(RECT_NOTE, key, "BIO 101", "Doping is the use of banned substances.");
+  assert.match(out, /> \[!PDF\] \[\[BIO 101\.pdf#page=20&rect=37,49,697,348\|BIO 101, p\.20\]\]\n> > Doping is the use of banned substances\./);
+  assert.doesNotMatch(out, /!\[\[BIO 101\.pdf#page=20/);
+  assert.equal(fp.rectToCallout(out, key, "BIO 101", "Doping is the use of banned substances."), out);
 });
 
 test("rectToCallout leaves the note alone with no text or no matching key", () => {
-  assert.equal(fp.rectToCallout(RECT_NOTE, "page=20&rect=37,49,697,348", "HBIO 250", ""), RECT_NOTE);
-  assert.equal(fp.rectToCallout(RECT_NOTE, "page=99&rect=1,2,3,4", "HBIO 250", "text"), RECT_NOTE);
+  assert.equal(fp.rectToCallout(RECT_NOTE, "page=20&rect=37,49,697,348", "BIO 101", ""), RECT_NOTE);
+  assert.equal(fp.rectToCallout(RECT_NOTE, "page=99&rect=1,2,3,4", "BIO 101", "text"), RECT_NOTE);
 });
 
 test("rectToCallout keeps the prose that shares the embed's line", () => {
@@ -313,8 +313,8 @@ test("setAliases with no new names returns the note unchanged", () => {
 test("setTag replaces inline and block tags and inserts after type:", () => {
   assert.match(fp.setTag("---\ntype: concept\ntags: [other]\n---\n", "term"), /tags: \[term\]/);
   assert.match(fp.setTag("---\ntype: concept\ntags:\n  - other\n  - junk\n---\n", "term"), /tags: \[term\]\n---/);
-  const inserted = fp.setTag("---\ntype: concept\nclass: HBIO250\n---\n", "term");
-  assert.match(inserted, /type: concept\ntags: \[term\]\nclass: HBIO250/);
+  const inserted = fp.setTag("---\ntype: concept\nclass: BIO101\n---\n", "term");
+  assert.match(inserted, /type: concept\ntags: \[term\]\nclass: BIO101/);
   assert.equal(fp.setTag(inserted, "term"), inserted);
 });
 
@@ -336,11 +336,11 @@ const PAGES = () =>
   new Map([
     [
       "wiki/concepts/coaching-communication.md",
-      { path: "wiki/concepts/coaching-communication.md", title: "coaching-communication", displayTitle: "Coaching Communication", schema: "class", kind: "concept", classCodes: ["PHED163"], content: CLASS_PAGE },
+      { path: "wiki/concepts/coaching-communication.md", title: "coaching-communication", displayTitle: "Coaching Communication", schema: "class", kind: "concept", classCodes: ["KIN110"], content: CLASS_PAGE },
     ],
     [
       "wiki/concepts/empowering-behavior-change.md",
-      { path: "wiki/concepts/empowering-behavior-change.md", title: "empowering-behavior-change", displayTitle: "Empowering Behavior Change", schema: "class", kind: "concept", classCodes: ["PHED163"], content: CLASS_PAGE },
+      { path: "wiki/concepts/empowering-behavior-change.md", title: "empowering-behavior-change", displayTitle: "Empowering Behavior Change", schema: "class", kind: "concept", classCodes: ["KIN110"], content: CLASS_PAGE },
     ],
   ]);
 
@@ -370,20 +370,20 @@ test("planCrossLinks proposes both directions of a duplicate pair", () => {
 test("planCrossLinks under a topic folder prefix writes links relative to that folder", () => {
   const pages = new Map([
     [
-      "classes/HBIO250/receptors.md",
-      { path: "classes/HBIO250/receptors.md", title: "receptors", displayTitle: "Receptors", schema: "class", kind: "concept", classCodes: ["HBIO250"], content: CLASS_PAGE },
+      "classes/BIO101/receptors.md",
+      { path: "classes/BIO101/receptors.md", title: "receptors", displayTitle: "Receptors", schema: "class", kind: "concept", classCodes: ["BIO101"], content: CLASS_PAGE },
     ],
     [
-      "classes/HBIO250/agonists.md",
-      { path: "classes/HBIO250/agonists.md", title: "agonists", displayTitle: "Agonists", schema: "class", kind: "concept", classCodes: ["HBIO250"], content: CLASS_PAGE },
+      "classes/BIO101/agonists.md",
+      { path: "classes/BIO101/agonists.md", title: "agonists", displayTitle: "Agonists", schema: "class", kind: "concept", classCodes: ["BIO101"], content: CLASS_PAGE },
     ],
   ]);
   const issues = [
     {
       id: "duplicate-pages",
-      path: "classes/HBIO250/receptors.md",
+      path: "classes/BIO101/receptors.md",
       title: "Receptors",
-      target: "classes/HBIO250/agonists.md",
+      target: "classes/BIO101/agonists.md",
     },
   ];
   const fixes = fp.planCrossLinks(issues, pages, "classes/");
@@ -391,7 +391,7 @@ test("planCrossLinks under a topic folder prefix writes links relative to that f
   const applied = fixes[0].apply(CLASS_PAGE);
   // Relative to the prefix, `.md` stripped, `|display` — the same shape
   // `buildReplacement` gives a repoint under this prefix.
-  assert.match(applied, /- \[\[HBIO250\/agonists\|Agonists\]\]/);
+  assert.match(applied, /- \[\[BIO101\/agonists\|Agonists\]\]/);
 });
 
 test("planRelinks wraps the fixable rows the link fixer already found", () => {
@@ -456,22 +456,22 @@ test("planHubLinks lists an unlinked page in its class's hub", () => {
   const pages = new Map([
     [
       "wiki/concepts/doping.md",
-      { path: "wiki/concepts/doping.md", title: "doping", displayTitle: "Doping", schema: "class", kind: "concept", classCodes: ["HBIO250"], content: CLASS_PAGE },
+      { path: "wiki/concepts/doping.md", title: "doping", displayTitle: "Doping", schema: "class", kind: "concept", classCodes: ["BIO101"], content: CLASS_PAGE },
     ],
   ]);
   const hubs = new Map([
-    ["HBIO250", { path: "classes/HBIO250/HBIO250.md", title: "HBIO250", schema: "class", kind: "concept", classCodes: ["HBIO250"], content: HUB }],
+    ["BIO101", { path: "classes/BIO101/BIO101.md", title: "BIO101", schema: "class", kind: "concept", classCodes: ["BIO101"], content: HUB }],
   ]);
   const issues = [{ id: "unlinked", path: "wiki/concepts/doping.md", title: "Doping" }];
   const fixes = fp.planHubLinks(issues, pages, hubs, "wiki/");
   assert.equal(fixes.length, 1);
   assert.equal(fixes[0].kind, "hub-link");
-  assert.equal(fixes[0].path, "classes/HBIO250/HBIO250.md");
-  assert.equal(fixes[0].label, "List Doping in HBIO250 hub");
+  assert.equal(fixes[0].path, "classes/BIO101/BIO101.md");
+  assert.equal(fixes[0].label, "List Doping in BIO101 hub");
   assert.match(fixes[0].apply(HUB), /- \[\[concepts\/doping\|Doping\]\]/);
 
   // The hub is never listed in itself.
-  const hubIssue = [{ id: "orphan", path: "classes/HBIO250/HBIO250.md", title: "HBIO250" }];
+  const hubIssue = [{ id: "orphan", path: "classes/BIO101/BIO101.md", title: "BIO101" }];
   assert.deepEqual(fp.planHubLinks(hubIssue, hubs, hubs, "wiki/"), []);
   // A page whose class has no hub gets no row here.
   assert.deepEqual(fp.planHubLinks(issues, pages, new Map(), "wiki/"), []);
@@ -481,7 +481,7 @@ test("planRelatedFrom links an orphan from its nearest neighbour", () => {
   const pages = new Map([
     [
       "wiki/concepts/doping.md",
-      { path: "wiki/concepts/doping.md", title: "doping", displayTitle: "Doping", schema: "class", kind: "concept", classCodes: ["HBIO250"], content: CLASS_PAGE },
+      { path: "wiki/concepts/doping.md", title: "doping", displayTitle: "Doping", schema: "class", kind: "concept", classCodes: ["BIO101"], content: CLASS_PAGE },
     ],
   ]);
   const neighbour = {
@@ -490,7 +490,7 @@ test("planRelatedFrom links an orphan from its nearest neighbour", () => {
     displayTitle: "Pharmacology",
     schema: "class",
     kind: "concept",
-    classCodes: ["HBIO250"],
+    classCodes: ["BIO101"],
     content: CLASS_PAGE,
   };
   const issues = [{ id: "orphan", path: "wiki/concepts/doping.md", title: "Doping" }];
@@ -509,19 +509,19 @@ test("planRectCallouts proposes one row per rect-only note with text", () => {
   const pages = new Map([
     [
       "wiki/concepts/rect.md",
-      { path: "wiki/concepts/rect.md", title: "rect", displayTitle: "Rect only", schema: "class", kind: "concept", classCodes: ["HBIO250"], content: RECT_NOTE },
+      { path: "wiki/concepts/rect.md", title: "rect", displayTitle: "Rect only", schema: "class", kind: "concept", classCodes: ["BIO101"], content: RECT_NOTE },
     ],
   ]);
   const issues = [{ id: "no-evidence", path: "wiki/concepts/rect.md", title: "Rect only" }];
-  const rectText = () => [{ key: "page=20&rect=37,49,697,348", pdfBasename: "HBIO 250", text: "Doping is banned." }];
+  const rectText = () => [{ key: "page=20&rect=37,49,697,348", pdfBasename: "BIO 101", text: "Doping is banned." }];
   const fixes = fp.planRectCallouts(issues, rectText);
   assert.equal(fixes.length, 1);
   assert.equal(fixes[0].kind, "rect-callout");
-  assert.equal(fixes[0].label, "Quote 1 rectangle from HBIO 250");
+  assert.equal(fixes[0].label, "Quote 1 rectangle from BIO 101");
   assert.match(fixes[0].apply(RECT_NOTE), /> > Doping is banned\./);
 
   // A rect with no text layer is no row at all: honesty over coverage.
-  assert.deepEqual(fp.planRectCallouts(issues, () => [{ key: "page=20&rect=37,49,697,348", pdfBasename: "HBIO 250", text: "" }]), []);
+  assert.deepEqual(fp.planRectCallouts(issues, () => [{ key: "page=20&rect=37,49,697,348", pdfBasename: "BIO 101", text: "" }]), []);
   assert.deepEqual(fp.planRectCallouts(issues, () => []), []);
 });
 
@@ -844,19 +844,19 @@ test("cross-link ids come from the pair and the direction, so a verdict's rows m
 });
 
 test("planRelatedFrom leaves a page to its hub when its class has one", () => {
-  const doping = { path: "wiki/concepts/doping.md", title: "doping", displayTitle: "Doping", schema: "class", kind: "concept", classCodes: ["HBIO250"], content: CLASS_PAGE };
-  const lone = { path: "wiki/concepts/lone.md", title: "lone", displayTitle: "Lone", schema: "class", kind: "concept", classCodes: ["PHED999"], content: CLASS_PAGE };
+  const doping = { path: "wiki/concepts/doping.md", title: "doping", displayTitle: "Doping", schema: "class", kind: "concept", classCodes: ["BIO101"], content: CLASS_PAGE };
+  const lone = { path: "wiki/concepts/lone.md", title: "lone", displayTitle: "Lone", schema: "class", kind: "concept", classCodes: ["KIN999"], content: CLASS_PAGE };
   const pages = new Map([[doping.path, doping], [lone.path, lone]]);
-  const hub = { path: "classes/HBIO250/HBIO250.md", title: "HBIO250", schema: "class", kind: "concept", classCodes: ["HBIO250"], content: HUB };
-  const hubs = new Map([["HBIO250", hub]]);
-  const neighbour = { path: "wiki/concepts/pharmacology.md", title: "pharmacology", displayTitle: "Pharmacology", schema: "class", kind: "concept", classCodes: ["HBIO250"], content: CLASS_PAGE };
+  const hub = { path: "classes/BIO101/BIO101.md", title: "BIO101", schema: "class", kind: "concept", classCodes: ["BIO101"], content: HUB };
+  const hubs = new Map([["BIO101", hub]]);
+  const neighbour = { path: "wiki/concepts/pharmacology.md", title: "pharmacology", displayTitle: "Pharmacology", schema: "class", kind: "concept", classCodes: ["BIO101"], content: CLASS_PAGE };
   const issues = [
     { id: "orphan", path: doping.path, title: "Doping" },
     { id: "unlinked", path: lone.path, title: "Lone" },
   ];
   const hubRows = fp.planHubLinks(issues, pages, hubs, "wiki/");
   const related = fp.planRelatedFrom(issues, pages, () => neighbour, "wiki/", hubs);
-  assert.deepEqual(hubRows.map((f) => f.label), ["List Doping in HBIO250 hub"]);
+  assert.deepEqual(hubRows.map((f) => f.label), ["List Doping in BIO101 hub"]);
   assert.deepEqual(related.map((f) => f.label), ["Relate Lone from Pharmacology"], "the page with a hub gets the hub row only");
   // Without hubs passed, every orphan still gets a neighbour row, as before.
   assert.equal(fp.planRelatedFrom(issues, pages, () => neighbour, "wiki/").length, 2);
@@ -906,10 +906,10 @@ test("planReviewLinks gives each link one row with a stable id, and skips pages 
 });
 
 test("hub and neighbour rows name the page they make reachable", () => {
-  const doping = { path: "wiki/concepts/doping.md", title: "doping", displayTitle: "Doping", schema: "class", kind: "concept", classCodes: ["HBIO250"], content: CLASS_PAGE };
-  const lone = { path: "wiki/concepts/lone.md", title: "lone", displayTitle: "Lone", schema: "class", kind: "concept", classCodes: ["PHED999"], content: CLASS_PAGE };
+  const doping = { path: "wiki/concepts/doping.md", title: "doping", displayTitle: "Doping", schema: "class", kind: "concept", classCodes: ["BIO101"], content: CLASS_PAGE };
+  const lone = { path: "wiki/concepts/lone.md", title: "lone", displayTitle: "Lone", schema: "class", kind: "concept", classCodes: ["KIN999"], content: CLASS_PAGE };
   const pages = new Map([[doping.path, doping], [lone.path, lone]]);
-  const hubs = new Map([["HBIO250", { path: "classes/HBIO250/HBIO250.md", title: "HBIO250", schema: "class", kind: "concept", classCodes: ["HBIO250"], content: HUB }]]);
+  const hubs = new Map([["BIO101", { path: "classes/BIO101/BIO101.md", title: "BIO101", schema: "class", kind: "concept", classCodes: ["BIO101"], content: HUB }]]);
   const neighbour = { path: "wiki/concepts/pharmacology.md", title: "pharmacology", displayTitle: "Pharmacology", schema: "class", kind: "concept", classCodes: [], content: CLASS_PAGE };
   const issues = [{ id: "orphan", path: doping.path, title: "Doping" }, { id: "unlinked", path: lone.path, title: "Lone" }];
   assert.deepEqual(fp.planHubLinks(issues, pages, hubs, "wiki/").map((f) => f.about), [doping.path]);
@@ -967,7 +967,7 @@ test("setKind rewrites type: and leaves a page without one alone", () => {
   assert.equal(once, "---\ntype: entity\ntags: [term]\n---\n\n# A\n");
   assert.equal(fp.setKind(once, "entity"), once, "applying twice changes nothing more");
   assert.equal(fp.setKind(md, "concept"), md, "already that kind: byte-identical");
-  const classPage = "---\nclass: HBIO250\n---\n\n# A\n";
+  const classPage = "---\nclass: BIO101\n---\n\n# A\n";
   assert.equal(fp.setKind(classPage, "entity"), classPage);
   assert.equal(fp.setKind("# No frontmatter\n", "entity"), "# No frontmatter\n");
   assert.equal(fp.setKind('---\ntype: "concept"\n---\n', "entity"), "---\ntype: entity\n---\n");

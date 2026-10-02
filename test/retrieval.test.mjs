@@ -10,7 +10,7 @@ import { pathToFileURL } from "node:url";
 let rt;
 let tn;
 before(async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "recall-test-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "wikilm-test-"));
   const outRetrieval = path.join(dir, "retrieval.mjs");
   const outTopicNote = path.join(dir, "topicNote.mjs");
   await build({ entryPoints: ["src/retrieval.ts"], bundle: true, format: "esm", platform: "node", outfile: outRetrieval, logLevel: "silent" });
@@ -20,7 +20,7 @@ before(async () => {
 
   RECEPTORS_MD = tn.renderTopicNote({
     title: "Receptors",
-    classCode: "HBIO250",
+    classCode: "BIO101",
     created: "2026-09-10",
     pdfBasename: PHARM_PDF,
     summary: "Receptors bind drugs with high affinity and transduce a signal.",
@@ -32,7 +32,7 @@ before(async () => {
   });
   KINETICS_MD = tn.renderTopicNote({
     title: "Pharmacokinetics",
-    classCode: "HBIO250",
+    classCode: "BIO101",
     created: "2026-09-10",
     pdfBasename: PHARM_PDF,
     summary: "What the body does to the drug: absorption, distribution, metabolism, excretion.",
@@ -44,12 +44,12 @@ before(async () => {
   });
 });
 
-const PHARM_PDF = "HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics";
-const CLAIMS_PDF = "Module 3 - CH 3 Video Assignments (2) - Conrad Ragsdale";
+const PHARM_PDF = "BIO 101 - Pharmacology, Pharmacodynamics, and Pharmacokinetics";
+const CLAIMS_PDF = "Module 3 - CH 3 Video Assignments (2) - A Student";
 
-const RECEPTORS_PATH = "classes/HBIO250/Receptors.md";
-const KINETICS_PATH = "classes/HBIO250/Pharmacokinetics.md";
-const STAGES_PATH = "classes/PHED163/Stages of Change.md";
+const RECEPTORS_PATH = "classes/BIO101/Receptors.md";
+const KINETICS_PATH = "classes/BIO101/Pharmacokinetics.md";
+const STAGES_PATH = "classes/KIN110/Stages of Change.md";
 
 function selection(page, text, color = "yellow") {
   return {
@@ -88,14 +88,14 @@ const KINETICS_HIGHLIGHTS = KINETICS_TEXTS.map((t, i) => selection(i + 1, t));
 let RECEPTORS_MD;
 let KINETICS_MD;
 
-// A PHED163-style claims note: the shape of
-// projects/classes/PHED163/Stages of Change.md, three bullets, em dash separator.
+// A KIN110-style claims note: the shape of
+// projects/classes/KIN110/Stages of Change.md, three bullets, em dash separator.
 const STAGES_MD = `---
 type: topic
-class: PHED163
+class: KIN110
 created: 2026-09-07
 source_file: "[[${CLAIMS_PDF}.pdf]]"
-tags: [phed163]
+tags: [kin110]
 ---
 
 # The five stages of change
@@ -213,10 +213,10 @@ test("indexNote carries titles, ids, pages and targets", () => {
 });
 
 test("indexNote carries the note's class codes, scalar or list, and none when absent", () => {
-  const scalar = rt.indexNote("classes/HBIO250/X.md", "---\nclass: HBIO250\n---\nA sentence of prose here.");
-  assert.deepEqual(scalar[0].classCodes, ["HBIO250"]);
-  const list = rt.indexNote("classes/HBIO250/Y.md", "---\nclass: [HBIO250, PHED163]\n---\nAnother sentence of prose here.");
-  assert.deepEqual(list[0].classCodes, ["HBIO250", "PHED163"]);
+  const scalar = rt.indexNote("classes/BIO101/X.md", "---\nclass: BIO101\n---\nA sentence of prose here.");
+  assert.deepEqual(scalar[0].classCodes, ["BIO101"]);
+  const list = rt.indexNote("classes/BIO101/Y.md", "---\nclass: [BIO101, KIN110]\n---\nAnother sentence of prose here.");
+  assert.deepEqual(list[0].classCodes, ["BIO101", "KIN110"]);
   const none = rt.indexNote("notes/Z.md", "A sentence of prose here.");
   assert.deepEqual(none[0].classCodes, []);
 });
@@ -233,7 +233,7 @@ test("indexNote strips == marks and the source link from claim text", () => {
 
 test("indexNote falls back to the file basename when the note has no H1", () => {
   const md = "## Key claims\n- A claim about clearance. — [[Notes.pdf#page=3|p.3]]\n";
-  const units = rt.indexNote("classes/HBIO250/Untitled Note.md", md);
+  const units = rt.indexNote("classes/BIO101/Untitled Note.md", md);
   assert.equal(units.length, 1);
   assert.equal(units[0].noteTitle, "Untitled Note");
   assert.equal(units[0].page, 3);
@@ -241,7 +241,7 @@ test("indexNote falls back to the file basename when the note has no H1", () => 
 
 test("indexNote leaves target and page null for a claim linking to a non-PDF note", () => {
   const md = "## Key claims\n- Coaching honors client autonomy. — [[Health Coach|the coach note]]\n";
-  const units = rt.indexNote("classes/PHED163/Autonomy.md", md);
+  const units = rt.indexNote("classes/KIN110/Autonomy.md", md);
   assert.equal(units.length, 1);
   assert.equal(units[0].target, null);
   assert.equal(units[0].pdfBasename, null);
@@ -318,7 +318,7 @@ test("renderEvidenceMarkdown renders a selection highlight as a PDF++ callout", 
   const receptors = rt.indexNote(RECEPTORS_PATH, RECEPTORS_MD);
   const md = rt.renderEvidenceMarkdown(receptors[0], 2);
   const lines = md.split("\n");
-  assert.equal(lines[0], "**[2]** [[classes/HBIO250/Receptors|Receptors]]");
+  assert.equal(lines[0], "**[2]** [[classes/BIO101/Receptors|Receptors]]");
   assert.ok(lines[1].startsWith("> [!PDF|yellow] [["), lines[1]);
   assert.ok(lines[1].includes("#page=4&selection=2,0,33,19&color=yellow|p.4]]"));
   assert.equal(lines[2], `> > ${receptors[0].text}`);
@@ -326,10 +326,10 @@ test("renderEvidenceMarkdown renders a selection highlight as a PDF++ callout", 
 
 test("renderEvidenceMarkdown renders a claim without a PDF target as a quote block", () => {
   const md0 = "## Key claims\n- Coaching honors client autonomy. — [[Health Coach|the coach note]]\n";
-  const unit = rt.indexNote("classes/PHED163/Autonomy.md", md0)[0];
+  const unit = rt.indexNote("classes/KIN110/Autonomy.md", md0)[0];
   const md = rt.renderEvidenceMarkdown(unit, 1);
   const lines = md.split("\n");
-  assert.equal(lines[0], "**[1]** [[classes/PHED163/Autonomy|Autonomy]]");
+  assert.equal(lines[0], "**[1]** [[classes/KIN110/Autonomy|Autonomy]]");
   assert.ok(lines[1].startsWith("> "), lines[1]);
   assert.ok(!lines[1].startsWith("> [!PDF"), lines[1]);
   assert.equal(lines[1], "> Coaching honors client autonomy.");
@@ -340,7 +340,7 @@ test("renderEvidenceMarkdown renders a PDF-linked claim as a callout at its page
   const stages = rt.indexNote(STAGES_PATH, STAGES_MD);
   const md = rt.renderEvidenceMarkdown(stages[2], 3);
   const lines = md.split("\n");
-  assert.equal(lines[0], "**[3]** [[classes/PHED163/Stages of Change|The five stages of change]]");
+  assert.equal(lines[0], "**[3]** [[classes/KIN110/Stages of Change|The five stages of change]]");
   assert.ok(lines[1].startsWith("> [!PDF] [["), lines[1]);
   assert.ok(lines[1].includes("#page=2|p.2]]"));
 });
@@ -358,7 +358,7 @@ test("questionScorer counts significant shared words, ignoring stopwords and plu
 // covered. These cover the prose fallback that makes such a note answerable.
 
 test("indexNote falls back to prose when a note has neither section", () => {
-  const md = `---\nclass: HBIO408\n---\n**Definition**: A theoretical point about which an object's mass is equally distributed\n- Used to model whole body movements using classical mechanics\n`;
+  const md = `---\nclass: BIO201\n---\n**Definition**: A theoretical point about which an object's mass is equally distributed\n- Used to model whole body movements using classical mechanics\n`;
   const units = rt.indexNote("wiki/concepts/TBCM.md", md);
   assert.equal(units.length, 2);
   assert.equal(units[0].noteTitle, "TBCM");
@@ -367,7 +367,7 @@ test("indexNote falls back to prose when a note has neither section", () => {
 });
 
 test("indexNote leaves a structured note untouched by the fallback", () => {
-  const structured = rt.indexNote("classes/HBIO250/Receptors.md", RECEPTORS_MD);
+  const structured = rt.indexNote("classes/BIO101/Receptors.md", RECEPTORS_MD);
   assert.ok(structured.length > 0);
   assert.ok(structured.every((u) => u.kind === "highlight" || u.kind === "claim"));
   // Every unit still comes from the parsed sections, not from raw prose.
@@ -376,7 +376,7 @@ test("indexNote leaves a structured note untouched by the fallback", () => {
 
 test("prose fallback carries the callout header's page down to the quoted text", () => {
   const md = [
-    "---", "class: HBIO250", "---",
+    "---", "class: BIO101", "---",
     "> [!PDF|yellow] [[Pharm.pdf#page=2&selection=1,0,1,5&color=yellow|Pharm, p.2]]",
     "> > Pharmacokinetics = “What the body does to drugs”",
   ].join("\n");
@@ -412,7 +412,7 @@ test("prose fallback reduces wikilinks to their display text", () => {
 });
 
 test("an empty note still indexes to nothing", () => {
-  assert.equal(rt.indexNote("wiki/entities/WADA.md", "---\nclass: HBIO250\n---\n").length, 0);
+  assert.equal(rt.indexNote("wiki/entities/WADA.md", "---\nclass: BIO101\n---\n").length, 0);
 });
 
 // Adapted from gd4ai/obsidian-llm-wiki's needle scoring, where a hit on a page
@@ -531,7 +531,7 @@ test("indexNote keeps claims below a fenced ## heading inside Key claims", () =>
     "## Related topics",
     "",
   ].join("\n");
-  const units = rt.indexNote("classes/HBIO250/Clearance.md", md);
+  const units = rt.indexNote("classes/BIO101/Clearance.md", md);
   assert.deepEqual(
     units.filter((u) => u.kind === "claim").map((u) => u.text),
     ["A claim about clearance."],
@@ -555,7 +555,7 @@ test("indexNote ignores a fenced ## Key claims above the real one", () => {
     "- A claim about clearance. — [[Notes.pdf#page=3|p.3]]",
     "",
   ].join("\n");
-  const claims = rt.indexNote("classes/HBIO250/Clearance.md", md).filter((u) => u.kind === "claim");
+  const claims = rt.indexNote("classes/BIO101/Clearance.md", md).filter((u) => u.kind === "claim");
   assert.deepEqual(
     claims.map((u) => [u.text, u.page]),
     [["A claim about clearance.", 3]],
@@ -596,7 +596,7 @@ test("pageContextFor returns the summary and headings of the pages the top evide
 });
 
 test("pageContextFor falls back to the first prose paragraph of a page with no Summary section", () => {
-  const md = "---\nclass: HBIO408\n---\n## [[Deck.pdf#page=1|Linear Impulse]]\n[[Deck.pdf#page=1&selection=1,0,1,4|The effect of a force]]: over time.\n\n- a bullet\n## Linear Momentum\nMomentum is mass times velocity.\n";
+  const md = "---\nclass: BIO201\n---\n## [[Deck.pdf#page=1|Linear Impulse]]\n[[Deck.pdf#page=1&selection=1,0,1,4|The effect of a force]]: over time.\n\n- a bullet\n## Linear Momentum\nMomentum is mass times velocity.\n";
   const unit = { id: "x", notePath: "wiki/concepts/Kinetics.md", noteTitle: "Kinetics", pdfBasename: null, target: null, page: null, text: "t", kind: "claim", classCodes: [] };
   const [page] = rt.pageContextFor([unit], () => md);
   assert.equal(page.title, "Kinetics");
@@ -609,32 +609,32 @@ test("pageContextFor falls back to the first prose paragraph of a page with no S
 test("scopeFor: a class the reader named is binding, even when it holds nothing for the question", () => {
   const u = (path, cls, text) => ({ id: `${path}:${text}`, notePath: path, noteTitle: path, pdfBasename: null, target: null, page: null, text, kind: "claim", classCodes: [cls] });
   const all = [
-    u("a.md", "PSYC360", "Culture sets the baseline for what counts as normal"),
-    u("b.md", "PSYC360", "MRI shows structure while fMRI shows function"),
-    u("c.md", "HBIO408", "Linear impulse is the area under the force-time curve"),
-    u("d.md", "HBIO408", "Impulse equals the change in momentum"),
+    u("a.md", "PSY220", "Culture sets the baseline for what counts as normal"),
+    u("b.md", "PSY220", "MRI shows structure while fMRI shows function"),
+    u("c.md", "BIO201", "Linear impulse is the area under the force-time curve"),
+    u("d.md", "BIO201", "Impulse equals the change in momentum"),
   ];
-  const named = rt.scopeFor(all, "what is linear impulse", { named: "PSYC360" }, { minNotes: 2 });
-  assert.equal(named.scope, "in PSYC360", "a named class is obeyed");
+  const named = rt.scopeFor(all, "what is linear impulse", { named: "PSY220" }, { minNotes: 2 });
+  assert.equal(named.scope, "in PSY220", "a named class is obeyed");
   assert.equal(named.units.length, 2);
 });
 
 test("scopeFor: a class inferred from the open note is dropped when the question matches nothing in it", () => {
   const u = (path, cls, text) => ({ id: `${path}:${text}`, notePath: path, noteTitle: path, pdfBasename: null, target: null, page: null, text, kind: "claim", classCodes: [cls] });
   const all = [
-    u("a.md", "PSYC360", "Culture sets the baseline for what counts as normal"),
-    u("b.md", "PSYC360", "MRI shows structure while fMRI shows function"),
-    u("c.md", "HBIO408", "Linear impulse is the area under the force-time curve"),
-    u("d.md", "HBIO408", "Impulse equals the change in momentum"),
+    u("a.md", "PSY220", "Culture sets the baseline for what counts as normal"),
+    u("b.md", "PSY220", "MRI shows structure while fMRI shows function"),
+    u("c.md", "BIO201", "Linear impulse is the area under the force-time curve"),
+    u("d.md", "BIO201", "Impulse equals the change in momentum"),
   ];
-  // The reader is looking at a PSYC360 note and asks an HBIO408 question.
-  const away = rt.scopeFor(all, "what is linear impulse", { inferred: "PSYC360" }, { minNotes: 2 });
+  // The reader is looking at a PSY220 note and asks an BIO201 question.
+  const away = rt.scopeFor(all, "what is linear impulse", { inferred: "PSY220" }, { minNotes: 2 });
   assert.equal(away.scope, "", "the inferred class is abandoned, so the whole vault answers");
   assert.equal(away.units.length, 4);
 
   // The same note, a question its own class covers: the scope holds.
-  const home = rt.scopeFor(all, "how does culture set what counts as normal", { inferred: "PSYC360" }, { minNotes: 2 });
-  assert.equal(home.scope, "in PSYC360");
+  const home = rt.scopeFor(all, "how does culture set what counts as normal", { inferred: "PSY220" }, { minNotes: 2 });
+  assert.equal(home.scope, "in PSY220");
   assert.equal(home.units.length, 2);
 
   // No class at all is the whole vault, silently.
@@ -643,10 +643,10 @@ test("scopeFor: a class inferred from the open note is dropped when the question
 
 test("scopeFor: a named class too thin to answer from falls back to the vault and says so", () => {
   const u = (path, cls, text) => ({ id: path, notePath: path, noteTitle: path, pdfBasename: null, target: null, page: null, text, kind: "claim", classCodes: [cls] });
-  const all = [u("a.md", "PHED163", "Decisional balance weighs pros against cons"), u("b.md", "HBIO408", "Impulse equals the change in momentum")];
-  const thin = rt.scopeFor(all, "what is decisional balance", { named: "PHED163" }, { minNotes: 5 });
+  const all = [u("a.md", "KIN110", "Decisional balance weighs pros against cons"), u("b.md", "BIO201", "Impulse equals the change in momentum")];
+  const thin = rt.scopeFor(all, "what is decisional balance", { named: "KIN110" }, { minNotes: 5 });
   assert.equal(thin.units.length, 2, "the whole vault stands in");
-  assert.ok(thin.scope.startsWith("the whole vault (PHED163 has 1 note"), thin.scope);
+  assert.ok(thin.scope.startsWith("the whole vault (KIN110 has 1 note"), thin.scope);
 });
 
 // ---- coverage: does a page already say this?
@@ -654,7 +654,7 @@ test("scopeFor: a named class too thin to answer from falls back to the vault an
 test("coveredBy: a claim the page restates is covered; one it only touches is not", () => {
   const units = rt.indexNote("wiki/concepts/Linear Kinematics.md", [
     "---",
-    "class: HBIO408",
+    "class: BIO201",
     "---",
     "[[Deck.pdf#page=34&selection=5,0,6,1|Velocity (m/s):]] Change in position in a given change in time (x/t) Speed & Direction (vector)",
     "[[Deck.pdf#page=34&selection=12,0,15,1|Acceleration (m/s2):]] Change in velocity in given change in time (Vx/t)",
@@ -693,7 +693,7 @@ test("coveredBy matches across word forms, so a restatement is not missed by an 
 
 const COACHING_MD = [
   "---",
-  "class: PHED163",
+  "class: KIN110",
   "---",
   "**Health coaching** is a client-centered partnership in which a coach helps a person change.",
   "",

@@ -10,7 +10,7 @@ import { pathToFileURL } from "node:url";
 let pm;
 let pt;
 before(async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "recall-test-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "wikilm-test-"));
   const out = path.join(dir, "pageMap.mjs");
   await build({ entryPoints: ["src/pageMap.ts"], bundle: true, format: "esm", platform: "node", outfile: out, logLevel: "silent" });
   pm = await import(pathToFileURL(out).href);

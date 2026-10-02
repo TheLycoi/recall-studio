@@ -9,7 +9,7 @@ import { pathToFileURL } from "node:url";
 
 let q;
 before(async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "recall-test-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "wikilm-test-"));
   const out = path.join(dir, "quiz.mjs");
   await build({ entryPoints: ["src/quiz.ts"], bundle: true, format: "esm", platform: "node", outfile: out, logLevel: "silent" });
   q = await import(pathToFileURL(out).href);
@@ -17,8 +17,8 @@ before(async () => {
 
 // ---- fixtures ----------------------------------------------------------------
 
-const RECEPTORS = "classes/HBIO250/Receptors.md";
-const KINETICS = "classes/HBIO250/Pharmacokinetics.md";
+const RECEPTORS = "classes/BIO101/Receptors.md";
+const KINETICS = "classes/BIO101/Pharmacokinetics.md";
 
 function unit(id, notePath, noteTitle, text, extra = {}) {
   return {

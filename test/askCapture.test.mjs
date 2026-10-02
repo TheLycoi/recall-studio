@@ -9,7 +9,7 @@ import { pathToFileURL } from "node:url";
 
 let ac;
 before(async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "recall-test-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "wikilm-test-"));
   const out = path.join(dir, "askCapture.mjs");
   await build({ entryPoints: ["src/askCapture.ts"], bundle: true, format: "esm", platform: "node", outfile: out, logLevel: "silent" });
   ac = await import(pathToFileURL(out).href);

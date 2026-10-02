@@ -22,7 +22,7 @@ const OBSIDIAN_STUB = {
 
 let an;
 before(async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "recall-test-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "wikilm-test-"));
   const out = path.join(dir, "anthropic.mjs");
   await build({
     entryPoints: ["src/anthropic.ts"],

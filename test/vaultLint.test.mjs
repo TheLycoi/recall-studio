@@ -18,7 +18,7 @@ before(async () => {
 const ids = (r, id) => r.issues.filter((i) => i.id === id).map((i) => i.title);
 
 test("lintVault reports a note with only frontmatter as empty", () => {
-  const r = vl.lintVault([{ path: "wiki/WADA.md", content: "---\nclass: HBIO250\n---\n" }]);
+  const r = vl.lintVault([{ path: "wiki/WADA.md", content: "---\nclass: BIO101\n---\n" }]);
   assert.deepEqual(ids(r, "empty-note"), ["WADA"]);
   assert.equal(r.units, 0);
 });
@@ -134,7 +134,7 @@ test("a real alias satisfies the check, inline or block", () => {
 });
 
 test("no schema configured means no schema findings", () => {
-  const r = vl.lintVault([page("wiki/a.md", "class: HBIO408", "Text with a claim in it.")]);
+  const r = vl.lintVault([page("wiki/a.md", "class: BIO201", "Text with a claim in it.")]);
   assert.deepEqual(r.issues.filter((i) => i.id === "schema-violation" || i.id === "no-aliases"), []);
 });
 
@@ -260,9 +260,9 @@ test("two pages citing the same PDF page, with no span, are not duplicates", () 
 });
 
 test("a legacy topic page is a known kind with no tag rule, not a schema violation", () => {
-  const r = vl.lintVault([page("classes/HBIO250/Doping.md", "type: topic\nclass: HBIO250\ntags: [hbio250]", "A sentence of prose here.")], { schema: vl.WIKI_SCHEMA });
+  const r = vl.lintVault([page("classes/BIO101/Doping.md", "type: topic\nclass: BIO101\ntags: [bio101]", "A sentence of prose here.")], { schema: vl.WIKI_SCHEMA });
   assert.deepEqual(r.issues.filter((i) => i.id === "schema-violation"), []);
-  const hub = vl.lintVault([page("classes/PHED163/PHED163.md", "type: topic-index\nclass: PHED163", "A sentence of prose here.")], { schema: vl.WIKI_SCHEMA });
+  const hub = vl.lintVault([page("classes/KIN110/KIN110.md", "type: topic-index\nclass: KIN110", "A sentence of prose here.")], { schema: vl.WIKI_SCHEMA });
   assert.deepEqual(hub.issues.filter((i) => i.id === "schema-violation"), []);
 });
 

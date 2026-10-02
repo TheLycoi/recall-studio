@@ -173,14 +173,14 @@ function tfolder(p) {
 
 // ---- the reader's pages ----------------------------------------------------------
 
-const PDF = "HBIO 250 Lecture 3";
+const PDF = "BIO 101 Lecture 3";
 const QUOTE_LEAD = `> [!PDF|yellow] [[${PDF}.pdf#page=4&selection=2,0,33,19&color=yellow|${PDF}, p.4]]\n> > Receptors bind a ligand and transduce a signal.`;
 const EMBED_LEAD = `![[${PDF}.pdf#page=7&rect=10,20,300,400|${PDF}, p.7]]`;
 const QUOTE_SECTION = `> [!PDF|yellow] [[${PDF}.pdf#page=5&selection=1,0,12,40&color=yellow|${PDF}, p.5]]\n> > Albumin binds drugs but transduces nothing.`;
 
 /** A concept page as the article digest writes one (topicNote.ts renderArticleBody). */
 const DIGEST_PAGE = `---
-class: HBIO250
+class: BIO101
 tags:
   - concept
 sources:
@@ -206,7 +206,7 @@ ${QUOTE_SECTION}
 
 /** A page whose only headings are upstream's own, so a rewrite loses nothing to the section filter. */
 const CANONICAL_PAGE = `---
-class: HBIO250
+class: BIO101
 ---
 # Receptors
 
@@ -340,7 +340,7 @@ test("a complementary append that only adds is written, and the old text is save
   assert.ok(calls.includes("complementary"), calls.join(", "));
   const page = files.get("wiki/concepts/receptors.md");
   assert.match(page, /An antagonist binds receptors without transducing\./, "the append was written");
-  for (const kept of [QUOTE_LEAD, EMBED_LEAD, QUOTE_SECTION, "## Two Properties", "## Related topics", "class: HBIO250"]) {
+  for (const kept of [QUOTE_LEAD, EMBED_LEAD, QUOTE_SECTION, "## Two Properties", "## Related topics", "class: BIO101"]) {
     assert.ok(page.includes(kept), `the page still holds ${kept}`);
   }
   const [snapshot] = saved(files, "/wiki/concepts/receptors.md");
@@ -354,19 +354,19 @@ test("an append to a page whose `sources:` names a PDF is refused: upstream rewr
   const r = await m.ingestWithUpstream(plugin, tfile(NOTE_PATH));
   assert.equal(files.get("wiki/concepts/receptors.md"), DIGEST_PAGE, "the page keeps its PDF source");
   const [proposal] = saved(files, "/wiki/concepts/receptors.proposed.md");
-  assert.match(files.get(proposal), /sources:\n\s+- "\[\[sources\/hbio-250-lecture-3-pdf\]\]"/, "what upstream would have written");
+  assert.match(files.get(proposal), /sources:\n\s+- "\[\[sources\/bio-101-lecture-3-pdf\]\]"/, "what upstream would have written");
   assert.ok(!r.updatedPages.includes("wiki/concepts/receptors.md"));
   assert.match(notices().at(-1), /- wiki\/concepts\/receptors\.md: the rewrite would have dropped 1 line \(1 PDF link\)\./);
 });
 
 test("an ingest run writes only inside the wiki folder: an engine write to the reader's class note is refused and reported", async () => {
-  const classNote = "# HBIO 250\n\nWeek 3 covers each [[receptors]].\n";
+  const classNote = "# BIO 101\n\nWeek 3 covers each [[receptors]].\n";
   let plugin;
   const ctx = setup(
-    { [NOTE_PATH]: NOTE, "classes/HBIO250.md": classNote },
+    { [NOTE_PATH]: NOTE, "classes/BIO101.md": classNote },
     script([RECEPTORS], {
       "source-page": async () => {
-        await plugin.upstreamHost().engine().createOrUpdateFile("classes/HBIO250.md", "# HBIO 250\n\nRewritten.\n");
+        await plugin.upstreamHost().engine().createOrUpdateFile("classes/BIO101.md", "# BIO 101\n\nRewritten.\n");
         return "Receptors and drug action.\n\n## Summary\n\nReceptors bind and transduce.";
       },
     }),
@@ -374,9 +374,9 @@ test("an ingest run writes only inside the wiki folder: an engine write to the r
   plugin = ctx.plugin;
   const r = await m.ingestWithUpstream(plugin, tfile(NOTE_PATH));
   assert.equal(r.success, true, r.errorMessage);
-  assert.equal(ctx.files.get("classes/HBIO250.md"), classNote);
+  assert.equal(ctx.files.get("classes/BIO101.md"), classNote);
   assert.ok(ctx.files.has("wiki/concepts/receptors.md"), "the pages inside the wiki are written");
-  assert.match(notices().at(-1), /- classes\/HBIO250\.md: outside the wiki folder; it was left as it was\./);
+  assert.match(notices().at(-1), /- classes\/BIO101\.md: outside the wiki folder; it was left as it was\./);
 });
 
 test("a brand-new page is created normally, with nothing saved for it", async () => {
@@ -410,7 +410,7 @@ test("a folder run refuses, counts and names every note inside the wiki folder a
       [NOTE_PATH]: NOTE,
       "wiki/sources/wispr/Tuesday.md": NOTE,
       "wiki/concepts/receptors.md": DIGEST_PAGE,
-      "classes/HBIO250.md": "# HBIO 250\n",
+      "classes/BIO101.md": "# BIO 101\n",
     },
     script([]),
   );
@@ -419,5 +419,5 @@ test("a folder run refuses, counts and names every note inside the wiki folder a
   const shown = notices().at(-1);
   assert.match(shown, /1 of 4 files read/);
   assert.match(shown, /- 2 files: it is inside the wiki folder .*\n {2}- wiki\/concepts\/receptors\.md\n {2}- wiki\/sources\/wispr\/Tuesday\.md/);
-  assert.match(shown, /- classes\/HBIO250\.md: it is in WikiLM's topic notes folder/);
+  assert.match(shown, /- classes\/BIO101\.md: it is in WikiLM's topic notes folder/);
 });

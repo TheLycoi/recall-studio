@@ -247,12 +247,12 @@ function missingLines(before, after) {
 
 // ---- the reader's pages ----------------------------------------------------------
 
-const PDF = "HBIO 250 Lecture 3";
+const PDF = "BIO 101 Lecture 3";
 const QUOTE = `> [!PDF|yellow] [[${PDF}.pdf#page=4&selection=2,0,33,19&color=yellow|${PDF}, p.4]]\n> > Receptors bind a ligand and transduce a signal.`;
 const QUOTE_2 = `> [!PDF|yellow] [[${PDF}.pdf#page=5&selection=1,0,12,40&color=yellow|${PDF}, p.5]]\n> > Albumin binds drugs but transduces nothing.`;
 
 function page({ aliases = null, extra = "", body }) {
-  const fm = ["---", "type: concept", "class: HBIO250"];
+  const fm = ["---", "type: concept", "class: BIO101"];
   if (aliases) fm.push("aliases:", ...aliases.map((a) => `  - ${a}`));
   if (extra) fm.push(extra);
   fm.push("---");
@@ -317,7 +317,7 @@ test("the scan reports the orphan page and the page missing aliases, and modifie
 });
 
 test("the scan's rewrite of a digest page's PDF `sources:` entry into a sources/ slug is refused, and so is alias completion's copy of it", async () => {
-  const digest = LIGANDS.replace("class: HBIO250", `class: HBIO250\nsources:\n  - "[[${PDF}.pdf]]"`);
+  const digest = LIGANDS.replace("class: BIO101", `class: BIO101\nsources:\n  - "[[${PDF}.pdf]]"`);
   const { plugin, files } = setup(
     { "wiki/concepts/receptors.md": RECEPTORS, "wiki/concepts/ligands.md": digest, "wiki/concepts/albumin.md": ALBUMIN },
     (kind) => (kind === "aliases" ? JSON.stringify({ aliases: ["Ligand"] }) : "{}"),
@@ -330,7 +330,7 @@ test("the scan's rewrite of a digest page's PDF `sources:` entry into a sources/
   await press(plugin, modal, "onCompleteAliases");
   const now = files.get("wiki/concepts/ligands.md");
   assert.ok(now.includes(`  - "[[${PDF}.pdf]]"`), now);
-  assert.doesNotMatch(now, /sources\/hbio-250/);
+  assert.doesNotMatch(now, /sources\/bio-101/);
 });
 
 // ---- 2. merge duplicates: the source is never removed ---------------------------------
@@ -362,9 +362,9 @@ function vaultFiles(files) {
 test("Merge duplicates keeps both pages and links each to the other; no other file in the vault changes", async () => {
   // A note of the reader's outside the wiki that links the duplicate:
   // upstream's merge re-pointed it (merge-duplicates.ts, retargetLinksToPage).
-  const classNote = "# HBIO 250\n\nWeek 3 covers each [[receptor]] and its ligands.\n";
+  const classNote = "# BIO 101\n\nWeek 3 covers each [[receptor]] and its ligands.\n";
   const { plugin, files, calls } = setup(
-    { "wiki/concepts/receptors.md": RECEPTORS, "wiki/concepts/receptor.md": RECEPTOR_DUP, "wiki/concepts/ligands.md": LIGANDS, "classes/HBIO250.md": classNote },
+    { "wiki/concepts/receptors.md": RECEPTORS, "wiki/concepts/receptor.md": RECEPTOR_DUP, "wiki/concepts/ligands.md": LIGANDS, "classes/BIO101.md": classNote },
     duplicatePair(JSON.stringify({ body: "# Receptors\n\nFused.\n", aliases: [] })),
   );
   linkIndex(plugin.app, files);
@@ -457,22 +457,22 @@ test("alias completion writes the aliases and the page keeps everything else", a
 });
 
 test("a lint run writes only inside the wiki folder: an engine write to the reader's class note is refused and reported", async () => {
-  const classNote = "# HBIO 250\n\nWeek 3 covers each [[receptors]] and its ligands.\n";
+  const classNote = "# BIO 101\n\nWeek 3 covers each [[receptors]] and its ligands.\n";
   let plugin;
   const ctx = setup(
-    { "wiki/concepts/receptors.md": RECEPTORS, "wiki/concepts/ligands.md": LIGANDS, "wiki/concepts/albumin.md": ALBUMIN, "classes/HBIO250.md": classNote },
+    { "wiki/concepts/receptors.md": RECEPTORS, "wiki/concepts/ligands.md": LIGANDS, "wiki/concepts/albumin.md": ALBUMIN, "classes/BIO101.md": classNote },
     async (kind) => {
       if (kind !== "aliases") return "{}";
       // A runner that reached outside the wiki, as upstream's merge did.
-      await plugin.upstreamHost().engine().createOrUpdateFile("classes/HBIO250.md", "# HBIO 250\n\nWeek 3 covers each [[concepts/receptors|receptor]].\n");
+      await plugin.upstreamHost().engine().createOrUpdateFile("classes/BIO101.md", "# BIO 101\n\nWeek 3 covers each [[concepts/receptors|receptor]].\n");
       return JSON.stringify({ aliases: ["Ligand"] });
     },
   );
   plugin = ctx.plugin;
   const modal = await lint(plugin);
   await press(plugin, modal, "onCompleteAliases");
-  assert.equal(ctx.files.get("classes/HBIO250.md"), classNote);
-  assert.match(notices().at(-1), /Not updated, to keep what was there:\n(- .*\n)*- classes\/HBIO250\.md: outside the wiki folder; it was left as it was\./);
+  assert.equal(ctx.files.get("classes/BIO101.md"), classNote);
+  assert.match(notices().at(-1), /Not updated, to keep what was there:\n(- .*\n)*- classes\/BIO101\.md: outside the wiki folder; it was left as it was\./);
 });
 
 // ---- 5. every model call runs on the lint role --------------------------------------------
@@ -571,7 +571,7 @@ test("Expand empty pages fills a page with only a title, and a fill that drops t
     await press(plugin, modal, "onFillEmptyPages");
     return files.get("wiki/concepts/antagonist.md");
   };
-  const kept = await run("---\ntype: concept\nclass: HBIO250\naliases:\n  - Blocker\n---\n# Antagonist\n\n## Definition\nAn antagonist binds a receptor without activating it, and blocks agonists from binding.\n");
+  const kept = await run("---\ntype: concept\nclass: BIO101\naliases:\n  - Blocker\n---\n# Antagonist\n\n## Definition\nAn antagonist binds a receptor without activating it, and blocks agonists from binding.\n");
   assert.match(kept, /An antagonist binds a receptor/, "a fill that keeps the title is written");
   const refused = await run("---\ntype: concept\n---\nAn antagonist binds a receptor without activating it, and blocks agonists from binding it for a while.\n");
   assert.equal(refused, empty, "a fill that drops the title and frontmatter keys is refused");
@@ -579,7 +579,7 @@ test("Expand empty pages fills a page with only a title, and a fill that drops t
 });
 
 test("Retag violations rewrites the tags value and nothing else", async () => {
-  const tagged = RECEPTORS.replace("class: HBIO250", "class: HBIO250\ntags:\n  - not-a-real-tag");
+  const tagged = RECEPTORS.replace("class: BIO101", "class: BIO101\ntags:\n  - not-a-real-tag");
   const { plugin, files } = setup(
     { "wiki/concepts/receptors.md": tagged, "wiki/concepts/ligands.md": LIGANDS },
     (kind) => (kind === "retag" ? JSON.stringify({ tags: ["term"] }) : "{}"),

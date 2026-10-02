@@ -9,13 +9,13 @@ import { pathToFileURL } from "node:url";
 
 let tn;
 before(async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "recall-test-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "wikilm-test-"));
   const out = path.join(dir, "topicNote.mjs");
   await build({ entryPoints: ["src/topicNote.ts"], bundle: true, format: "esm", platform: "node", outfile: out, logLevel: "silent" });
   tn = await import(pathToFileURL(out).href);
 });
 
-const PDF_BASENAME = "HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics";
+const PDF_BASENAME = "BIO 101 - Pharmacology, Pharmacodynamics, and Pharmacokinetics";
 const SUMMARY =
   "Receptors bind drugs with high affinity and transduce a signal, which is what separates them from inert binding proteins such as albumin; the better the structural fit, the higher the affinity.";
 
@@ -30,7 +30,7 @@ const SELECTION_HIGHLIGHT = {
     "Receptors have 2 important properties: 1. They bind ligands (or drugs) with relatively high affinity, and after they bind a drug… 2. They transduce a signal to produce a biological effect (this property distinguishes receptors from inert binding sites – e.g., albumin – a blood protein that binds/carries many drugs but does not transduce a signal)",
   before: "",
   after: "",
-  origins: ["classes/HBIO250/Pharmacology.md"],
+  origins: ["classes/BIO101/Pharmacology.md"],
 };
 
 const RECT_HIGHLIGHT = {
@@ -43,14 +43,14 @@ const RECT_HIGHLIGHT = {
   text: "",
   before: "",
   after: "",
-  origins: ["classes/HBIO250/Pharmacology.md"],
+  origins: ["classes/BIO101/Pharmacology.md"],
 };
 
 const LITERAL_NOTE = `---
 type: concept
-class: HBIO250
+class: BIO101
 created: 2026-09-10
-source_file: "[[HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf]]"
+source_file: "[[BIO 101 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf]]"
 tags: [term]
 aliases:
   - "Drug Receptors"
@@ -63,12 +63,12 @@ Receptors bind drugs with high affinity and transduce a signal, which is what se
 
 ## Highlights
 
-> [!PDF|yellow] [[HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=4&selection=2,0,33,19&color=yellow|HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.4]]
+> [!PDF|yellow] [[BIO 101 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=4&selection=2,0,33,19&color=yellow|BIO 101 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.4]]
 > > Receptors have 2 important properties:
 > > 1. They bind ligands (or drugs) with relatively high affinity, and after they bind a drug…
 > > 2. They transduce a signal to produce a biological effect (this property distinguishes receptors from inert binding sites – e.g., albumin – a blood protein that binds/carries many drugs but does not transduce a signal)
 
-![[HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=4&rect=13,55,713,222|HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.4]]
+![[BIO 101 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=4&rect=13,55,713,222|BIO 101 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.4]]
 
 ## Related topics
 - [[Pharmacology]]
@@ -79,7 +79,7 @@ Receptors bind drugs with high affinity and transduce a signal, which is what se
 test("renderTopicNote produces the literal two-highlight note", () => {
   const rendered = tn.renderTopicNote({
     title: "Receptors",
-    classCode: "HBIO250",
+    classCode: "BIO101",
     created: "2026-09-10",
     pdfBasename: PDF_BASENAME,
     summary: SUMMARY,
@@ -95,7 +95,7 @@ test("renderTopicNote produces the literal two-highlight note", () => {
 test("parseTopicNote(renderTopicNote(x)) returns the same title, summary, and highlight keys", () => {
   const parsed = tn.parseTopicNote(LITERAL_NOTE);
   assert.equal(parsed.title, "Receptors");
-  assert.equal(parsed.classCode, "HBIO250");
+  assert.equal(parsed.classCode, "BIO101");
   assert.equal(parsed.sourceBasename, PDF_BASENAME);
   assert.equal(parsed.summary, SUMMARY);
   assert.deepEqual(
@@ -123,7 +123,7 @@ test("renderTopicNote lists rows in page order, without page headings", () => {
   };
   const rendered = tn.renderTopicNote({
     title: "Receptors",
-    classCode: "HBIO250",
+    classCode: "BIO101",
     created: "2026-09-10",
     pdfBasename: PDF_BASENAME,
     summary: SUMMARY,
@@ -152,7 +152,7 @@ test("mergeTopicHighlights adds only the new highlight, skips the existing one",
     text: "The better the fit, the higher the affinity",
     before: "",
     after: "",
-    origins: ["classes/HBIO250/Pharmacology.md"],
+    origins: ["classes/BIO101/Pharmacology.md"],
   };
   const result = tn.mergeTopicHighlights(LITERAL_NOTE, PDF_BASENAME, [SELECTION_HIGHLIGHT, newHighlight]);
   assert.equal(result.added, 1);
@@ -172,10 +172,10 @@ test("mergeTopicHighlights adds only the new highlight, skips the existing one",
 test("mergeTopicHighlights inserts ## Highlights before ## Related topics when missing", () => {
   const stagesOfChange = `---
 type: topic
-class: PHED163
+class: KIN110
 created: 2026-09-07
-source_file: "[[Module 3 - CH 3 Video Assignments (2) - Conrad Ragsdale.pdf]]"
-tags: [phed163]
+source_file: "[[Module 3 - CH 3 Video Assignments (2) - A Student.pdf]]"
+tags: [kin110]
 ---
 
 # The five stages of change
@@ -184,7 +184,7 @@ tags: [phed163]
 The five stages of behavior change, what defines each, and what the coach does in each.
 
 ## Key claims
-- Precontemplation: the client has no intention of changing in the foreseeable future. — [[Module 3 - CH 3 Video Assignments (2) - Conrad Ragsdale.pdf#page=1|p.1]]
+- Precontemplation: the client has no intention of changing in the foreseeable future. — [[Module 3 - CH 3 Video Assignments (2) - A Student.pdf#page=1|p.1]]
 
 ## Related topics
 - [[Decisional Balance and Processes of Change]]
@@ -202,9 +202,9 @@ The five stages of behavior change, what defines each, and what the coach does i
     text: "New highlight",
     before: "",
     after: "",
-    origins: ["classes/PHED163/Stages of Change.md"],
+    origins: ["classes/KIN110/Stages of Change.md"],
   };
-  const result = tn.mergeTopicHighlights(stagesOfChange, "Module 3 - CH 3 Video Assignments (2) - Conrad Ragsdale", [highlight]);
+  const result = tn.mergeTopicHighlights(stagesOfChange, "Module 3 - CH 3 Video Assignments (2) - A Student", [highlight]);
   assert.equal(result.added, 1);
   assert.equal(result.skipped, 0);
   assert.ok(result.md.includes("## Highlights"));
@@ -218,9 +218,9 @@ The five stages of behavior change, what defines each, and what the coach does i
 
 function manifestFor(highlights) {
   return {
-    pdfPath: "sources/class notes/HBIO250/" + PDF_BASENAME + ".pdf",
+    pdfPath: "sources/class notes/BIO101/" + PDF_BASENAME + ".pdf",
     pdfBasename: PDF_BASENAME,
-    classCode: "HBIO250",
+    classCode: "BIO101",
     extracted: "2026-09-10T15:04:00",
     sources: [],
     highlights,
@@ -234,7 +234,7 @@ test("planTopicNotes reports unknownIds and keeps the note", () => {
   };
   const manifest = manifestFor([{ ...SELECTION_HIGHLIGHT, id: "H01" }]);
   const result = tn.planTopicNotes(draft, manifest, {
-    classCode: "HBIO250",
+    classCode: "BIO101",
     topicFolder: "classes",
     created: "2026-09-10",
     pages: [],
@@ -251,7 +251,7 @@ test("planTopicNotes drops a note whose only id is unknown", () => {
   };
   const manifest = manifestFor([{ ...SELECTION_HIGHLIGHT, id: "H01" }]);
   const result = tn.planTopicNotes(draft, manifest, {
-    classCode: "HBIO250",
+    classCode: "BIO101",
     topicFolder: "classes",
     created: "2026-09-10",
     pages: [],
@@ -273,7 +273,7 @@ test("planTopicNotes merges duplicate titles case-insensitively", () => {
     { ...SELECTION_HIGHLIGHT, id: "H02", key: "page=5&selection=10,0,12,8", page: 5, target: { page: 5, selection: { beginIndex: 10, beginOffset: 0, endIndex: 12, endOffset: 8 }, color: "yellow" } },
   ]);
   const result = tn.planTopicNotes(draft, manifest, {
-    classCode: "HBIO250",
+    classCode: "BIO101",
     topicFolder: "classes",
     created: "2026-09-10",
     pages: [],
@@ -292,7 +292,7 @@ test("planTopicNotes reports an id in no note and not in unused_ids as unassigne
     { ...RECT_HIGHLIGHT, id: "H02" },
   ]);
   const result = tn.planTopicNotes(draft, manifest, {
-    classCode: "HBIO250",
+    classCode: "BIO101",
     topicFolder: "classes",
     created: "2026-09-10",
     pages: [],
@@ -301,48 +301,48 @@ test("planTopicNotes reports an id in no note and not in unused_ids as unassigne
 });
 
 test("renderTopicNote writes a class list when a page belongs to two classes, and addClassCode grows it", () => {
-  const md = tn.renderTopicNote({ title: "Muscle", classCode: "HBIO408", classCodes: ["HBIO408", "PHED163"], created: "2026-09-17", pdfBasename: "P", summary: "S", highlights: [], related: [], kind: "concept", tag: "term", aliases: [] });
-  assert.ok(md.includes("class: [HBIO408, PHED163]"));
+  const md = tn.renderTopicNote({ title: "Muscle", classCode: "BIO201", classCodes: ["BIO201", "KIN110"], created: "2026-09-17", pdfBasename: "P", summary: "S", highlights: [], related: [], kind: "concept", tag: "term", aliases: [] });
+  assert.ok(md.includes("class: [BIO201, KIN110]"));
   assert.ok(!md.includes("aliases:"), "no aliases, no key");
-  const scalar = "---\ntype: concept\nclass: HBIO408\ncreated: 2026-09-17\n---\n# Muscle\n";
-  assert.ok(tn.addClassCode(scalar, "PHED163").includes("class: [HBIO408, PHED163]"));
-  assert.equal(tn.addClassCode(scalar, "HBIO408"), scalar, "already there: byte-identical");
-  const list = "---\nclass: [HBIO408, PHED163]\n---\n";
-  assert.ok(tn.addClassCode(list, "PSYC360").includes("class: [HBIO408, PHED163, PSYC360]"));
-  assert.ok(tn.addClassCode("---\ntype: concept\n---\n# M\n", "PHED163").includes("class: PHED163"), "a page with no class gains one");
+  const scalar = "---\ntype: concept\nclass: BIO201\ncreated: 2026-09-17\n---\n# Muscle\n";
+  assert.ok(tn.addClassCode(scalar, "KIN110").includes("class: [BIO201, KIN110]"));
+  assert.equal(tn.addClassCode(scalar, "BIO201"), scalar, "already there: byte-identical");
+  const list = "---\nclass: [BIO201, KIN110]\n---\n";
+  assert.ok(tn.addClassCode(list, "PSY220").includes("class: [BIO201, KIN110, PSY220]"));
+  assert.ok(tn.addClassCode("---\ntype: concept\n---\n# M\n", "KIN110").includes("class: KIN110"), "a page with no class gains one");
 });
 
 test("planTopicNotes merges into a page from another class by alias and appends the class", () => {
   const other = {
-    path: "classes/HBIO408/Skeletal Muscle.md",
+    path: "classes/BIO201/Skeletal Muscle.md",
     title: "Skeletal Muscle",
     kind: "concept",
     aliases: ["Muscle Fibres"],
-    classCodes: ["HBIO408"],
-    md: "---\ntype: concept\nclass: HBIO408\ncreated: 2026-09-10\n---\n\n# Skeletal Muscle\n\n## Summary\nS.\n\n## Highlights\n\n## Related topics\n",
+    classCodes: ["BIO201"],
+    md: "---\ntype: concept\nclass: BIO201\ncreated: 2026-09-10\n---\n\n# Skeletal Muscle\n\n## Summary\nS.\n\n## Highlights\n\n## Related topics\n",
   };
-  const manifest = { pdfPath: "sources/class notes/PHED163/Deck.pdf", pdfBasename: "Deck", classCode: "PHED163", extracted: "", sources: [], highlights: [SELECTION_HIGHLIGHT] };
+  const manifest = { pdfPath: "sources/class notes/KIN110/Deck.pdf", pdfBasename: "Deck", classCode: "KIN110", extracted: "", sources: [], highlights: [SELECTION_HIGHLIGHT] };
   const draft = {
     notes: [{ title: "Muscle Fibres", kind: "concept", aliases: [], tag: "term", closest_existing: "", why_new: "", summary: "S.", highlight_ids: ["H04"], related: [] }],
     unused_ids: [],
   };
-  const out = tn.planTopicNotes(draft, manifest, { classCode: "PHED163", topicFolder: "classes", created: "2026-09-17", pages: [other] });
+  const out = tn.planTopicNotes(draft, manifest, { classCode: "KIN110", topicFolder: "classes", created: "2026-09-17", pages: [other] });
   assert.equal(out.notes.length, 1);
   assert.equal(out.notes[0].path, other.path, "the alias found the page in the other class");
   assert.equal(out.notes[0].exists, true);
-  assert.ok(out.notes[0].content.includes("class: [HBIO408, PHED163]"), out.notes[0].content);
+  assert.ok(out.notes[0].content.includes("class: [BIO201, KIN110]"), out.notes[0].content);
 });
 
 test("planTopicNotes files a new title that names a home into that page under a heading, and creates one that has none", () => {
   const home = {
-    path: "classes/HBIO250/Pharmacology.md",
+    path: "classes/BIO101/Pharmacology.md",
     title: "Pharmacology",
     kind: "concept",
     aliases: [],
-    classCodes: ["HBIO250"],
-    md: "---\ntype: concept\nclass: HBIO250\n---\n\n# Pharmacology\n\n## Summary\nS.\n\n## Highlights\n\n## Related topics\n",
+    classCodes: ["BIO101"],
+    md: "---\ntype: concept\nclass: BIO101\n---\n\n# Pharmacology\n\n## Summary\nS.\n\n## Highlights\n\n## Related topics\n",
   };
-  const manifest = { pdfPath: "sources/class notes/HBIO250/Deck.pdf", pdfBasename: "Deck", classCode: "HBIO250", extracted: "", sources: [], highlights: [SELECTION_HIGHLIGHT, { ...RECT_HIGHLIGHT, text: "Aspirin inhibits COX." }] };
+  const manifest = { pdfPath: "sources/class notes/BIO101/Deck.pdf", pdfBasename: "Deck", classCode: "BIO101", extracted: "", sources: [], highlights: [SELECTION_HIGHLIGHT, { ...RECT_HIGHLIGHT, text: "Aspirin inhibits COX." }] };
   const draft = {
     notes: [
       { title: "COX Inhibitors", kind: "concept", aliases: ["NSAIDs"], tag: "term", closest_existing: "Pharmacology", why_new: "part of pharmacology", summary: "S.", highlight_ids: ["H05"], related: [] },
@@ -350,14 +350,14 @@ test("planTopicNotes files a new title that names a home into that page under a 
     ],
     unused_ids: [],
   };
-  const out = tn.planTopicNotes(draft, manifest, { classCode: "HBIO250", topicFolder: "classes", created: "2026-09-17", pages: [home] });
+  const out = tn.planTopicNotes(draft, manifest, { classCode: "BIO101", topicFolder: "classes", created: "2026-09-17", pages: [home] });
   const filed = out.notes.find((n) => n.path === home.path);
   assert.ok(filed, "COX Inhibitors was filed into Pharmacology");
   assert.ok(tn.noteSections(filed.content).includes("COX Inhibitors"), "under a heading named after the proposal");
   assert.deepEqual(filed.routed.map((r) => [r.from, r.heading]), [["COX Inhibitors", "COX Inhibitors"]]);
   const created = out.notes.find((n) => n.title === "Self-Efficacy");
   assert.equal(created.exists, false);
-  assert.equal(created.path, "classes/HBIO250/Self-Efficacy.md");
+  assert.equal(created.path, "classes/BIO101/Self-Efficacy.md");
   assert.equal(created.whyNew, "nothing listed is about beliefs");
   assert.ok(created.content.includes("type: concept"));
   assert.ok(created.content.includes('- "Self-efficacy belief"'));
@@ -366,17 +366,17 @@ test("planTopicNotes files a new title that names a home into that page under a 
 
 test("planTopicNotes gives one row per page when two proposals are filed into the same home", () => {
   const home = {
-    path: "classes/HBIO250/Pharmacology.md",
+    path: "classes/BIO101/Pharmacology.md",
     title: "Pharmacology",
     kind: "concept",
     aliases: [],
-    classCodes: ["HBIO250"],
-    md: "---\ntype: concept\nclass: HBIO250\n---\n\n# Pharmacology\n\n## Summary\nS.\n\n## Highlights\n\n## Related topics\n",
+    classCodes: ["BIO101"],
+    md: "---\ntype: concept\nclass: BIO101\n---\n\n# Pharmacology\n\n## Summary\nS.\n\n## Highlights\n\n## Related topics\n",
   };
   const manifest = {
-    pdfPath: "sources/class notes/HBIO250/Deck.pdf",
+    pdfPath: "sources/class notes/BIO101/Deck.pdf",
     pdfBasename: "Deck",
-    classCode: "HBIO250",
+    classCode: "BIO101",
     extracted: "",
     sources: [],
     highlights: [SELECTION_HIGHLIGHT, { ...RECT_HIGHLIGHT, text: "Aspirin inhibits COX." }],
@@ -388,7 +388,7 @@ test("planTopicNotes gives one row per page when two proposals are filed into th
     ],
     unused_ids: [],
   };
-  const out = tn.planTopicNotes(draft, manifest, { classCode: "HBIO250", topicFolder: "classes", created: "2026-09-17", pages: [home] });
+  const out = tn.planTopicNotes(draft, manifest, { classCode: "BIO101", topicFolder: "classes", created: "2026-09-17", pages: [home] });
   const rows = out.notes.filter((n) => n.path === home.path);
   assert.equal(rows.length, 1, "one page, one row");
   assert.equal(rows[0].added, 2, "both proposals' highlights counted");
@@ -405,26 +405,26 @@ test("planTopicNotes gives one row per page when two proposals are filed into th
 // group-keyed narrowing the digest now does instead.
 
 const HOME_PHARM = {
-  path: "classes/HBIO250/Pharmacology.md",
+  path: "classes/BIO101/Pharmacology.md",
   title: "Pharmacology",
   kind: "concept",
   aliases: [],
-  classCodes: ["HBIO250"],
-  md: "---\ntype: concept\nclass: HBIO250\n---\n\n# Pharmacology\n\n## Summary\nS.\n\n## Highlights\n\n## Related topics\n",
+  classCodes: ["BIO101"],
+  md: "---\ntype: concept\nclass: BIO101\n---\n\n# Pharmacology\n\n## Summary\nS.\n\n## Highlights\n\n## Related topics\n",
 };
 
 function twoHighlightManifest() {
   return {
-    pdfPath: "sources/class notes/HBIO250/Deck.pdf",
+    pdfPath: "sources/class notes/BIO101/Deck.pdf",
     pdfBasename: "Deck",
-    classCode: "HBIO250",
+    classCode: "BIO101",
     extracted: "",
     sources: [],
     highlights: [SELECTION_HIGHLIGHT, { ...RECT_HIGHLIGHT, text: "Aspirin inhibits COX." }],
   };
 }
 
-const DIGEST_OPTS = { classCode: "HBIO250", topicFolder: "classes", created: "2026-09-17" };
+const DIGEST_OPTS = { classCode: "BIO101", topicFolder: "classes", created: "2026-09-17" };
 
 test("applyDigestChoices drops both groups filed into one home when that row is unchecked", () => {
   const manifest = twoHighlightManifest();
@@ -458,7 +458,7 @@ test("applyDigestChoices renames a checked new row's one group, and re-planning 
   assert.equal(narrowed.notes[0].title, "Self Efficacy Beliefs");
   assert.deepEqual(keepAsNew, ["Self Efficacy Beliefs"], "a row accepted as new stays new");
   const replanned = tn.planTopicNotes(narrowed, manifest, { ...DIGEST_OPTS, pages: [], keepAsNew });
-  assert.equal(replanned.notes[0].path, "classes/HBIO250/Self Efficacy Beliefs.md");
+  assert.equal(replanned.notes[0].path, "classes/BIO101/Self Efficacy Beliefs.md");
 });
 
 test("applyDigestChoices keeps an unchecked merged group out even when another row is renamed onto its page", () => {
@@ -500,12 +500,12 @@ test("applyDigestChoices ignores an edit to an existing row's title", () => {
 test("a row accepted as new is written as a new page even when the rename specializes an existing title", () => {
   const manifest = twoHighlightManifest();
   const RECEPTORS = {
-    path: "classes/HBIO250/Receptors.md",
+    path: "classes/BIO101/Receptors.md",
     title: "Receptors",
     kind: "concept",
     aliases: [],
-    classCodes: ["HBIO250"],
-    md: "---\ntype: concept\nclass: HBIO250\n---\n\n# Receptors\n\n## Summary\nS.\n\n## Highlights\n\n## Related topics\n",
+    classCodes: ["BIO101"],
+    md: "---\ntype: concept\nclass: BIO101\n---\n\n# Receptors\n\n## Summary\nS.\n\n## Highlights\n\n## Related topics\n",
   };
   const draft = {
     notes: [
@@ -526,19 +526,19 @@ test("a row accepted as new is written as a new page even when the rename specia
   const replanned = tn.planTopicNotes(narrowed, manifest, { ...DIGEST_OPTS, pages: [RECEPTORS], keepAsNew });
   assert.equal(replanned.notes.length, 1);
   assert.equal(replanned.notes[0].exists, false, "what the reader accepted as new must not merge into an existing page");
-  assert.equal(replanned.notes[0].path, "classes/HBIO250/Receptor Subtypes.md");
+  assert.equal(replanned.notes[0].path, "classes/BIO101/Receptor Subtypes.md");
   assert.equal(replanned.notes[0].path !== RECEPTORS.path, true, "the existing page is untouched");
 });
 
 test("without keepAsNew the specialization rule still routes a plain proposal into its home", () => {
   const manifest = twoHighlightManifest();
   const RECEPTORS = {
-    path: "classes/HBIO250/Receptors.md",
+    path: "classes/BIO101/Receptors.md",
     title: "Receptors",
     kind: "concept",
     aliases: [],
-    classCodes: ["HBIO250"],
-    md: "---\ntype: concept\nclass: HBIO250\n---\n\n# Receptors\n\n## Summary\nS.\n\n## Highlights\n\n## Related topics\n",
+    classCodes: ["BIO101"],
+    md: "---\ntype: concept\nclass: BIO101\n---\n\n# Receptors\n\n## Summary\nS.\n\n## Highlights\n\n## Related topics\n",
   };
   const draft = {
     notes: [
@@ -606,7 +606,7 @@ function wikiHighlight(overrides) {
     text: "Some highlight text",
     before: "",
     after: "",
-    origins: ["classes/HBIO250/Pharmacology.md"],
+    origins: ["classes/BIO101/Pharmacology.md"],
     ...overrides,
   };
 }
@@ -628,14 +628,14 @@ test("renderWikiNote renders sorted highlights with a summary", () => {
   });
 
   const rendered = tn.renderWikiNote({
-    classCode: "HBIO250",
+    classCode: "BIO101",
     pdfBasename: PDF_BASENAME,
     summary: "S.",
     highlights: [p4, p2],
   });
 
   const expected = `---
-class: HBIO250
+class: BIO101
 ---
 
 ## Summary
@@ -657,13 +657,13 @@ S.
 test("renderWikiNote omits the Summary section when summary is empty", () => {
   const p4 = wikiHighlight();
   const rendered = tn.renderWikiNote({
-    classCode: "HBIO250",
+    classCode: "BIO101",
     pdfBasename: PDF_BASENAME,
     summary: "",
     highlights: [p4],
   });
   assert.ok(!rendered.includes("## Summary"));
-  assert.ok(rendered.startsWith("---\nclass: HBIO250\n---\n\n## Highlights\n\n"));
+  assert.ok(rendered.startsWith("---\nclass: BIO101\n---\n\n## Highlights\n\n"));
 });
 
 test("mergeWikiHighlights dedupes against a link under an arbitrary heading with no ## Highlights section", () => {
@@ -681,7 +681,7 @@ Some prose here. [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|$
     text: "Brand new text",
   });
 
-  const result = tn.mergeWikiHighlights(existing, PDF_BASENAME, "HBIO250", [existingHighlight, newHighlight]);
+  const result = tn.mergeWikiHighlights(existing, PDF_BASENAME, "BIO101", [existingHighlight, newHighlight]);
   assert.equal(result.added, 1);
   assert.equal(result.skipped, 1);
 
@@ -700,7 +700,7 @@ test("mergeWikiHighlights leaves a note with no frontmatter unchanged apart from
 Some other content.
 `;
   const highlight = wikiHighlight();
-  const result = tn.mergeWikiHighlights(existing, PDF_BASENAME, "HBIO250", [highlight]);
+  const result = tn.mergeWikiHighlights(existing, PDF_BASENAME, "BIO101", [highlight]);
   assert.equal(result.md.split("\n")[0], "**Potency**");
   assert.ok(!result.md.startsWith("---"));
   assert.equal(result.added, 1);
@@ -716,15 +716,15 @@ test("mergeWikiHighlights on an empty note renders a fresh wiki note", () => {
     target: { page: 6, selection: { beginIndex: 0, beginOffset: 0, endIndex: 3, endOffset: 0 }, color: "yellow" },
     text: "Another one",
   });
-  const result = tn.mergeWikiHighlights("", PDF_BASENAME, "HBIO250", [h1, h2]);
-  assert.ok(result.md.startsWith("---\nclass: HBIO250\n---\n\n## Highlights"));
+  const result = tn.mergeWikiHighlights("", PDF_BASENAME, "BIO101", [h1, h2]);
+  assert.ok(result.md.startsWith("---\nclass: BIO101\n---\n\n## Highlights"));
   assert.equal(result.added, 2);
   assert.equal(result.skipped, 0);
 });
 
 test("mergeWikiHighlights inserts the new callout inside an existing Highlights section, before a later section", () => {
   const existing = `---
-class: HBIO250
+class: BIO101
 ---
 
 ## Highlights
@@ -742,7 +742,7 @@ Some unrelated notes.
     target: { page: 6, selection: { beginIndex: 0, beginOffset: 0, endIndex: 3, endOffset: 0 }, color: "yellow" },
     text: "New text",
   });
-  const result = tn.mergeWikiHighlights(existing, PDF_BASENAME, "HBIO250", [wikiHighlight(), newHighlight]);
+  const result = tn.mergeWikiHighlights(existing, PDF_BASENAME, "BIO101", [wikiHighlight(), newHighlight]);
   assert.equal(result.added, 1);
   assert.equal(result.skipped, 1);
 
@@ -754,7 +754,7 @@ Some unrelated notes.
 
 test("mergeWikiHighlights inserts a missing ## Highlights section before ## Related topics, ahead of ## Flashcard Seeds", () => {
   const existing = `---
-class: PHED163
+class: KIN110
 ---
 
 ## Summary
@@ -769,7 +769,7 @@ S.
 ## Flashcard Seeds
 `;
   const highlight = wikiHighlight();
-  const result = tn.mergeWikiHighlights(existing, PDF_BASENAME, "PHED163", [highlight]);
+  const result = tn.mergeWikiHighlights(existing, PDF_BASENAME, "KIN110", [highlight]);
   assert.equal(result.added, 1);
   assert.equal(result.skipped, 0);
 
@@ -788,7 +788,7 @@ S.
 
 test("mergeWikiHighlights inserts a missing ## Highlights section before ## Flashcard Seeds when that is the only trailing heading", () => {
   const existing = `---
-class: PHED163
+class: KIN110
 ---
 
 ## Summary
@@ -797,7 +797,7 @@ S.
 ## Flashcard Seeds
 `;
   const highlight = wikiHighlight();
-  const result = tn.mergeWikiHighlights(existing, PDF_BASENAME, "PHED163", [highlight]);
+  const result = tn.mergeWikiHighlights(existing, PDF_BASENAME, "KIN110", [highlight]);
   assert.equal(result.added, 1);
   assert.equal(result.skipped, 0);
 
@@ -809,7 +809,7 @@ S.
 
 test("mergeWikiHighlights inserts a missing ## Highlights section before ## Related topics when there is no ## Flashcard Seeds", () => {
   const existing = `---
-class: PHED163
+class: KIN110
 ---
 
 ## Summary
@@ -819,7 +819,7 @@ S.
 - [[X]]
 `;
   const highlight = wikiHighlight();
-  const result = tn.mergeWikiHighlights(existing, PDF_BASENAME, "PHED163", [highlight]);
+  const result = tn.mergeWikiHighlights(existing, PDF_BASENAME, "KIN110", [highlight]);
   assert.equal(result.added, 1);
   assert.equal(result.skipped, 0);
 
@@ -846,15 +846,15 @@ const HL = (page, n) => ({
 });
 
 test("renderWikiNote defaults to the class schema", () => {
-  const md = tn.renderWikiNote({ classCode: "HBIO408", pdfBasename: "P", summary: "s", highlights: [] });
-  assert.ok(md.includes("class: HBIO408"));
+  const md = tn.renderWikiNote({ classCode: "BIO201", pdfBasename: "P", summary: "s", highlights: [] });
+  assert.ok(md.includes("class: BIO201"));
   assert.ok(md.includes("## Highlights"));
   assert.ok(!md.includes("type: concept"));
 });
 
 test("renderWikiNote dispatches to the karpathy schema when asked", () => {
   const md = tn.renderWikiNote({
-    classCode: "HBIO408",
+    classCode: "BIO201",
     pdfBasename: "P",
     summary: "What it means.",
     highlights: [],
@@ -1010,8 +1010,8 @@ test("a highlight already on the page is skipped, not duplicated", () => {
 });
 
 test("the class schema still merges under Highlights", () => {
-  const page = "---\nclass: HBIO408\n---\n\n## Highlights\n\n";
-  const r = tn.mergeWikiHighlights(page, "Paper", "HBIO408", [HL(1, "a")]);
+  const page = "---\nclass: BIO201\n---\n\n## Highlights\n\n";
+  const r = tn.mergeWikiHighlights(page, "Paper", "BIO201", [HL(1, "a")]);
   assert.equal(r.added, 1);
   assert.ok(r.md.includes("## Highlights"));
   assert.ok(!r.md.includes("## Mentions in Source"));
@@ -1023,7 +1023,7 @@ test("the class schema still merges under Highlights", () => {
 test("noteSections lists a note's ## headings as the reader wrote them, marks and links removed", () => {
   const md = [
     "---",
-    "class: HBIO250",
+    "class: BIO101",
     "---",
     "# Pharmacology",
     "",
@@ -1069,7 +1069,7 @@ test("headingKey and safeHeading fold the forms a heading is typed in", () => {
 
 test("a merge with a section appends inside that section, before the next heading", () => {
   const existing = `---
-class: HBIO250
+class: BIO101
 ---
 
 ## Dosing
@@ -1084,7 +1084,7 @@ Receptor text.
 > > Some highlight text
 `;
   // "receptors" finds "## Receptors " — case and the trailing space are not part of the name.
-  const r = tn.mergeWikiHighlights(existing, PDF_BASENAME, "HBIO250", [wikiHighlight(), HL(6, "b")], { section: "receptors" });
+  const r = tn.mergeWikiHighlights(existing, PDF_BASENAME, "BIO101", [wikiHighlight(), HL(6, "b")], { section: "receptors" });
   assert.equal(r.added, 1);
   assert.equal(r.skipped, 1, "the highlight the page already holds is still skipped");
   assert.deepEqual(r.section, { heading: "Receptors", created: false });
@@ -1099,7 +1099,7 @@ Receptor text.
 
 test("a merge with a section the page lacks creates it before the trailing sections", () => {
   const existing = `---
-class: HBIO250
+class: BIO101
 ---
 
 ## Receptors
@@ -1110,7 +1110,7 @@ Receptor text.
 ## Related topics
 - [[Pharmacology]]
 `;
-  const r = tn.mergeWikiHighlights(existing, PDF_BASENAME, "HBIO250", [HL(19, "c")], { section: "COX Inhibitors and NSAIDs" });
+  const r = tn.mergeWikiHighlights(existing, PDF_BASENAME, "BIO101", [HL(19, "c")], { section: "COX Inhibitors and NSAIDs" });
   assert.equal(r.added, 1);
   assert.deepEqual(r.section, { heading: "COX Inhibitors and NSAIDs", created: true });
   const receptors = r.md.indexOf("## Receptors");
@@ -1155,7 +1155,7 @@ Text.
 
 test("a section merge with nothing new to add leaves the page byte-identical", () => {
   const existing = `---
-class: HBIO250
+class: BIO101
 ---
 
 ## Receptors
@@ -1163,7 +1163,7 @@ class: HBIO250
 > [!PDF|yellow] [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|${PDF_BASENAME}, p.4]]
 > > Some highlight text
 `;
-  const r = tn.mergeWikiHighlights(existing, PDF_BASENAME, "HBIO250", [wikiHighlight()], { section: "Receptors" });
+  const r = tn.mergeWikiHighlights(existing, PDF_BASENAME, "BIO101", [wikiHighlight()], { section: "Receptors" });
   assert.equal(r.added, 0);
   assert.equal(r.md, existing);
   assert.equal(r.section, undefined);
@@ -1229,14 +1229,14 @@ test("a merge skips a mention whose quote the page already holds and adds one it
 });
 
 test("parseTopicNote reads a class list and keeps classCode as the first", () => {
-  const one = tn.parseTopicNote("---\nclass: HBIO250\n---\n# T\n");
-  assert.equal(one.classCode, "HBIO250");
-  assert.deepEqual(one.classCodes, ["HBIO250"]);
-  const many = tn.parseTopicNote("---\nclass:\n  - HBIO250\n  - PHED163\n---\n# T\n");
-  assert.deepEqual(many.classCodes, ["HBIO250", "PHED163"]);
-  const inline = tn.parseTopicNote("---\nclass: [HBIO250, PHED163]\n---\n# T\n");
-  assert.deepEqual(inline.classCodes, ["HBIO250", "PHED163"]);
-  assert.equal(inline.classCode, "HBIO250");
+  const one = tn.parseTopicNote("---\nclass: BIO101\n---\n# T\n");
+  assert.equal(one.classCode, "BIO101");
+  assert.deepEqual(one.classCodes, ["BIO101"]);
+  const many = tn.parseTopicNote("---\nclass:\n  - BIO101\n  - KIN110\n---\n# T\n");
+  assert.deepEqual(many.classCodes, ["BIO101", "KIN110"]);
+  const inline = tn.parseTopicNote("---\nclass: [BIO101, KIN110]\n---\n# T\n");
+  assert.deepEqual(inline.classCodes, ["BIO101", "KIN110"]);
+  assert.equal(inline.classCode, "BIO101");
 });
 
 // ---- rows: a passage is a bullet whose link text is its label; a verbatim quote is a Title-and-page callout ----
@@ -1319,7 +1319,7 @@ test("newlines in a quote split it the same way as inline bullets", () => {
 });
 
 test("a passage row reads back with the passage as its text, and a callout row with its quote", () => {
-  const md = `---\nclass: HBIO250\n---\n# T\n\n## Highlights\n\n- [[${SEL}|Receptor affinity]]: Receptors bind drugs with high affinity.\n> [!PDF|yellow] [[${PDF_BASENAME}.pdf#page=5&selection=1,0,1,4&color=yellow|${PDF_BASENAME}, p.5]]\n> > L = m * v\n`;
+  const md = `---\nclass: BIO101\n---\n# T\n\n## Highlights\n\n- [[${SEL}|Receptor affinity]]: Receptors bind drugs with high affinity.\n> [!PDF|yellow] [[${PDF_BASENAME}.pdf#page=5&selection=1,0,1,4&color=yellow|${PDF_BASENAME}, p.5]]\n> > L = m * v\n`;
   const parsed = tn.parseTopicNote(md);
   assert.equal(parsed.highlights.length, 2);
   assert.equal(parsed.highlights[0].text, "Receptors bind drugs with high affinity.");
@@ -1347,12 +1347,12 @@ test("planTopicNotes writes an article: resolved prose, quotes as callouts under
     unused_ids: [],
   };
   const manifest = manifestFor([{ ...SELECTION_HIGHLIGHT, id: "H01" }, { ...RECT_HIGHLIGHT, id: "H02" }]);
-  const pages = [{ path: "classes/HBIO250/Pharmacology.md", title: "Pharmacology", kind: "concept", aliases: [], classCodes: ["HBIO250"], md: "---\nclass: HBIO250\n---\n# Pharmacology\n" }];
-  const result = tn.planTopicNotes(draft, manifest, { classCode: "HBIO250", topicFolder: "classes", created: "2026-09-10", pages });
+  const pages = [{ path: "classes/BIO101/Pharmacology.md", title: "Pharmacology", kind: "concept", aliases: [], classCodes: ["BIO101"], md: "---\nclass: BIO101\n---\n# Pharmacology\n" }];
+  const result = tn.planTopicNotes(draft, manifest, { classCode: "BIO101", topicFolder: "classes", created: "2026-09-10", pages });
   assert.equal(result.notes.length, 1);
   const md = result.notes[0].content;
   const cite = `[[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|${PDF_BASENAME}, p.4]]`;
-  assert.ok(md.includes(`## Definition\nReceptors are the proteins drugs bind to ${cite}. They are studied within [[classes/HBIO250/Pharmacology|Pharmacology]] and mentioned by Nobody Home.`), md);
+  assert.ok(md.includes(`## Definition\nReceptors are the proteins drugs bind to ${cite}. They are studied within [[classes/BIO101/Pharmacology|Pharmacology]] and mentioned by Nobody Home.`), md);
   assert.ok(md.includes(`## Two Properties\nA receptor binds with high affinity and then transduces a signal ${cite}; albumin does neither.\n\n> [!PDF|yellow] ${cite}\n> > Receptors have 2 important properties:`), md);
   assert.ok(md.includes(`## Figures\n![[${PDF_BASENAME}.pdf#page=4&rect=13,55,713,222|${PDF_BASENAME}, p.4]]`), md);
   assert.ok(md.includes("## Related topics\n- [[Pharmacology]]"), md);
@@ -1369,7 +1369,7 @@ test("planTopicNotes writes an article: resolved prose, quotes as callouts under
 
 test("a pre-article draft with passages or highlight_ids still plans: unnamed sections under the opening", () => {
   const manifest = manifestFor([{ ...SELECTION_HIGHLIGHT, id: "H01" }]);
-  const opts = { classCode: "HBIO250", topicFolder: "classes", created: "2026-09-10", pages: [] };
+  const opts = { classCode: "BIO101", topicFolder: "classes", created: "2026-09-10", pages: [] };
   const passages = tn.planTopicNotes(
     { notes: [{ title: "Receptors", summary: "S", related: [], passages: [{ highlight_id: "H01", label: "Receptor affinity", text: "Receptors bind drugs with high affinity.", verbatim: false, coverage: "defined" }] }], unused_ids: [] },
     manifest,
@@ -1392,7 +1392,7 @@ test("a pre-article draft with passages or highlight_ids still plans: unnamed se
 
 test("mergeArticle appends a section's prose and new quotes under the page's heading, creates a missing one, and never repeats", () => {
   const cite = `[[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|${PDF_BASENAME}, p.4]]`;
-  const existing = `---\nclass: HBIO250\n---\n# Receptors\n\n## Definition\nOld opening.\n\n## Two Properties\nOld prose.\n\n## Related topics\n- [[Pharmacology]]\n`;
+  const existing = `---\nclass: BIO101\n---\n# Receptors\n\n## Definition\nOld opening.\n\n## Two Properties\nOld prose.\n\n## Related topics\n- [[Pharmacology]]\n`;
   const article = {
     definition: "A new opening the page must not gain.",
     sections: [
@@ -1417,7 +1417,7 @@ test("mergeArticle appends a section's prose and new quotes under the page's hea
 });
 
 test("mergeArticle with a section files the whole article under that heading, section names as lead lines", () => {
-  const existing = `---\nclass: HBIO250\n---\n# Pharmacology\n\n## Dosing\nDose text.\n\n## Related topics\n- [[x]]\n`;
+  const existing = `---\nclass: BIO101\n---\n# Pharmacology\n\n## Dosing\nDose text.\n\n## Related topics\n- [[x]]\n`;
   const article = { definition: "Receptors are what drugs bind to.", sections: [{ heading: "Two Properties", prose: "Bind, then transduce.", highlights: [wikiHighlight({ verbatim: true })] }], figures: [] };
   const r = tn.mergeArticle(existing, PDF_BASENAME, article, { section: "Receptors" });
   assert.ok(r.md.includes(`## [[${PDF_BASENAME}.pdf#page=4|Receptors]]\n\nReceptors are what drugs bind to.\n\n**Two Properties**\n\nBind, then transduce.\n\n> [!PDF|yellow]`), r.md);
@@ -1436,8 +1436,8 @@ test("a rect row with no text is still the bare embed, and a mention row is stil
 });
 
 test("a section the merge creates carries a link to its first slide in the heading", () => {
-  const existing = `---\nclass: HBIO250\n---\n\n## Receptors\nReceptor text.\n\n## Highlights\n\n## Related topics\n- [[Pharmacology]]\n`;
-  const r = tn.mergeWikiHighlights(existing, PDF_BASENAME, "HBIO250", [HL(21, "b"), HL(19, "a")], { section: "COX Inhibitors and NSAIDs" });
+  const existing = `---\nclass: BIO101\n---\n\n## Receptors\nReceptor text.\n\n## Highlights\n\n## Related topics\n- [[Pharmacology]]\n`;
+  const r = tn.mergeWikiHighlights(existing, PDF_BASENAME, "BIO101", [HL(21, "b"), HL(19, "a")], { section: "COX Inhibitors and NSAIDs" });
   assert.equal(r.added, 2);
   assert.deepEqual(r.section, { heading: "COX Inhibitors and NSAIDs", created: true });
   const heading = `## [[${PDF_BASENAME}.pdf#page=19|COX Inhibitors and NSAIDs]]`;
@@ -1446,7 +1446,7 @@ test("a section the merge creates carries a link to its first slide in the headi
 
   // The linked heading is still the section on the next merge: matched by
   // its display text, not rewritten, and the new row goes under it.
-  const again = tn.mergeWikiHighlights(r.md, PDF_BASENAME, "HBIO250", [HL(21, "b"), HL(23, "c")], { section: "cox inhibitors and nsaids" });
+  const again = tn.mergeWikiHighlights(r.md, PDF_BASENAME, "BIO101", [HL(21, "b"), HL(23, "c")], { section: "cox inhibitors and nsaids" });
   assert.equal(again.added, 1);
   assert.equal(again.skipped, 1);
   assert.deepEqual(again.section, { heading: "COX Inhibitors and NSAIDs", created: false });
@@ -1456,8 +1456,8 @@ test("a section the merge creates carries a link to its first slide in the headi
 });
 
 test("an existing heading the reader wrote is never rewritten with a link", () => {
-  const existing = `---\nclass: HBIO250\n---\n\n## Receptors\nReceptor text.\n\n## Highlights\n\n`;
-  const r = tn.mergeWikiHighlights(existing, PDF_BASENAME, "HBIO250", [HL(6, "b")], { section: "Receptors" });
+  const existing = `---\nclass: BIO101\n---\n\n## Receptors\nReceptor text.\n\n## Highlights\n\n`;
+  const r = tn.mergeWikiHighlights(existing, PDF_BASENAME, "BIO101", [HL(6, "b")], { section: "Receptors" });
   assert.ok(r.md.includes("## Receptors\nReceptor text.\n\n> [!PDF"), r.md);
   assert.ok(!r.md.includes("## [["));
 });
@@ -1465,7 +1465,7 @@ test("an existing heading the reader wrote is never rewritten with a link", () =
 test("parseTopicNote reads a bullet row's text, nested items included, without the link", () => {
   const md = [
     "---",
-    "class: HBIO250",
+    "class: BIO101",
     "---",
     "",
     "## Highlights",
@@ -1489,10 +1489,10 @@ test("parseTopicNote reads a bullet row's text, nested items included, without t
 });
 
 test("renderWikiNote's class schema writes a quote callout under Highlights", () => {
-  const rendered = tn.renderWikiNote({ classCode: "HBIO250", pdfBasename: PDF_BASENAME, summary: "S.", highlights: [wikiHighlight()] });
+  const rendered = tn.renderWikiNote({ classCode: "BIO101", pdfBasename: PDF_BASENAME, summary: "S.", highlights: [wikiHighlight()] });
   assert.equal(
     rendered,
-    `---\nclass: HBIO250\n---\n\n## Summary\nS.\n\n## Highlights\n\n> [!PDF|yellow] [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|${PDF_BASENAME}, p.4]]\n> > Some highlight text\n`,
+    `---\nclass: BIO101\n---\n\n## Summary\nS.\n\n## Highlights\n\n> [!PDF|yellow] [[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|${PDF_BASENAME}, p.4]]\n> > Some highlight text\n`,
   );
 });
 
@@ -1527,7 +1527,7 @@ test("mergeWikiHighlights appends after a fenced ## heading, not inside the fenc
     target: { page: 6, selection: { beginIndex: 0, beginOffset: 0, endIndex: 3, endOffset: 0 }, color: "yellow" },
     text: "New text",
   });
-  const result = tn.mergeWikiHighlights(existing, PDF_BASENAME, "HBIO250", [newHighlight], { schema: "class" });
+  const result = tn.mergeWikiHighlights(existing, PDF_BASENAME, "BIO101", [newHighlight], { schema: "class" });
   assert.equal(result.added, 1);
   assert.ok(result.md.includes("```md\n## Example\ncode the user wrote\n```"), "the fence survives intact");
   const newLinkIdx = result.md.indexOf("page=6&selection=0,0,3,0");
@@ -1561,7 +1561,7 @@ test("mergeWikiHighlights ignores a fenced ## Highlights above the real one", ()
     target: { page: 6, selection: { beginIndex: 0, beginOffset: 0, endIndex: 3, endOffset: 0 }, color: "yellow" },
     text: "New text",
   });
-  const result = tn.mergeWikiHighlights(existing, PDF_BASENAME, "HBIO250", [newHighlight], { schema: "class" });
+  const result = tn.mergeWikiHighlights(existing, PDF_BASENAME, "BIO101", [newHighlight], { schema: "class" });
   assert.equal(result.added, 1);
   const newLinkIdx = result.md.indexOf("page=6&selection=0,0,3,0");
   assert.ok(newLinkIdx > result.md.lastIndexOf("## Highlights"), "the row goes under the real heading");
@@ -1693,7 +1693,7 @@ test("re-running a merge over an edited page keeps the edit and still appends th
     text: "The better the fit, the higher the affinity",
     before: "",
     after: "",
-    origins: ["classes/HBIO250/Pharmacology.md"],
+    origins: ["classes/BIO101/Pharmacology.md"],
   };
 
   // What the planner merged against, minutes ago.
@@ -1728,7 +1728,7 @@ test("replaying a merge over its own output adds nothing: the highlights are alr
     text: "The better the fit, the higher the affinity",
     before: "",
     after: "",
-    origins: ["classes/HBIO250/Pharmacology.md"],
+    origins: ["classes/BIO101/Pharmacology.md"],
   };
 
   const once = tn.mergeTopicHighlights(LITERAL_NOTE, PDF_BASENAME, [SELECTION_HIGHLIGHT, newHighlight]);
@@ -1744,7 +1744,7 @@ test("replaying a merge over its own output adds nothing: the highlights are alr
 // ---- coverage: the digest reads the page before it writes
 
 test("noteOutline lists each heading with the first sentence of prose beneath it, links reduced to words", () => {
-  const md = "---\nclass: HBIO408\n---\n# Kinetics\n\n## Definition\nThe study of forces that cause motion [[Deck.pdf#page=1|Deck, p.1]]. A second sentence.\n\n## [[Lab.pdf#page=1&selection=38,0,38,10|Linear Impulse]]\n[[Lab.pdf#page=1&selection=40,0,41,12|The effect of a force on a system]]: the net force acting over time\n\n> [!PDF] [[Lab.pdf#page=1|Lab, p.1]]\n> > quote\n\n## Empty\n\n## Related topics\n- [[x]]\n";
+  const md = "---\nclass: BIO201\n---\n# Kinetics\n\n## Definition\nThe study of forces that cause motion [[Deck.pdf#page=1|Deck, p.1]]. A second sentence.\n\n## [[Lab.pdf#page=1&selection=38,0,38,10|Linear Impulse]]\n[[Lab.pdf#page=1&selection=40,0,41,12|The effect of a force on a system]]: the net force acting over time\n\n> [!PDF] [[Lab.pdf#page=1|Lab, p.1]]\n> > quote\n\n## Empty\n\n## Related topics\n- [[x]]\n";
   assert.deepEqual(tn.noteOutline(md), [
     { heading: "Definition", lead: "The study of forces that cause motion Deck, p.1." },
     { heading: "Linear Impulse", lead: "The effect of a force on a system: the net force acting over time" },
@@ -1755,7 +1755,7 @@ test("noteOutline lists each heading with the first sentence of prose beneath it
 
 test("mergeArticle with a coverage check does not quote or restate what the page already says, and counts it", () => {
   const cite = `[[${PDF_BASENAME}.pdf#page=4&selection=2,0,33,19&color=yellow|${PDF_BASENAME}, p.4]]`;
-  const existing = `---\nclass: HBIO250\n---\n# Receptors\n\n## Definition\nReceptors bind ligands with high affinity and transduce a signal.\n\n## Related topics\n- [[x]]\n`;
+  const existing = `---\nclass: BIO101\n---\n# Receptors\n\n## Definition\nReceptors bind ligands with high affinity and transduce a signal.\n\n## Related topics\n- [[x]]\n`;
   const covered = (text) => /transduce a signal/i.test(text);
   const article = {
     definition: "",
@@ -1775,7 +1775,7 @@ test("mergeArticle with a coverage check does not quote or restate what the page
 });
 
 test("mergeArticle keeps a bulleted section line by line: indent kept, a covered bullet dropped whole, the lead and the rest untouched", () => {
-  const existing = `---\nclass: HBIO250\n---\n# Skeletal Muscle Tissue\n\n## Definition\nSkeletal muscle is voluntary striated muscle.\n\n## Related topics\n- [[x]]\n`;
+  const existing = `---\nclass: BIO101\n---\n# Skeletal Muscle Tissue\n\n## Definition\nSkeletal muscle is voluntary striated muscle.\n\n## Related topics\n- [[x]]\n`;
   // A bullet the page already states in other words; the check sees the bullet's own words, marker and bold stripped.
   const covered = (text) => /collagen fibers type I plus elastin/i.test(text);
   const prose = [
@@ -1804,19 +1804,19 @@ test("mergeArticle keeps a bulleted section line by line: indent kept, a covered
 
 test("planTopicNotes passes the coverage check per target page and flags rows a new page's class already states", () => {
   const manifest = manifestFor([{ ...SELECTION_HIGHLIGHT, id: "H01" }]);
-  const home = { path: "classes/HBIO250/Receptors.md", title: "Receptors", kind: "concept", aliases: [], classCodes: ["HBIO250"], md: "---\nclass: HBIO250\n---\n# Receptors\n\n## Definition\nOld.\n" };
+  const home = { path: "classes/BIO101/Receptors.md", title: "Receptors", kind: "concept", aliases: [], classCodes: ["BIO101"], md: "---\nclass: BIO101\n---\n# Receptors\n\n## Definition\nOld.\n" };
   const seen = [];
   const coveredBy = (path, text) => {
     seen.push([path, text.slice(0, 20)]);
     return /Receptors have 2 important properties/.test(text);
   };
   const draft = { notes: [{ title: "Receptors", summary: "S", related: [], sections: [{ heading: "Props", prose: "Two properties [H01].", quote_ids: ["H01"] }] }], unused_ids: [] };
-  const merged = tn.planTopicNotes(draft, manifest, { classCode: "HBIO250", topicFolder: "classes", created: "2026-09-10", pages: [home], coveredBy });
+  const merged = tn.planTopicNotes(draft, manifest, { classCode: "BIO101", topicFolder: "classes", created: "2026-09-10", pages: [home], coveredBy });
   assert.equal(merged.notes[0].said, 1, "the quote the page already states is counted, not written");
   assert.ok(seen.some(([p]) => p === home.path), "the check was asked about the target page");
   assert.ok(!merged.notes[0].content.includes("> > Receptors have 2"), merged.notes[0].content);
 
-  const fresh = tn.planTopicNotes({ ...draft, notes: [{ ...draft.notes[0], title: "Brand New" }] }, manifest, { classCode: "HBIO250", topicFolder: "classes", created: "2026-09-10", pages: [home], coveredBy });
+  const fresh = tn.planTopicNotes({ ...draft, notes: [{ ...draft.notes[0], title: "Brand New" }] }, manifest, { classCode: "BIO101", topicFolder: "classes", created: "2026-09-10", pages: [home], coveredBy });
   assert.equal(fresh.notes[0].exists, false);
   assert.equal(fresh.notes[0].highlights[0].covered, true, "a new page's row is flagged when the class already says it");
   assert.ok(fresh.notes[0].content.includes("> > Receptors have 2"), "but a new page still quotes it: the row belongs there");
@@ -1830,14 +1830,14 @@ test("the coverage check sees prose without its citation text, so a file's title
     seen.push(text);
     return false;
   };
-  const existing = "---\nclass: HBIO250\n---\n# R\n\n## Definition\nOld.\n";
-  tn.mergeArticle(existing, PDF_BASENAME, { definition: "", sections: [{ heading: "S", prose: `Receptors bind ligands ${cite}. They also link to [[classes/HBIO250/Pharmacology|Pharmacology]].`, highlights: [] }], figures: [] }, { covered });
+  const existing = "---\nclass: BIO101\n---\n# R\n\n## Definition\nOld.\n";
+  tn.mergeArticle(existing, PDF_BASENAME, { definition: "", sections: [{ heading: "S", prose: `Receptors bind ligands ${cite}. They also link to [[classes/BIO101/Pharmacology|Pharmacology]].`, highlights: [] }], figures: [] }, { covered });
   assert.deepEqual(seen, ["Receptors bind ligands.", "They also link to Pharmacology."], "one sentence at a time, citations gone, links reduced to words");
 });
 
 test("sentences the page already states are dropped from a paragraph and counted; the rest are kept with their citations", () => {
   const covered = (text) => /impulse is the area|equals the change in momentum/i.test(text);
-  const existing = "---\nclass: HBIO408\n---\n# K\n\n## Definition\nOld.\n";
+  const existing = "---\nclass: BIO201\n---\n# K\n\n## Definition\nOld.\n";
   const cite = "[[Lab.pdf#page=1&selection=1,0,1,4|Lab, p.1]]";
   const mostly = `Linear impulse is the area under the force-time curve ${cite}. It equals the change in momentum of the object ${cite}. A dive needs both linear and angular impulse ${cite}.`;
   // Two of three already said is "mostly": the leftover sentence does not earn
@@ -1861,10 +1861,10 @@ test("sentences the page already states are dropped from a paragraph and counted
 
 test("a planned merge row carries its article and the heading it was filed under, so the write can replay it", () => {
   const manifest = manifestFor([{ ...SELECTION_HIGHLIGHT, id: "H01" }]);
-  const home = { path: "classes/HBIO250/Receptors.md", title: "Receptors", kind: "concept", aliases: [], classCodes: ["HBIO250"], md: "---\nclass: HBIO250\n---\n# Receptors\n\n## Definition\nOld.\n" };
-  const parent = { path: "classes/HBIO250/Pharmacology.md", title: "Pharmacology", kind: "concept", aliases: [], classCodes: ["HBIO250"], md: "---\nclass: HBIO250\n---\n# Pharmacology\n\n## Definition\nDrugs.\n" };
+  const home = { path: "classes/BIO101/Receptors.md", title: "Receptors", kind: "concept", aliases: [], classCodes: ["BIO101"], md: "---\nclass: BIO101\n---\n# Receptors\n\n## Definition\nOld.\n" };
+  const parent = { path: "classes/BIO101/Pharmacology.md", title: "Pharmacology", kind: "concept", aliases: [], classCodes: ["BIO101"], md: "---\nclass: BIO101\n---\n# Pharmacology\n\n## Definition\nDrugs.\n" };
   const note = (title, extra = {}) => ({ title, summary: "S", related: [], kind: "concept", aliases: [], tag: "term", closest_existing: "", why_new: "", sections: [{ heading: "Props", prose: "Two properties [H01].", quote_ids: ["H01"] }], ...extra });
-  const opts = { classCode: "HBIO250", topicFolder: "classes", created: "2026-09-10", pages: [home, parent] };
+  const opts = { classCode: "BIO101", topicFolder: "classes", created: "2026-09-10", pages: [home, parent] };
   const merged = tn.planTopicNotes({ notes: [note("Receptors")], unused_ids: [] }, manifest, opts);
   assert.ok(merged.notes[0].article, "home merge carries the article");
   assert.equal(merged.notes[0].articleSection, undefined);
@@ -1874,7 +1874,7 @@ test("a planned merge row carries its article and the heading it was filed under
   assert.ok(filed && filed.article, "a routed merge carries the article");
   assert.equal(filed.articleSection, "Receptor Subtypes");
   // Replaying against the page as written yields the same page: nothing is appended twice.
-  const again = tn.mergeArticle(merged.notes[0].content, PDF_BASENAME, merged.notes[0].article, { classCode: "HBIO250" });
+  const again = tn.mergeArticle(merged.notes[0].content, PDF_BASENAME, merged.notes[0].article, { classCode: "BIO101" });
   assert.equal(again.md, merged.notes[0].content);
 });
 
@@ -1884,7 +1884,7 @@ test("a quote whose slide the page already links sits with that line, not at the
   const sel = "page=4&selection=2,0,33,19&color=yellow";
   const existing = [
     "---",
-    "class: HBIO250",
+    "class: BIO101",
     "---",
     "# Receptors",
     "",
@@ -1918,7 +1918,7 @@ test("a quote whose slide the page already links sits with that line, not at the
 });
 
 test("a quote whose slide the page does not mention still lands at the end of the section", () => {
-  const existing = "---\nclass: HBIO250\n---\n# R\n\n## Binding\n- my own note\n\n## Related topics\n- [[x]]\n";
+  const existing = "---\nclass: BIO101\n---\n# R\n\n## Binding\n- my own note\n\n## Related topics\n- [[x]]\n";
   const h = wikiHighlight({ verbatim: true });
   const r = tn.mergeArticle(existing, PDF_BASENAME, { definition: "", sections: [{ heading: "Binding", prose: "", highlights: [h] }], figures: [] });
   const lines = r.md.split("\n");

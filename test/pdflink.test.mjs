@@ -9,64 +9,64 @@ import { pathToFileURL } from "node:url";
 
 let pl;
 before(async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "recall-test-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "wikilm-test-"));
   const out = path.join(dir, "pdflink.mjs");
   await build({ entryPoints: ["src/pdflink.ts"], bundle: true, format: "esm", platform: "node", outfile: out, logLevel: "silent" });
   pl = await import(pathToFileURL(out).href);
 });
 
-// Fixture notes copied verbatim from secondbrain (read-only source vault).
+// Fixture notes in the shape PDF++ writes.
 const PHARMACOLOGY_MD = `---
-class: HBIO250
+class: BIO101
 ---
-> [!PDF|255, 208, 0] [[HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=2&annotation=846R|HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.2]]
+> [!PDF|255, 208, 0] [[BIO 101 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=2&annotation=846R|BIO 101 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.2]]
 > > Pharmacology Pharmacology is the study of the action of drugs in the human body (from Greek pharmakia = drugs)
 
-![[HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=2&rect=37,186,711,385&color=yellow|HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.2]]
-> [!PDF] [[HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=2&annotation=849R|HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.2]]
+![[BIO 101 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=2&rect=37,186,711,385&color=yellow|BIO 101 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.2]]
+> [!PDF] [[BIO 101 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=2&annotation=849R|BIO 101 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.2]]
 > > [[Pharmacodynamics]] = “What drugs do in the body” 
 > > [[Pharmacokinetics]] = “What the body does to drugs”
 
-> [!PDF|yellow] [[HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=4&selection=2,0,33,19&color=yellow|HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.4]]
+> [!PDF|yellow] [[BIO 101 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=4&selection=2,0,33,19&color=yellow|BIO 101 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.4]]
 > > Receptors have 2 important properties: 1. They bind ligands (or drugs) with relatively high affinity, and after they bind a drug… 2. They transduce a signal to produce a biological effect (this property distinguishes receptors from inert binding sites – e.g., albumin – a blood protein that binds/carries many drugs but does not transduce a signal)
 
-![[HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=4&rect=13,55,713,222|HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.4]]
+![[BIO 101 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=4&rect=13,55,713,222|BIO 101 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.4]]
 
-> [!PDF|yellow] [[HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=5&selection=10,0,12,8&color=yellow|p.5]]
+> [!PDF|yellow] [[BIO 101 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=5&selection=10,0,12,8&color=yellow|p.5]]
 > > The better the fit, the higher the “affinity” of a drug to a receptor
 
-> [!PDF|yellow] [[HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=6&selection=6,0,34,23&color=yellow|HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.6]]
+> [!PDF|yellow] [[BIO 101 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=6&selection=6,0,34,23&color=yellow|BIO 101 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.6]]
 > > Types of “Receptors” 
 > > • Enzymes (competitive – binds at ”active site”; noncompetitive – binds at allosteric site [not active site]) 
 > > • Ion Channels (ligand-gated) 
 > > • Membrane Receptors 
 > > • Intracellular Receptors
 
-![[HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=9&rect=42,48,675,410|HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.9]]
-![[HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=6&rect=12,31,719,290|HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.6]]
+![[BIO 101 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=9&rect=42,48,675,410|BIO 101 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.9]]
+![[BIO 101 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf#page=6&rect=12,31,719,290|BIO 101 - Pharmacology, Pharmacodynamics, and Pharmacokinetics, p.6]]
 
 
 - Competitive is 
 `;
 
 const DOPING_MD = `---
-class: HBIO250
+class: BIO101
 ---
 ## WADA
 
-> [!PDF|255, 208, 0] [[HBIO 250 History of Doping and Oversight Fall 2026.pdf#page=23&annotation=1110R|HBIO 250 History of Doping and Oversight Fall 2026, p.23]]
+> [!PDF|255, 208, 0] [[BIO 101 History of Doping and Oversight Fall 2026.pdf#page=23&annotation=1110R|BIO 101 History of Doping and Oversight Fall 2026, p.23]]
 > > “The purpose of the Code is to ensure the fight against drugs in sport is intensified, accelerated, harmonized and unified.” Dick Pound, WADA President – March 2003
 > 
 > 
 
-![[HBIO 250 History of Doping and Oversight Fall 2026.pdf#page=23&rect=20,34,714,344|HBIO 250 History of Doping and Oversight Fall 2026, p.23]]
-![[HBIO 250 History of Doping and Oversight Fall 2026.pdf#page=24&rect=10,19,717,488&color=yellow|HBIO 250 History of Doping and Oversight Fall 2026, p.24]]
+![[BIO 101 History of Doping and Oversight Fall 2026.pdf#page=23&rect=20,34,714,344|BIO 101 History of Doping and Oversight Fall 2026, p.23]]
+![[BIO 101 History of Doping and Oversight Fall 2026.pdf#page=24&rect=10,19,717,488&color=yellow|BIO 101 History of Doping and Oversight Fall 2026, p.24]]
 
 [[Therapeutic Use Exemption (TUE)]]
 
 `;
 
-const PHARMACOLOGY_PDF = "HBIO 250 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf";
+const PHARMACOLOGY_PDF = "BIO 101 - Pharmacology, Pharmacodynamics, and Pharmacokinetics.pdf";
 
 test("parsePdfSubpath: acceptance table", () => {
   assert.deepEqual(pl.parsePdfSubpath("page=4&selection=2,0,33,19&color=yellow"), {
@@ -188,7 +188,7 @@ test("findPdfReferences: Pharmacology.md yields 9 references in file order", () 
 });
 
 test("findPdfReferences: Doping.md yields 3", () => {
-  const refs = pl.findPdfReferences(DOPING_MD, "HBIO 250 History of Doping and Oversight Fall 2026.pdf");
+  const refs = pl.findPdfReferences(DOPING_MD, "BIO 101 History of Doping and Oversight Fall 2026.pdf");
   assert.equal(refs.length, 3);
   assert.equal(refs[0].target.annotation, "1110R");
   assert.equal(refs[1].embed, true);
@@ -269,7 +269,7 @@ test("an ordinary unencoded subpath is unchanged by decoding", () => {
 // ---- 2.0: the reader's notes under a bare link
 
 const CLASS_NOTE = `---
-class: PSYC360
+class: PSY220
 ---
 ## Attachment Disorders, Conduct Disorder, and Oppositional Defiant Disorder
 [[Chapter 5 -1.pdf#page=23&selection=0,0,2,33&color=note|Chapter 5 -1, p.23]]

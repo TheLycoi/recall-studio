@@ -12,7 +12,7 @@ import { pathToFileURL } from "node:url";
 let table;
 let cc;
 before(async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "recall-test-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "wikilm-test-"));
   const outTable = path.join(dir, "commandTable.mjs");
   const outChat = path.join(dir, "chatCommands.mjs");
   await build({ entryPoints: ["src/commandTable.ts"], bundle: true, format: "esm", platform: "node", outfile: outTable, logLevel: "silent" });
@@ -108,12 +108,12 @@ test("aliases are unique across the table and never collide with another id", ()
 const CTX = {
   pages: [
     { path: "classes/BIO101/Receptors.md", title: "Receptors", aliases: ["Drug Receptors"], classCodes: ["BIO101"], hasPdfLinks: true },
-    { path: "classes/PHED163/Stages of Change.md", title: "Stages of Change", aliases: [], classCodes: ["PHED163"], hasPdfLinks: false },
+    { path: "classes/KIN110/Stages of Change.md", title: "Stages of Change", aliases: [], classCodes: ["KIN110"], hasPdfLinks: false },
   ],
   pdfs: [
     { path: "sources/class notes/BIO101/BIO101 History of Doping and Oversight.pdf", basename: "BIO101 History of Doping and Oversight" },
-    { path: "sources/class notes/PSYC360/Ch3.pdf", basename: "Ch3" },
-    { path: "sources/class notes/PSYC360/Ch3 notes.pdf", basename: "Ch3 notes" },
+    { path: "sources/class notes/PSY220/Ch3.pdf", basename: "Ch3" },
+    { path: "sources/class notes/PSY220/Ch3 notes.pdf", basename: "Ch3 notes" },
   ],
   manifests: ["wikilm-manifests/Ch3.md"],
   get commands() {
@@ -140,7 +140,7 @@ test("digest and highlight phrases resolve a PDF, a manifest, a note with PDF li
   });
   assert.deepEqual(cc.matchIntent("digest receptors", CTX).target, { kind: "page", path: "classes/BIO101/Receptors.md", title: "Receptors" });
   assert.equal(cc.matchIntent("digest stages of change", CTX).kind, "ambiguous", "a page with no PDF links cannot be digested");
-  assert.deepEqual(cc.matchIntent("highlight ch3 notes", CTX), { kind: "highlight", target: { kind: "pdf", path: "sources/class notes/PSYC360/Ch3 notes.pdf", basename: "Ch3 notes" } });
+  assert.deepEqual(cc.matchIntent("highlight ch3 notes", CTX), { kind: "highlight", target: { kind: "pdf", path: "sources/class notes/PSY220/Ch3 notes.pdf", basename: "Ch3 notes" } });
 });
 
 test("two files that fit equally are offered as candidates, never guessed", () => {
@@ -149,7 +149,7 @@ test("two files that fit equally are offered as candidates, never guessed", () =
   assert.equal(m.verb, "digest");
   assert.deepEqual(
     m.candidates.map((c) => c.path),
-    ["sources/class notes/PSYC360/Ch3.pdf", "sources/class notes/PSYC360/Ch3 notes.pdf", "wikilm-manifests/Ch3.md"],
+    ["sources/class notes/PSY220/Ch3.pdf", "sources/class notes/PSY220/Ch3 notes.pdf", "wikilm-manifests/Ch3.md"],
   );
 });
 
@@ -240,18 +240,18 @@ test("renderHelp lists phrases, not slash commands", () => {
 
 const SCOPE_CTX = {
   pages: [
-    { path: "wiki/concepts/Kinetics.md", title: "Kinetics", aliases: [], classCodes: ["HBIO408"], hasPdfLinks: true },
-    { path: "wiki/concepts/Stages of Change.md", title: "Stages of Change", aliases: [], classCodes: ["PHED163"], hasPdfLinks: true },
+    { path: "wiki/concepts/Kinetics.md", title: "Kinetics", aliases: [], classCodes: ["BIO201"], hasPdfLinks: true },
+    { path: "wiki/concepts/Stages of Change.md", title: "Stages of Change", aliases: [], classCodes: ["KIN110"], hasPdfLinks: true },
   ],
   pdfs: [],
   manifests: [],
   commands: [],
 };
 
-test("'ask HBIO408 what is impulse' and 'what is impulse in HBIO408' are questions scoped to that class", () => {
-  assert.deepEqual(cc.matchIntent("ask HBIO408 what is impulse", SCOPE_CTX), { kind: "question", classCode: "HBIO408", text: "what is impulse" });
-  assert.deepEqual(cc.matchIntent("What is impulse in hbio408?", SCOPE_CTX), { kind: "question", classCode: "HBIO408", text: "What is impulse" });
-  assert.deepEqual(cc.matchIntent("in PHED163, what is decisional balance", SCOPE_CTX), { kind: "question", classCode: "PHED163", text: "what is decisional balance" });
+test("'ask BIO201 what is impulse' and 'what is impulse in BIO201' are questions scoped to that class", () => {
+  assert.deepEqual(cc.matchIntent("ask BIO201 what is impulse", SCOPE_CTX), { kind: "question", classCode: "BIO201", text: "what is impulse" });
+  assert.deepEqual(cc.matchIntent("What is impulse in bio201?", SCOPE_CTX), { kind: "question", classCode: "BIO201", text: "What is impulse" });
+  assert.deepEqual(cc.matchIntent("in KIN110, what is decisional balance", SCOPE_CTX), { kind: "question", classCode: "KIN110", text: "what is decisional balance" });
 });
 
 test("a code no page carries, or a bare 'ask', is an ordinary question", () => {
@@ -314,16 +314,16 @@ test("a file verb leading a real question is a question when no file fits", () =
 });
 
 test("a file verb leading a question keeps a class scope the line names", () => {
-  assert.deepEqual(cc.matchIntent("highlight the differences between kinetics and kinematics in HBIO408", SCOPE_CTX), {
+  assert.deepEqual(cc.matchIntent("highlight the differences between kinetics and kinematics in BIO201", SCOPE_CTX), {
     kind: "question",
-    classCode: "HBIO408",
+    classCode: "BIO201",
     text: "highlight the differences between kinetics and kinematics",
   });
 });
 
 test("'ask about X in CODE' keeps its class", () => {
-  assert.deepEqual(cc.matchIntent("ask about impulse in HBIO408", SCOPE_CTX), { kind: "question", classCode: "HBIO408", text: "impulse" });
-  assert.deepEqual(cc.matchIntent("ask what is impulse in hbio408?", SCOPE_CTX), { kind: "question", classCode: "HBIO408", text: "what is impulse" });
+  assert.deepEqual(cc.matchIntent("ask about impulse in BIO201", SCOPE_CTX), { kind: "question", classCode: "BIO201", text: "impulse" });
+  assert.deepEqual(cc.matchIntent("ask what is impulse in bio201?", SCOPE_CTX), { kind: "question", classCode: "BIO201", text: "what is impulse" });
 });
 
 test("help describes one inbox row per answer, lists the send phrases, and the class scope", () => {

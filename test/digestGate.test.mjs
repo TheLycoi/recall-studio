@@ -106,15 +106,15 @@ test("digestFolderSummary keeps 'with no highlights' for the bare count and 'cou
 const pdf = (path) => ({ path, extension: path.toLowerCase().endsWith(".pdf") ? path.slice(-3) : "md" });
 
 test("pickerFolders lists each folder with PDFs under it, with its own and all PDFs in path order", () => {
-  const files = [pdf("HBIO408/L02.pdf"), pdf("HBIO408/L01.pdf"), pdf("HBIO408/labs/Lab4.pdf"), pdf("PHED163/notes.md"), pdf("PSYC360/week1/reading.pdf")];
+  const files = [pdf("BIO201/L02.pdf"), pdf("BIO201/L01.pdf"), pdf("BIO201/labs/Lab4.pdf"), pdf("KIN110/notes.md"), pdf("PSY220/week1/reading.pdf")];
   const rows = dg.pickerFolders(files);
   assert.deepEqual(
     rows.map((r) => [r.path, r.depth, r.pdfs.map((f) => f.path), r.all.map((f) => f.path)]),
     [
-      ["HBIO408", 0, ["HBIO408/L01.pdf", "HBIO408/L02.pdf"], ["HBIO408/L01.pdf", "HBIO408/L02.pdf", "HBIO408/labs/Lab4.pdf"]],
-      ["HBIO408/labs", 1, ["HBIO408/labs/Lab4.pdf"], ["HBIO408/labs/Lab4.pdf"]],
-      ["PSYC360", 0, [], ["PSYC360/week1/reading.pdf"]],
-      ["PSYC360/week1", 1, ["PSYC360/week1/reading.pdf"], ["PSYC360/week1/reading.pdf"]],
+      ["BIO201", 0, ["BIO201/L01.pdf", "BIO201/L02.pdf"], ["BIO201/L01.pdf", "BIO201/L02.pdf", "BIO201/labs/Lab4.pdf"]],
+      ["BIO201/labs", 1, ["BIO201/labs/Lab4.pdf"], ["BIO201/labs/Lab4.pdf"]],
+      ["PSY220", 0, [], ["PSY220/week1/reading.pdf"]],
+      ["PSY220/week1", 1, ["PSY220/week1/reading.pdf"], ["PSY220/week1/reading.pdf"]],
     ],
   );
 });

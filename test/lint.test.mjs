@@ -9,13 +9,13 @@ import { pathToFileURL } from "node:url";
 
 let l;
 before(async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "recall-test-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "wikilm-test-"));
   const out = path.join(dir, "lint.mjs");
   await build({ entryPoints: ["src/lint.ts"], bundle: true, format: "esm", platform: "node", outfile: out, logLevel: "silent" });
   l = await import(pathToFileURL(out).href);
 });
 
-// PHED163-style fixture, as specified in the brief.
+// KIN110-style fixture, as specified in the brief.
 const highlight = {
   id: "h1",
   sourcePath: "note.md",
@@ -338,7 +338,7 @@ test("a qa card never emits cloze-* failure ids", () => {
 
 // ---- realistic zero-failure, zero-warning card
 
-test("a well-formed PHED163-style cloze card with no siblings passes clean", () => {
+test("a well-formed KIN110-style cloze card with no siblings passes clean", () => {
   const card = clozeCard(
     "Contemplation: the client intends to change within the next {{c1::six months}} and weighs {{c2::pros and cons}}.",
   );

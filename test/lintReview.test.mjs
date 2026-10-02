@@ -66,7 +66,7 @@ test("selectPages with a kind callback leaves out pages the review cannot judge"
 });
 
 test("a class-schema page, with class: and no type:, is selected and reviewed as the kind the callback gives", () => {
-  const pages = [note("classes/X/doping.md", "class: HBIO250", "# Doping\n\nProse."), note("classes/X/X.md", "type: topic-index\nclass: HBIO250", "# X")];
+  const pages = [note("classes/X/doping.md", "class: BIO101", "# Doping\n\nProse."), note("classes/X/X.md", "type: topic-index\nclass: BIO101", "# X")];
   const kindOf = (p) => (p === "classes/X/doping.md" ? "concept" : "other");
   const r = report([issue("orphan", "classes/X/doping.md"), issue("orphan", "classes/X/X.md")]);
   const { chosen } = lr.selectPages(r, pages, 60_000, kindOf);

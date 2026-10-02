@@ -360,7 +360,7 @@ test("a folder run refuses every note inside the wiki folder or one of WikiLM's 
     "notes/Lecture.md",
     "wiki/sources/wispr/Tuesday.md",
     "wiki/concepts/Receptors.md",
-    "classes/HBIO250.md",
+    "classes/BIO101.md",
     "exports/Deck.md",
   ].map(file);
   const plugin = fakePlugin(engine, { files });
@@ -368,12 +368,12 @@ test("a folder run refuses every note inside the wiki folder or one of WikiLM's 
   const reports = await m.ingestFolderWithUpstream(plugin, folder("/"));
   assert.deepEqual(engine.calls.map((c) => c.path), ["notes/Lecture.md"]);
   const refused = reports.filter((r) => r.skipped).map((r) => r.sourceFile);
-  assert.deepEqual(refused.sort(), ["classes/HBIO250.md", "exports/Deck.md", "wiki/concepts/Receptors.md", "wiki/sources/wispr/Tuesday.md"]);
+  assert.deepEqual(refused.sort(), ["classes/BIO101.md", "exports/Deck.md", "wiki/concepts/Receptors.md", "wiki/sources/wispr/Tuesday.md"]);
   const shown = notices().at(-1);
   assert.match(shown, /1 of 5 files read\./);
   assert.match(shown, /Not ingested:\n/);
   assert.match(shown, /- 2 files: it is inside the wiki folder \(wiki\/\).*\n {2}- wiki\/concepts\/Receptors\.md\n {2}- wiki\/sources\/wispr\/Tuesday\.md/);
-  assert.match(shown, /- classes\/HBIO250\.md: it is in WikiLM's topic notes folder \(classes\/\)/);
+  assert.match(shown, /- classes\/BIO101\.md: it is in WikiLM's topic notes folder \(classes\/\)/);
   assert.match(shown, /- exports\/Deck\.md: it is in WikiLM's text export folder \(exports\/\)/);
 });
 

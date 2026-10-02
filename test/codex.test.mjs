@@ -10,7 +10,7 @@ import { z } from "zod";
 
 let c;
 before(async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "recall-test-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "wikilm-test-"));
   const out = path.join(dir, "codex.mjs");
   await build({ entryPoints: ["src/codex.ts"], bundle: true, format: "esm", platform: "node", outfile: out, logLevel: "silent" });
   c = await import(pathToFileURL(out).href);

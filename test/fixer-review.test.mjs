@@ -96,8 +96,8 @@ test("reviewKindOf reads both schemas: type: on karpathy pages, class: on class 
   const pages = [
     page("wiki/concepts/a.md", "type: concept"),
     page("wiki/entities/b.md", "type: entity"),
-    page("classes/X/c.md", "class: HBIO250"),
-    page("classes/X/X.md", "type: topic-index\nclass: HBIO250"),
+    page("classes/X/c.md", "class: BIO101"),
+    page("classes/X/X.md", "type: topic-index\nclass: BIO101"),
     page("wiki/sources/s.md", "type: source"),
     page("wiki/log.md", "updated: today"),
   ];

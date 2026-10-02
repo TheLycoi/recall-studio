@@ -13,7 +13,7 @@ let p;
 // so no `obsidian`), which is why they can be bundled here the same way.
 let schemas;
 before(async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "recall-test-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "wikilm-test-"));
   const out = path.join(dir, "prompt.mjs");
   await build({ entryPoints: ["src/prompt.ts"], bundle: true, format: "esm", platform: "node", outfile: out, logLevel: "silent" });
   p = await import(pathToFileURL(out).href);
@@ -85,14 +85,14 @@ test("blocks are separated by a blank line", () => {
 // --- digest message ---------------------------------------------------------
 
 const digestBase = {
-  pdfTitle: "HBIO 250 - Pharmacology",
-  classCode: "HBIO250",
+  pdfTitle: "BIO 101 - Pharmacology",
+  classCode: "BIO101",
   paperText: "[page 1]\nPharmacology, Pharmacodynamics and Pharmacokinetics",
   highlights: [
     { id: "H01", page: 2, text: "Pharmacology is the study of the action of drugs." },
     { id: "H02", page: 4, text: "Receptors bind ligands with high affinity." },
   ],
-  existingNotes: [{ title: "Pharmacology", kind: "concept", aliases: ["Drug Action"], sections: ["Receptors", "Dosing"], summary: "The study of drug action.", classCodes: ["HBIO250"] }],
+  existingNotes: [{ title: "Pharmacology", kind: "concept", aliases: ["Drug Action"], sections: ["Receptors", "Dosing"], summary: "The study of drug action.", classCodes: ["BIO101"] }],
   maxNotes: 6,
   standingInstructions: "",
   instruction: "",
@@ -108,7 +108,7 @@ test("digest blocks run paper, highlights, existing notes, then the limit", () =
   assert.ok(paper < highlights, "paper precedes highlights");
   assert.ok(highlights < existing, "highlights precede existing notes");
   assert.ok(existing < limit, "existing notes precede the limit line");
-  assert.ok(msg.includes('<paper title="HBIO 250 - Pharmacology" class="HBIO250">'), "paper block carries title and class");
+  assert.ok(msg.includes('<paper title="BIO 101 - Pharmacology" class="BIO101">'), "paper block carries title and class");
 });
 
 test("an empty paper drops the paper block and keeps the rest", () => {
@@ -131,7 +131,7 @@ test("every highlight carries its id and page, text-less ones included", () => {
 test("existing notes print title, kind, aliases, class, sections and a summary line", () => {
   const msg = p.buildDigestMessage({ ...digestBase });
   assert.ok(
-    msg.includes("<existing_notes>\nPharmacology (concept; aliases: Drug Action; class HBIO250)\n  ## Receptors\n  ## Dosing\n  summary: The study of drug action.\n</existing_notes>"),
+    msg.includes("<existing_notes>\nPharmacology (concept; aliases: Drug Action; class BIO101)\n  ## Receptors\n  ## Dosing\n  summary: The study of drug action.\n</existing_notes>"),
     msg,
   );
   const bare = p.buildDigestMessage({ ...digestBase, existingNotes: [] });
@@ -446,7 +446,7 @@ test("QuizCueOut and QuizRecallGradeOut parse good drafts and serialize strictly
 
 const suggestBase = {
   pdfTitle: "Doping in Sport",
-  classCode: "HBIO 250",
+  classCode: "BIO 101",
   pages: [
     { page: 3, text: "Doping is defined in the Code." },
     { page: 4, text: "WADA was founded in 1999." },
@@ -730,12 +730,12 @@ test("an existing note with an outline prints each heading with its lead; withou
   const msg = p.buildDigestMessage({
     ...digestBase,
     existingNotes: [
-      { title: "Kinetics", kind: "concept", aliases: [], sections: ["Definition", "Linear Impulse"], summary: "Forces that cause motion.", classCodes: ["HBIO408"], outline: [{ heading: "Definition", lead: "The study of forces that cause motion." }, { heading: "Linear Impulse", lead: "" }] },
-      { title: "Other", kind: "concept", aliases: [], sections: ["A"], summary: "", classCodes: ["PSYC360"] },
+      { title: "Kinetics", kind: "concept", aliases: [], sections: ["Definition", "Linear Impulse"], summary: "Forces that cause motion.", classCodes: ["BIO201"], outline: [{ heading: "Definition", lead: "The study of forces that cause motion." }, { heading: "Linear Impulse", lead: "" }] },
+      { title: "Other", kind: "concept", aliases: [], sections: ["A"], summary: "", classCodes: ["PSY220"] },
     ],
   });
-  assert.ok(msg.includes("Kinetics (concept; class HBIO408)\n  ## Definition — The study of forces that cause motion.\n  ## Linear Impulse\n  summary: Forces that cause motion.\n"), msg);
-  assert.ok(msg.includes("Other (concept; class PSYC360)\n  ## A\n"), msg);
+  assert.ok(msg.includes("Kinetics (concept; class BIO201)\n  ## Definition — The study of forces that cause motion.\n  ## Linear Impulse\n  summary: Forces that cause motion.\n"), msg);
+  assert.ok(msg.includes("Other (concept; class PSY220)\n  ## A\n"), msg);
 });
 
 test("buildDuplicatesMessage numbers each pair, shows both pages with kind and aliases, the shared fact, and asks for a verdict per number", () => {

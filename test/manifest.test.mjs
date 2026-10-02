@@ -9,7 +9,7 @@ import { pathToFileURL } from "node:url";
 
 let mf;
 before(async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "recall-test-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "wikilm-test-"));
   const out = path.join(dir, "manifest.mjs");
   await build({ entryPoints: ["src/manifest.ts"], bundle: true, format: "esm", platform: "node", outfile: out, logLevel: "silent" });
   mf = await import(pathToFileURL(out).href);
@@ -26,7 +26,7 @@ function selectionHighlight(overrides = {}) {
     text: "Receptors have 2 important properties",
     before: "Drug–Receptor Interactions",
     after: "Agonists activate receptors",
-    origins: ["classes/HBIO250/Pharmacology.md"],
+    origins: ["classes/BIO101/Pharmacology.md"],
     ...overrides,
   };
 }
@@ -59,15 +59,15 @@ test("sortAndAssignIds orders by page then selection position, zero-padded ids",
 });
 
 test("mergeHighlights collapses two entries with the same key", () => {
-  const a = selectionHighlight({ text: "", origins: ["classes/HBIO250/Pharmacology.md"] });
-  const b = selectionHighlight({ text: "Receptors have 2 important properties", origins: ["classes/HBIO250/Pharmacokinetics.md"] });
+  const a = selectionHighlight({ text: "", origins: ["classes/BIO101/Pharmacology.md"] });
+  const b = selectionHighlight({ text: "Receptors have 2 important properties", origins: ["classes/BIO101/Pharmacokinetics.md"] });
   const merged = mf.mergeHighlights([a, b]);
   assert.equal(merged.length, 1);
   assert.equal(merged[0].key, a.key);
   assert.equal(merged[0].text, "Receptors have 2 important properties");
   assert.deepEqual(
     merged[0].origins.slice().sort(),
-    ["classes/HBIO250/Pharmacokinetics.md", "classes/HBIO250/Pharmacology.md"],
+    ["classes/BIO101/Pharmacokinetics.md", "classes/BIO101/Pharmacology.md"],
   );
 });
 
@@ -79,7 +79,7 @@ test("mergeHighlights collapses a selection and an annotation on the same page w
     color: "255,208,0",
     target: { page: 2, selection: { beginIndex: 1, beginOffset: 0, endIndex: 5, endOffset: 0 }, color: "255,208,0" },
     text: "Pharmacology is the study of drugs",
-    origins: ["classes/HBIO250/Pharmacology.md"],
+    origins: ["classes/BIO101/Pharmacology.md"],
   });
   const annotation = selectionHighlight({
     key: "page=2&annotation=846R",
@@ -100,7 +100,7 @@ test("mergeHighlights collapses a selection and an annotation on the same page w
   assert.equal(merged[0].kind, "annotation");
   assert.deepEqual(
     merged[0].origins.slice().sort(),
-    ["classes/HBIO250/Pharmacology.md", "pdf annotation"],
+    ["classes/BIO101/Pharmacology.md", "pdf annotation"],
   );
 });
 
