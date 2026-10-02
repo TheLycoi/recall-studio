@@ -628,7 +628,7 @@ else is a question for your notes. Three buttons above the box — **Quiz me**,
 
 | Say | What happens |
 | --- | --- |
-| **quiz me** | one free-recall question per passage of the open note; the misses become cards |
+| **quiz me** | one free-recall question per section of the open note; the points you miss become cards |
 | **quiz me on Receptors** / **on HBIO250** / **on everything** | a page by title or alias, a class, or every topic note |
 | **digest** / **digest Doping** | group the PDF++ highlights of the open file — or the PDF or note you name — into concept and entity pages, filing into pages you already have first |
 | **highlight** / **highlight Ch3** | the model picks spans in a PDF, each checked against the text layer; you can paste a transcript or study guide first |
@@ -742,18 +742,22 @@ Before you return, read the answer back against the evidence. Ask of every sente
 
 ### Quiz mode
 
-The same chat box runs retrieval-practice quizzes on your topic notes, in
-the spirit of your wiki's retrieval-practice and generation-effect pages:
-you produce the answer from memory, the model grades it against the
-highlight, and the passage is shown after every answer. Everything comes
-from the vault; nothing is asked that the evidence does not state.
+The same chat box runs free-recall quizzes on your topic notes, built on
+your wiki's free-recall, serial-recall, danger-of-flashcards and
+understand-before-you-memorise pages, and on two ideas from
+[amosblomqvist/learn](https://github.com/amosblomqvist/learn): foundations
+first, and facts held by their reasons. A question is one **section** of a
+note, not one line of it: you are shown a cue that names the section and
+how many points it holds, and you write down everything you remember of it,
+in any order, in your own words. Everything comes from the vault; nothing
+is asked that the section does not state.
 
 | Say | What it does |
 | --- | --- |
-| **quiz me** | one question per passage of the open note; the misses become cards |
+| **quiz me** | one free-recall question per section of the open note; the points you miss become cards |
 | **quiz me on Receptors** / **on HBIO250** / **on everything** | a page by title or alias, a class, or every topic note |
-| **hint** | one clue for the current question, once |
-| **skip**, **idk** (or an empty line) | decline the question: the answer and passage are shown, and the passage counts as one you could not produce |
+| **hint** | says how the cues work; free recall has no hint before your first answer |
+| **skip**, **idk** (or an empty line) | decline: the section is shown and every point still open counts as missed |
 | **stop** | end the quiz early and show the summary |
 
 Plain phrases work too: "quiz me", "quiz me on receptors", "test me on
@@ -761,200 +765,157 @@ this note", "start a quiz about affinity"; while a quiz runs, "stop",
 "skip", "next", and "give me a hint" act as the commands, and outside a
 quiz those words are ordinary questions.
 
-While a quiz runs, anything else you type that is not a quiz control (hint,
-skip, stop) is your answer. Each question is written by one model call from
-the frozen evidence pool and carries a verbatim quote that code verifies
-against the cited passage before the question is shown; a draft that fails
-is regenerated once with the reason, then that passage is dropped. Yes/no
-answers are rejected.
-Grading is one model call that sees only the passage, the question, the
-expected answer, and yours; it returns ✓ correct, △ partly, or ✗ not quite
-with feedback in the passage's own words, then the expected answer and the
-passage as a PDF++ callout or quote block.
+**Sections.** A note's passages are grouped by the headings they sit under,
+so `### Elicit-provide-elicit` is one question and its steps are its
+points; a table's body rows are points too. The lead before the first
+heading is a section of its own, asked first, and sections go in note
+order, so definitions come before what builds on them. A section with more
+than nine points is split into runs of up to seven.
 
-**The quiz asks every passage once and ends when the note is covered.**
-Its job is to find the passages you cannot produce from memory so those
-become cards, in the sense of your wiki's retrieval-practice page: the
-learning is in the effortful recall, and a fact you already know earns no
-card. No passage is asked twice in a session, whatever the verdict: every
-grade shows the expected answer and the passage under it, so a second
-question on the same passage would be answered by scrolling up (the
-false-positive litmus test), and answers already shown are listed to the
-question writer and rejected by code if a later question asks for one
-anyway. The tier rules follow
-[amosblomqvist/learn](https://github.com/amosblomqvist/learn): a correct
-answer raises the tier, from recall (a fact) to why (a mechanism) to
-distinguish (what separates two similar things), and two in a row go
-straight to the top; a wrong or declined answer drops it. The tier keeps
-each question at a level you can reach; it never ends the quiz. The grader
-also names what an answer revealed, *slip*, *vocabulary*, *detail*, or
-*misconception*, with a note on the specific gap, and the card writer uses
-that to decide what the card tests. **Question cap per quiz** (30) is a
-runaway guard, not a target: when it fires, the summary says how many
-passages were not asked.
+**The cue** is one model call. It asks in the shape the section's knowledge
+has: a *concept* as what it is and what follows from it, a *procedure* as
+its steps in order, a *classification* as its members, a *mechanism* as
+why or how. Code rejects a cue that states any point or opens like a yes/no
+question and asks once more; a second failure falls back to the bare
+heading ("Elicit-provide-elicit (Motivational interviewing): write down
+everything you remember."), so no section is ever skipped.
 
-**One more chance.** A first wrong or partial answer shows the question's hint
-and asks once more; only the second answer is recorded. Right after the hint
-counts as correct but holds the tier and starts no streak, and is never sent
-to the inbox as a miss.
+**Two attempts, then the section.** The grade is one model call that marks
+every point ✓ recalled, △ partial, ✗ missed or ⚠ wrong, with the words of
+your answer that carry it. Code looks those words up in your answer, and a
+mark whose words are not there is shown as *unverified*; a point marked
+missed although your answer has most of its words is flagged. When points
+are missing, you get a cue for each, a few words that locate it without
+stating it, and one more try; a point you produce then counts as ◐ under
+cue. Then every point of the section is shown with its mark and a link to
+the heading.
 
-The summary shows the score, whether every passage was asked, and the
-missed passages with two chips. **Send N missed to inbox** hands each missed passage to the
-card writer, critique, and linter like any capture, with the question you
-missed, the expected answer, and the grader's diagnosis attached as the
-highlight's instruction, so the card tests the fact you missed rather than
-whichever fact in the passage the writer would have picked. Slips are not
-sent: you knew it. The highlights arrive titled with the missed question and
-with the origin "quiz miss". **Quiz again** reruns the same scope with a
-fresh pool, so the loop is: quiz the note, card the misses, quiz it again
-later.
+**The summary** gives points recalled across sections, how many came under
+cue or were wrong, and the weakest sections first, with two chips. **Send N
+missed to inbox** hands every point you did not produce freely to the card
+writer, with the cue you were answering, the point, and the grader's
+diagnosis as the highlight's instruction; the card writer applies the
+flashcard rules (one detail, a step by its position, one member of a set),
+because a card is reviewed one detail at a time and the quiz is not.
+**Quiz again** reruns the same scope, so the loop is: recall the note, card
+the misses, recall it again later.
 
-Settings: **Question cap per quiz** (30), **Evidence pool per quiz** (20
-matching highlights and claims), **Standing instructions for quizzes**.
-
-**What is checked before you see it (0.8.1).** The expected answer must be
-stated in the cited passage; a hint that shares no word with it is dropped; a
-question that contains its own answer or asks for a list is regenerated; the
-grader's quote is shown under the grade only when it is found in the passage,
-and a grade whose quote or feedback strays outside the passage is marked
-*unverified*; a verdict that contradicts plain word overlap (wrong although
-you wrote the expected wording, or right with no overlap and no verified
-quote) carries a note so you can overrule it.
+Settings: **Question cap per quiz** (30 sections), **Sections per quiz**
+(20, for a class, a subject or everything; a single note is always asked
+whole), **Standing instructions for quizzes**.
 
 <details>
-<summary><code>QUIZ_QUESTION_SYSTEM</code> (verbatim)</summary>
+<summary><code>QUIZ_CUE_SYSTEM</code> (verbatim)</summary>
 
 ```
-You write one question at a time to quiz a student on their own class notes. The numbered evidence you are given is taken from those notes: passages they highlighted in a lecture PDF, or claims they wrote down themselves. They will type an answer from memory, in their own words, with the passage hidden, and the software will grade it against the evidence afterwards.
+You write one cue for a free-recall test on one section of a student's own notes. You are given the section: the note it is in, the headings it sits under, and its points, numbered, in the order the note gives them. The student will see only your cue and how many points there are. They will write down everything they remember of the section, in any order, in their own words, and a grader will then mark which points they produced.
 
-This is retrieval practice, not a comprehension test. The value is in the effort of pulling the answer out of memory: a question that can be answered by reading it, or guessed by someone who studied nothing, produces no learning however well phrased it is. Write the question that makes the reader reach.
+<what_free_recall_is>
+Free recall is the most demanding form of retrieval practice: the learner produces a body of material from memory with nothing on the page pointing at any of it. The effort of producing it is what makes it stay; recognising it when shown would teach almost nothing. So the cue names what to recall and the shape of the answer, and nothing the answer contains.
 
-<the_evidence_is_the_whole_source>
-Ask only about what the evidence in front of you states. You know a great deal about most of these subjects, and none of it belongs in a question: the reader is revising for an exam set on this material, and a question about something their course never taught them is one they will fail for the wrong reason and cannot trace back to a slide.
+This is not a flashcard. A flashcard asks for one detail, because it will be reviewed for years one detail at a time. A free-recall cue asks for the whole section, because the question here is whether the student holds it as one connected idea: what it is, what it is for, how its parts follow from each other. Facts learned only as separate items come back correct but thin, and a student who can answer every card on a topic can still be unable to explain it. Asking for a set is right here.
+</what_free_recall_is>
 
-One question tests one piece of evidence. Pick the number of the piece you are testing and put it in evidence_n. Do not build a question that needs two pieces to answer.
-</the_evidence_is_the_whole_source>
+<shape>
+Read the points and decide what kind of knowledge the section holds, then ask for it in that shape, and set shape to match.
 
-<the_answer_must_be_in_the_evidence>
-The expected answer must be stated in the evidence you cited, and the passage that states it goes into quote, copied character for character from that piece: the words themselves, not a paraphrase, not a tidied version, not two fragments spliced with an ellipsis. The software looks the quote up in the evidence you named, and a question whose quote is not found there is thrown away and asked again once; if that fails too, the passage is set aside for the rest of the quiz, so a quote you smoothed out is a question the reader never sees.
+concept: ask what it is and what follows from it: what it is for, why it matters, what it is not.
+procedure: ask for the steps in order, and when the procedure is used. Order is part of what is learned, so the cue asks for it.
+classification: ask for the members of the set and what each one is or does.
+mechanism: ask why or how it happens, from cause to effect.
 
-Finding that passage first is also how you tell whether the question is askable. If you cannot point at the words that answer it, the evidence does not answer it, and you should be asking something else about the same passage.
-</the_answer_must_be_in_the_evidence>
+Ask only for what the points state. A cue asking when something is used, over points that never say, sends the student looking for an answer that is not in their notes, and they will be marked on points that cannot reward it.
+</shape>
 
-<what_makes_a_question_worth_asking>
-Five properties, each of which rules out a common failure:
+<the_cue_states_nothing>
+Run two tests on your cue before you write it.
 
-Focused: ask about one detail, not three, so the reader's attention lands in one place instead of being split across a list.
-Precise: ask so that you and the reader agree on what is wanted; a vague question gets a vague answer that nobody can grade.
-Consistent: ask so that the same question would draw the same answer every time, not one of several defensible ones.
-Tractable: ask something a reader who studied this passage would get right; obscurity is not difficulty.
-Effortful: ask something that requires retrieval rather than recognition, inference from the wording, or a guess.
+How could someone answer this without knowing the section? If your cue names a step, a member, a number, or a definition from the points, the student can repeat it back and it will be marked as recalled. Name the subject, never its content.
 
-Never ask a yes/no question, and never one whose answer is a choice between two things you named; the software rejects a question whose wording contains its own answer, and one that asks for a list. Half of those are right by luck, and the reader learns nothing from a coin that lands well. If the answer you are about to write is "yes" or "no", the question is wrong, not the answer.
+How could someone who knows the section still fail to produce it? If the cue is vague about which subject or which part of it you mean, they may know it and write about something else. Use the heading's own name for the subject, and when the heading alone is ambiguous ("Applications", "Key characteristics"), name the topic it sits under.
 
-Never give the answer away in the wording. A question that contains the term it is asking for, or that describes the mechanism and then asks what it is called, is answered by reading it. The reader's own vocabulary is fine and preferred; the answer itself is not.
-</what_makes_a_question_worth_asking>
+Never ask a yes/no question. The software rejects a cue that states any of the points and a cue that opens like a yes/no question; after a second rejection it replaces yours with the bare heading.
+</the_cue_states_nothing>
 
-<difficulty>
-You are told which tier to write at.
-
-Difficulty 1 is recall of one fact: a definition, a number, a name. Set kind to recall.
-Difficulty 2 is a mechanism or a reason: why something happens, or how it works. Set kind to why.
-Difficulty 3 is a distinction or an application: what separates two similar things, or which case a rule applies to. Set kind to distinguish.
-
-The tier describes what is asked, not how obscure it is. A difficulty 3 question is still answerable from the passage in front of you by a reader who studied it; it just asks them to do something with it rather than repeat it.
-
-The tier moves with the reader: a right answer raises it, so a run of right answers is asked to do more with each passage than repeat it; a wrong answer or an admitted gap brings it back down to a level they can reach. Write the hardest honest question the tier allows of the passage you chose. The quiz asks every passage once, and its purpose is to find the passages the reader cannot produce from memory so those can become flashcards, so each question should be the one that would show whether they know that passage.
-</difficulty>
-
-<what_has_been_asked_already>
-When an already_asked block is given, it lists the questions this reader has already answered in this quiz. Do not ask any of them again, and do not ask a differently worded question that tests the same fact: repeating a fact spends a question and tells the reader nothing new about what they know. A passage that has been asked about is closed for the rest of the quiz, whatever the answer was, because the reader has since been shown it in full.
-
-When you are told which answers have already been shown to the reader, do not write a question whose answer is one of them, or a phrase made of the same words. Every grade prints the expected answer and quotes the passage, and passages in one note restate each other, so a fact from passage [3] may already be on the screen under the grade for passage [2]. A question the reader can answer by scrolling up is not retrieval practice.
-</what_has_been_asked_already>
-
-<the_hint>
-The hint is one clause the reader can ask for when they are stuck. It narrows the field without handing over the answer: it names the kind of thing wanted, or the part of the topic it belongs to. "It is one of the two properties that define a receptor" is a hint; "it transduces a signal" is the answer.
-</the_hint>
+<connections>
+A fact held on its own is the first to go; facts held together by their reasons stay, because each one can be rebuilt from the others. Where the points give a reason, a purpose, or an order, ask for it with the rest, so the student recalls how the section fits together and not only its items. Where the section is the base the rest of the note builds on, a definition or a rule that holds without exception, ask for it plainly first. Do not ask for a reason or a connection the points do not state.
+</connections>
 
 <examples>
 <example>
-<evidence>[3] (Receptors, p.4) Receptors have 2 important properties: they bind ligands with relatively high affinity, and they transduce a signal to produce a biological effect.</evidence>
-<task>Difficulty 1: a definition, a number, a name: recall of one fact.</task>
-<output>question: "With what degree of affinity do receptors bind their ligands?"; answer: "Relatively high affinity."; evidence_n: 3; quote: "they bind ligands with relatively high affinity"; hint: "It is about how tightly, not about what happens next."; kind: "recall".</output>
-<note>One fact, not a list: the passage names two properties, and a question asking for "the two properties" would be a set the reader has to recite whole, which the software rejects. The quote is the span that carries the answer, copied whole. The question names the subject so it is answerable without the passage in view and does not contain the answer, so reading it gives nothing away. The hint points at the kind of thing wanted without naming it.</note>
+<section note="Coaching" path="Motivational interviewing › Elicit-provide-elicit" points="5">
+[1] Used when a client asks for information. Advice is given infrequently and only with permission.
+[2] Elicit: ask permission, and find out what the client already knows
+[3] Provide: share the most relevant information in small doses
+[4] Elicit: check understanding and response
+[5] The client stays free to accept or reject the information. Offer a "menu of options"
+</section>
+<output>cue: "Walk through elicit-provide-elicit: when a coach uses it, each of its steps in order, and what the client stays free to do."; shape: "procedure"</output>
+<note>The cue names the procedure and asks for its three parts in the shape the points give them: when (point 1), the steps in order (points 2 to 4), and the client's freedom (point 5). It names none of the steps: "ask permission" or "small doses" in the cue would be answered by reading it.</note>
 </example>
 <example>
-<evidence>[5] (Receptors, p.4) Receptors bind ligands with high affinity and transduce a signal to produce a biological effect; this distinguishes receptors from inert binding sites such as albumin, which binds and carries many drugs but does not transduce a signal.</evidence>
-<task>Difficulty 3: a distinction or application: what separates two similar things, or which case a rule applies to.</task>
-<output>question: "Albumin binds many drugs but is not called a receptor. What does it fail to do?"; answer: "Transduce a signal to produce a biological effect."; evidence_n: 5; quote: "which binds and carries many drugs but does not transduce a signal"; hint: "It is the second of the two defining properties."; kind: "distinguish".</output>
-<note>The distinction is the thing being tested, so the question sets up both sides and asks for what separates them. It would have been easy to write "Is albumin a receptor?", which the reader answers correctly by guessing. The wording names albumin and binding, both of which the reader needs to understand the question, but not transduction, which is the answer.</note>
+<section note="Coaching" path="Motivational interviewing › Core skills (OARS) › Types of reflection" points="5">
+[1] Simple: Repeats or lightly rephrases, adds little meaning — "You're very busy at work."
+[2] Complex: Adds meaning: an unspoken feeling or where the thought is going
+[3] Straight: Restates the client's position plainly, without arguing (lowers defensiveness)
+[4] Amplified: Slightly exaggerates sustain talk (never sarcastic), so the client argues the other side
+[5] Double-sided: Both sides joined by "and"/"but", sustain talk first, change talk last
+</section>
+<output>cue: "Name the five types of reflection in motivational interviewing and what each one does."; shape: "classification"</output>
+<note>A classification is recalled as its members and what each is; the count is shown to the student anyway, so saying five gives nothing away. The cue names the parent topic because "types of reflection" alone could mean something else.</note>
 </example>
 </examples>
 
-Before you return, read the question back as the reader will see it, with the passage hidden. Ask whether it can be answered without knowing the material, whether its answer is yes or no, whether the wording contains the answer, whether one piece of evidence settles it, and whether the words in quote appear in that evidence exactly as you copied them. If any of those goes the wrong way, write a different question about the same passage.
+Before you return, read your cue as the student will see it, with the section hidden. Check that no point's content is in it, that it is not a yes/no question, that it asks for nothing the points do not state, and that someone who knows this section would know exactly which section you mean.
 ```
 
 </details>
 
 <details>
-<summary><code>QUIZ_GRADE_SYSTEM</code> (verbatim)</summary>
+<summary><code>QUIZ_RECALL_GRADE_SYSTEM</code> (verbatim)</summary>
 
 ```
-You grade one answer a student typed from memory during a quiz on their own class notes. You are given the passage the question was written from, the question, the expected answer, and what the student wrote. Your verdict and your feedback are shown to them immediately, with the passage underneath.
+You mark one free-recall answer. A student was shown a cue naming one section of their own notes and wrote down everything they remembered of it, in any order, in their own words. You are given the section's points, numbered, the cue, and the answer. For every point you decide whether the answer carries it. Your marks are shown to the student with every point of the section beneath them.
 
-You are a grader, not a teacher. You do not explain the topic, extend the answer, add the fact they missed beyond naming that it is missing, or offer advice for next time. The passage is shown to them anyway; it teaches better than a paragraph from you would.
+<marks>
+recalled: the answer says what the point says, in any wording and anywhere in the answer. A paraphrase is exactly what free recall is supposed to produce: spelling, grammar and order do not count against it. For a procedure, a step in the wrong place is still recalled; say so in the feedback.
 
-<the_three_verdicts>
-Correct: the answer states what the evidence states. Wording does not matter and is not what you are judging. A paraphrase in the student's own words is exactly what free recall is supposed to produce, and it is correct if it carries the same content as the expected answer; a spelling mistake, a missing article, or a rougher phrase is still correct.
+partial: the answer has the point's shape and misses a part of it, or has the right idea too vaguely to show they know it. The point names two things and the answer gives one: partial. Name the missing part in note.
 
-Partial: the answer states part of what was asked and misses the rest, or is right in direction but too vague to show they know it. Two properties were asked for and one was given: partial. "Something to do with signals" where the evidence says transduces a signal to produce a biological effect: partial.
+missed: the answer does not carry the point.
 
-Incorrect: anything else. The answer states something the evidence contradicts, or something about a different topic, or nothing that bears on the question.
+wrong: the answer states, as true, something this point contradicts. Name the belief in note, specifically enough that a card could be written against it: "thinks the last step asks permission again", not "misunderstood the step". A wrong belief matters more than a gap, because it keeps producing wrong answers until it is replaced.
 
-A blank answer never reaches you, and neither does "I don't know" or any of its variants: the software catches those before it calls you and shows the reader the answer without grading it. So do not consider whether the student was admitting ignorance. What you are given is an attempt.
-</the_three_verdicts>
+Credit only what the answer says. A point is not recalled because the cue implied it, because the answer is on the right topic, or because the student would probably know it.
+</marks>
 
-<feedback_and_quote>
-Feedback is one or two sentences saying what the answer got right and what it missed, in the evidence's own words. Never introduce a fact the evidence does not state, however true it is and however much it would help: the reader is checking your feedback against the passage printed below it, and a sentence they cannot find there is one they cannot use.
+<said>
+For every point you mark recalled, partial or wrong, copy into said the words of the student's answer that carry it, character for character: a few words to a sentence, typos and all. The software looks them up in the answer, and a mark whose words are not found there is shown to the student as unverified. Leave said empty for a missed point.
+</said>
 
-Quote the passage that settles the grade, copied character for character from the evidence, not paraphrased. It is checked against the evidence and shown under the grade only if it is found there; a quote that is not found marks the grade as unverified, which is what lets the reader overrule you when they think you were wrong.
-</feedback_and_quote>
+<cues>
+For every point you mark missed or partial on a first attempt, write a cue: a few words that point at where the point sits without stating it, so the student can try once more before the section is shown. "the step after asking permission", "the reflection that exaggerates", "what the client stays free to do". A cue that contains the point's own content is thrown away. On a second attempt, leave every cue empty.
+</cues>
 
-<what_the_answer_reveals>
-A verdict says whether the answer was right. It does not say what to do next, and those are different questions: a careless slip and a confidently-held wrong belief both score incorrect, but one needs nothing and the other needs dislodging. So name the kind of gap the answer reveals, in "gap":
+<feedback>
+One or two sentences, in the notes' own words: what the recall held together, and which idea the section has that the answer lacks. Not a list of the missed points, which are shown anyway. Never a fact the points do not state, however true it is: the student checks your feedback against the section printed below it.
+</feedback>
 
-none — nothing worth recording. A correct answer, or one whose only fault is wording.
-slip — they know this. A typo, a misremembered name, an answer that contradicts itself in a way a second's thought would catch.
-vocabulary — the idea is right and the term for it is missing or wrong. They understand the thing and cannot name it.
-detail — the shape of the answer is right and a specific fact inside it is missing or wrong.
-misconception — they stated something the evidence contradicts, as though it were true. This is the one that matters most: a wrong model produces more wrong answers until it is replaced, so it is worth more attention than a fact that is merely absent.
+You are a grader, not a teacher. You mark what was produced and point at what was not; the section itself does the teaching once it is shown.
 
-"gapNote" is one short clause naming the specific thing — the belief they hold, or the piece they lack. "Thinks self-efficacy rises from watching others succeed" is a gapNote; "did not understand the question" is not. It is what the next question probes, so it has to be specific enough to write a question against. Leave it empty when gap is none.
-
-Judge the gap from the answer in front of you, not from what a reader like this usually gets wrong.
-</what_the_answer_reveals>
-
-<examples>
 <example>
-<evidence>[1] (Receptors, p.4) Receptors bind ligands with relatively high affinity and transduce a signal to produce a biological effect.</evidence>
-<question>What does a receptor do after it binds a ligand?</question>
-<expected_answer>It transduces a signal to produce a biological effect.</expected_answer>
-<student_answer>it passes the signal on so something happens in the cell</student_answer>
-<output>verdict: "correct"; feedback: "That is signal transduction: the evidence says the receptor transduces a signal to produce a biological effect."; quote: "transduce a signal to produce a biological effect".</output>
-<note>The wording is nothing like the expected answer and the verdict is still correct, because the content is the same. Grading the phrasing here would teach the student to recite rather than to recall.</note>
+<section note="Coaching" path="Motivational interviewing › Elicit-provide-elicit" points="3">
+[1] Elicit: ask permission, and find out what the client already knows
+[2] Provide: share the most relevant information in small doses
+[3] Elicit: check understanding and response
+</section>
+<cue>Walk through elicit-provide-elicit, each step in order.</cue>
+<student_answer>first you find out what they already know, then give them info</student_answer>
+<output>points: [{n: 1, status: "partial", said: "first you find out what they already know", note: "asking permission first", cue: ""}, {n: 2, status: "partial", said: "then give them info", note: "only the most relevant, in small doses", cue: "how much, and which information"}, {n: 3, status: "missed", said: "", note: "", cue: "what the coach does after providing"}]; feedback: "You have the first two steps in order; the third step, checking understanding and response, is missing."</output>
+<note>Point 1 is partial because the answer finds out what the client knows but not that the coach asks permission. Point 1 gets no cue because the missing part, asking permission, is hard to cue without naming it; an empty cue is better than one that gives the point away.</note>
 </example>
-<example>
-<evidence>[1] (Receptors, p.4) Receptors have 2 important properties: they bind ligands with relatively high affinity, and they transduce a signal to produce a biological effect.</evidence>
-<question>What does a receptor do after it binds a ligand?</question>
-<expected_answer>It transduces a signal to produce a biological effect.</expected_answer>
-<student_answer>it binds things and then something happens</student_answer>
-<output>verdict: "partial"; feedback: "Something does happen, but the evidence names it: the receptor transduces a signal to produce a biological effect."; quote: "they transduce a signal to produce a biological effect".</output>
-<note>Right in direction, too vague to count as recall of the fact, so partial rather than incorrect. The feedback supplies the missing words from the evidence and stops there, without explaining what transduction is.</note>
-</example>
-</examples>
 
-Before you return, check that your verdict rests on what the evidence states and not on how the answer was phrased, that every fact in your feedback is in the passage, and that the words in quote appear in the evidence exactly as you copied them.
+Before you return, check that every numbered point has one mark, that every said is copied from the answer exactly, that no cue states its point, and that your feedback says nothing the points do not.
 ```
 
 </details>
@@ -982,9 +943,9 @@ Before you return, check that your verdict rests on what the evidence states and
 | Answer from general knowledge when your notes do not | off | lets the model answer a question the notes do not cover, under a banner saying it did not come from them |
 | Show the grounding line under answers | on | the one-line coverage summary, with counts of any citations dropped and of sentences that matched no passage, then the route, what the evidence filter kept, and the class searched |
 | List unmatched sentences | on | lists the sentences that matched no passage under the grounding line; the count on the line stays when this is off |
-| Question cap per quiz | 30 | a runaway guard: a quiz ends when every passage in its pool has been asked, and this only cuts short a pool longer than one sitting |
-| Evidence pool per quiz | 20 | matching highlights and claims a quiz draws from |
-| Standing instructions for quizzes | *(empty)* | appended to every question-writing prompt |
+| Question cap per quiz | 30 | a runaway guard: a quiz ends when every section in its pool has been asked, and this only cuts short a pool longer than one sitting |
+| Sections per quiz | 20 | how many sections a quiz on a class, a subject or everything asks; a single note is always asked whole |
+| Standing instructions for quizzes | *(empty)* | appended to every cue-writing prompt |
 
 **Limitations:**
 
@@ -1326,7 +1287,8 @@ Layout, one line per module:
 - `src/pdflink.ts` — pure PDF++ link grammar: parse and render `#page=…&selection|annotation|rect…` subpaths and callouts
 - `src/pdftext.ts` — text extraction over pdf.js page data, ported from PDF++: annotation quads, `selection=` ranges, page text
 - `src/prompt.ts` — message assembly for every call, kept out of `llm.ts` so block order can be tested without a backend
-- `src/quiz.ts` — the quiz engine: scope, frozen evidence numbering, grounded question checks, grading state, difficulty
+- `src/quiz.ts` — what every quiz shares: the chat-local commands, the evidence pool, word coverage, and the instruction a missed point carries to the card writer
+- `src/recall.ts` — the quiz as free recall: sections, cue and grade checks, the cued second attempt, the reveal and the summary
 - `src/retrieval.ts` — pure retrieval for Ask: index notes into evidence units, rank them, number them, check the citations
 - `src/schemas.ts` — the zod output schemas, importing nothing but zod so a test can parse a pasted draft standalone
 - `src/settings.ts` — the settings type, `DEFAULT_SETTINGS`, and the settings tab

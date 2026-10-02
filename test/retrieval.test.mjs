@@ -688,3 +688,54 @@ test("coveredBy matches across word forms, so a restatement is not missed by an 
   const r = rt.coveredBy(restated, units);
   assert.equal(r.covered, true, `scored ${r.score.toFixed(2)}`);
 });
+
+// ---- sections and tables: what the free-recall quiz groups by ------------------
+
+const COACHING_MD = [
+  "---",
+  "class: PHED163",
+  "---",
+  "**Health coaching** is a client-centered partnership in which a coach helps a person change.",
+  "",
+  "## Motivational interviewing",
+  "**Motivational interviewing (MI)** is a client-centered approach to behavior change.",
+  "",
+  "### Elicit-provide-elicit",
+  "Used when a client asks for information. Advice is given infrequently and only with permission.",
+  "1. **Elicit**: ask permission, and find out what the client already knows",
+  "\t- \"What does 'eating better' look like to you?\"",
+  "2. **Provide**: share the most relevant information in small doses",
+  "",
+  "#### Types of reflection",
+  "| Type | What it does | Example |",
+  "| --- | --- | --- |",
+  "| **Simple** | Repeats or lightly rephrases, adds little meaning | \"You're very busy at work.\" |",
+  "| **Amplified** | Slightly exaggerates sustain talk | \"So there's no time at all.\" |",
+  "",
+  "## Initial session",
+  "- Sit at a **45-degree angle** to the client",
+].join("\n");
+
+test("indexNote gives each prose line the heading path it sits under", () => {
+  const units = rt.indexNote("wiki/concepts/Coaching.md", COACHING_MD);
+  const at = (re) => units.find((u) => re.test(u.text));
+  assert.equal(at(/client-centered partnership/).section, "", "the lead before any heading has no section");
+  assert.equal(at(/approach to behavior change/).section, "Motivational interviewing");
+  assert.equal(at(/Used when a client asks/).section, "Motivational interviewing › Elicit-provide-elicit");
+  assert.equal(at(/share the most relevant/).section, "Motivational interviewing › Elicit-provide-elicit");
+  assert.equal(at(/45-degree angle/).section, "Initial session", "a ## heading resets the deeper levels");
+});
+
+test("indexNote reads a table's body rows as statements and skips the header and separator", () => {
+  const units = rt.indexNote("wiki/concepts/Coaching.md", COACHING_MD);
+  const rows = units.filter((u) => u.section === "Motivational interviewing › Elicit-provide-elicit › Types of reflection");
+  assert.deepEqual(
+    rows.map((u) => u.text),
+    [
+      "Simple: Repeats or lightly rephrases, adds little meaning — \"You're very busy at work.\"",
+      "Amplified: Slightly exaggerates sustain talk — \"So there's no time at all.\"",
+    ],
+  );
+  assert.equal(units.some((u) => /What it does/.test(u.text)), false, "the header row is a label");
+  assert.equal(units.some((u) => /---/.test(u.text)), false, "the separator is not text");
+});

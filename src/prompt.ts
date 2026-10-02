@@ -205,84 +205,82 @@ function askEvidenceLines(evidence: AskEvidenceIn[]): string {
 }
 
 
-/** A quiz question is written from the same numbered evidence Ask answers from, so the two share one shape. */
-export type QuizEvidenceIn = AskEvidenceIn;
+/** One section of a note as the free-recall quiz sends it: where it sits and its points, in note order. */
+export interface QuizSectionIn {
+  noteTitle: string;
+  /** The heading path, "" for the note's lead. */
+  section: string;
+  /** Which run of a split section this is, of how many. */
+  part: number;
+  parts: number;
+  points: string[];
+}
 
-export interface QuizQuestionMessageArgs {
-  evidence: QuizEvidenceIn[];
-  difficulty: 1 | 2 | 3;
-  askedQuestions: string[];
-  /** Expected answers already shown to the reader in earlier grades; the model must not ask for them again. */
-  revealed: string[];
+export interface QuizCueMessageArgs extends QuizSectionIn {
   standingInstructions: string;
   failure: string;
 }
 
-/** What each difficulty tier asks for, spelled out rather than left to the model's sense of "harder". */
-const QUIZ_DIFFICULTY: Record<1 | 2 | 3, string> = {
-  1: "a definition, a number, a name: recall of one fact",
-  2: "a mechanism or reason: why or how something happens",
-  3: "a distinction or application: what separates two similar things, or which case a rule applies to",
-};
+export interface QuizRecallGradeMessageArgs extends QuizSectionIn {
+  cue: string;
+  answer: string;
+  /** The second attempt, after a cue for each of these points. */
+  cued: boolean;
+}
+
+/** Attribute values are single-line; a quote in a heading would close the attribute early. */
+function attr(v: string): string {
+  return v.replace(/"/g, "'").replace(/\s+/g, " ").trim();
+}
+
+/** The section block both quiz messages open with. */
+function sectionBlock(a: QuizSectionIn): string {
+  const part = a.parts > 1 ? ` part="${a.part} of ${a.parts}"` : "";
+  const head = `<section note="${attr(a.noteTitle)}" path="${attr(a.section)}"${part} points="${a.points.length}">`;
+  const lines = a.points.map((t, i) => `[${i + 1}] ${t}`).join("\n");
+  return `${head}\n${lines}\n</section>`;
+}
 
 /**
- * Build the user message for one quiz question.
+ * Build the user message for one free-recall cue.
  *
- * Same order as the ask message: the evidence is the long input and goes
- * first, the questions already asked and the answers already shown follow it
- * so the model can see what not to repeat, and the instructions narrow from
- * there — the tier, then the reader's standing instructions, then the reason
- * the last attempt was rejected. The closing line is one sentence, because by
- * then everything it needs is above it.
- *
- * `already_asked` is omitted rather than printed empty: an empty block reads
- * as "nothing has been asked", which is true, but it also invites the model to
- * fill it, and an omitted block cannot be misread at all.
+ * The section is the long input and goes first; the reader's standing
+ * instructions and the reason the last cue was rejected follow, each omitted
+ * when empty, and the task closes the message in one line.
  */
-export function buildQuizQuestionMessage(a: QuizQuestionMessageArgs): string {
-  const asked = a.askedQuestions.map((q) => q.trim()).filter(Boolean);
+export function buildQuizCueMessage(a: QuizCueMessageArgs): string {
   const standing = a.standingInstructions.trim();
   const failure = a.failure.trim();
-  const revealed = a.revealed.map((r) => r.trim()).filter(Boolean);
   return [
-    `<evidence>\n${askEvidenceLines(a.evidence)}\n</evidence>`,
-    asked.length ? `<already_asked>\n${asked.join("\n")}\n</already_asked>` : "",
-    // Every grade shows its expected answer, so these are on the reader's
-    // screen; a question they answer is a scroll, not a recall.
-    revealed.length ? `Already shown to the reader as answers, so do not ask for any of them again: ${revealed.join("; ")}` : "",
-    `Difficulty ${a.difficulty}: ${QUIZ_DIFFICULTY[a.difficulty]}.`,
+    sectionBlock(a),
     standing ? `Standing instructions: ${standing}` : "",
-    failure ? `The previous attempt was rejected: ${failure}. Fix that.` : "",
-    `Write one question.`,
+    failure ? `The previous cue was rejected: ${failure}. Fix that.` : "",
+    "Write the cue.",
   ]
     .filter(Boolean)
     .join("\n\n");
 }
 
-export interface QuizGradeMessageArgs {
-  evidence: QuizEvidenceIn;
-  question: string;
-  expected: string;
-  userAnswer: string;
-}
-
 /**
- * Build the user message for one grade.
+ * Build the user message for one free-recall grade.
  *
- * The grader sees one piece of evidence, not the pool: the question was
- * written from that passage and is graded against it, and handing over the
- * rest would invite a verdict that rests on something the reader was never
- * asked about. The student's answer comes last of the four inputs, directly
- * above the task, because it is the thing being judged.
+ * The grader sees the section, the cue the reader saw, and the answer, which
+ * comes last of the three, directly above the task, because it is the thing
+ * being judged. On the cued attempt the points are only the ones still open,
+ * and the message says so.
  */
-export function buildQuizGradeMessage(a: QuizGradeMessageArgs): string {
+export function buildQuizRecallGradeMessage(a: QuizRecallGradeMessageArgs): string {
   return [
-    `<evidence>\n${askEvidenceLines([a.evidence])}\n</evidence>`,
-    `<question>\n${a.question.trim()}\n</question>`,
-    `<expected_answer>\n${a.expected.trim()}\n</expected_answer>`,
-    `<student_answer>\n${a.userAnswer.trim()}\n</student_answer>`,
-    `Grade the student's answer against the evidence.`,
-  ].join("\n\n");
+    sectionBlock(a),
+    `<cue>\n${a.cue.trim()}\n</cue>`,
+    a.cued
+      ? "This is the student's second attempt, after a cue for each of the points above; they are the points the first attempt did not produce. Mark only these."
+      : "",
+    `<student_answer>\n${a.answer.trim()}\n</student_answer>`,
+    "Mark every point.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 /** One existing wiki note as the suggest prompt sees it: its title, which of the two kinds it is, and its sections. */

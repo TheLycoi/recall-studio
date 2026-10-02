@@ -124,64 +124,61 @@ export type DigestDraft = z.infer<typeof DigestOut>;
 export type AskDraft = z.infer<typeof AskOut>;
 
 /**
- * One quiz question, generated from a single numbered piece of evidence.
- *
- * `evidence_n` and `quote` exist so the software can check the question before
- * the reader sees it: src/quiz.ts looks the number up in the pool it sent and
- * checks the quote is in that evidence, a plain substring check (Ask no
- * longer checks quotes at all). A question whose quote fails verification is
- * regenerated once and then dropped, so the model is never the last word on
- * whether its own question is grounded.
+ * The shape of what a free-recall cue asks for. It follows the knowledge in
+ * the section, not a difficulty: a procedure is recalled in order, a
+ * classification by its members, a mechanism by its causes, a concept by what
+ * it is and what follows from it.
  */
-export const QuizQuestionOut = z.object({
-  question: z
+export const CueShape = z.enum(["concept", "procedure", "classification", "mechanism"]);
+export type CueShape = z.infer<typeof CueShape>;
+
+/** One free-recall cue for one section of a note. */
+export const QuizCueOut = z.object({
+  cue: z
     .string()
     .describe(
-      "One focused, precise question with exactly one correct answer, answerable from the cited evidence alone, in the reader's own vocabulary; no [n] markers, links, or ids.",
+      "One question naming the section's subject and the shape of what to recall, in the reader's vocabulary; it states none of the points. No [n] markers, links, or ids.",
     ),
-  answer: z.string().describe("The expected answer in one short phrase or sentence, as the evidence states it. Never 'yes' or 'no'."),
-  evidence_n: z.number().describe("The number of the one piece of evidence this question tests."),
-  quote: z
-    .string()
-    .describe("The passage from that evidence which states the answer, copied verbatim, character for character."),
-  hint: z.string().describe("One clause that narrows the question without giving the answer away."),
-  kind: z
-    .enum(["recall", "why", "distinguish"])
-    .describe("recall: one fact, a definition, a number, a name; why: a mechanism or reason; distinguish: a contrast or an application."),
+  shape: CueShape.describe(
+    "concept: what it is and what follows from it; procedure: its steps in order; classification: its members and what each is; mechanism: why or how it happens.",
+  ),
 });
 
 /**
- * One grade of a free-recall answer, judged against the single piece of
- * evidence the question came from.
- *
- * `quote` is checked the same way the question's is and shown only when it
- * verifies, which is what lets the reader overrule a grade they disagree with:
- * the passage that settled it is printed underneath the verdict.
+ * One free-recall grade: a mark for every numbered point of the section, and
+ * a sentence of feedback. `said` is the reader's own words for the point,
+ * copied from their answer, which is what the software checks.
  */
-export const QuizGradeOut = z.object({
-  verdict: z
-    .enum(["correct", "partial", "incorrect"])
-    .describe(
-      "correct: the answer states what the evidence states, in any wording; partial: it states part of it, or is right but vague; incorrect: otherwise.",
-    ),
+export const QuizRecallGradeOut = z.object({
+  points: z
+    .array(
+      z.object({
+        n: z.number().describe("The number of the point being marked."),
+        status: z
+          .enum(["recalled", "partial", "missed", "wrong"])
+          .describe(
+            "recalled: the answer carries the point, in any wording; partial: it has the point's shape and misses a part; missed: absent; wrong: the answer states something this point contradicts.",
+          ),
+        said: z
+          .string()
+          .describe("For recalled, partial or wrong: the words of the student's answer that carry it, copied character for character. Empty when missed."),
+        note: z.string().describe("For partial or wrong: one short clause naming the missing part or the wrong belief. Empty otherwise."),
+        cue: z
+          .string()
+          .describe(
+            "For partial or missed: a few words that point at where the point sits without stating it, such as 'the step after asking permission'. Empty for recalled or wrong.",
+          ),
+      }),
+    )
+    .describe("One entry per numbered point, in order."),
   feedback: z
     .string()
-    .describe("One or two sentences in the evidence's own words naming what the answer got right and what it missed. No new facts."),
-  quote: z.string().describe("The passage from the evidence that settles the grade, copied verbatim, character for character."),
-  gap: z
-    .enum(["none", "slip", "vocabulary", "detail", "misconception"])
-    .describe(
-      "What the answer reveals about the reader's understanding. none: nothing wrong worth recording. slip: they know it, the answer was careless or a typo. vocabulary: the idea is right but the term is missing or wrong. detail: the shape is right and a specific fact is missing. misconception: they hold a belief the evidence contradicts.",
-    ),
-  gapNote: z
-    .string()
-    .describe(
-      "When gap is not none, one short clause naming the specific wrong belief or missing piece — what to probe next. Empty when gap is none.",
-    ),
+    .describe("One or two sentences in the notes' own words on what the recall held together and which idea is missing. No new facts."),
 });
 
-export type QuizQuestionDraft = z.infer<typeof QuizQuestionOut>;
-export type QuizGradeDraft = z.infer<typeof QuizGradeOut>;
+export type QuizCueDraft = z.infer<typeof QuizCueOut>;
+export type QuizRecallGradeDraft = z.infer<typeof QuizRecallGradeOut>;
+
 
 /**
  * One "suggest" response: the spans worth highlighting in a batch of PDF

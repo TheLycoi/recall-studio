@@ -43,33 +43,31 @@ import { checkClaims } from "./answerClaims";
 import { matchIntent, renderHelp, type Intent, type IntentContext, type IntentPage, type Target } from "./chatCommands";
 import { WIKILM_COMMANDS, type WikiLmCommand } from "./commands";
 import { captureAskAnswer, captureQuizMisses } from "./capture";
+import { isDontKnow, parseQuizCommand, type QuizMiss, type QuizScope, type Verdict } from "./quiz";
 import {
-  acceptQuestion,
-  applyGrade,
-  armRetry,
-  checkQuestion,
-  dropUnit,
-  failedDraft,
-  nextEvidence,
-  isDontKnow,
-  nextRequest,
-  parseQuizCommand,
-  renderGradeMarkdown,
-  renderQuestionMarkdown,
-  renderSummaryMarkdown,
-  retryLine,
-  resolvePool,
-  startSession,
-  missesForInbox,
-  usableUnits,
-  verifyGradeQuote,
-  type QuizMiss,
-  type QuizScope,
-  type QuizSession,
-  type Verdict,
-  feedbackGrounded,
-  disputeGrade,
-} from "./quiz";
+  acceptCue,
+  afterCuedAttempt,
+  afterFirstAttempt,
+  checkCue,
+  checkRecallGrade,
+  fallbackCue,
+  itemById,
+  nextItem,
+  openPoints,
+  recallMisses,
+  renderCueMarkdown,
+  renderCuedMarkdown,
+  renderRecallSummaryMarkdown,
+  renderRevealMarkdown,
+  resolveRecallPool,
+  resultVerdict,
+  sectionIn,
+  skipRecall,
+  startRecall,
+  type RecallItem,
+  type RecallSession,
+} from "./recall";
+import type { CueShape } from "./schemas";
 import type { AskHistoryTurn } from "./prompt";
 import { pdfFileName, renderPdfSubpath, findAllPdfReferences } from "./pdflink";
 import { parseTopicNote, noteAliases } from "./topicNote";
@@ -200,7 +198,7 @@ export class ChatPanel {
    * state: the live run reads it through `view.chat.session` between turns, and
    * `null` is the one test for "is a quiz running" everywhere in this file.
    */
-  session: QuizSession | null = null;
+  session: RecallSession | null = null;
   /** What the last finished quiz was, kept so “Quiz again” repeats it; each summary turn carries its own misses for its send button. */
   private lastQuiz: { scope: QuizScope; query: string; notePath: string | null; classCode: string | null } | null = null;
   /** Set by the first quiz phrase typed during a quiz; the next one restarts, any other message clears it. */
@@ -758,7 +756,7 @@ export class ChatPanel {
           return;
         default:
           // `q` is the command itself, so the log shows which one was typed.
-          await this.gradeWithout("skipped", q);
+          await this.skipQuiz(q);
           return;
       }
     }
@@ -772,7 +770,7 @@ export class ChatPanel {
       this.draft = "";
       this.restartArmed = false;
       if (isDontKnow(q)) {
-        await this.gradeWithout("skipped", q);
+        await this.skipQuiz(q);
         return;
       }
       await this.answerQuiz(q);
@@ -1369,19 +1367,19 @@ export class ChatPanel {
     this.draft = "";
     this.rerender();
 
-    let pool: EvidenceUnit[] = [];
+    let items: RecallItem[] = [];
     let label = "";
     try {
       const all = await this.buildIndex();
       // A phrase can name the note to quiz ("quiz me on Receptors"), so the
       // pool is not always the file in front of the reader. obsidian.d.ts
-      // (`Workspace.getActiveFile`): null when nothing is open, which `resolvePool` reads
+      // (`Workspace.getActiveFile`): null when nothing is open, which `resolveRecallPool` reads
       // as "this note has no evidence".
       const activePath = notePath ?? this.plugin.app.workspace.getActiveFile()?.path ?? null;
       // A class scope is the whole vault narrowed to one code, which is what
       // makes "quiz me on HBIO250" different from "quiz me on everything".
       const units = classCode ? all.filter((u) => u.classCodes.includes(classCode)) : all;
-      const resolved = resolvePool(
+      const resolved = resolveRecallPool(
         scope,
         query,
         units,
@@ -1389,7 +1387,7 @@ export class ChatPanel {
         questionScorer(query || "", units),
         this.plugin.settings.quizPoolSize,
       );
-      pool = resolved.pool;
+      items = resolved.items;
       label = classCode || resolved.label;
     } catch (e) {
       this.turns.push({ role: "assistant", text: "", error: describeError(e) });
@@ -1403,7 +1401,7 @@ export class ChatPanel {
     this.busy = false;
     this.status = "";
 
-    if (pool.length === 0) {
+    if (items.length === 0) {
       this.session = null;
       this.pushSystem(this.noEvidenceLine(scope, query, classCode));
       return;
@@ -1414,9 +1412,9 @@ export class ChatPanel {
     this.lastQuizNotePath = notePath;
     this.lastQuizClassCode = classCode;
     const kind: QuizScope["kind"] = scope === "all" ? "all" : scope === "this" ? "note" : "query";
-    this.session = startSession({ kind, label }, query, pool, Math.max(1, this.plugin.settings.quizCap));
+    this.session = startRecall({ kind, label }, query, items, Math.max(1, this.plugin.settings.quizCap));
     this.pushSystem(
-      `Quiz on ${label}: one question per passage until every passage has been asked, then the misses go to your inbox as cards. Say hint, skip or stop.`,
+      `Quiz on ${label}: ${items.length} section${items.length === 1 ? "" : "s"}, one at a time. Write everything you remember of each, in any order; you get a cue for what you miss, then the section. Say skip or stop.`,
     );
     await this.nextQuestion();
   }
@@ -1430,87 +1428,47 @@ export class ChatPanel {
   }
 
   /**
-   * Write the next question, checking its grounding before the reader sees it.
+   * Write the cue for the next section, checking it before the reader sees it.
    *
-   * The loop is the Design's two-strike rule: a draft that fails
-   * `checkQuestion` (src/quiz.ts) is asked for once more with the failure
-   * named in the prompt, and a second failure drops the cited unit
-   * (`dropUnit`, src/quiz.ts) rather than the question, so the numbering stays frozen
-   * and the next attempt has one fewer passage to get wrong. A draft whose
-   * `evidence_n` is out of range cannot be dropped by id, so that case breaks
-   * out instead of looping forever on a model that keeps citing [99].
+   * The two-strike rule of the passage quiz, with a different last resort: a
+   * cue that fails `checkCue` (src/recall.ts) is asked for once more with the
+   * failure named, and a second failure falls back to a cue written by code
+   * from the heading path. A section is never set aside because the model
+   * could not phrase it, so the quiz cannot loop or stall on one.
    */
   private async nextQuestion(): Promise<void> {
     const session = this.session;
     if (!session) return;
+    const item = nextItem(session);
+    if (!item) {
+      await this.finishQuiz();
+      return;
+    }
 
     this.busy = true;
     this.status = "writing a question…";
     this.rerender();
 
-    let failure = "";
     try {
-      for (;;) {
-        const live = this.session;
-        if (!live) return;
-
-        if (usableUnits(live).length === 0) {
-          this.turns.push({ role: "system", text: "No more passages to quiz on." });
-          this.busy = false;
-          this.status = "";
-          await this.finishQuiz();
-          return;
-        }
-
-        const req = nextRequest(live);
-        const draft = await this.plugin.llm.quizQuestion({
-          evidence: nextEvidence(live),
-          difficulty: req.difficulty,
-          askedQuestions: req.askedQuestions,
-          revealed: req.revealed,
+      let failure = "";
+      let accepted: { cue: string; shape: CueShape; fallback: boolean } | null = null;
+      for (let attempt = 0; attempt < 2 && !accepted; attempt++) {
+        const draft = await this.plugin.llm.quizCue({
+          ...sectionIn(item),
           standingInstructions: this.plugin.settings.quizInstructions,
           failure,
         });
-
-        const check = checkQuestion(draft, live);
-        if (check.ok) {
-          const next = acceptQuestion(live, check.question);
-          this.session = next;
-          const current = next.current;
-          if (!current) return;
-          this.turns.push({
-            role: "assistant",
-            text: renderQuestionMarkdown(current),
-            quiz: { kind: "question", index: current.n },
-          });
-          return;
-        }
-
-        if (!failure) {
-          failure = check.reason;
-          continue;
-        }
-
-        // Second failure: set the cited passage aside and start over clean. A
-        // draft that cites a passage already closed would set nothing aside,
-        // so the loop would repeat the same call forever; end the quiz instead.
-        failure = "";
-        const failed = failedDraft(live, draft.evidence_n);
-        if (failed.stuck) {
-          this.turns.push({
-            role: "system",
-            text: `No question could be written from the passages left (${check.reason}), so the quiz ends here.`,
-          });
-          this.busy = false;
-          this.status = "";
-          await this.finishQuiz();
-          return;
-        }
-        this.session = failed.session;
-        this.turns.push({ role: "system", text: "Skipped a passage the model could not turn into a question." });
-        this.trim();
-        this.rerender();
+        const check = checkCue(draft, item);
+        if (check.ok) accepted = { cue: check.cue, shape: check.shape, fallback: false };
+        else failure = check.reason;
       }
+      const live = this.session;
+      if (!live) return;
+      const q = accepted ?? { cue: fallbackCue(item), shape: "concept" as const, fallback: true };
+      const next = acceptCue(live, item, q.cue, q.shape, q.fallback);
+      this.session = next;
+      if (!next.current) return;
+      this.turns.push({ role: "assistant", text: renderCueMarkdown(next.current, item), quiz: { kind: "question", index: next.current.n } });
     } catch (e) {
       this.turns.push({ role: "assistant", text: "", error: describeError(e) });
       this.session = null;
@@ -1523,52 +1481,51 @@ export class ChatPanel {
   }
 
   /**
-   * One typed answer: graded against the one passage its question came from.
+   * One typed answer, marked point by point against the section.
    *
-   * A failed model call keeps the session, because the answer is still on the
-   * screen and typing it again is the whole recovery — ending the quiz on a
-   * provider hiccup would throw away four graded questions.
+   * On the free attempt, points still open with a cue to give arm the cued
+   * attempt, and the reader sees the cues, not the points. On the cued
+   * attempt only the open points are sent. A failed model call keeps the
+   * session, because the answer is still on the screen and typing it again is
+   * the whole recovery.
    */
   private async answerQuiz(text: string): Promise<void> {
     const session = this.session;
     const current = session?.current;
-    if (!session || !current || this.busy) return;
+    const item = session && current ? itemById(session, current.itemId) : undefined;
+    if (!session || !current || !item || this.busy) return;
 
     this.busy = true;
-    this.status = "grading…";
+    this.status = "marking…";
     this.draft = "";
     this.turns.push({ role: "user", text, quiz: { kind: "grade" } });
     this.trim();
     this.rerender();
 
-    const evidence = session.numbered[current.evidenceN - 1];
+    const cued = session.attempt === 2;
+    const points = cued ? openPoints(session) : item.points;
     try {
-      const grade = await this.plugin.llm.quizGrade({
-        evidence,
-        question: current.question,
-        expected: current.answer,
-        userAnswer: text,
+      const draft = await this.plugin.llm.quizRecallGrade({
+        ...sectionIn(item),
+        points: points.map((p) => p.text),
+        cue: current.cue,
+        answer: text,
+        cued,
       });
-      if (session.attempt === 1 && (grade.verdict === "incorrect" || grade.verdict === "partial")) {
-        this.session = armRetry(session);
-        this.turns.push({ role: "assistant", text: retryLine(current), quiz: { kind: "retry", verdict: grade.verdict } });
+      const { marks, feedback, feedbackGrounded } = checkRecallGrade(draft, points, text);
+      const next = cued
+        ? afterCuedAttempt(session, text, marks, feedback, feedbackGrounded)
+        : afterFirstAttempt(session, text, marks, feedback, feedbackGrounded);
+      if (next.attempt === 2 && next.current) {
+        this.session = next;
+        this.turns.push({ role: "assistant", text: renderCuedMarkdown(next), quiz: { kind: "retry", verdict: "partial" } });
         this.busy = false;
         this.status = "";
         this.trim();
         this.rerender();
         return;
       }
-      // A grade quoting words the passage does not contain is exactly what the
-      // reader needs to spot, so an unverified quote is dropped rather than shown.
-      const gradeQuote = verifyGradeQuote(grade.quote, evidence.text);
-      const extras = {
-        gradeQuoteRejected: !!grade.quote.trim() && !gradeQuote,
-        feedbackGrounded: feedbackGrounded(grade.feedback, evidence.text, text),
-        dispute: disputeGrade(text, current.answer, grade.verdict, !!gradeQuote),
-        gap: grade.gap,
-        gapNote: grade.gapNote,
-      };
-      this.pushGrade(applyGrade(session, grade.verdict, grade.feedback, gradeQuote, text, extras), current.evidenceN);
+      this.pushReveal(next);
     } catch (e) {
       this.turns.push({ role: "assistant", text: "", error: describeError(e) });
       this.busy = false;
@@ -1584,42 +1541,38 @@ export class ChatPanel {
   }
 
   /**
-   * A verdict that needs no model call: `/skip` and `/idk` (and a blank line,
-   * which `ask` routes here) are one and the same — a declined answer. It shows
-   * the expected answer and the passage, because the point of declining in the
-   * reference quiz is to be told rather than to be marked wrong.
+   * A declined answer: `/skip`, `/idk` or a blank line. No model call; every
+   * point still open is missed and the section is shown, because the point
+   * of declining is to be told.
    */
-  private async gradeWithout(verdict: Verdict, userAnswer: string): Promise<void> {
+  private async skipQuiz(userAnswer: string): Promise<void> {
     const session = this.session;
-    const current = session?.current;
-    if (!session || !current || this.busy) return;
-    if (userAnswer.trim()) {
-      this.turns.push({ role: "user", text: userAnswer, quiz: { kind: "grade" } });
-    }
-    // Nothing was graded, so nothing diagnosed it — but declining is its own
-    // diagnosis: a passage the reader would not attempt, which is exactly what
-    // a card is for.
-    const extras = { gap: "detail" as const, gapNote: "could not recall it at all" };
-    this.pushGrade(applyGrade(session, verdict, "", "", userAnswer, extras), current.evidenceN);
+    if (!session?.current || this.busy) return;
+    if (userAnswer.trim()) this.turns.push({ role: "user", text: userAnswer, quiz: { kind: "grade" } });
+    this.pushReveal(skipRecall(session, userAnswer));
     await this.afterGrade();
   }
 
-  /** Put the grade on the log and keep the new session. */
-  private pushGrade(next: QuizSession, evidenceN: number): void {
+  /** Put the reveal of the section just closed on the log and keep the new session. */
+  private pushReveal(next: RecallSession): void {
     this.session = next;
-    const asked = next.asked[next.asked.length - 1];
-    const unit = next.pool[evidenceN - 1];
-    if (!asked || !unit) return;
+    const result = next.results[next.results.length - 1];
+    const item = result ? itemById(next, result.itemId) : undefined;
+    if (!result || !item) return;
     this.turns.push({
       role: "assistant",
-      text: renderGradeMarkdown(asked, unit),
-      quiz: { kind: "grade", verdict: asked.verdict, unverified: asked.gradeQuoteRejected || !asked.feedbackGrounded },
+      text: renderRevealMarkdown(result, item),
+      quiz: {
+        kind: "grade",
+        verdict: resultVerdict(result),
+        unverified: !result.feedbackGrounded || result.marks.some((m) => !m.verified),
+      },
     });
     this.trim();
     this.rerender();
   }
 
-  /** After any grade: the summary when the count is reached, otherwise the next question. */
+  /** After a reveal: the summary when the quiz is done, otherwise the next section. */
   private async afterGrade(): Promise<void> {
     const session = this.session;
     if (!session) return;
@@ -1627,37 +1580,36 @@ export class ChatPanel {
     else await this.nextQuestion();
   }
 
-  /** `/hint`: the generator's one clause, once. Asking twice says so rather than repeating it. */
+  /**
+   * `/hint`. Free recall has no hint before the attempt, because any word
+   * about the content would turn it into cued recall; the cues come after the
+   * first answer, one per point missed. So the hint says that.
+   */
   private showHint(): void {
     const session = this.session;
-    const current = session?.current;
-    if (!session || !current) return;
-    if (session.hintShown) {
-      this.pushSystem("Hint already shown.");
-      return;
-    }
-    this.session = { ...session, hintShown: true };
-    this.pushSystem(current.hint ? `Hint: ${current.hint}` : "No hint for this one.");
+    if (!session?.current) return;
+    this.pushSystem(
+      session.attempt === 2
+        ? "The cues above are the hints. Write what they bring back, or say skip."
+        : "Write whatever you can, in any order. After your answer you get a cue for each point you missed, before anything is shown.",
+    );
   }
 
   /**
    * End the quiz and offer the misses.
    *
-   * The session goes to null, but the scope and the missed units stay on the
+   * The session goes to null, but the scope and the missed points stay on the
    * panel: the two chips outlive the session they came from, so "Quiz again"
    * still knows what was being quizzed after the summary has scrolled up.
    */
   private async finishQuiz(): Promise<void> {
     const session = this.session;
     if (!session) return;
-    // Each miss carries the question the reader failed, so the card written
-    // from it tests that fact and not another one in the same passage.
-    const misses = missesForInbox(session);
-
+    const misses = recallMisses(session);
     this.lastQuiz = { scope: session.scope, query: session.query, notePath: this.lastQuizNotePath, classCode: this.lastQuizClassCode };
     this.turns.push({
       role: "assistant",
-      text: renderSummaryMarkdown(session),
+      text: renderRecallSummaryMarkdown(session),
       quiz: { kind: "summary", misses },
     });
     this.session = null;

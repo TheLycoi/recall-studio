@@ -391,151 +391,55 @@ test("KeywordsOut accepts a plain list of search terms", () => {
 
 /* ---------------------------------------------------------------- quiz mode */
 
-const quizEvidence = [
-  { n: 1, noteTitle: "Receptors", page: 4, text: "Receptors bind ligands with high affinity and transduce a signal." },
-  { n: 2, noteTitle: "Drug Disposition", page: null, text: "Metabolism converts drugs into more water-soluble forms." },
-];
-
-const quizBase = {
-  evidence: quizEvidence,
-  difficulty: 2,
-  askedQuestions: [],
-  revealed: [],
-  standingInstructions: "",
-  failure: "",
+const recallSection = {
+  noteTitle: "Coaching",
+  section: "Motivational interviewing › Elicit-provide-elicit",
+  part: 1,
+  parts: 1,
+  points: [
+    "Used when a client asks for information, and only with permission.",
+    "Elicit: ask permission, and find out what the client already knows",
+    "Provide: share the most relevant information in small doses",
+  ],
 };
 
-test("the quiz question message puts the evidence first and the task last, omitting the optional blocks", () => {
-  const msg = p.buildQuizQuestionMessage({ ...quizBase });
-  assert.ok(msg.startsWith("<evidence>"), "the evidence is the first block");
-  assert.ok(msg.includes("[1] (Receptors, p.4) Receptors bind ligands"), "evidence lines carry the note title and page");
-  assert.ok(msg.includes("[2] (Drug Disposition) Metabolism"), "a claim with no page prints without one");
-  assert.ok(!msg.includes("<already_asked>"), "no already_asked block when nothing has been asked");
-  assert.ok(!msg.includes("Already shown to the reader"), "no revealed line when no grade has been shown");
-  assert.ok(!msg.includes("Standing instructions:"), "no standing line when blank");
-  assert.ok(!msg.includes("was rejected"), "no rejection line when there was no failure");
-  assert.ok(
-    msg.includes("Difficulty 2: a mechanism or reason: why or how something happens."),
-    "the tier is spelled out, not left as a number",
-  );
-  assert.ok(msg.endsWith("Write one question."), "the closing instruction is last");
+test("the cue message puts the section first, numbered, and the task last, omitting the optional lines", () => {
+  const msg = p.buildQuizCueMessage({ ...recallSection, standingInstructions: "", failure: "" });
+  assert.ok(msg.startsWith('<section note="Coaching" path="Motivational interviewing › Elicit-provide-elicit" points="3">\n'), msg.slice(0, 120));
+  assert.ok(msg.includes("[2] Elicit: ask permission"), "points are numbered");
+  assert.ok(msg.trimEnd().endsWith("Write the cue."), "the task is last");
+  assert.ok(!msg.includes("Standing instructions"), "no empty standing line");
+  assert.ok(!msg.includes("rejected"), "no empty failure line");
 });
 
-test("the quiz question blocks appear in the order the prompt expects", () => {
-  const msg = p.buildQuizQuestionMessage({
-    ...quizBase,
-    askedQuestions: ["What is affinity?", "  "],
-    revealed: ["high affinity"],
-    standingInstructions: "prefer mechanisms",
-    failure: "the quote was not in evidence 1",
-  });
-  const at = (s) => {
-    const i = msg.indexOf(s);
-    assert.notEqual(i, -1, `${s} is present`);
-    return i;
-  };
-  const order = [
-    at("<evidence>"),
-    at("<already_asked>"),
-    at("Already shown to the reader as answers, so do not ask for any of them again: high affinity"),
-    at("Difficulty 2:"),
-    at("Standing instructions: prefer mechanisms"),
-    at("The previous attempt was rejected: the quote was not in evidence 1. Fix that."),
-    at("Write one question."),
-  ];
-  assert.deepEqual(order, [...order].sort((a, b) => a - b), "the blocks run in the documented order");
-  assert.ok(msg.includes("<already_asked>\nWhat is affinity?\n</already_asked>"), "blank asked questions are dropped");
-  assert.ok(msg.endsWith("Write one question."), "the closing instruction is still last");
+test("the cue message carries the part of a split section, the standing instructions and the failure", () => {
+  const msg = p.buildQuizCueMessage({ ...recallSection, part: 2, parts: 3, standingInstructions: "Keep cues short.", failure: "the cue states point 2" });
+  assert.ok(msg.includes('part="2 of 3"'), msg.slice(0, 160));
+  assert.ok(msg.includes("Standing instructions: Keep cues short."));
+  assert.ok(msg.includes("The previous cue was rejected: the cue states point 2. Fix that."));
 });
 
-test("the quiz question message lists the answers the reader has already seen", () => {
-  const msg = p.buildQuizQuestionMessage({ ...quizBase, askedQuestions: ["What pumps calcium into the SR?"], revealed: ["Ca2+ ATPases (SERCAs)", "  ", "a drug"] });
-  assert.ok(
-    msg.includes("Already shown to the reader as answers, so do not ask for any of them again: Ca2+ ATPases (SERCAs); a drug"),
-    "the revealed answers are listed, blanks dropped",
-  );
-  assert.ok(msg.indexOf("</already_asked>") < msg.indexOf("Already shown"), "after the asked questions, before the tier");
-  assert.ok(msg.indexOf("Already shown") < msg.indexOf("Difficulty 2:"));
+test("the recall grade message has the section, the cue, then the answer directly above the task", () => {
+  const msg = p.buildQuizRecallGradeMessage({ ...recallSection, cue: "Walk through elicit-provide-elicit.", answer: "ask permission first", cued: false });
+  const order = ["<section", "<cue>", "<student_answer>", "Mark every point."].map((k) => msg.indexOf(k));
+  assert.deepEqual([...order].sort((a, b) => a - b), order, "blocks in order");
+  assert.ok(order.every((i) => i >= 0), msg);
+  assert.ok(!msg.includes("second attempt"));
+  const second = p.buildQuizRecallGradeMessage({ ...recallSection, cue: "c", answer: "a", cued: true });
+  assert.ok(second.includes("second attempt"), "the cued attempt says so");
 });
 
-test("each difficulty tier prints its own description", () => {
-  assert.ok(
-    p.buildQuizQuestionMessage({ ...quizBase, difficulty: 1 }).includes("Difficulty 1: a definition, a number, a name: recall of one fact."),
-  );
-  assert.ok(
-    p
-      .buildQuizQuestionMessage({ ...quizBase, difficulty: 3 })
-      .includes("Difficulty 3: a distinction or application: what separates two similar things, or which case a rule applies to."),
-  );
-});
-
-test("the grade message shows one piece of evidence, then the question, expected, and student answer", () => {
-  const msg = p.buildQuizGradeMessage({
-    evidence: quizEvidence[0],
-    question: "  What does a receptor do after binding?  ",
-    expected: "It transduces a signal.",
-    userAnswer: "it passes the signal on",
-  });
-  const at = (s) => {
-    const i = msg.indexOf(s);
-    assert.notEqual(i, -1, `${s} is present`);
-    return i;
-  };
-  const order = [at("<evidence>"), at("<question>"), at("<expected_answer>"), at("<student_answer>"), at("Grade the student's answer")];
-  assert.deepEqual(order, [...order].sort((a, b) => a - b), "the four inputs precede the task");
-  assert.ok(msg.includes("[1] (Receptors, p.4) Receptors bind ligands"), "the one evidence line is numbered as in Ask");
-  assert.ok(!msg.includes("Metabolism"), "the rest of the pool is not sent to the grader");
-  assert.ok(msg.includes("<question>\nWhat does a receptor do after binding?\n</question>"), "the question is trimmed");
-  assert.ok(msg.endsWith("Grade the student's answer against the evidence."), "the closing instruction is last");
-});
-
-test("QuizQuestionOut accepts a grounded draft and rejects an unknown kind or a missing field", () => {
-  const draft = {
-    question: "What are the two properties of a receptor?",
-    answer: "Binding with high affinity and transducing a signal.",
-    evidence_n: 1,
-    quote: "bind ligands with high affinity",
-    hint: "One is about what it attaches to.",
-    kind: "recall",
-  };
-  const ok = schemas.QuizQuestionOut.safeParse(draft);
-  assert.equal(ok.success, true, "a full draft parses");
-  assert.deepEqual(ok.data, draft, "and comes back unchanged");
-
-  assert.equal(schemas.QuizQuestionOut.safeParse({ ...draft, kind: "trivia" }).success, false, "kind is one of the three");
-  assert.equal(schemas.QuizQuestionOut.safeParse({ ...draft, evidence_n: "1" }).success, false, "evidence_n is a number");
-  const { hint, ...noHint } = draft;
-  assert.equal(schemas.QuizQuestionOut.safeParse(noHint).success, false, "hint is required, not optional");
-});
-
-test("QuizGradeOut accepts a verdict with feedback and a quote", () => {
-  const full = { verdict: "partial", feedback: "f", quote: "q", gap: "detail", gapNote: "missed the second property" };
-  const ok = schemas.QuizGradeOut.safeParse(full);
-  assert.equal(ok.success, true, "a partial grade parses");
-  assert.deepEqual(ok.data, full);
-
-  assert.equal(schemas.QuizGradeOut.safeParse({ ...full, verdict: "maybe" }).success, false, "verdict is one of three");
-  assert.equal(schemas.QuizGradeOut.safeParse({ verdict: "correct", feedback: "f" }).success, false, "quote is required");
-
-  // The diagnosis drives both the probing and what becomes a card, so it is
-  // required and its kinds are closed.
-  assert.equal(schemas.QuizGradeOut.safeParse({ verdict: "partial", feedback: "f", quote: "q" }).success, false, "gap is required");
-  assert.equal(schemas.QuizGradeOut.safeParse({ ...full, gap: "careless" }).success, false, "gap is one of five");
-  assert.equal(schemas.QuizGradeOut.safeParse({ ...full, gap: "none", gapNote: "" }).success, true, "none with an empty note parses");
-});
-
-test("QuizQuestionOut and QuizGradeOut serialize strictly at every level", () => {
-  const question = z.toJSONSchema(schemas.QuizQuestionOut);
-  assertStrict(question, "QuizQuestionOut");
-  assert.deepEqual(question.properties.kind.enum, ["recall", "why", "distinguish"], "the kind enum is a string enum");
-  assert.equal(question.properties.evidence_n.type, "number", "evidence_n is a plain number");
-  for (const [k, v] of Object.entries(question.properties)) {
-    assert.ok(typeof v.description === "string" && v.description.length > 0, `${k} carries a description`);
-  }
-
-  const grade = z.toJSONSchema(schemas.QuizGradeOut);
-  assertStrict(grade, "QuizGradeOut");
-  assert.deepEqual(grade.properties.verdict.enum, ["correct", "partial", "incorrect"]);
+test("QuizCueOut and QuizRecallGradeOut parse good drafts and serialize strictly", () => {
+  assert.equal(schemas.QuizCueOut.safeParse({ cue: "Walk through it.", shape: "procedure" }).success, true);
+  assert.equal(schemas.QuizCueOut.safeParse({ cue: "x", shape: "trivia" }).success, false, "shape is one of four");
+  const point = { n: 1, status: "recalled", said: "ask permission", note: "", cue: "" };
+  assert.equal(schemas.QuizRecallGradeOut.safeParse({ points: [point], feedback: "" }).success, true);
+  assert.equal(schemas.QuizRecallGradeOut.safeParse({ points: [{ ...point, status: "correct" }], feedback: "" }).success, false);
+  assert.equal(schemas.QuizRecallGradeOut.safeParse({ points: [{ n: 1, status: "missed" }], feedback: "" }).success, false, "every field is required");
+  const cue = z.toJSONSchema(schemas.QuizCueOut);
+  assertStrict(cue, "QuizCueOut");
+  assert.deepEqual(cue.properties.shape.enum, ["concept", "procedure", "classification", "mechanism"]);
+  assertStrict(z.toJSONSchema(schemas.QuizRecallGradeOut), "QuizRecallGradeOut");
 });
 
 // --- suggest ---------------------------------------------------------------
@@ -927,12 +831,20 @@ test("RELEVANCE_SYSTEM tells the model to judge, never to answer, and to return 
 });
 
 
-test("the quiz question system prompt names the knowledge types, the lenses and note order", () => {
+test("the free-recall prompts say what free recall is and keep the flashcard rules out", () => {
   const llm = readFileSync(new URL("../src/llm.ts", import.meta.url), "utf8");
-  const src = /const QUIZ_QUESTION_SYSTEM = `([\s\S]*?)`;/.exec(llm)?.[1] ?? "";
-  for (const needle of ["<what_kind_of_knowledge>", "fact", "procedure", "concept", "always, sometimes, or never true", "lowest-numbered open passage"]) {
-    assert.ok(src.includes(needle), `system prompt mentions ${needle}`);
+  const body = (name) => new RegExp("const " + name + " = `([\\s\\S]*?)`;").exec(llm)?.[1] ?? "";
+  const cue = body("QUIZ_CUE_SYSTEM");
+  for (const needle of ["<what_free_recall_is>", "<shape>", "<the_cue_states_nothing>", "<connections>", "in any order", "Never ask a yes/no question"]) {
+    assert.ok(cue.includes(needle), `cue prompt mentions ${needle}`);
   }
+  assert.ok(!/one detail, not three/.test(cue), "the flashcard 'focused' rule is not a cue rule");
+  const grade = body("QUIZ_RECALL_GRADE_SYSTEM");
+  for (const needle of ["<marks>", "<said>", "<cues>", "<feedback>", "character for character"]) {
+    assert.ok(grade.includes(needle), `grade prompt mentions ${needle}`);
+  }
+  assert.equal(body("QUIZ_QUESTION_SYSTEM"), "", "the passage question prompt is gone");
+  assert.equal(body("QUIZ_GRADE_SYSTEM"), "", "the passage grade prompt is gone");
 });
 
 test("the digest system prompt asks for the mindmap shape: a lead line, one claim per bullet, nested two deep, pages named for linking", () => {

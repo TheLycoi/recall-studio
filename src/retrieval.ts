@@ -22,6 +22,13 @@ export interface EvidenceUnit {
   kind: "highlight" | "claim";
   /** The note's `class:` codes, so a quiz can be scoped to one class. */
   classCodes: string[];
+  /**
+   * The heading path the passage sits under, below the note's title:
+   * "Motivational interviewing › Elicit-provide-elicit". "" for the lead
+   * before the first heading. Set only for prose-indexed notes; the quiz
+   * groups a note's passages by it, and Ask ignores it.
+   */
+  section?: string;
 }
 
 /**
@@ -161,8 +168,12 @@ function proseUnits(path: string, noteTitle: string, body: string, classCodes: s
   // written on the header, and an answer is only useful if it can point there.
   let calloutTarget: { target: PdfTarget; pdfBasename: string } | null = null;
 
-  for (const rawLine of body.split("\n")) {
-    const line = rawLine.trim();
+  // The heading path above the current line, from `##` down; the note's `#`
+  // title is the note itself and not part of any section's name.
+  const headings: string[] = [];
+  const lines = body.split("\n");
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li].trim();
     if (/^(```|~~~)/.test(line)) {
       fenced = !fenced;
       continue;
@@ -178,15 +189,29 @@ function proseUnits(path: string, noteTitle: string, body: string, classCodes: s
       calloutTarget = firstPdfTarget(line);
       continue;
     }
+    const heading = /^(#{2,6})\s+(.+?)\s*#*$/.exec(line);
+    if (heading) {
+      const depth = heading[1].length - 2;
+      headings.length = depth;
+      headings[depth] = cleanProse(heading[2]);
+    }
     // `![[...]]` is an embedded image or PDF rect: no quotable text.
     if (line.startsWith("#") || /^!\[\[/.test(line) || /^(-{3,}|\*{3,}|_{3,})$/.test(line)) {
       if (!line.startsWith(">")) calloutTarget = null;
       continue;
     }
 
+    // A table's header row and its separator are labels; a body row is one
+    // statement, its first cell the thing and the rest what is said of it.
+    let text: string;
+    if (line.startsWith("|")) {
+      if (TABLE_SEPARATOR.test(line) || TABLE_SEPARATOR.test((lines[li + 1] ?? "").trim())) continue;
+      text = tableRowText(line);
+    } else {
+      text = cleanProse(line);
+    }
     const target = firstPdfTarget(line) ?? (line.startsWith(">") ? calloutTarget : null);
     if (!line.startsWith(">")) calloutTarget = null;
-    const text = cleanProse(line);
     // Below the length of a real statement, a fragment only adds noise.
     if (text.length < 12) continue;
     // A line naming where the note came from is metadata about the note, not a
@@ -206,6 +231,7 @@ function proseUnits(path: string, noteTitle: string, body: string, classCodes: s
       text,
       kind: "claim",
       classCodes,
+      section: headings.filter(Boolean).join(" › "),
     });
     i += 1;
   }
@@ -222,6 +248,21 @@ function proseUnits(path: string, noteTitle: string, body: string, classCodes: s
  * statement never matches, because the words are not at the front.
  */
 const CITATION_LINE = /^\s*(?:source|sources|adapted from|adapted|reference|references|ref|citation|cited from|from|credit|credits|via|see also|further reading)\b\s*[::—–-]?/i;
+
+/** A markdown table's separator row: `| --- | :---: |`. */
+const TABLE_SEPARATOR = /^\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)*\|?$/;
+
+/** One table body row as a sentence: "Simple: Repeats or rephrases — \"You're busy.\"". */
+function tableRowText(line: string): string {
+  const cells = line
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((c) => cleanProse(c))
+    .filter(Boolean);
+  if (cells.length <= 1) return cells[0] ?? "";
+  return `${cells[0]}: ${cells.slice(1).join(" — ")}`;
+}
 
 /** The first PDF wikilink on a line, when it resolves to a real target. */
 function firstPdfTarget(line: string): { target: PdfTarget; pdfBasename: string } | null {

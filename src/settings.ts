@@ -985,7 +985,7 @@ export class WikiLmSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Question cap per quiz")
       .setDesc(
-        "A safety limit, not a target. A quiz asks every passage in its pool once; this only cuts short a pool longer than one sitting.",
+        "A safety limit, not a target. A quiz asks every section in its pool once; this only cuts short a pool longer than one sitting.",
       )
       .addSlider((sl) =>
         sl
@@ -999,8 +999,8 @@ export class WikiLmSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Evidence pool per quiz")
-      .setDesc("How many matching highlights and claims a quiz draws its questions from.")
+      .setName("Sections per quiz")
+      .setDesc("How many sections a quiz on a class, a subject or everything asks. A single note is always asked whole.")
       .addSlider((sl) =>
         sl
           .setLimits(5, 60, 5)
