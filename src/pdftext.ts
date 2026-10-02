@@ -1,5 +1,6 @@
 /**
- * Text extraction over pdf.js page data, ported from PDF++ 0.40.31.
+ * Text extraction over pdf.js page data, ported from PDF++ 0.40.31
+ * (MIT, Ryota Ushio; see NOTICE).
  *
  * Obsidian-free and pdf.js-free by design: every function here takes plain
  * data (the `items` array of `page.getTextContent({ includeChars: true })`

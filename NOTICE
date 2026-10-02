@@ -59,3 +59,8 @@ engine and follow its policy, with a guard of WikiLM's between the engine and
 the vault (src/upstream/guardedVault.ts): each existing page is saved before
 it is overwritten, and a rewrite that would drop a page's headings, quotes,
 PDF links, embeds or frontmatter keys is refused.
+
+src/pdftext.ts is a port of text-extraction code from PDF++ 0.40.31
+(https://github.com/RyotaUshio/obsidian-pdf-plus), Copyright (c) 2023
+Ryota Ushio, MIT License. The ported functions carry a comment naming
+their origin.
