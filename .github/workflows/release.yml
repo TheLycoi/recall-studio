@@ -1,0 +1,56 @@
+# Builds the plugin and drafts a GitHub release when a version tag is pushed.
+# Based on the release workflow of obsidianmd/obsidian-sample-plugin
+# (fetched 2026-10-01), with Node 24, `npm ci`, and WikiLM's licence notices
+# added to the assets. Push a tag that matches the version in manifest.json
+# (for example 0.14.0), then review and publish the draft by hand.
+name: Release Obsidian plugin
+
+on:
+  push:
+    tags:
+      - "*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.x"
+
+      # `npm run build` does not make the declarations for the vendored
+      # obsidian-llm-wiki itself: scripts/vendor-types-guard.mjs stops the
+      # build when they are missing, and a fresh checkout has none (.types/ is
+      # git-ignored). `npm run vendor:types` makes them. It runs
+      # `npm ci --legacy-peer-deps` inside vendor/llm-wiki, whose lockfile
+      # resolves most packages to registry.npmmirror.com. npm still checks
+      # every package against the integrity hash in that lockfile.
+      - name: Build plugin
+        run: |
+          npm ci
+          npm run vendor:types
+          npm run build
+
+      # main.js carries code compiled from the Apache-2.0 obsidian-llm-wiki,
+      # so its NOTICE and the licence travel with every release. The upstream
+      # NOTICE is uploaded as NOTICE-llm-wiki, the name scripts/install.mjs
+      # gives it in the plugin folder. It is copied to that name first: gh's
+      # `path#display-name` only sets the asset's label, the asset keeps the
+      # file's own name, and two assets named NOTICE cannot share a release.
+      - name: Create release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          cp vendor/llm-wiki/NOTICE NOTICE-llm-wiki
+
+          gh release create "$tag" \
+            --title="$tag" \
+            --draft \
+            main.js manifest.json styles.css NOTICE LICENSE-APACHE-2.0.txt \
+            "NOTICE-llm-wiki#NOTICE-llm-wiki"
