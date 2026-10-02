@@ -21,7 +21,6 @@ import type { SuggestDraft } from "./schemas";
 import {
   batchSegments,
   buildSourceMap,
-  renderBatch,
   toMarkdownRows,
   verifyMarkdownSpans,
   type Segment,
@@ -282,13 +281,6 @@ function hasProse(text: string): boolean {
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/^[\s>*_-]+/gm, "");
   return stripped.trim().length >= 40;
-}
-
-/** The batch as the model sees it, for logging and tests. */
-export function previewBatch(md: string): string {
-  const map = buildSourceMap(md);
-  const indexOf = new Map(map.segments.map((seg, i) => [seg, i + 1]));
-  return renderBatch(map.segments, (seg) => indexOf.get(seg) as number);
 }
 
 /**

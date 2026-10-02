@@ -34,8 +34,6 @@ export const WIKILM_EDIT_ICON = `${ICON_PREFIX}-edit`;
 export const WIKILM_DISCARD_ICON = `${ICON_PREFIX}-discard`;
 /** A circular arrow — retry a failed highlight. */
 export const WIKILM_RETRY_ICON = `${ICON_PREFIX}-retry`;
-/** A check — apply the linter's fix. */
-export const WIKILM_FIX_ICON = `${ICON_PREFIX}-fix`;
 /** Card with brackets — convert to cloze. */
 export const WIKILM_CLOZE_ICON = `${ICON_PREFIX}-cloze`;
 /** Card with a question mark — convert to Q&A. */
@@ -120,11 +118,6 @@ const ICONS: Record<string, string> = {
   [WIKILM_RETRY_ICON]: stroke(`
     <path d="M82 38A34 34 0 1 1 68 21"/>
     <path d="M84 14v26H58"/>`),
-
-  // Check: the linter's fix, accepted. A wrench turned to mush at 16px; a
-  // check reads instantly and still means "resolve this".
-  [WIKILM_FIX_ICON]: stroke(`
-    <path d="M20 54l20 20 40-46"/>`),
 
   // Cloze: a card whose middle word is blanked out. The gap in the text line is
   // the whole idea, so the card stays whole and the line breaks instead —
