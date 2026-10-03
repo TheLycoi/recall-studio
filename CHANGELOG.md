@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.3
+
+- A digest says each thing once. A highlight that a bullet paraphrases and cites is no longer printed again as a quote beneath it. Quotes are kept for wording worth keeping: a definition the source states outright, a formula, a list of criteria, a figure, or a highlight of 200 characters or more. A quoted highlight that no bullet cites is always kept.
+- A section built only from cited bullets links its heading to the slide, and its highlights count as added in the preview.
+
 ## 0.14.2
 
 - In the digest preview, the box on each row is the note the topic goes into. Type the name of a note you already have and the topic is filed there: a new topic becomes a branch under its own title, with its sub-sections as headings beneath it. Type a new name and it becomes a new note. Existing notes are suggested as you type, and the line under the box says where the topic will land.
