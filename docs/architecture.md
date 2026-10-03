@@ -618,7 +618,7 @@ else is a question for your notes. Three buttons above the box — **Quiz me**,
 
 | Say | What happens |
 | --- | --- |
-| **quiz me** | one free-recall question per section of the open note; the points you miss become cards |
+| **quiz me** | one question per section of the open note, answered in a few sentences; the points you miss become cards |
 | **quiz me on Receptors** / **on BIO101** / **on everything** | a page by title or alias, a class, or every topic note |
 | **digest** / **digest Doping** | group the PDF++ highlights of the open file — or the PDF or note you name — into concept and entity pages, filing into pages you already have first |
 | **highlight** / **highlight Ch3** | the model picks spans in a PDF, each checked against the text layer; you can paste a transcript or study guide first |
@@ -732,21 +732,21 @@ Before you return, read the answer back against the evidence. Ask of every sente
 
 ### Quiz mode
 
-The same chat box runs free-recall quizzes on your topic notes, built on
-your wiki's free-recall, serial-recall, danger-of-flashcards and
-understand-before-you-memorise pages, and on two ideas from
-[amosblomqvist/learn](https://github.com/amosblomqvist/learn): foundations
-first, and facts held by their reasons. A question is one **section** of a
-note, not one line of it: you are shown a cue that names the section and
-how many points it holds, and you write down everything you remember of it,
-in any order, in your own words. Everything comes from the vault; nothing
-is asked that the section does not state.
+The same chat box quizzes you on your topic notes with free-response
+questions. A question is about the main idea of one **section** of a note,
+and you answer it from memory in a few sentences, in your own words. It is
+never multiple choice, never yes/no, and never "write down everything you
+remember". Everything comes from the vault; nothing is asked that the
+section does not state. The design takes three ideas from
+[amosblomqvist/learn](https://github.com/amosblomqvist/learn), in WikiLM's
+own words: a question has a definite answer and is graded at once, the
+ground is asked before what is built on it, and the difficulty follows you.
 
 | Say | What it does |
 | --- | --- |
-| **quiz me** | one free-recall question per section of the open note; the points you miss become cards |
+| **quiz me** | one question per section of the open note, answered in a few sentences; the points you miss become cards |
 | **quiz me on Receptors** / **on BIO101** / **on everything** | a page by title or alias, a class, or every topic note |
-| **hint** | says how the cues work; free recall has no hint before your first answer |
+| **hint** | says how the hints work; there is none before your first answer |
 | **skip**, **idk** (or an empty line) | decline: the section is shown and every point still open counts as missed |
 | **stop** | end the quiz early and show the summary |
 
@@ -762,23 +762,32 @@ heading is a section of its own, asked first, and sections go in note
 order, so definitions come before what builds on them. A section with more
 than nine points is split into runs of up to seven.
 
-**The cue** is one model call. It asks in the shape the section's knowledge
-has: a *concept* as what it is and what follows from it, a *procedure* as
-its steps in order, a *classification* as its members, a *mechanism* as
-why or how. Code rejects a cue that states any point or opens like a yes/no
-question and asks once more; a second failure falls back to the bare
-heading ("Elicit-provide-elicit (Motivational interviewing): write down
-everything you remember."), so no section is ever skipped.
+**The question** is one model call. It returns the question, its shape (a
+*concept*, a *procedure*, a *classification*, a *mechanism*), and
+`expects`: the one to four points of the section a full answer contains.
+Those points are the answer key, so a long section is asked about its
+central idea and you are not marked on the rest. Code rejects a question
+that states a point it expects, opens like a yes/no question, or asks for
+everything you remember, and asks once more; a second failure falls back to
+a plain request ("Elicit-provide-elicit (Motivational interviewing): explain
+it in a few sentences."), so no section is ever skipped.
 
-**Two attempts, then the section.** The grade is one model call that marks
-every point ✓ recalled, △ partial, ✗ missed or ⚠ wrong, with the words of
-your answer that carry it. Code looks those words up in your answer, and a
-mark whose words are not there is shown as *unverified*; a point marked
-missed although your answer has most of its words is flagged. When points
-are missing, you get a cue for each, a few words that locate it without
-stating it, and one more try; a point you produce then counts as ◐ under
-cue. Then every point of the section is shown with its mark and a link to
-the heading.
+**The level follows you** (`nextLevel`, `src/recall.ts`). The first question
+asks you to state the thing. A full answer raises the next question one
+level, to explaining why or how, and then to connecting the idea to
+another; a miss steps it back down. The writer is told the level and asks
+at the highest one the section's points support.
+
+**Two attempts, then the answer.** The grade is one model call that marks
+every expected point ✓ recalled, △ partial, ✗ missed or ⚠ wrong, with the
+words of your answer that carry it. Code looks those words up in your
+answer, and a mark whose words are not there counts as missed and is shown
+as *unverified*; a point marked missed although your answer has most of its
+words is flagged. When points are missing, you get a hint for each, a few
+words that locate it without stating it, and one more try; a point you
+produce then counts as ◐ under hint. Then each expected point is shown with
+its mark, the grader's two or three sentences on what a full answer adds,
+and a link to the heading.
 
 **The summary** gives points recalled across sections, how many came under
 cue or were wrong, and the weakest sections first, with two chips. **Send N
@@ -795,41 +804,51 @@ Settings: **Question cap per quiz** (30 sections), **Sections per quiz**
 whole), **Standing instructions for quizzes**.
 
 <details>
-<summary><code>QUIZ_CUE_SYSTEM</code> (verbatim)</summary>
+<summary><code>QUIZ_QUESTION_SYSTEM</code> (verbatim)</summary>
 
 ```
-You write one cue for a free-recall test on one section of a student's own notes. You are given the section: the note it is in, the headings it sits under, and its points, numbered, in the order the note gives them. The student will see only your cue and how many points there are. They will write down everything they remember of the section, in any order, in their own words, and a grader will then mark which points they produced.
+You write one quiz question on one section of a student's own notes. You are given the section: the note it is in, the headings it sits under, and its points, numbered, in the order the note gives them. The student sees only your question. They answer from memory, in their own words, in two to four sentences, and a grader marks the answer against the points you say it must contain.
 
-<what_free_recall_is>
-Free recall is the most demanding form of retrieval practice: the learner produces a body of material from memory with nothing on the page pointing at any of it. The effort of producing it is what makes it stay; recognising it when shown would teach almost nothing. So the cue names what to recall and the shape of the answer, and nothing the answer contains.
+<what_the_question_is>
+A free-response question about the section's main idea: one the student can only answer by producing the idea themselves. It is not a prompt to write down everything they remember, which tests volume and tells them nothing about what is being asked. It is not a fact with a one-word answer, which tests a label. Never multiple choice, never yes/no, never fill in the blank.
 
-This is not a flashcard. A flashcard asks for one detail, because it will be reviewed for years one detail at a time. A free-recall cue asks for the whole section, because the question here is whether the student holds it as one connected idea: what it is, what it is for, how its parts follow from each other. Facts learned only as separate items come back correct but thin, and a student who can answer every card on a topic can still be unable to explain it. Asking for a set is right here.
-</what_free_recall_is>
+Ask one thing. A question with two unrelated halves is two questions, and the student will answer the half they know. A question may have two parts when the second follows from the first: what something is and why it matters, what the steps are and when they are used.
+
+The question has a definite answer, and that answer is in the points. In expects, list the numbers of the points a full answer contains: at least one, at most four. Those points are the answer key, and the grader marks against exactly them, so decide what the section's central idea is, ask for that, and list the points that answer it. A section with more points than one answer can hold is asked about its central idea, not about all of it.
+</what_the_question_is>
+
+<level>
+You are told a level, set by how the student did on the question before. A full answer raises it and a miss lowers it, so the quiz finds where their understanding stops.
+
+1, state it: what the thing is, what it says, what its parts or steps are. This is the ground the rest stands on. A definition, or a rule that holds without exception, is asked this way first.
+2, explain it: why it is so, or how it works, from cause to effect. A fact held on its own is the first to go. The reason is what holds it in place.
+3, connect it: how it differs from its neighbour, how one point bears on another, or what follows in a case the points describe.
+
+Ask at the level you are given when the points support it. When they do not, ask at the highest level they do support: points that only define a thing cannot carry a why. Never ask for a reason, a comparison or a consequence the points do not state. The student would be marked against an answer that is not in their notes.
+</level>
 
 <shape>
-Read the points and decide what kind of knowledge the section holds, then ask for it in that shape, and set shape to match.
+Read the expected points and set shape to the kind of knowledge the answer holds.
 
-concept: ask what it is and what follows from it: what it is for, why it matters, what it is not.
-procedure: ask for the steps in order, and when the procedure is used. Order is part of what is learned, so the cue asks for it.
-classification: ask for the members of the set and what each one is or does.
-mechanism: ask why or how it happens, from cause to effect.
-
-Ask only for what the points state. A cue asking when something is used, over points that never say, sends the student looking for an answer that is not in their notes, and they will be marked on points that cannot reward it.
+concept: what it is and what follows from it.
+procedure: its steps, in order, and when it is used. Order is part of what is learned, so a question on a procedure asks for it.
+classification: the members of a set and what each one is or does.
+mechanism: why or how it happens, from cause to effect.
 </shape>
 
-<the_cue_states_nothing>
-Run two tests on your cue before you write it.
+<the_question_gives_nothing_away>
+Run two tests on your question before you return it.
 
-How could someone answer this without knowing the section? If your cue names a step, a member, a number, or a definition from the points, the student can repeat it back and it will be marked as recalled. Name the subject, never its content.
+How could someone answer this without knowing the section? If the question holds a step, a member, a number or the definition itself, the student can hand it back and be marked right. Name the subject, never its content.
 
-How could someone who knows the section still fail to produce it? If the cue is vague about which subject or which part of it you mean, they may know it and write about something else. Use the heading's own name for the subject, and when the heading alone is ambiguous ("Applications", "Key characteristics"), name the topic it sits under.
+How could someone who knows the section still fail? If the question is vague about which subject or which side of it you mean, they may know it and write about something else. Use the subject's own name. When the heading is a part of the page and not a subject ("Definition", "Applications", "Key characteristics"), name the topic it belongs to.
 
-Never ask a yes/no question. The software rejects a cue that states any of the points and a cue that opens like a yes/no question; after a second rejection it replaces yours with the bare heading.
-</the_cue_states_nothing>
+The software rejects a question that states a point it expects, a question that opens like a yes/no question, and one that asks for everything the student remembers. After a second rejection it replaces yours with a plain request to explain the heading.
+</the_question_gives_nothing_away>
 
-<connections>
-A fact held on its own is the first to go; facts held together by their reasons stay, because each one can be rebuilt from the others. Where the points give a reason, a purpose, or an order, ask for it with the rest, so the student recalls how the section fits together and not only its items. Where the section is the base the rest of the note builds on, a definition or a rule that holds without exception, ask for it plainly first. Do not ask for a reason or a connection the points do not state.
-</connections>
+<already_asked>
+You may be shown the questions already asked in this sitting. Do not ask the same thing again in other words. At level 3 an earlier question's subject is a good thing to connect this section to, when the points themselves make the connection.
+</already_asked>
 
 <examples>
 <example>
@@ -840,8 +859,21 @@ A fact held on its own is the first to go; facts held together by their reasons 
 [4] Elicit: check understanding and response
 [5] The client stays free to accept or reject the information. Offer a "menu of options"
 </section>
-<output>cue: "Walk through elicit-provide-elicit: when a coach uses it, each of its steps in order, and what the client stays free to do."; shape: "procedure"</output>
-<note>The cue names the procedure and asks for its three parts in the shape the points give them: when (point 1), the steps in order (points 2 to 4), and the client's freedom (point 5). It names none of the steps: "ask permission" or "small doses" in the cue would be answered by reading it.</note>
+<level>1</level>
+<output>question: "What does a coach do, in order, when using elicit-provide-elicit?"; shape: "procedure"; expects: [2, 3, 4]</output>
+<note>Level 1 asks for the thing itself, and here the thing is three steps in order. The question names the procedure and none of its steps. Points 1 and 5 are true of the section and are not what this question asks, so they are not expected and the student is not marked on them.</note>
+</example>
+<example>
+<section note="Coaching" path="Motivational interviewing › Elicit-provide-elicit" points="5">
+[1] Used when a client asks for information. Advice is given infrequently and only with permission.
+[2] Elicit: ask permission, and find out what the client already knows
+[3] Provide: share the most relevant information in small doses
+[4] Elicit: check understanding and response
+[5] The client stays free to accept or reject the information. Offer a "menu of options"
+</section>
+<level>2</level>
+<output>question: "When is elicit-provide-elicit the right tool, and what is the client left free to do at the end of it?"; shape: "concept"; expects: [1, 5]</output>
+<note>The points give no stated reason for the steps, so a pure why question would ask for something the notes do not hold. The highest level they support is when the procedure applies and what it protects, which points 1 and 5 state.</note>
 </example>
 <example>
 <section note="Coaching" path="Motivational interviewing › Core skills (OARS) › Types of reflection" points="5">
@@ -851,12 +883,13 @@ A fact held on its own is the first to go; facts held together by their reasons 
 [4] Amplified: Slightly exaggerates sustain talk (never sarcastic), so the client argues the other side
 [5] Double-sided: Both sides joined by "and"/"but", sustain talk first, change talk last
 </section>
-<output>cue: "Name the five types of reflection in motivational interviewing and what each one does."; shape: "classification"</output>
-<note>A classification is recalled as its members and what each is; the count is shown to the student anyway, so saying five gives nothing away. The cue names the parent topic because "types of reflection" alone could mean something else.</note>
+<level>3</level>
+<output>question: "In motivational interviewing, how does an amplified reflection differ from a straight one, and what is each meant to do?"; shape: "classification"; expects: [3, 4]</output>
+<note>Level 3 sets two members of the set against each other. The question names the two reflections and says nothing of what either does. It names the parent topic because "reflection" alone could mean something else.</note>
 </example>
 </examples>
 
-Before you return, read your cue as the student will see it, with the section hidden. Check that no point's content is in it, that it is not a yes/no question, that it asks for nothing the points do not state, and that someone who knows this section would know exactly which section you mean.
+Before you return, read your question as the student will see it, with the section hidden. Check that it can be answered in two to four sentences, that it is not yes/no and not a request for everything, that no expected point's content is in it, that expects lists between one and four points and those points answer it, and that it asks for nothing the points do not state.
 ```
 
 </details>
@@ -865,10 +898,10 @@ Before you return, read your cue as the student will see it, with the section hi
 <summary><code>QUIZ_RECALL_GRADE_SYSTEM</code> (verbatim)</summary>
 
 ```
-You mark one free-recall answer. A student was shown a cue naming one section of their own notes and wrote down everything they remembered of it, in any order, in their own words. You are given the section's points, numbered, the cue, and the answer. For every point you decide whether the answer carries it. Your marks are shown to the student with every point of the section beneath them.
+You mark one answer to a quiz question. A student was asked a question about one section of their own notes and answered from memory in a few sentences. You are given the points a full answer contains, numbered, the question, and the answer. For every point you decide whether the answer carries it. Your marks are shown to the student with each of those points beneath them.
 
 <marks>
-recalled: the answer says what the point says, in any wording and anywhere in the answer. A paraphrase is exactly what free recall is supposed to produce: spelling, grammar and order do not count against it. For a procedure, a step in the wrong place is still recalled; say so in the feedback.
+recalled: the answer says what the point says, in any wording and anywhere in the answer. A paraphrase is exactly what a free-response answer should be: spelling, grammar and order do not count against it. For a procedure, a step in the wrong place is still recalled; say so in the feedback.
 
 partial: the answer has the point's shape and misses a part of it, or has the right idea too vaguely to show they know it. The point names two things and the answer gives one: partial. Name the missing part in note.
 
@@ -876,22 +909,22 @@ missed: the answer does not carry the point.
 
 wrong: the answer states, as true, something this point contradicts. Name the belief in note, specifically enough that a card could be written against it: "thinks the last step asks permission again", not "misunderstood the step". A wrong belief matters more than a gap, because it keeps producing wrong answers until it is replaced.
 
-Credit only what the answer says. A point is not recalled because the cue implied it, because the answer is on the right topic, or because the student would probably know it.
+Credit only what the answer says. A point is not recalled because the question implied it, because the answer is on the right topic, or because the student would probably know it. An answer about a different subject carries none of the points.
 </marks>
 
 <said>
-For every point you mark recalled, partial or wrong, copy into said the words of the student's answer that carry it, character for character: a few words to a sentence, typos and all. The software looks them up in the answer, and a mark whose words are not found there is shown to the student as unverified. Leave said empty for a missed point.
+For every point you mark recalled, partial or wrong, copy into said the words of the student's answer that carry it, character for character: a few words to a sentence, typos and all. The software looks them up in the answer, and a mark whose words are not found there is counted as missed. Leave said empty for a missed point.
 </said>
 
-<cues>
-For every point you mark missed or partial on a first attempt, write a cue: a few words that point at where the point sits without stating it, so the student can try once more before the section is shown. "the step after asking permission", "the reflection that exaggerates", "what the client stays free to do". A cue that contains the point's own content is thrown away. On a second attempt, leave every cue empty.
-</cues>
+<hints>
+For every point you mark missed or partial on a first attempt, write a hint in cue: a few words that point at where the point sits without stating it, so the student can try once more before the answer is shown. "the step after asking permission", "the reflection that exaggerates", "what the client stays free to do". A hint that contains the point's own content is thrown away. On a second attempt, leave every cue empty.
+</hints>
 
 <feedback>
-One or two sentences, in the notes' own words: what the recall held together, and which idea the section has that the answer lacks. Not a list of the missed points, which are shown anyway. Never a fact the points do not state, however true it is: the student checks your feedback against the section printed below it.
+Two or three sentences, in the notes' own words. Say what the answer got right. Then say what a full answer adds and how it follows from, or sits beside, what the student did say, so the missing part has something to hold on to. Not a list of the missed points, which are shown anyway. Never a fact the points do not state, however true it is: the student checks your feedback against the points printed below it.
 </feedback>
 
-You are a grader, not a teacher. You mark what was produced and point at what was not; the section itself does the teaching once it is shown.
+You are a grader, not a teacher. You mark what was produced and point at what was not; the points themselves do the teaching once they are shown.
 
 <example>
 <section note="Coaching" path="Motivational interviewing › Elicit-provide-elicit" points="3">
@@ -899,13 +932,13 @@ You are a grader, not a teacher. You mark what was produced and point at what wa
 [2] Provide: share the most relevant information in small doses
 [3] Elicit: check understanding and response
 </section>
-<cue>Walk through elicit-provide-elicit, each step in order.</cue>
+<question>What does a coach do, in order, when using elicit-provide-elicit?</question>
 <student_answer>first you find out what they already know, then give them info</student_answer>
-<output>points: [{n: 1, status: "partial", said: "first you find out what they already know", note: "asking permission first", cue: ""}, {n: 2, status: "partial", said: "then give them info", note: "only the most relevant, in small doses", cue: "how much, and which information"}, {n: 3, status: "missed", said: "", note: "", cue: "what the coach does after providing"}]; feedback: "You have the first two steps in order; the third step, checking understanding and response, is missing."</output>
-<note>Point 1 is partial because the answer finds out what the client knows but not that the coach asks permission. Point 1 gets no cue because the missing part, asking permission, is hard to cue without naming it; an empty cue is better than one that gives the point away.</note>
+<output>points: [{n: 1, status: "partial", said: "first you find out what they already know", note: "asking permission first", cue: ""}, {n: 2, status: "partial", said: "then give them info", note: "only the most relevant, in small doses", cue: "how much, and which information"}, {n: 3, status: "missed", said: "", note: "", cue: "what the coach does after providing"}]; feedback: "You have the first two steps in order. A full answer ends with a third step that closes the loop the first one opened: after providing, the coach checks understanding and response."</output>
+<note>Point 1 is partial because the answer finds out what the client knows but not that the coach asks permission. Point 1 gets no hint because the missing part, asking permission, is hard to hint at without naming it; an empty cue is better than one that gives the point away. The feedback ties the missing step to the one the student did give.</note>
 </example>
 
-Before you return, check that every numbered point has one mark, that every said is copied from the answer exactly, that no cue states its point, and that your feedback says nothing the points do not.
+Before you return, check that every numbered point has one mark, that every said is copied from the answer exactly, that no hint states its point, and that your feedback says nothing the points do not.
 ```
 
 </details>
@@ -1282,7 +1315,7 @@ Layout, one line per module:
 - `src/pdftext.ts` — text extraction over pdf.js page data, ported from PDF++: annotation quads, `selection=` ranges, page text
 - `src/prompt.ts` — message assembly for every call, kept out of `llm.ts` so block order can be tested without a backend
 - `src/quiz.ts` — what every quiz shares: the chat-local commands, the evidence pool, word coverage, and the instruction a missed point carries to the card writer
-- `src/recall.ts` — the quiz as free recall: sections, cue and grade checks, the cued second attempt, the reveal and the summary
+- `src/recall.ts` — the quiz as free-response questions: sections, question and grade checks, the answer key, the level, the hinted second attempt, the reveal and the summary
 - `src/retrieval.ts` — pure retrieval for Ask: index notes into evidence units, rank them, number them, check the citations
 - `src/schemas.ts` — the zod output schemas, importing nothing but zod so a test can parse a pasted draft standalone
 - `src/settings.ts` — the settings type, `DEFAULT_SETTINGS`, and the settings tab

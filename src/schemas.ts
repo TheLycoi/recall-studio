@@ -132,20 +132,23 @@ export type AskDraft = z.infer<typeof AskOut>;
 export const CueShape = z.enum(["concept", "procedure", "classification", "mechanism"]);
 export type CueShape = z.infer<typeof CueShape>;
 
-/** One free-recall cue for one section of a note. */
-export const QuizCueOut = z.object({
-  cue: z
+/** One free-response quiz question on one section of a note, with the points a full answer contains. */
+export const QuizQuestionOut = z.object({
+  question: z
     .string()
     .describe(
-      "One question naming the section's subject and the shape of what to recall, in the reader's vocabulary; it states none of the points. No [n] markers, links, or ids.",
+      "One free-response question about the section's main idea, answerable from memory in two to four sentences, in the reader's vocabulary. Never yes/no, multiple choice, fill in the blank, or a request to write everything down. It states none of the points it expects. No [n] markers, links, or ids.",
     ),
   shape: CueShape.describe(
     "concept: what it is and what follows from it; procedure: its steps in order; classification: its members and what each is; mechanism: why or how it happens.",
   ),
+  expects: z
+    .array(z.number().int())
+    .describe("The numbers of the points a full answer contains, e.g. [2, 3, 4]: at least one, at most four. The grader marks the answer against exactly these."),
 });
 
 /**
- * One free-recall grade: a mark for every numbered point of the section, and
+ * One quiz grade: a mark for every numbered point the question expects, and
  * a sentence of feedback. `said` is the reader's own words for the point,
  * copied from their answer, which is what the software checks.
  */
@@ -173,10 +176,10 @@ export const QuizRecallGradeOut = z.object({
     .describe("One entry per numbered point, in order."),
   feedback: z
     .string()
-    .describe("One or two sentences in the notes' own words on what the recall held together and which idea is missing. No new facts."),
+    .describe("Two or three sentences in the notes' own words: what the answer got right, then what a full answer adds and how it ties to what the student said. No new facts."),
 });
 
-export type QuizCueDraft = z.infer<typeof QuizCueOut>;
+export type QuizQuestionDraft = z.infer<typeof QuizQuestionOut>;
 export type QuizRecallGradeDraft = z.infer<typeof QuizRecallGradeOut>;
 
 

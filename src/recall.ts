@@ -1,28 +1,27 @@
 /**
- * The quiz as free recall: every rule about a quiz that is not a rendering or
- * a model call.
+ * The quiz as free-response questions: every rule about a quiz that is not a
+ * rendering or a model call.
  *
- * A question is a free-recall trial on one section of a note. The reader is
- * given a cue that names the section's subject and none of its points, writes
- * everything they remember in any order, and the grade marks each point of
- * the section recalled, partial, missed or wrong. Points still missing get a
- * cue each and one more attempt, then the whole section is shown. Design:
- * free-recall quiz design note.
+ * A question asks about the main idea of one section of a note and is
+ * answered from memory in a few sentences. The writer names the points of the
+ * section a full answer must contain (`expects`), and the grade marks each of
+ * those recalled, partial, missed or wrong. Points still missing get a hint
+ * each and one more attempt, then the answer is shown.
  *
- * Why a section and not a passage. The free-recall literature:
- * study a set of items, then produce them with no cue beyond the instruction
- * to recall, the most demanding form of retrieval practice. Its pages on the
- * danger of flashcards and on understanding before memorising say the other
- * half: facts held one by one stay thin and disconnected. A section is the
- * unit a reader understands as one idea, so recalling it whole tests the
- * connections as well as the facts. The flashcard rules (one detail, no sets)
- * belong to the cards written from the misses, not to this test.
+ * Why a question and not "write down everything you remember": the reader
+ * asked for it on 2026-10-03. A bare instruction to recall a section tests
+ * volume, and on a section that is one paragraph it tests nothing a person
+ * can do. A question about the section's idea, answered in a few sentences,
+ * is still free recall, since nothing on the page states the answer, and it
+ * says what is being asked.
  *
- * Principles taken from amosblomqvist/learn (read for its design; no code or
- * prose of it is used here): sections are asked in
- * note order so the definitions and lead lines, the unconditional truths the
- * rest builds on, come first; and what the reader could not produce is the
- * edge of what they know, found here by the points missed within a section.
+ * Ideas taken from amosblomqvist/learn (read for its design; no code or
+ * prose of it is used here): a question has a definite answer and is graded
+ * at once with the reason; the ground is asked first, definitions and rules
+ * that hold without exception; and the difficulty follows the reader, up
+ * after a full answer and down after a miss, so the quiz finds the edge of
+ * what they understand (`nextLevel`). Its questions are multiple choice;
+ * these never are.
  *
  * Pure like src/quiz.ts: sessions are immutable and every check is counting,
  * so test/recall.test.mjs bundles it with no Obsidian runtime.
@@ -30,7 +29,7 @@
 import { normalizePlain } from "./util";
 import { significantTokens, type EvidenceUnit } from "./retrieval";
 import { feedbackGrounded, quizzable, resolvePool, wordCoverage, type QuizMiss, type QuizScope } from "./quiz";
-import type { CueShape, QuizCueDraft, QuizRecallGradeDraft } from "./schemas";
+import type { CueShape, QuizQuestionDraft, QuizRecallGradeDraft } from "./schemas";
 import type { QuizSectionIn } from "./prompt";
 
 // ---- items -------------------------------------------------------------------
@@ -135,11 +134,18 @@ export function itemName(item: RecallItem): string {
 
 // ---- session -----------------------------------------------------------------
 
+/** How much a question asks for: 1 state it, 2 explain why or how, 3 connect it to another idea. */
+export type QuizLevel = 1 | 2 | 3;
+
 export interface RecallQuestion {
   n: number;
   itemId: string;
+  /** The question as the reader sees it. */
   cue: string;
   shape: CueShape;
+  /** Ids of the section's points a full answer must contain: the answer key the grade marks against. */
+  expects: string[];
+  level: QuizLevel;
   /** The cue was written by code from the heading path because the model's failed the checks. */
   fallback: boolean;
 }
@@ -220,39 +226,116 @@ function statesPoint(text: string, point: string): boolean {
   return (cov.total >= 2 && cov.fraction >= 0.5) || cov.count >= 4;
 }
 
-export type CueCheck = { ok: true; cue: string; shape: CueShape } | { ok: false; reason: string };
+export type QuestionCheck = { ok: true; cue: string; shape: CueShape; expects: string[] } | { ok: false; reason: string };
+
+/** A full answer is a few sentences, so it carries a few points, not a section's worth. */
+const EXPECTS_MAX = 4;
+
+/** "Write down everything you remember": a dump, which is what this quiz replaced. */
+const DUMP = /\beverything\s+(?:you\s+)?(?:can\s+)?(?:remember|recall|know)\b|\ball\s+you\s+(?:remember|know)\b/i;
 
 /**
- * The code tier of the cue: not empty, not yes/no, and stating none of the
- * points. A free-recall cue may ask for a set; that is what recall of a
- * section is. What the cue asks must be in the section, and that is the
- * model's rule, not a count this function can make.
+ * Whether a question gives an expected point away. A question has to name
+ * its subject, and on a long point it shares many of the subject's words
+ * without stating the point, so only the point itself, or half of its
+ * meaning-carrying words, counts. (`statesPoint`, with its four-word rule,
+ * stays the test for a hint, which points at one short thing.)
  */
-export function checkCue(draft: QuizCueDraft, item: RecallItem): CueCheck {
-  const cue = draft.cue.trim();
-  if (!cue) return { ok: false, reason: "empty cue" };
-  if (BINARY_CUE.test(cue)) return { ok: false, reason: "a yes/no cue; ask the reader to produce the section" };
-  const leaked = item.points.findIndex((p) => statesPoint(cue, p.text));
-  if (leaked >= 0) return { ok: false, reason: `the cue states point ${leaked + 1}; name the subject, not what it holds` };
-  return { ok: true, cue, shape: draft.shape };
+function givesAway(question: string, point: string): boolean {
+  if (!question.trim()) return false;
+  if (normalizePlain(question).includes(normalizePlain(point))) return true;
+  const cov = wordCoverage(point, question);
+  return cov.total >= 2 && cov.fraction >= 0.5;
 }
 
-/** The cue when the model's two drafts failed: the heading path and the instruction to recall, which is free recall in its plainest form. */
-export function fallbackCue(item: RecallItem): string {
+/**
+ * The code tier of a question: not empty, not yes/no, not a prompt to write
+ * everything down, expecting between one and four points the section has,
+ * and stating none of them. What the question asks must be in those points,
+ * and that is the model's rule, not a count this function can make.
+ */
+export function checkQuestion(draft: QuizQuestionDraft, item: RecallItem): QuestionCheck {
+  const cue = (draft.question ?? "").trim();
+  if (!cue) return { ok: false, reason: "empty question" };
+  if (BINARY_CUE.test(cue)) return { ok: false, reason: "a yes/no question; ask one the reader answers in a few sentences" };
+  if (DUMP.test(cue)) return { ok: false, reason: "it asks for everything the reader remembers; ask one question about the section's main idea" };
+  const expects: string[] = [];
+  const numbers: number[] = [];
+  for (const n of draft.expects ?? []) {
+    const point = Number.isInteger(n) ? item.points[n - 1] : undefined;
+    if (!point || expects.includes(point.id) || expects.length >= EXPECTS_MAX) continue;
+    expects.push(point.id);
+    numbers.push(n);
+  }
+  if (expects.length === 0) return { ok: false, reason: "expects names no point of the section; list the numbers of the points a full answer contains" };
+  const leaked = numbers.find((n) => givesAway(cue, item.points[n - 1].text));
+  if (leaked !== undefined) return { ok: false, reason: `the question states point ${leaked}; ask for it, do not say it` };
+  return { ok: true, cue, shape: draft.shape, expects };
+}
+
+/** Headings that name a page's part, not its subject: the question names the note instead. */
+const GENERIC_SECTION = /^(?:definition|description|summary|overview|introduction|key claims?)$/i;
+
+/** The question when the model's two drafts failed: the section's name and a plain request to explain it. */
+export function fallbackQuestion(item: RecallItem): string {
   const parts = item.section.split(" › ").filter(Boolean);
-  const name = parts[parts.length - 1] ?? item.noteTitle;
-  const parent = parts.length > 1 ? ` (${parts[parts.length - 2]})` : "";
+  const last = parts[parts.length - 1];
+  const generic = !!last && GENERIC_SECTION.test(last);
+  const name = !last || generic ? item.noteTitle : last;
+  const parent = !generic && parts.length > 1 ? ` (${parts[parts.length - 2]})` : "";
   const part = item.parts > 1 ? `, part ${item.part} of ${item.parts}` : "";
-  return `${name}${parent}${part}: write down everything you remember.`;
+  return `${name}${parent}${part}: explain it in a few sentences.`;
 }
 
-export function acceptCue(session: RecallSession, item: RecallItem, cue: string, shape: CueShape, fallback: boolean): RecallSession {
+/** What the fallback question is marked against: the section's first points, as many as one answer holds. */
+export function fallbackExpects(item: RecallItem): string[] {
+  return item.points.slice(0, EXPECTS_MAX).map((p) => p.id);
+}
+
+/**
+ * The level of the next question, from how the last one went: up after a full
+ * answer, down after one that held nothing or was declined, the same after a
+ * partial one. The first question states the ground.
+ */
+export function nextLevel(session: RecallSession): QuizLevel {
+  const last = session.results[session.results.length - 1];
+  if (!last) return 1;
+  const level = last.question.level ?? 1;
+  const verdict = resultVerdict(last);
+  if (verdict === "correct") return Math.min(3, level + 1) as QuizLevel;
+  if (verdict === "incorrect" || verdict === "skipped") return Math.max(1, level - 1) as QuizLevel;
+  return level;
+}
+
+/**
+ * Put a question to the reader. `expects` defaults to every point of the
+ * section, which is how a question with no answer key of its own is marked.
+ */
+export function acceptQuestion(
+  session: RecallSession,
+  item: RecallItem,
+  cue: string,
+  shape: CueShape,
+  fallback: boolean,
+  expects: string[] = item.points.map((p) => p.id),
+  level: QuizLevel = 1,
+): RecallSession {
   return {
     ...session,
-    current: { n: session.results.length + 1, itemId: item.id, cue, shape, fallback },
+    current: { n: session.results.length + 1, itemId: item.id, cue, shape, fallback, expects, level },
     attempt: 1,
     first: null,
   };
+}
+
+/** The points the current question is marked against, in the section's order. */
+export function questionPoints(session: RecallSession): EvidenceUnit[] {
+  const current = session.current;
+  const item = current ? itemById(session, current.itemId) : undefined;
+  if (!current || !item) return [];
+  const want = new Set(current.expects);
+  const points = item.points.filter((p) => want.has(p.id));
+  return points.length ? points : item.points;
 }
 
 // ---- grade -------------------------------------------------------------------
@@ -371,15 +454,14 @@ export function skipRecall(session: RecallSession, answer: string): RecallSessio
     const marks = first.marks.map((m) => (open(m) ? { ...m, status: "missed" as const, cue: m.cue } : m));
     return close(session, [first.answer, answer].filter((a) => a.trim()), marks, first.feedback, true, false);
   }
-  return close(session, answer.trim() ? [answer] : [], item.points.map((p) => missed(p.id)), "", true, true);
+  return close(session, answer.trim() ? [answer] : [], questionPoints(session).map((p) => missed(p.id)), "", true, true);
 }
 
 // ---- rendering ---------------------------------------------------------------
 
-/** The question as the reader sees it: which section, what shape, how many points, then the cue. */
-export function renderCueMarkdown(q: RecallQuestion, item: RecallItem): string {
-  const count = `${item.points.length} point${item.points.length === 1 ? "" : "s"}`;
-  return `**Question ${q.n} · ${itemName(item)}** *(${q.shape} · ${count})*\n\n${q.cue}`;
+/** The question as the reader sees it: which section, what shape of answer, then the question. */
+export function renderQuestionMarkdown(q: RecallQuestion, item: RecallItem): string {
+  return `**Question ${q.n} · ${itemName(item)}** *(${q.shape} · answer in a few sentences)*\n\n${q.cue}`;
 }
 
 /** Between the attempts: the count so far and a cue per open point, the points themselves still hidden. */
@@ -389,7 +471,7 @@ export function renderCuedMarkdown(session: RecallSession): string {
   const recalled = first.marks.filter((m) => m.status === "recalled").length;
   const cues = first.marks.filter(open).map((m) => `- ${m.cue || "one more point"}`);
   return [
-    `You recalled ${recalled} of ${first.marks.length}. Cues for the other ${cues.length}:`,
+    `Your answer has ${recalled} of ${first.marks.length} parts. Hints for the other ${cues.length}:`,
     cues.join("\n"),
     "Write what these bring back, or say skip.",
   ].join("\n\n");

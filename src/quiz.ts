@@ -2,7 +2,7 @@
  * The parts of a quiz shared by every question shape: the chat-local
  * commands, the pool of passages a quiz draws on, the word arithmetic its
  * checks count with, and the instruction a missed point carries to the card
- * writer. The quiz itself, a free-recall test on one section of a note at a
+ * writer. The quiz itself, a free-response question on one section of a note at a
  * time, is src/recall.ts.
  *
  * Pure by construction, so test/quiz.test.mjs bundles it without an Obsidian

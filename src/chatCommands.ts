@@ -308,7 +308,7 @@ function chatOnlyLine(): string {
 /** What the box understands, one phrase per line. Shown for "help". */
 export function renderHelp(): string {
   return [
-    "- **quiz me** — one section of the open note at a time, the misses become cards; **quiz me on Receptors**, **quiz me on BIO101**, **quiz me on everything**",
+    "- **quiz me** — a question on each section of the open note, answered in a few sentences, the misses become cards; **quiz me on Receptors**, **quiz me on BIO101**, **quiz me on everything**",
     "- **digest** — group the open PDF's highlights into concept and entity pages; **digest Doping** names a PDF or a note with PDF++ links",
     "- **highlight** — let the model pick spans in the open PDF, each checked against the text layer; **highlight Ch3**",
     "- **lint** — check the wiki for wrong quotes, dead links and duplicate pages",

@@ -114,40 +114,107 @@ test("resolveRecallPool: a note is every section of it; all and query cap by sec
 
 // ---- cue -----------------------------------------------------------------------
 
-test("checkCue accepts a cue that names the subject and none of its points", () => {
+test("checkQuestion accepts a question on the section's idea and maps expects to its points", () => {
   const item = r.buildItems(coaching())[2];
-  const ok = r.checkCue({ cue: "Walk through elicit-provide-elicit: when a coach uses it, and each step in order.", shape: "procedure" }, item);
+  const ok = r.checkQuestion({ question: "What are the steps of elicit-provide-elicit, in order?", shape: "procedure", expects: [2, 3, 4] }, item);
   assert.equal(ok.ok, true, ok.reason);
+  assert.deepEqual(ok.expects, ["p3", "p4", "p5"]);
+  assert.equal(ok.cue, "What are the steps of elicit-provide-elicit, in order?");
 });
 
-test("checkCue rejects a cue that states one of the points", () => {
+test("checkQuestion keeps at most four expected points, once each, and drops numbers the section does not have", () => {
+  const long = Array.from({ length: 6 }, (_, i) => unit(`l${i}`, "Initial session › Rapport", `Rapport statement number ${i} about trust and understanding.`));
+  const item = r.buildItems(long)[0];
+  const ok = r.checkQuestion({ question: "How does a coach build rapport in the first session?", shape: "concept", expects: [0, 2, 2, 1, 3, 4, 5, 9] }, item);
+  assert.equal(ok.ok, true, ok.reason);
+  assert.deepEqual(ok.expects, ["l1", "l0", "l2", "l3"]);
+});
+
+test("checkQuestion rejects a question that expects nothing the section has", () => {
   const item = r.buildItems(coaching())[2];
-  const bad = r.checkCue({ cue: "Elicit-provide-elicit: after you share the most relevant information in small doses, what comes next?", shape: "procedure" }, item);
+  for (const expects of [[], [9], undefined]) {
+    const bad = r.checkQuestion({ question: "What are the steps of elicit-provide-elicit?", shape: "procedure", expects }, item);
+    assert.equal(bad.ok, false);
+    assert.match(bad.reason, /expects/);
+  }
+});
+
+test("checkQuestion rejects a question that states a point it expects", () => {
+  const item = r.buildItems(coaching())[2];
+  const bad = r.checkQuestion(
+    { question: "Elicit-provide-elicit: after you share the most relevant information in small doses, what comes next?", shape: "procedure", expects: [3, 4] },
+    item,
+  );
   assert.equal(bad.ok, false);
   assert.match(bad.reason, /states point 3/);
 });
 
-test("checkCue rejects a yes/no cue and an empty one", () => {
+test("checkQuestion lets a question use the subject's own words when the point is a long passage", () => {
+  const para =
+    "The biopsychosocial approach, a term introduced by George Engel, insists that mental illness cannot be understood through biology alone but must include psychological and social factors as well. The course organizes its coverage of psychopathology around three major themes: a behavioral and experiential perspective, a neuroscience perspective, and an evolutionary perspective.";
+  const item = r.buildItems([unit("d0", "Definition", para, "wiki/concepts/Biopsychosocial Model.md", "Biopsychosocial Model")])[0];
+  const ok = r.checkQuestion({ question: "What does the biopsychosocial model say mental illness must be understood through, and who introduced the term?", shape: "concept", expects: [1] }, item);
+  assert.equal(ok.ok, true, ok.reason);
+});
+
+test("checkQuestion rejects a yes/no question, an empty one, and a write-everything prompt", () => {
   const item = r.buildItems(coaching())[2];
-  assert.equal(r.checkCue({ cue: "Is elicit-provide-elicit used with permission?", shape: "concept" }, item).ok, false);
-  assert.equal(r.checkCue({ cue: "  ", shape: "concept" }, item).ok, false);
+  const q = (question) => r.checkQuestion({ question, shape: "concept", expects: [1] }, item);
+  assert.equal(q("Is elicit-provide-elicit used with permission?").ok, false);
+  assert.equal(q("  ").ok, false);
+  const dump = q("Elicit-provide-elicit: write down everything you remember.");
+  assert.equal(dump.ok, false);
+  assert.match(dump.reason, /everything/);
 });
 
-test("fallbackCue is written from the heading path and never from the points", () => {
+test("fallbackQuestion asks for a few sentences on the heading and never states a point", () => {
   const items = r.buildItems(coaching());
-  assert.equal(r.fallbackCue(items[2]), "Elicit-provide-elicit (Motivational interviewing): write down everything you remember.");
-  assert.equal(r.fallbackCue(items[0]), "Coaching: write down everything you remember.", "the lead is named by the note");
-  const long = Array.from({ length: 12 }, (_, i) => unit(`l${i}`, "Initial session › Rapport", `Rapport statement number ${i} about trust and understanding.`));
-  assert.equal(r.fallbackCue(r.buildItems(long)[1]), "Rapport (Initial session), part 2 of 2: write down everything you remember.");
+  assert.equal(r.fallbackQuestion(items[2]), "Elicit-provide-elicit (Motivational interviewing): explain it in a few sentences.");
+  assert.equal(r.fallbackQuestion(items[0]), "Coaching: explain it in a few sentences.", "the lead is named by the note");
+  const def = r.buildItems([unit("d0", "Definition", "The biopsychosocial model holds that mental illness cannot be understood through biology alone.", "wiki/concepts/Biopsychosocial Model.md", "Biopsychosocial Model")])[0];
+  assert.equal(r.fallbackQuestion(def), "Biopsychosocial Model: explain it in a few sentences.", "a generic heading is replaced by the note's name");
+  assert.deepEqual(r.fallbackExpects(items[2]), ["p2", "p3", "p4", "p5"]);
 });
 
-test("renderCueMarkdown's header names the section, the shape and the point count", () => {
+test("renderQuestionMarkdown's header names the section and asks for a few sentences", () => {
   let s = session();
   const item = s.items[2];
-  s = r.acceptCue(s, item, "Walk through elicit-provide-elicit.", "procedure", false);
-  const md = r.renderCueMarkdown(s.current, item);
-  assert.equal(md.split("\n")[0], "**Question 1 · Elicit-provide-elicit** *(procedure · 4 points)*");
-  assert.ok(md.endsWith("Walk through elicit-provide-elicit."));
+  s = r.acceptQuestion(s, item, "What are the steps of elicit-provide-elicit, in order?", "procedure", false, ["p3", "p4", "p5"], 1);
+  const md = r.renderQuestionMarkdown(s.current, item);
+  assert.equal(md.split("\n")[0], "**Question 1 · Elicit-provide-elicit** *(procedure · answer in a few sentences)*");
+  assert.ok(md.endsWith("What are the steps of elicit-provide-elicit, in order?"));
+});
+
+test("a question is marked only on the points it expects", () => {
+  let s = session();
+  const item = s.items[2];
+  s = r.acceptQuestion(s, item, "What are the steps of elicit-provide-elicit, in order?", "procedure", false, ["p3", "p4", "p5"], 1);
+  assert.deepEqual(r.questionPoints(s).map((p) => p.id), ["p3", "p4", "p5"]);
+  const skipped = r.skipRecall(s, "");
+  assert.equal(skipped.results[0].marks.length, 3, "the point the question did not ask for is not held against the reader");
+});
+
+test("nextLevel rises after a full answer, falls after a miss, and holds on a partial one", () => {
+  const items = r.buildItems(coaching());
+  let s = session(items);
+  assert.equal(r.nextLevel(s), 1, "the first question states the ground");
+  const ask = (level) => (s = r.acceptQuestion(s, r.nextItem(s), "Q?", "concept", false, undefined, level));
+  const answer = (statuses) => {
+    const pts = r.questionPoints(s);
+    const words = "the client centered partnership approach";
+    const said = pts.map(() => words);
+    const { marks } = r.checkRecallGrade(grade(statuses, { said }), pts, words);
+    s = r.afterFirstAttempt(s, words, marks, "");
+  };
+  ask(1);
+  answer(["recalled"]);
+  assert.equal(r.nextLevel(s), 2);
+  ask(2);
+  answer(["recalled"]);
+  assert.equal(r.nextLevel(s), 3);
+  ask(3);
+  s = r.skipRecall(s, "");
+  assert.equal(r.nextLevel(s), 2, "a miss steps back down");
 });
 
 // ---- grade -----------------------------------------------------------------------
@@ -173,7 +240,7 @@ test("checkRecallGrade counts a recalled point as missed when its words are not 
 test("an unverified recalled mark is not counted: the review's reproduction", () => {
   let s = session();
   const item = r.nextItem(s);
-  s = r.acceptCue(s, item, "Recall it.", "concept", true);
+  s = r.acceptQuestion(s, item, "Recall it.", "concept", true);
   const answer = "I have no idea at all";
   const { marks } = r.checkRecallGrade(grade(["recalled"], { said: ["receptors bind ligands with high affinity"] }), item.points, answer);
   assert.equal(marks[0].status, "missed");
@@ -194,7 +261,7 @@ test("an unverified partial mark counts as missed", () => {
 test("an unverified wrong mark counts as missed and sends no misconception", () => {
   let s = session();
   const item = r.nextItem(s);
-  s = r.acceptCue(s, item, "Recall it.", "concept", true);
+  s = r.acceptQuestion(s, item, "Recall it.", "concept", true);
   const answer = "I have no idea at all";
   const draft = grade(["wrong"], { said: ["coaching is telling people what to do"], note: ["thinks coaching is directive"] });
   const { marks } = r.checkRecallGrade(draft, item.points, answer);
@@ -230,7 +297,7 @@ test("checkRecallGrade flags a missed point whose words the answer plainly has",
 function onEpe() {
   let s = session();
   const item = s.items[2];
-  s = r.acceptCue(s, item, "Walk through elicit-provide-elicit.", "procedure", false);
+  s = r.acceptQuestion(s, item, "Walk through elicit-provide-elicit.", "procedure", false);
   return { s, item };
 }
 
@@ -246,7 +313,7 @@ test("a first attempt with points missing and cues to give arms the cued attempt
   assert.equal(next.attempt, 2);
   assert.deepEqual(r.openPoints(next).map((p) => p.id), ["p3", "p4", "p5"], "partial and missed points are open");
   const md = r.renderCuedMarkdown(next);
-  assert.match(md, /You recalled 1 of 4/);
+  assert.match(md, /Your answer has 1 of 4 parts/);
   assert.match(md, /what the coach does second/);
   assert.match(md, /the last step/);
 });
@@ -294,13 +361,13 @@ test("the quiz ends when every section is asked, or at the cap", () => {
   let s = session(r.buildItems(coaching()), 2);
   for (let i = 0; i < 2; i++) {
     const item = r.nextItem(s);
-    s = r.acceptCue(s, item, "Recall it.", "concept", true);
+    s = r.acceptQuestion(s, item, "Recall it.", "concept", true);
     s = r.skipRecall(s, "");
   }
   assert.equal(s.finished, true, "the cap");
   let all = session();
   while (r.nextItem(all)) {
-    all = r.acceptCue(all, r.nextItem(all), "Recall it.", "concept", true);
+    all = r.acceptQuestion(all, r.nextItem(all), "Recall it.", "concept", true);
     all = r.skipRecall(all, "");
   }
   assert.equal(all.finished, true);
@@ -333,13 +400,13 @@ test("recallSummary counts points across sections and lists the weakest first", 
   let s = session();
   // Section 1 (lead): recalled. Section 2: skipped. Section 3: 1 of 4.
   let item = r.nextItem(s);
-  s = r.acceptCue(s, item, "Recall it.", "concept", true);
+  s = r.acceptQuestion(s, item, "Recall it.", "concept", true);
   s = r.afterFirstAttempt(s, "a partnership", r.checkRecallGrade(grade(["recalled"], { said: ["a partnership"] }), item.points, "a partnership").marks, "");
   item = r.nextItem(s);
-  s = r.acceptCue(s, item, "Recall it.", "concept", true);
+  s = r.acceptQuestion(s, item, "Recall it.", "concept", true);
   s = r.skipRecall(s, "");
   item = r.nextItem(s);
-  s = r.acceptCue(s, item, "Recall it.", "procedure", true);
+  s = r.acceptQuestion(s, item, "Recall it.", "procedure", true);
   s = r.afterFirstAttempt(s, "when a client asks", r.checkRecallGrade(grade(["recalled", "missed", "missed", "missed"], { said: ["when a client asks"] }), item.points, "when a client asks").marks, "");
   const { line, weak } = r.recallSummary(s);
   assert.equal(line, "Recalled 2 of 6 points across 3 sections");

@@ -171,7 +171,7 @@ Text extraction in `src/pdftext.ts` is ported from [PDF++](https://github.com/Ry
 
 The evidence filter in Ask follows the design of the per-result relevance filter in [WikiChat](https://github.com/stanford-oval/WikiChat), reimplemented here.
 
-The free-recall quiz takes its ideas from [amosblomqvist/learn](https://github.com/amosblomqvist/learn), written in WikiLM's own words with no code taken.
+The quiz takes its ideas from [amosblomqvist/learn](https://github.com/amosblomqvist/learn): a question with a definite answer, the ground first, and a difficulty that follows you. They are written in WikiLM's own words with no code or text taken, and the questions are free response, never multiple choice.
 
 ## Licence
 

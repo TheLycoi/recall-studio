@@ -45,17 +45,20 @@ import { WIKILM_COMMANDS, type WikiLmCommand } from "./commands";
 import { captureAskAnswer, captureQuizMisses } from "./capture";
 import { isDontKnow, parseQuizCommand, type QuizMiss, type QuizScope, type Verdict } from "./quiz";
 import {
-  acceptCue,
+  acceptQuestion,
   afterCuedAttempt,
   afterFirstAttempt,
-  checkCue,
+  checkQuestion,
   checkRecallGrade,
-  fallbackCue,
+  fallbackExpects,
+  fallbackQuestion,
   itemById,
   nextItem,
+  nextLevel,
   openPoints,
+  questionPoints,
   recallMisses,
-  renderCueMarkdown,
+  renderQuestionMarkdown,
   renderCuedMarkdown,
   renderRecallSummaryMarkdown,
   renderRevealMarkdown,
@@ -964,7 +967,9 @@ export class ChatPanel {
   private async quizTarget(target: Target): Promise<void> {
     if (this.session && !this.restartArmed) {
       this.restartArmed = true;
-      this.pushSystem("A quiz is running. Say “quiz me” again to restart it.");
+      this.pushSystem(
+        `A quiz on ${this.session.scope.label} is running, and your next message is read as the answer to its question. Send the same “quiz me…” line once more to drop it and start the new one, or say stop.`,
+      );
       return;
     }
     this.restartArmed = false;
@@ -1418,7 +1423,7 @@ export class ChatPanel {
     const kind: QuizScope["kind"] = scope === "all" ? "all" : scope === "this" ? "note" : "query";
     this.session = startRecall({ kind, label }, query, items, Math.max(1, this.plugin.settings.quizCap));
     this.pushSystem(
-      `Quiz on ${label}: ${items.length} section${items.length === 1 ? "" : "s"}, one at a time. Write everything you remember of each, in any order; you get a cue for what you miss, then the section. Say skip or stop.`,
+      `Quiz on ${label}: ${items.length} question${items.length === 1 ? "" : "s"}, one per section. Answer each from memory in a few sentences, in your own words. You get a hint for what you miss, then the answer. Say skip or stop.`,
     );
     await this.nextQuestion();
   }
@@ -1435,7 +1440,7 @@ export class ChatPanel {
    * Write the cue for the next section, checking it before the reader sees it.
    *
    * The two-strike rule of the passage quiz, with a different last resort: a
-   * cue that fails `checkCue` (src/recall.ts) is asked for once more with the
+   * cue that fails `checkQuestion` (src/recall.ts) is asked for once more with the
    * failure named, and a second failure falls back to a cue written by code
    * from the heading path. A section is never set aside because the model
    * could not phrase it, so the quiz cannot loop or stall on one. A cue call
@@ -1456,31 +1461,37 @@ export class ChatPanel {
     this.rerender();
 
     try {
+      // The level follows the reader: up after a full answer, down after a
+      // miss, so the questions find where their understanding stops.
+      const level = nextLevel(session);
+      const asked = session.results.map((r) => r.question.cue);
       let failure = "";
-      let accepted: { cue: string; shape: CueShape; fallback: boolean } | null = null;
+      let accepted: { cue: string; shape: CueShape; expects: string[]; fallback: boolean } | null = null;
       for (let attempt = 0; attempt < 2 && !accepted; attempt++) {
         let draft;
         try {
-          draft = await this.plugin.llm.quizCue({
+          draft = await this.plugin.llm.quizQuestion({
             ...sectionIn(item),
+            level,
+            asked,
             standingInstructions: this.plugin.settings.quizInstructions,
             failure,
           });
         } catch (e) {
-          console.debug("[wikilm] quiz cue failed, using the heading cue:", e);
+          console.debug("[wikilm] quiz question failed, using the heading question:", e);
           break;
         }
-        const check = checkCue(draft, item);
-        if (check.ok) accepted = { cue: check.cue, shape: check.shape, fallback: false };
+        const check = checkQuestion(draft, item);
+        if (check.ok) accepted = { cue: check.cue, shape: check.shape, expects: check.expects, fallback: false };
         else failure = check.reason;
       }
       const live = this.session;
       if (!live) return;
-      const q = accepted ?? { cue: fallbackCue(item), shape: "concept" as const, fallback: true };
-      const next = acceptCue(live, item, q.cue, q.shape, q.fallback);
+      const q = accepted ?? { cue: fallbackQuestion(item), shape: "concept" as const, expects: fallbackExpects(item), fallback: true };
+      const next = acceptQuestion(live, item, q.cue, q.shape, q.fallback, q.expects, level);
       this.session = next;
       if (!next.current) return;
-      this.turns.push({ role: "assistant", text: renderCueMarkdown(next.current, item), quiz: { kind: "question", index: next.current.n } });
+      this.turns.push({ role: "assistant", text: renderQuestionMarkdown(next.current, item), quiz: { kind: "question", index: next.current.n } });
     } catch (e) {
       this.turns.push({ role: "assistant", text: "", error: describeError(e) });
       await this.finishQuiz();
@@ -1515,12 +1526,13 @@ export class ChatPanel {
     this.rerender();
 
     const cued = session.attempt === 2;
-    const points = cued ? openPoints(session) : item.points;
+    // Marked against the points the question expects, not the whole section.
+    const points = cued ? openPoints(session) : questionPoints(session);
     try {
       const draft = await this.plugin.llm.quizRecallGrade({
         ...sectionIn(item),
         points: points.map((p) => p.text),
-        cue: current.cue,
+        question: current.cue,
         answer: text,
         cued,
       });
@@ -1593,8 +1605,8 @@ export class ChatPanel {
   }
 
   /**
-   * `/hint`. Free recall has no hint before the attempt, because any word
-   * about the content would turn it into cued recall; the cues come after the
+   * `/hint`. There is no hint before the attempt, because any word about the
+   * content would answer part of the question; the hints come after the
    * first answer, one per point missed. So the hint says that.
    */
   private showHint(): void {
@@ -1602,8 +1614,8 @@ export class ChatPanel {
     if (!session?.current) return;
     this.pushSystem(
       session.attempt === 2
-        ? "The cues above are the hints. Write what they bring back, or say skip."
-        : "Write whatever you can, in any order. After your answer you get a cue for each point you missed, before anything is shown.",
+        ? "The hints are above. Write what they bring back, or say skip."
+        : "Answer in a few sentences with whatever you have. After your answer you get a hint for each part you missed, before the answer is shown.",
     );
   }
 
