@@ -41,11 +41,11 @@ export const DigestOut = z.object({
             quote_ids: z
               .array(z.string())
               .describe(
-                'The highlights this section quotes verbatim beneath its prose, e.g. ["H03","H04"]: every highlight filed under this page goes in exactly one section, except slide titles and logistics, which go in unused_ids.',
+                'Only the highlights whose exact wording the page should keep, printed verbatim beneath this section, e.g. ["H03"]: a definition the source states outright, a formula, a list of criteria, a long passage, or a figure. Leave out every highlight a bullet already cites; most sections have none. A highlight is cited in a bullet or quoted here, never both.',
               ),
           }),
         )
-        .describe("One to four sections, each a subtopic with prose and the highlights it rests on. At least one."),
+        .describe("One to four sections, each a subtopic: a lead line and cited bullets, plus the few highlights quoted verbatim. At least one."),
       related: z.array(z.string()).describe("Titles of other notes in this response or of the existing notes listed. Empty when none."),
       kind: z
         .enum(["concept", "entity"])

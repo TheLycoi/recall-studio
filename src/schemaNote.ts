@@ -55,7 +55,7 @@ export function renderDefaultSchema(opts: DefaultSchemaOptions): string {
   const pageSections = [
     "1. **## Summary** — three to five sentences on the topic, in your language, close to the source's wording.",
     "2. **## <Subtopic>** sections — each a branch of the page, read as a mind map: one lead line that says what the branch is, then a bullet list, never a paragraph, one claim per bullet with its term in bold at the front, nested two levels at most, every bullet cited. A bullet that names another page names it as {{Its Title}} and the plugin writes the link. Inside a page that already nests its branches as `###`, new branches are `###` under the page's own `##`.",
-    "3. The highlights filed under a branch are printed beneath its bullets as PDF++ callouts, verbatim, so the reader's own marks stay on the page.",
+    "3. A highlight is said once: cited by the bullet that paraphrases it, or quoted beneath the bullets as a PDF++ callout when its exact wording matters (a stated definition, a formula, a list of criteria, a long passage). Never both.",
     "4. **## Related topics** — `- [[Title]]` links to other pages, written by the plugin and never by the model.",
     "5. **## Flashcard Seeds** — left empty for you; the card writer works from the highlights, not from this section.",
   ].join("\n");

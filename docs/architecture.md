@@ -285,10 +285,14 @@ should say about it.
 
 **What the model returns** (`DigestOut`, `src/schemas.ts`): per page, a
 `summary` — the opening, two to five sentences — and `sections`, each a
-`heading`, `prose` of two to six sentences, and `quote_ids`, the highlights
-quoted verbatim beneath that prose. Every highlight filed under a page goes
-in exactly one section's `quote_ids`; slide titles and logistics go in
-`unused_ids`. Prose cites by id after the sentence it supports and mentions
+`heading`, `prose` (one lead line, then cited bullets), and `quote_ids`,
+the few highlights quoted verbatim beneath the bullets. A highlight is said
+once: cited by the bullet that paraphrases it, or quoted when its exact
+wording matters (a stated definition, a formula, a list of criteria, a long
+passage, a figure). The planner drops the quote of a highlight under 200
+characters that a bullet of the page cites (`LONG_QUOTE_CHARS`,
+`src/topicNote.ts`). Slide titles and logistics go in `unused_ids`. Prose
+cites by id after the sentence it supports and mentions
 other pages in double braces; it never writes a bracket. An id the run
 lacks is dropped from the prose and counted; a name no page answers to is
 left as plain words and reported as an orphan. No stub page is ever created.

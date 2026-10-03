@@ -789,6 +789,13 @@ export interface ArticleMergeResult extends MergeResult {
  * reader already has — with each section's heading as a lead line. The
  * page's own opening is never touched: it already says what the page is.
  */
+/**
+ * A highlight at least this long keeps its quote even when a bullet cites it:
+ * a paraphrase of a long passage is a summary, and the reader may want the
+ * passage itself. Shorter ones are said once, by the bullet.
+ */
+export const LONG_QUOTE_CHARS = 200;
+
 /** Marks a sub-section heading inside a filed block until the block's own level is known. */
 const SUBHEAD = "\u0000sub\u0000";
 
@@ -853,6 +860,18 @@ export function mergeArticle(
         existingKeys.add(h.key);
         keys.push(h.key);
         if (firstPage === null) firstPage = h.page;
+      }
+      // A highlight a bullet cites and nothing quotes reaches the page as
+      // that citation, and counts as added the first time its link lands.
+      if (prose) {
+        for (const ref of findAllPdfReferences(prose)) {
+          const key = highlightKey(ref.target);
+          if (existingKeys.has(key)) continue;
+          existingKeys.add(key);
+          keys.push(key);
+          added++;
+          if (firstPage === null) firstPage = ref.target.page;
+        }
       }
       const chunk: string[] = [];
       if (leadLines && sec.heading) chunk.push(`${SUBHEAD}${sec.heading}`);
@@ -1024,9 +1043,15 @@ export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: Pl
       if (!namedIds.includes(id)) namedIds.push(id);
     }
     const sections: ArticleSection[] = [];
-    for (const sec of shaped.sections) {
+    // Every section's prose is resolved first, so the citations of the whole
+    // page are known before any quote is decided.
+    const resolved = shaped.sections.map((sec) => {
       const prose = resolve(sec.prose ?? "");
       take(prose);
+      return prose;
+    });
+    shaped.sections.forEach((sec, si) => {
+      const prose = resolved[si];
       const quoted: ManifestHighlight[] = [];
       for (const id of sec.quote_ids ?? []) {
         seenIds.add(id);
@@ -1040,11 +1065,17 @@ export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: Pl
         // along for the card writer.
         const row: ManifestHighlight = { ...h, verbatim: true };
         if (prose.prose) row.passage = plainProse(prose.prose);
-        if (!quoted.some((x) => x.key === h.key)) quoted.push(row);
         if (!validHighlights.some((x) => x.key === h.key)) validHighlights.push(row);
+        // A thing is said once. A highlight some bullet of this page cites is
+        // already there as a paraphrase with a link to the slide, so its
+        // quote is left out, unless it is long enough that the paraphrase
+        // stands in for a passage the reader may want in the source's words.
+        // A figure is an embed, not a quote, and is never dropped here.
+        if (cited.has(id) && !isFigure(h) && h.text.trim().length < LONG_QUOTE_CHARS) continue;
+        if (!quoted.some((x) => x.key === h.key)) quoted.push(row);
       }
       if (prose.prose || quoted.length) sections.push({ heading: safeHeading(sec.heading ?? ""), prose: prose.prose, highlights: quoted });
-    }
+    });
     // A highlight cited in prose but quoted nowhere still belongs to the page.
     for (const id of cited) {
       const h = byId.get(id);

@@ -1890,7 +1890,7 @@ test("sentences the page already states are dropped from a paragraph and counted
   const someNew = `Linear impulse is the area under the force-time curve ${cite}. Propulsive impulse above braking impulse raises velocity ${cite}. A dive needs both linear and angular impulse ${cite}.`;
   const r3 = tn.mergeArticle(existing, "Lab", { definition: "", sections: [{ heading: "Impulse", prose: someNew, highlights: [] }], figures: [] }, { covered });
   assert.equal(r3.said, 1);
-  assert.ok(r3.md.includes("## Impulse\n\nPropulsive impulse above braking impulse raises velocity"), r3.md);
+  assert.ok(r3.md.includes("## [[Lab.pdf#page=1|Impulse]]\n\nPropulsive impulse above braking impulse raises velocity"), r3.md);
   assert.ok(!r3.md.includes("Linear impulse is the area"), r3.md);
   const all = `Linear impulse is the area under the force-time curve ${cite}. It equals the change in momentum ${cite}.`;
   const r2 = tn.mergeArticle(existing, "Lab", { definition: "", sections: [{ heading: "Impulse", prose: all, highlights: [] }], figures: [] }, { covered });
@@ -2162,4 +2162,60 @@ test("typing another existing page's name into a merging row's box sends the top
   const replanned = tn.planTopicNotes(narrowed, manifest, { ...DIGEST_OPTS, pages, keepAsNew });
   assert.equal(replanned.notes.length, 1);
   assert.equal(replanned.notes[0].path, OTHER.path);
+});
+
+// ---- Say a thing once: a cited paraphrase or a quote, not both ---------------------
+
+const SHORT_HL = {
+  id: "H01",
+  key: "page=6&selection=1,0,1,40",
+  page: 6,
+  kind: "selection",
+  color: "yellow",
+  target: { page: 6, selection: { beginIndex: 1, beginOffset: 0, endIndex: 1, endOffset: 40 }, color: "yellow" },
+  text: "No relationship between mental disorders and violence",
+  before: "",
+  after: "",
+  origins: ["pdf"],
+};
+const onceDraft = (prose, quote_ids) => ({
+  notes: [{ title: "Stigma", kind: "concept", aliases: [], tag: "term", closest_existing: "", why_new: "new", summary: "S.", related: [], sections: [{ heading: "Stigma and Violence", prose, quote_ids }] }],
+  unused_ids: [],
+});
+const ONCE_OPTS = { classCode: "BIO101", topicFolder: "classes", created: "2026-10-03", pages: [] };
+
+test("a short highlight a bullet cites is not quoted again beneath it", () => {
+  const plan = tn.planTopicNotes(onceDraft("Stigma persists.\n- **Stigma** continues despite no link to violence [H01]", ["H01"]), manifestFor([SHORT_HL]), ONCE_OPTS);
+  const note = plan.notes[0];
+  assert.ok(!note.content.includes("> [!PDF"), note.content);
+  assert.ok(note.content.includes("page=6&selection=1,0,1,40"), "the bullet's citation still opens the slide");
+  assert.equal(note.highlights.length, 1, "the highlight still belongs to the page");
+  assert.deepEqual(plan.unassignedIds, []);
+});
+
+test("a quoted highlight that no bullet cites keeps its quote", () => {
+  const plan = tn.planTopicNotes(onceDraft("Stigma persists.\n- **Stigma** is common", ["H01"]), manifestFor([SHORT_HL]), ONCE_OPTS);
+  assert.ok(plan.notes[0].content.includes("> > No relationship between mental disorders and violence"), plan.notes[0].content);
+});
+
+test("a long highlight keeps its quote even when a bullet cites it", () => {
+  const long = { ...SELECTION_HIGHLIGHT, id: "H01" };
+  const plan = tn.planTopicNotes(onceDraft("Receptors do two things.\n- **Binding** then transduction [H01]", ["H01"]), manifestFor([long]), ONCE_OPTS);
+  assert.ok(plan.notes[0].content.includes("> > Receptors have 2 important properties"), plan.notes[0].content);
+});
+
+test("a short highlight cited in one section is not quoted in another section of the same page", () => {
+  const draft = onceDraft("Stigma persists.\n- **Stigma** continues [H01]", []);
+  draft.notes[0].sections.push({ heading: "Evidence", prose: "What the data say.\n- **Data** are mixed", quote_ids: ["H01"] });
+  const plan = tn.planTopicNotes(draft, manifestFor([SHORT_HL]), ONCE_OPTS);
+  assert.ok(!plan.notes[0].content.includes("> [!PDF"), plan.notes[0].content);
+});
+
+test("mergeArticle counts a highlight that arrives only as a bullet's citation", () => {
+  const link = `[[${PDF_BASENAME}.pdf#page=6&selection=1,0,1,40&color=yellow|${PDF_BASENAME}, p.6]]`;
+  const article = { definition: "", sections: [{ heading: "Stigma", prose: `Stigma persists.\n- **Stigma** continues ${link}`, highlights: [] }], figures: [] };
+  const r = tn.mergeArticle("## Existing\nText.\n", PDF_BASENAME, article);
+  assert.equal(r.added, 1);
+  const again = tn.mergeArticle(r.md, PDF_BASENAME, article);
+  assert.equal(again.added, 0, "already on the page the second time");
 });
