@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.15.0
+
+- The quiz asks real questions. Each one is about the main idea of a section and is answered from memory in a few sentences. It no longer says "write down everything you remember", and it is never multiple choice or yes/no.
+- Each question carries its own answer key: the one to four points a full answer contains. You are marked on those, not on every line of the section.
+- The difficulty follows you. The first question asks you to state the thing. A full answer moves the next one up to why or how, then to how ideas connect. A miss steps it back down.
+- The grader's feedback says what you got right and what a full answer adds, tied to what you wrote.
+- A question about a section that is one long paragraph is no longer rejected for sharing the subject's words, which is what used to leave you with the bare heading as the question.
+- Starting a second quiz while one runs now says plainly that your next message is read as an answer, and how to switch.
+
 ## 0.14.3
 
 - A digest says each thing once. A highlight that a bullet paraphrases and cites is no longer printed again as a quote beneath it. Quotes are kept for wording worth keeping: a definition the source states outright, a formula, a list of criteria, a figure, or a highlight of 200 characters or more. A quoted highlight that no bullet cites is always kept.
