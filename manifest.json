@@ -1,7 +1,7 @@
 {
   "id": "wikilm",
   "name": "WikiLM",
-  "version": "0.14.1",
+  "version": "0.14.2",
   "minAppVersion": "1.7.2",
   "description": "Turn your sources into a wiki you can question: highlight-grounded concept and entity pages, a chat that answers only from them, and flashcards pushed to Anki for long-term retention.",
   "author": "Conrad Kelonu",

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.2
+
+- In the digest preview, the box on each row is the note the topic goes into. Type the name of a note you already have and the topic is filed there: a new topic becomes a branch under its own title, with its sub-sections as headings beneath it. Type a new name and it becomes a new note. Existing notes are suggested as you type, and the line under the box says where the topic will land.
+- The box can be typed in. A long badge used to squeeze it to nothing on new rows, and rows that merge into a page were read-only.
+- A topic filed into a page as a branch keeps its sub-sections as headings one level down, where a mind map draws them, instead of bold lines.
+
 ## 0.14.1
 
 - AI highlight on a PDF now writes pages through the digest. The spans it picks join the PDF's own highlights and go through the digest's draft, preview and merge, so the page gets an opening and branches of a lead line and cited bullets. Before, it wrote one labelled link per span and a separate heading per subject. The flashcards-only option is unchanged.
