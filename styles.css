@@ -653,10 +653,19 @@ body.wikilm-highlighter-active .textLayer ::selection {
   gap: var(--size-4-2);
   margin-bottom: var(--size-4-1);
 }
+.wikilm-preview-head {
+  flex-wrap: wrap;
+}
 .wikilm-preview-title {
-  flex: 1;
+  flex: 1 1 14em;
+  min-width: 12em;
 }
 .wikilm-preview-badge {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .wikilm-preview-highlights {

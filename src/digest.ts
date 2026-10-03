@@ -10,7 +10,7 @@
 import { Notice, TFile, normalizePath } from "obsidian";
 import type WikiLmPlugin from "./main";
 import { captureManifestHighlights } from "./capture";
-import { decideGate, digestFolderSummary, isDigestTarget, planDigestFolder, type DigestFolderTally, type GateDecision } from "./digestGate";
+import { decideGate, digestFolderSummary, fileTargets, isDigestTarget, planDigestFolder, type DigestFolderTally, type GateDecision } from "./digestGate";
 import { describeError } from "./llm";
 import { withSuggested, type Manifest, type ManifestHighlight } from "./manifest";
 import { askDigestOptions, askInstruction, previewDigest, type DigestProduct } from "./modals";
@@ -334,6 +334,7 @@ export async function digestPdf(plugin: WikiLmPlugin, source: TFile, opts: Diges
       planned.notes,
       { flashcards, unknownIds: planned.unknownIds, unassignedIds: planned.unassignedIds },
       manifest.pdfBasename,
+      fileTargets(planned.notes, pages),
     );
     if (chosen === null) return "skipped";
 
@@ -348,7 +349,7 @@ export async function digestPdf(plugin: WikiLmPlugin, source: TFile, opts: Diges
     // so the row is found by path and the pair is unambiguous. Re-planning
     // always: it is pure and cheap, and one code path has one behaviour.
     const chosenRows = chosen.map((n) => ({ path: n.path, title: n.title }));
-    const { draft: narrowed, keepAsNew } = applyDigestChoices(draft, planned.notes, chosenRows);
+    const { draft: narrowed, keepAsNew } = applyDigestChoices(draft, planned.notes, chosenRows, pages.map((p) => p.title));
     // A row ticked as "create this page" stays a creation through the re-plan,
     // even if its new title reads like a part of a page that already exists.
     const finalPlan = await plan(narrowed, keepAsNew);

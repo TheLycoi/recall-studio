@@ -195,3 +195,23 @@ export function nothingNewHint(rows: PreviewRowShape[]): string {
     `To cover other parts of the deck, highlight them in PDF++ and run Digest again, or run AI highlight… with your instruction, which reads every page.`
   );
 }
+
+/**
+ * The existing pages a preview row may be sent into, for the title box's
+ * suggestions: the pages this plan already merges into first, since those are
+ * the ones the PDF is about, then every other page by title. Once each,
+ * compared without case.
+ */
+export function fileTargets(rows: Array<{ exists: boolean; title: string }>, pages: Array<{ title: string }>): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const add = (t: string) => {
+    const k = t.trim().toLowerCase();
+    if (!k || seen.has(k)) return;
+    seen.add(k);
+    out.push(t.trim());
+  };
+  for (const r of rows) if (r.exists) add(r.title);
+  for (const t of pages.map((p) => p.title).sort((a, b) => a.localeCompare(b))) add(t);
+  return out;
+}

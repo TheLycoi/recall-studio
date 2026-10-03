@@ -553,6 +553,8 @@ export class DigestPreviewModal extends Modal {
     private extras: { flashcards: number; unknownIds: string[]; unassignedIds: string[] },
     private pdfBasename: string,
     private resolve: (v: PreparedNote[] | null) => void,
+    /** Titles of the pages that exist, offered as the title boxes' suggestions. */
+    private targets: string[] = [],
   ) {
     super(app);
     // A merge that adds no quote may still add prose — an article section
@@ -578,6 +580,16 @@ export class DigestPreviewModal extends Modal {
     const hint = nothingNewHint(this.notes);
     if (hint) contentEl.createEl("p", { text: hint, cls: "wikilm-muted wikilm-preview-hint" });
 
+    contentEl.createEl("p", {
+      text: "The box on each row is the note the topic goes into. Type the name of a note you already have to put the topic there, or a new name for a new note.",
+      cls: "wikilm-muted wikilm-preview-hint",
+    });
+    // The names of the notes that exist, offered as the reader types.
+    const listId = `wikilm-preview-notes-${Date.now()}`;
+    const datalist = contentEl.createEl("datalist", { attr: { id: listId } });
+    for (const t of this.targets) datalist.createEl("option", { attr: { value: t } });
+    const known = new Map(this.targets.map((t) => [t.trim().toLowerCase(), t]));
+
     const list = contentEl.createDiv();
     this.notes.forEach((note, i) => {
       const card = list.createDiv({ cls: "wikilm-preview-note" });
@@ -594,16 +606,28 @@ export class DigestPreviewModal extends Modal {
       titleInput.addClass("wikilm-inline-input");
       titleInput.addClass("wikilm-preview-title");
       titleInput.value = note.title;
-      // A page that already exists keeps its name: `applyDigestChoices`
-      // (src/topicNote.ts) ignores an edit to an existing row's title, since
-      // renaming the file is the vault's job and not the digest's. Saying so
-      // in the box beats silently discarding what was typed into it.
-      if (note.exists) {
+      titleInput.setAttribute("list", listId);
+      titleInput.placeholder = "Note name";
+      // A row that stands for several of the model's proposals has no one
+      // topic to move, so its box stays as it is.
+      const several = note.exists && (note.groups?.length ?? 1) > 1;
+      if (several) {
         titleInput.readOnly = true;
-        titleInput.title = "An existing page keeps its name";
+        titleInput.title = "This row holds several topics; untick it or leave it in this page";
       }
+      let where: HTMLElement | null = null;
+      const describe = () => {
+        if (!where) return;
+        const typed = titleInput.value.trim();
+        const page = known.get(typed.toLowerCase());
+        if (note.exists && typed.toLowerCase() === note.title.trim().toLowerCase()) where.setText(note.path);
+        else if (page) where.setText(note.exists ? `Goes into your note \u201C${page}\u201D instead` : `Goes into your note \u201C${page}\u201D as a branch named \u201C${note.title}\u201D`);
+        else if (typed) where.setText(`New note: ${typed}`);
+        else where.setText(note.path);
+      };
       titleInput.addEventListener("input", () => {
         this.titles[i] = titleInput.value;
+        describe();
       });
 
       // A merge and a filing both land in a page that exists; only the badge
@@ -612,9 +636,12 @@ export class DigestPreviewModal extends Modal {
       const badgeText = note.exists
         ? `${note.routed?.length ? "filed" : "merge"}: +${note.added}, ${note.skipped} skipped${note.said ? `, ${note.said} already said` : ""}`
         : `new ${note.kind ?? "concept"}${note.said ? ` (${note.said} already said elsewhere)` : ""}${note.whyNew ? ` — ${note.whyNew}` : ""}`;
-      head.createSpan({ text: badgeText, cls: "wikilm-badge wikilm-preview-badge" });
+      // The badge is cut short so it never squeezes the title box; the whole
+      // reason is on hover.
+      const badge = head.createSpan({ text: badgeText, cls: "wikilm-badge wikilm-preview-badge" });
+      badge.title = badgeText;
 
-      card.createEl("div", { text: note.path, cls: "wikilm-muted" });
+      where = card.createEl("div", { text: note.path, cls: "wikilm-muted" });
       card.createEl("p", { text: note.summary });
 
       const hlList = card.createEl("ul", { cls: "wikilm-preview-highlights" });
@@ -678,8 +705,9 @@ export function previewDigest(
   notes: PreparedNote[],
   extras: { flashcards: number; unknownIds: string[]; unassignedIds: string[] },
   pdfBasename: string,
+  targets: string[] = [],
 ): Promise<PreparedNote[] | null> {
-  return new Promise((resolve) => new DigestPreviewModal(app, notes, extras, pdfBasename, resolve).open());
+  return new Promise((resolve) => new DigestPreviewModal(app, notes, extras, pdfBasename, resolve, targets).open());
 }
 
 export interface SuggestPreviewExtras {

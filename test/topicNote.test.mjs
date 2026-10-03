@@ -481,7 +481,7 @@ test("applyDigestChoices keeps an unchecked merged group out even when another r
   assert.deepEqual(narrowed.notes[0].highlight_ids, ["H04"], "the unchecked group's highlights are gone");
 });
 
-test("applyDigestChoices ignores an edit to an existing row's title", () => {
+test("applyDigestChoices sends an existing row's topic to a new page when the reader types a name no page has", () => {
   const manifest = twoHighlightManifest();
   const draft = {
     notes: [
@@ -491,10 +491,49 @@ test("applyDigestChoices ignores an edit to an existing row's title", () => {
   };
   const planned = tn.planTopicNotes(draft, manifest, { ...DIGEST_OPTS, pages: [HOME_PHARM] });
   assert.equal(planned.notes[0].exists, true);
-  const { draft: narrowed, keepAsNew } = tn.applyDigestChoices(draft, planned.notes, [{ path: planned.notes[0].path, title: "Pharmacology Renamed" }]);
-  assert.equal(narrowed.notes.length, 1);
-  assert.equal(narrowed.notes[0].title, "Pharmacology", "the page's name is the page's");
-  assert.deepEqual(keepAsNew, [], "a merge row is not pinned as new");
+  const { draft: narrowed, keepAsNew } = tn.applyDigestChoices(draft, planned.notes, [{ path: planned.notes[0].path, title: "Drug Basics" }], ["Pharmacology"]);
+  assert.equal(narrowed.notes[0].title, "Drug Basics", "the box says where the topic goes");
+  assert.deepEqual(keepAsNew, ["Drug Basics"]);
+  const replanned = tn.planTopicNotes(narrowed, manifest, { ...DIGEST_OPTS, pages: [HOME_PHARM], keepAsNew });
+  assert.equal(replanned.notes[0].exists, false);
+  assert.equal(replanned.notes[0].path, "classes/BIO101/Drug Basics.md");
+});
+
+test("applyDigestChoices leaves an existing row alone when its box still holds the page's own name", () => {
+  const manifest = twoHighlightManifest();
+  const draft = { notes: [{ title: "Pharmacology", kind: "concept", aliases: [], tag: "term", closest_existing: "", why_new: "", summary: "S.", highlight_ids: ["H05"], related: [] }], unused_ids: [] };
+  const planned = tn.planTopicNotes(draft, manifest, { ...DIGEST_OPTS, pages: [HOME_PHARM] });
+  const { draft: narrowed, keepAsNew } = tn.applyDigestChoices(draft, planned.notes, [{ path: planned.notes[0].path, title: "pharmacology " }], ["Pharmacology"]);
+  assert.equal(narrowed.notes[0].title, "Pharmacology");
+  assert.deepEqual(keepAsNew, []);
+});
+
+test("typing an existing page's name into a new row's box files the topic there as a branch", () => {
+  const manifest = twoHighlightManifest();
+  const draft = {
+    notes: [
+      { title: "Pharmacology", kind: "concept", aliases: [], tag: "term", closest_existing: "", why_new: "", summary: "S.", highlight_ids: ["H05"], related: [] },
+      { title: "Self-Efficacy", kind: "concept", aliases: [], tag: "term", closest_existing: "", why_new: "nothing listed is about beliefs", summary: "A belief.", highlight_ids: ["H04"], related: [] },
+    ],
+    unused_ids: [],
+  };
+  const planned = tn.planTopicNotes(draft, manifest, { ...DIGEST_OPTS, pages: [HOME_PHARM] });
+  const fresh = planned.notes.find((n) => !n.exists);
+  const home = planned.notes.find((n) => n.exists);
+  const { draft: narrowed, keepAsNew } = tn.applyDigestChoices(
+    draft,
+    planned.notes,
+    [{ path: home.path, title: home.title }, { path: fresh.path, title: "pharmacology" }],
+    ["Pharmacology"],
+  );
+  const moved = narrowed.notes.find((n) => n.title === "Self-Efficacy");
+  assert.ok(moved, "the topic keeps its own name, which becomes the branch heading");
+  assert.equal(moved.closest_existing, "Pharmacology");
+  assert.deepEqual(keepAsNew, []);
+  const replanned = tn.planTopicNotes(narrowed, manifest, { ...DIGEST_OPTS, pages: [HOME_PHARM], keepAsNew });
+  assert.equal(replanned.notes.length, 1);
+  assert.equal(replanned.notes[0].path, HOME_PHARM.path);
+  assert.match(replanned.notes[0].content, /^## .*Self-Efficacy/m);
 });
 
 test("a row accepted as new is written as a new page even when the rename specializes an existing title", () => {
@@ -1420,7 +1459,7 @@ test("mergeArticle with a section files the whole article under that heading, se
   const existing = `---\nclass: BIO101\n---\n# Pharmacology\n\n## Dosing\nDose text.\n\n## Related topics\n- [[x]]\n`;
   const article = { definition: "Receptors are what drugs bind to.", sections: [{ heading: "Two Properties", prose: "Bind, then transduce.", highlights: [wikiHighlight({ verbatim: true })] }], figures: [] };
   const r = tn.mergeArticle(existing, PDF_BASENAME, article, { section: "Receptors" });
-  assert.ok(r.md.includes(`## [[${PDF_BASENAME}.pdf#page=4|Receptors]]\n\nReceptors are what drugs bind to.\n\n**Two Properties**\n\nBind, then transduce.\n\n> [!PDF|yellow]`), r.md);
+  assert.ok(r.md.includes(`## [[${PDF_BASENAME}.pdf#page=4|Receptors]]\n\nReceptors are what drugs bind to.\n\n### Two Properties\n\nBind, then transduce.\n\n> [!PDF|yellow]`), r.md);
   assert.deepEqual(r.sections, [{ heading: "Receptors", keys: ["page=4&selection=2,0,33,19"], created: true }]);
 });
 
@@ -2069,4 +2108,58 @@ test("mergeArticle keeps ## for a new section on a flat digest page", () => {
   const r = tn.mergeArticle(existing, PDF_BASENAME, article, { title: "Receptors" });
   assert.ok(r.md.includes("## Albumin Contrast\n"), r.md);
   assert.ok(!r.md.includes("### Albumin Contrast"), r.md);
+});
+
+// ---- Filing a proposed page into an existing one from the preview ------------------
+
+test("applyDigestChoices files a new row into the page the reader picked, and the re-plan writes it there as a branch", () => {
+  const manifest = twoHighlightManifest();
+  const draft = {
+    notes: [
+      { title: "Pharmacology", kind: "concept", aliases: [], tag: "term", closest_existing: "", why_new: "", summary: "S.", highlight_ids: ["H05"], related: [] },
+      { title: "Self-Efficacy", kind: "concept", aliases: [], tag: "term", closest_existing: "", why_new: "nothing listed is about beliefs", summary: "A belief.", highlight_ids: ["H04"], related: [] },
+    ],
+    unused_ids: [],
+  };
+  const planned = tn.planTopicNotes(draft, manifest, { ...DIGEST_OPTS, pages: [HOME_PHARM] });
+  assert.equal(planned.notes.length, 2);
+  const fresh = planned.notes.find((n) => !n.exists);
+  const home = planned.notes.find((n) => n.exists);
+  const { draft: narrowed, keepAsNew } = tn.applyDigestChoices(draft, planned.notes, [
+    { path: home.path, title: home.title },
+    { path: fresh.path, title: fresh.title, fileInto: "Pharmacology" },
+  ]);
+  assert.equal(narrowed.notes.find((n) => n.title === "Self-Efficacy").closest_existing, "Pharmacology");
+  assert.deepEqual(keepAsNew, [], "a row filed into a page is not pinned as new");
+  const replanned = tn.planTopicNotes(narrowed, manifest, { ...DIGEST_OPTS, pages: [HOME_PHARM], keepAsNew });
+  assert.equal(replanned.notes.length, 1, "both groups land in the one page");
+  assert.equal(replanned.notes[0].path, HOME_PHARM.path);
+  assert.match(replanned.notes[0].content, /^## .*Self-Efficacy/m);
+});
+
+test("a filed article's sub-sections sit one level under the branch they land in", () => {
+  const article = {
+    definition: "Lead.",
+    sections: [{ heading: "Sub Topic", prose: "Line.\n- **Term** claim", highlights: [] }],
+    figures: [],
+  };
+  const flat = tn.mergeArticle("## Existing\nText.\n", PDF_BASENAME, article, { section: "New Branch" });
+  assert.ok(flat.md.includes("## New Branch\n\nLead.\n\n### Sub Topic\n\nLine."), flat.md);
+  const nested = tn.mergeArticle("## Parent\nText.\n### Twitch Frequency\n- a\n", PDF_BASENAME, article, { section: "Twitch Frequency" });
+  assert.ok(nested.md.includes("#### Sub Topic"), nested.md);
+});
+
+test("typing another existing page's name into a merging row's box sends the topic to that page", () => {
+  const manifest = twoHighlightManifest();
+  const OTHER = { ...HOME_PHARM, path: "classes/BIO101/Receptors.md", title: "Receptors", md: HOME_PHARM.md.replace("# Pharmacology", "# Receptors") };
+  const draft = { notes: [{ title: "Pharmacology", kind: "concept", aliases: [], tag: "term", closest_existing: "", why_new: "", summary: "S.", highlight_ids: ["H05"], related: [] }], unused_ids: [] };
+  const pages = [HOME_PHARM, OTHER];
+  const planned = tn.planTopicNotes(draft, manifest, { ...DIGEST_OPTS, pages });
+  assert.equal(planned.notes[0].path, HOME_PHARM.path);
+  const { draft: narrowed, keepAsNew } = tn.applyDigestChoices(draft, planned.notes, [{ path: HOME_PHARM.path, title: "receptors" }], ["Pharmacology", "Receptors"]);
+  assert.equal(narrowed.notes[0].title, "Receptors");
+  assert.deepEqual(keepAsNew, []);
+  const replanned = tn.planTopicNotes(narrowed, manifest, { ...DIGEST_OPTS, pages, keepAsNew });
+  assert.equal(replanned.notes.length, 1);
+  assert.equal(replanned.notes[0].path, OTHER.path);
 });

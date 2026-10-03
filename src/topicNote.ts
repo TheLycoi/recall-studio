@@ -789,6 +789,9 @@ export interface ArticleMergeResult extends MergeResult {
  * reader already has — with each section's heading as a lead line. The
  * page's own opening is never touched: it already says what the page is.
  */
+/** Marks a sub-section heading inside a filed block until the block's own level is known. */
+const SUBHEAD = "\u0000sub\u0000";
+
 export function mergeArticle(
   existingMd: string,
   pdfBasename: string,
@@ -852,7 +855,7 @@ export function mergeArticle(
         if (firstPage === null) firstPage = h.page;
       }
       const chunk: string[] = [];
-      if (leadLines && sec.heading) chunk.push(`**${sec.heading}**`);
+      if (leadLines && sec.heading) chunk.push(`${SUBHEAD}${sec.heading}`);
       if (prose) chunk.push(prose);
       if (fresh.length) {
         chunk.push(joinRows(fresh.map((h) => renderQuoteCallout(pdfBasename, h))));
@@ -863,14 +866,19 @@ export function mergeArticle(
     return { text: parts.join("\n\n"), keys, firstPage, quotes };
   };
 
-  const place = (heading: string, text: string, keys: string[], firstPage: number | null) => {
+  // A filed article's sub-sections are headings one level under the branch
+  // they land in, so a mind map draws them as that branch's children.
+  const under = (level: 2 | 3, text: string) => text.split(SUBHEAD).join(`${"#".repeat(level + 1)} `);
+  const place = (heading: string, rawText: string, keys: string[], firstPage: number | null) => {
+    let text = under(2, rawText);
     if (!heading) {
-      body = insertBeforeTrailing(body, text);
+      body = insertBeforeTrailing(body, rawText.split(SUBHEAD).join("## "));
       filed.push({ heading: "", keys, created: false });
       return;
     }
     const found = findSection(body, heading);
     if (found) {
+      text = under(found.level, rawText);
       body = spliceIntoSection(body, found.end, text, found.level);
       filed.push({ heading: found.heading, keys, created: false });
       return;
@@ -883,6 +891,7 @@ export function mergeArticle(
     // merge exists to avoid.
     const near = nearestHeading(body, heading);
     if (near) {
+      text = under(near.level, rawText);
       body = spliceIntoSection(body, near.end, text, near.level);
       filed.push({ heading: near.heading, keys, created: false });
       return;
@@ -902,7 +911,7 @@ export function mergeArticle(
         parent = scanHeadings(body).find((h) => h.level === 2 && h.key === headingKey(opts.title!)) ?? null;
       }
       if (parent) {
-        body = spliceIntoSection(body, parent.end, `### ${link}\n\n${text}`, 2);
+        body = spliceIntoSection(body, parent.end, `### ${link}\n\n${under(3, rawText)}`, 2);
         filed.push({ heading, keys, created: true });
         return;
       }
@@ -1290,13 +1299,19 @@ export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: Pl
 export interface DigestChoice {
   path: string;
   title: string;
+  /**
+   * The existing page the reader chose in the preview for a row the plan
+   * showed as new: the proposal is filed there as a branch instead of
+   * becoming a page of its own. Ignored on a row that already merges.
+   */
+  fileInto?: string;
 }
 
 /**
  * The draft narrowed to what the reader kept in the preview: notes whose group
- * sits in a checked row survive; a checked NEW row's edited title renames its
- * one group; edits to an existing row's title are ignored (the page's name is
- * the page's).
+ * sits in a checked row survive, and the title box of each row says where its
+ * topic goes: a new name is a new page, the name of a page that exists sends
+ * the topic into that page. No page is ever renamed here.
  *
  * The digest re-plans the narrowed draft rather than filtering the planned
  * rows, because a rename can move a row between "create" and "merge into a
@@ -1309,24 +1324,53 @@ export function applyDigestChoices<D extends PlannerDraft>(
   draft: D,
   planned: PreparedNote[],
   chosen: DigestChoice[],
+  /** Titles of the pages that exist, so a name typed into a row's box can be recognised as one of them. */
+  existingTitles: string[] = [],
 ): { draft: D; keepAsNew: string[] } {
   const byPath = new Map(planned.map((n) => [n.path, n]));
+  const existing = new Map(existingTitles.map((t) => [safeTitle(t).toLowerCase(), t]));
   const keptGroups = new Set<string>();
   const renamed = new Map<string, string>();
   // Every row the reader ticked that the preview showed as a page to create,
   // under whatever title they left in the box. The re-plan is told to keep
   // these new: the reader agreed to a new page, so a new page is what they get.
   const keepAsNew: string[] = [];
+  // Groups the reader sent into an existing page, by the page's title.
+  const filedInto = new Map<string, string>();
   for (const choice of chosen) {
     const row = byPath.get(choice.path);
     const groups = row ? row.groups : [safeTitle(choice.title)];
     for (const g of groups) keptGroups.add(g.toLowerCase());
-    if (!row || row.exists === false) keepAsNew.push(safeTitle(choice.title));
-    // Only a new page can be renamed, and only when the row stands for exactly
-    // one group — otherwise there is no one proposal the new name belongs to.
-    if (row && row.exists === false && groups.length === 1) {
-      const to = safeTitle(choice.title);
-      if (to !== groups[0]) renamed.set(groups[0].toLowerCase(), to);
+    const typed = safeTitle(choice.title);
+    const typedPage = existing.get(typed.toLowerCase());
+
+    if (row && row.exists === false) {
+      // The box on a new row says where the topic goes. The name of a page
+      // that exists files it there as a branch under the topic's own title;
+      // any other name is the new page's name.
+      const target = (choice.fileInto ?? "").trim() || (typedPage && !groups.some((g) => g.toLowerCase() === typed.toLowerCase()) ? typedPage : "");
+      if (target) {
+        for (const g of groups) filedInto.set(g.toLowerCase(), target);
+        continue;
+      }
+      keepAsNew.push(typed);
+      // Only a row that stands for exactly one group can be renamed —
+      // otherwise there is no one proposal the new name belongs to.
+      if (groups.length === 1 && typed !== groups[0]) renamed.set(groups[0].toLowerCase(), typed);
+      continue;
+    }
+    if (!row) {
+      keepAsNew.push(typed);
+      continue;
+    }
+    // A row that merges into a page: the box still names that page unless the
+    // reader typed another. Another existing page takes the topic as a merge;
+    // a name no page has makes the topic a page of its own. The page the row
+    // first pointed at is not renamed either way.
+    const same = typed.toLowerCase() === safeTitle(row.title).toLowerCase();
+    if (!same && typed && typed !== "Untitled" && groups.length === 1) {
+      renamed.set(groups[0].toLowerCase(), typedPage ?? typed);
+      if (!typedPage) keepAsNew.push(typed);
     }
   }
 
@@ -1337,7 +1381,8 @@ export function applyDigestChoices<D extends PlannerDraft>(
         .filter((n) => keptGroups.has(safeTitle(n.title).toLowerCase()))
         .map((n) => {
           const key = safeTitle(n.title).toLowerCase();
-          return renamed.has(key) ? { ...n, title: renamed.get(key)! } : n;
+          if (filedInto.has(key)) return { ...n, closest_existing: filedInto.get(key)!, why_new: "you filed it there in the preview" };
+          return renamed.has(key) ? { ...n, title: renamed.get(key)!, closest_existing: "" } : n;
         }),
     },
     keepAsNew: [...new Set(keepAsNew)],

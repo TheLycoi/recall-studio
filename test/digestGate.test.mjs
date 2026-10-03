@@ -191,3 +191,10 @@ test("nothingNewHint is empty when any row would write something", () => {
   assert.equal(dg.nothingNewHint([{ exists: true, added: 0, sections: [{ heading: "X" }], highlights: [{ page: 2 }] }]), "");
   assert.equal(dg.nothingNewHint([]), "");
 });
+
+test("fileTargets lists the plan's own pages first, then the rest by title, once each", () => {
+  const rows = [{ exists: true, title: "Psychopathology" }, { exists: false, title: "Biopsychosocial Model" }];
+  const pages = [{ title: "Zeta" }, { title: "psychopathology" }, { title: "Alpha" }];
+  assert.deepEqual(dg.fileTargets(rows, pages), ["Psychopathology", "Alpha", "Zeta"]);
+  assert.deepEqual(dg.fileTargets([], []), []);
+});
