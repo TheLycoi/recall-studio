@@ -757,7 +757,8 @@ quiz those words are ordinary questions.
 
 **Sections.** A note's passages are grouped by the headings they sit under,
 so `### Elicit-provide-elicit` is one question and its steps are its
-points; a table's body rows are points too. The lead before the first
+points; a table's body rows are points too, and a long paragraph is
+one point per sentence. The lead before the first
 heading is a section of its own, asked first, and sections go in note
 order, so definitions come before what builds on them. A section with more
 than nine points is split into runs of up to seven.
@@ -910,6 +911,8 @@ missed: the answer does not carry the point.
 wrong: the answer states, as true, something this point contradicts. Name the belief in note, specifically enough that a card could be written against it: "thinks the last step asks permission again", not "misunderstood the step". A wrong belief matters more than a gap, because it keeps producing wrong answers until it is replaced.
 
 Credit only what the answer says. A point is not recalled because the question implied it, because the answer is on the right topic, or because the student would probably know it. An answer about a different subject carries none of the points.
+
+Mark against the question. A point may hold more than the question asked for. When the answer carries the part of the point the question asks about, the point is recalled, and what the question did not ask for is not a missing part.
 </marks>
 
 <said>

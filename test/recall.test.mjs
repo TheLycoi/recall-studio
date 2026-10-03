@@ -437,3 +437,22 @@ test("recallMisses sends every point not freely recalled, with the cue as contex
   assert.equal(misses[0].title, "Elicit: ask permission, and find out what the client already knows");
   assert.equal(misses[0].shape, "procedure");
 });
+
+// ---- a long paragraph is several points ---------------------------------------
+
+test("buildItems splits a long paragraph into its sentences, so a question can expect one idea of it", () => {
+  const para =
+    "The biopsychosocial approach, a term introduced by George Engel, insists that mental illness cannot be understood through biology alone but must include psychological and social factors as well. The course organizes its coverage of psychopathology around three major themes: a behavioral and experiential perspective, a neuroscience perspective, and an evolutionary perspective. These themes map onto different levels of analysis, from relationships and the individual down to genetics.";
+  const items = r.buildItems([unit("d0", "Definition", para, "wiki/concepts/Biopsychosocial Model.md", "Biopsychosocial Model")]);
+  assert.equal(items.length, 1);
+  assert.deepEqual(items[0].points.map((p) => p.id), ["d0#s1", "d0#s2", "d0#s3"]);
+  assert.ok(items[0].points[0].text.startsWith("The biopsychosocial approach"));
+  assert.ok(items[0].points[1].text.startsWith("The course organizes"));
+  assert.equal(items[0].points[0].notePath, "wiki/concepts/Biopsychosocial Model.md", "a sentence keeps its note");
+});
+
+test("buildItems leaves a short point and a one-sentence point whole", () => {
+  const one = "A long single sentence that runs on and on about the biopsychosocial approach and its many themes and levels of analysis, from relationships and the individual all the way down to psychological processes, cortical networks, and the genetics underneath them all, without ever stopping";
+  const items = r.buildItems([unit("a", "S", "Short point about rapport. Second short one."), unit("b", "S", one)]);
+  assert.deepEqual(items[0].points.map((p) => p.id), ["a", "b"]);
+});

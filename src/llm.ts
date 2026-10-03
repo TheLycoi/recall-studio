@@ -1326,6 +1326,8 @@ missed: the answer does not carry the point.
 wrong: the answer states, as true, something this point contradicts. Name the belief in note, specifically enough that a card could be written against it: "thinks the last step asks permission again", not "misunderstood the step". A wrong belief matters more than a gap, because it keeps producing wrong answers until it is replaced.
 
 Credit only what the answer says. A point is not recalled because the question implied it, because the answer is on the right topic, or because the student would probably know it. An answer about a different subject carries none of the points.
+
+Mark against the question. A point may hold more than the question asked for. When the answer carries the part of the point the question asks about, the point is recalled, and what the question did not ask for is not a missing part.
 </marks>
 
 <said>

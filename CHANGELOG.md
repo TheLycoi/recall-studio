@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.1
+
+- In the quiz, a long paragraph counts as one point per sentence. A page's opening is often one paragraph holding several ideas; as a single point, an answer that gave exactly what the question asked was marked partial for leaving out the rest.
+- The grader marks against the question: what a point holds beyond what was asked is not a missing part.
+
 ## 0.15.0
 
 - The quiz asks real questions. Each one is about the main idea of a section and is answered from memory in a few sentences. It no longer says "write down everything you remember", and it is never multiple choice or yes/no.

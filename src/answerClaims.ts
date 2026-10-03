@@ -182,7 +182,7 @@ function endsSentence(text: string, i: number, depth: number): boolean {
 }
 
 /** Split one run of prose into sentences, leaving abbreviations and asides whole. */
-function splitSentences(text: string): string[] {
+export function splitSentences(text: string): string[] {
   const out: string[] = [];
   let start = 0;
   let depth = 0;

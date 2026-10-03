@@ -28,6 +28,7 @@
  */
 import { normalizePlain } from "./util";
 import { significantTokens, type EvidenceUnit } from "./retrieval";
+import { splitSentences } from "./answerClaims";
 import { feedbackGrounded, quizzable, resolvePool, wordCoverage, type QuizMiss, type QuizScope } from "./quiz";
 import type { CueShape, QuizQuestionDraft, QuizRecallGradeDraft } from "./schemas";
 import type { QuizSectionIn } from "./prompt";
@@ -55,6 +56,24 @@ export interface RecallItem {
  */
 const QUOTED_LINE = /^(?:"[^"]*"|“[^”]*”|'[^']*'|‘[^’]*’)[.!?]?$/;
 
+/**
+ * A passage longer than this that holds several sentences is several points.
+ * A page's opening is often one paragraph of three ideas; as one point it
+ * could only be marked whole, so an answer that gave exactly what the
+ * question asked was partial for leaving out the rest.
+ */
+const LONG_POINT_CHARS = 240;
+
+/** A long passage as its sentences, each a point of its own; anything else as it is. */
+function pointsOf(u: EvidenceUnit): EvidenceUnit[] {
+  if (u.text.length <= LONG_POINT_CHARS) return [u];
+  const sentences = splitSentences(u.text)
+    .map((t) => t.trim())
+    .filter((t) => quizzable({ ...u, text: t }) && !QUOTED_LINE.test(t));
+  if (sentences.length < 2) return [u];
+  return sentences.map((text, i) => ({ ...u, id: `${u.id}#s${i + 1}`, text }));
+}
+
 /** Above this many points a section is split: nobody recalls twenty things in one go. */
 const SPLIT_ABOVE = 9;
 /** The longest run a split produces, the span of one recall (the wiki's chunking page). */
@@ -72,8 +91,9 @@ export function buildItems(pool: EvidenceUnit[]): RecallItem[] {
     if (!quizzable(u) || QUOTED_LINE.test(u.text.trim())) continue;
     const section = u.section ?? "";
     const last = groups[groups.length - 1];
-    if (last && last.notePath === u.notePath && last.section === section) last.points.push(u);
-    else groups.push({ notePath: u.notePath, noteTitle: u.noteTitle, section, points: [u] });
+    const points = pointsOf(u);
+    if (last && last.notePath === u.notePath && last.section === section) last.points.push(...points);
+    else groups.push({ notePath: u.notePath, noteTitle: u.noteTitle, section, points });
   }
   const items: RecallItem[] = [];
   for (const g of groups) {
