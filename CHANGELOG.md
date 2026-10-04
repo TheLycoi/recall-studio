@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.16.0
+
+- Lint wiki finds links by reading. Every page is searched for the names of your other pages: a filename, a heading or an alias, as a whole word. Where a page names another one without linking it, the fix plan offers a row under Missing links that links the first mention where it stands. Your words stay as the link's text, so "muscle contraction" in Muscle Tension becomes a link to Muscle Contraction and reads the same.
+- This pass uses no model and runs on every page, including pages with no other findings.
+- A phrase that is a longer page's name goes to that page: "linear kinematics" is not a mention of Kinematics. A plural counts. An acronym is matched by its exact case. A name in a parenthesis is found on its own, so "GRF" finds Ground Reaction Force (GRF).
+- A page that already links the other gets no row. Headings, quotes, tables, code and frontmatter are never touched, and a source note is never edited.
+
 ## 0.15.1
 
 - In the quiz, a long paragraph counts as one point per sentence. A page's opening is often one paragraph holding several ideas; as a single point, an answer that gave exactly what the question asked was marked partial for leaving out the rest.
