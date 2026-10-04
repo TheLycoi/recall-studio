@@ -1144,6 +1144,7 @@ const FIX_GROUP: Record<FixKind, string> = {
   "hub-link": "Unlinked pages",
   "related-link": "Unlinked pages",
   "add-link": "Missing links",
+  mention: "Missing links",
   "rect-callout": "Rect-only notes",
   attribute: "Unattributed quotes",
 };

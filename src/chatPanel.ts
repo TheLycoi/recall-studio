@@ -433,6 +433,18 @@ export class ChatPanel {
           this.status = "checking the wiki…";
         }
       }
+      // A page named in another page's text is linked where it stands. When
+      // the review proposed the same pair as a Related-list link, the mention
+      // row is the one kept: one link to a page is enough, and the one in the
+      // sentence is where the reader meets it.
+      const mentionPairs = new Set(plan.filter((f) => f.kind === "mention").map((f) => f.id.replace(/^mention:/, "")));
+      if (mentionPairs.size > 0) {
+        plan = plan.filter((f) => !(f.kind === "add-link" && mentionPairs.has(f.id.replace(/^add-link:/, ""))));
+        const n = mentionPairs.size;
+        this.pushSystem(
+          `${n} place${n === 1 ? "" : "s"} where a page names another page without linking it. ${n === 1 ? "It is" : "They are"} in the fix plan under Missing links.`,
+        );
+      }
       const planCtx: FixContext = { ...ctx, report: planReport };
 
       // The aliases-and-tags rows are not in `plan` — they cost a request and

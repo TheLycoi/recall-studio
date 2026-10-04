@@ -1065,3 +1065,50 @@ test("orderFixes puts add-link after related-link and kind after tag", () => {
   const ordered = fp.orderFixes([mk("add-link", "a.md"), mk("kind", "a.md"), mk("related-link", "a.md"), mk("tag", "a.md"), mk("cross-link", "a.md"), mk("rect-callout", "a.md")]);
   assert.deepEqual(ordered.map((f) => f.kind), ["tag", "kind", "cross-link", "related-link", "add-link", "rect-callout"]);
 });
+
+// ---- planMentions: a page named in another page's text ------------------------------
+
+const mentionPage = (path, content, aliases = []) => ({ path, title: path.split("/").pop().replace(/\.md$/, ""), aliases, content });
+
+test("planMentions offers one row per page that names another without linking it", () => {
+  const pages = [
+    mentionPage("wiki/concepts/Muscle Contraction.md", "## Muscle Contraction\n- Concentric contraction\n"),
+    mentionPage("wiki/concepts/Muscle Tension.md", "Gravity opposes muscle contraction. More muscle contraction.\n"),
+    mentionPage("wiki/concepts/Bioenergetics.md", "ATP powers muscle tension and muscle contraction.\n"),
+  ];
+  const rows = fp.planMentions(pages, "wiki/");
+  assert.deepEqual(
+    rows.map((r) => [r.kind, r.path, r.label]).sort(),
+    [
+      ["mention", "wiki/concepts/Bioenergetics.md", "Link “muscle contraction” in Bioenergetics → Muscle Contraction"],
+      ["mention", "wiki/concepts/Bioenergetics.md", "Link “muscle tension” in Bioenergetics → Muscle Tension"],
+      ["mention", "wiki/concepts/Muscle Tension.md", "Link “muscle contraction” in Muscle Tension → Muscle Contraction"],
+    ].sort(),
+  );
+  const row = rows.find((r) => r.path.endsWith("Muscle Tension.md"));
+  assert.equal(row.apply(pages[1].content), "Gravity opposes [[concepts/Muscle Contraction|muscle contraction]]. More muscle contraction.\n");
+  assert.equal(row.apply(row.apply(pages[1].content)), row.apply(pages[1].content), "applying twice changes nothing more");
+  assert.ok(rows.every((r) => r.enabled), "a page's own name in the text is evidence enough to tick the row");
+});
+
+test("planMentions finds a page by its aliases and never links a page to itself or twice", () => {
+  const pages = [
+    mentionPage("wiki/concepts/TBCM.md", "The total body centre of mass, TBCM, moves.\n", ["Total Body Centre of Mass"]),
+    mentionPage("wiki/concepts/Kinetics.md", "Forces act on the total body centre of mass. See [[TBCM]] too.\n"),
+    mentionPage("wiki/concepts/Impulse.md", "Impulse changes the momentum of the total body centre of mass.\n"),
+  ];
+  const rows = fp.planMentions(pages, "wiki/");
+  assert.deepEqual(rows.map((r) => r.path), ["wiki/concepts/Impulse.md"], "Kinetics already links TBCM; TBCM does not link itself");
+  assert.equal(rows[0].apply(pages[2].content), "Impulse changes the momentum of the [[concepts/TBCM|total body centre of mass]].\n");
+});
+
+test("planMentions gives a phrase to the longer page name", () => {
+  const pages = [
+    mentionPage("wiki/concepts/Kinematics.md", "The geometry of motion.\n"),
+    mentionPage("wiki/concepts/Linear Kinematics.md", "Position, velocity, acceleration.\n"),
+    mentionPage("wiki/concepts/Biomechanics.md", "Linear kinematics is one branch.\n"),
+  ];
+  const rows = fp.planMentions(pages, "wiki/");
+  const inBio = rows.filter((r) => r.path.endsWith("Biomechanics.md"));
+  assert.deepEqual(inBio.map((r) => r.label), ["Link “Linear kinematics” in Biomechanics → Linear Kinematics"]);
+});

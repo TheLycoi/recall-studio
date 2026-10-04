@@ -407,3 +407,106 @@ export function unwrapDeadLink(content: string, target: string): string {
     },
   );
 }
+
+// ---- mentions: a page named in another page's text ---------------------------
+
+/** A stretch of a note a mention was found in. */
+export interface Mention {
+  start: number;
+  end: number;
+  /** The reader's own words, as they stand in the note. */
+  text: string;
+}
+
+/** An acronym is matched by its exact case; "LDH" is a name, "ldh" is not. */
+function isAcronym(name: string): boolean {
+  return name.length >= 2 && !/\s/.test(name) && name === name.toUpperCase() && /[A-Z]/.test(name);
+}
+
+/** Whether a name is long enough to mean its page: an acronym, or four characters and up. */
+export function usableName(name: string): boolean {
+  const n = name.trim();
+  return isAcronym(n) || n.length >= 4;
+}
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** A name as a whole-word pattern, spaces flexible within a line, a plural allowed. */
+function nameRe(name: string): RegExp {
+  const body = name.trim().split(/\s+/).map(escapeRe).join("[ \\t]+");
+  return new RegExp(`(?<![\\p{L}\\p{N}_])${body}(?:es|s)?(?![\\p{L}\\p{N}_])`, isAcronym(name.trim()) ? "gu" : "giu");
+}
+
+/**
+ * Where a mention must not be linked: everything `proseRanges` skips, and
+ * also what is not the reader's running text or would be damaged by a link.
+ * A heading names a section. A blockquote or callout line is a quote, and a
+ * quote is checked against its source word for word. A table row would need
+ * its pipe escaped. An existing link, embed or URL already goes somewhere.
+ */
+function mentionSkips(content: string): Array<[number, number]> {
+  const skip = proseRanges(content);
+  let m: RegExpExecArray | null;
+  const line = /^(?: {0,3}#{1,6}\s.*|\s*>.*|\s*\|.*)$/gm;
+  while ((m = line.exec(content)) !== null) skip.push([m.index, m.index + m[0].length]);
+  const link = /!?\[\[[^\]\n]*\]\]|\[[^\]\n]*\]\([^)\n]*\)|https?:\/\/\S+/g;
+  while ((m = link.exec(content)) !== null) skip.push([m.index, m.index + m[0].length]);
+  return skip;
+}
+
+/** Whether the note already links to the page, by its path, its filename, or one of its names. */
+function alreadyLinks(content: string, names: string[], linkPath: string): boolean {
+  const wanted = new Set<string>([linkPath, linkPath.split("/").pop() ?? linkPath, ...names].map((n) => n.trim().toLowerCase()));
+  const re = /!?\[\[([^\]|#\n]+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    const raw = m[1].trim().replace(/\\$/, "").replace(/\.md$/i, "").toLowerCase();
+    if (wanted.has(raw) || wanted.has(raw.split("/").pop() ?? raw)) return true;
+  }
+  return false;
+}
+
+/**
+ * The first place a note names a page without linking it, or null.
+ *
+ * The lint's first job is to create links, and the plainest missing link is a
+ * page named in another page's running text. The evidence is the name itself:
+ * the page's filename, its heading, or an alias, as a whole word. No model is
+ * asked. `avoid` holds longer page names that contain this one ("Linear
+ * Kinematics" for "Kinematics"); a match inside one of those belongs to the
+ * longer page. A note that already links the page gets nothing: one link to
+ * a page is enough.
+ */
+export function findMention(content: string, names: string[], linkPath: string, avoid: string[] = []): Mention | null {
+  const usable = names.map((n) => n.trim()).filter(usableName);
+  if (usable.length === 0 || alreadyLinks(content, names, linkPath)) return null;
+  const skip = mentionSkips(content);
+  for (const phrase of avoid) {
+    if (!usableName(phrase)) continue;
+    const re = nameRe(phrase);
+    let a: RegExpExecArray | null;
+    while ((a = re.exec(content)) !== null) skip.push([a.index, a.index + a[0].length]);
+  }
+  let best: Mention | null = null;
+  for (const name of usable) {
+    const re = nameRe(name);
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(content)) !== null) {
+      const start = m.index;
+      const end = start + m[0].length;
+      if (inSkipped(skip, start) || inSkipped(skip, end - 1)) continue;
+      if (!best || start < best.start || (start === best.start && end > best.end)) best = { start, end, text: m[0] };
+      break;
+    }
+  }
+  return best;
+}
+
+/** Link the first unlinked mention of a page, keeping the reader's words as the link's text. Pure and idempotent. */
+export function linkMention(content: string, names: string[], linkPath: string, avoid: string[] = []): string {
+  const hit = findMention(content, names, linkPath, avoid);
+  if (!hit) return content;
+  return `${content.slice(0, hit.start)}[[${linkPath}|${hit.text}]]${content.slice(hit.end)}`;
+}

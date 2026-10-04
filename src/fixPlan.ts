@@ -26,7 +26,7 @@ import { compareIssues, type VaultIssue, type VaultLintReport } from "./vaultLin
 import type { ReviewKind, ReviewLink } from "./lintReview";
 import { pairKey, type DuplicateFinding } from "./duplicates";
 import type { FixPage, LinkFix, FixConfidence } from "./vaultFix";
-import { applyLinkFix, buildReplacement, safeDisplay, unwrapDeadLink } from "./vaultFix";
+import { applyLinkFix, buildReplacement, findMention, linkMention, safeDisplay, unwrapDeadLink, usableName } from "./vaultFix";
 import { findAllPdfReferences, highlightKey, parsePdfSubpath, renderCallout } from "./pdflink";
 import { linkKey } from "./graph";
 import { findSection, spliceIntoSection, insertBeforeTrailing } from "./topicNote";
@@ -44,6 +44,7 @@ export type FixKind =
   | "aliases"
   | "tag"
   | "add-link"
+  | "mention"
   | "kind";
 
 /** One proposed edit: a row in the plan, and the pure function it applies. */
@@ -988,6 +989,77 @@ export function planKinds(kinds: ReviewKind[], pages: Map<string, FixPageInfo>):
 
 // ------------------------------------------------------------ order & apply
 
+/** A page as the mention pass reads it: the names it answers to and its text. */
+export interface MentionPage {
+  path: string;
+  title: string;
+  displayTitle?: string;
+  aliases: string[];
+  content: string;
+}
+
+/**
+ * The names a page can be mentioned by: its filename, its heading and its
+ * aliases, and for a name with a parenthesis both halves, so "Ground Reaction
+ * Force (GRF)" is found as "ground reaction force" and as "GRF". Once each,
+ * longest first, and only names long enough to mean the page.
+ */
+export function mentionNames(page: { title: string; displayTitle?: string; aliases: string[] }): string[] {
+  const out: string[] = [];
+  const add = (raw: string | undefined) => {
+    const n = (raw ?? "").trim();
+    if (!n || !usableName(n) || out.some((x) => x.toLowerCase() === n.toLowerCase())) return;
+    out.push(n);
+  };
+  for (const raw of [page.title, page.displayTitle, ...page.aliases]) {
+    add(raw);
+    const paren = /^(.*?)\s*\(([^)]+)\)\s*$/.exec((raw ?? "").trim());
+    if (paren) {
+      add(paren[1]);
+      add(paren[2]);
+    }
+  }
+  return out.sort((a, b) => b.length - a.length);
+}
+
+/**
+ * Missing links found by reading: every page that names another page in its
+ * running text without linking it gets one row, which links the first such
+ * mention where it stands and leaves the words as the reader wrote them.
+ *
+ * This is the whole-wiki link pass: it needs no finding on the page and no
+ * model, so a clean page is read like any other. The evidence is the name
+ * itself, which is why the rows start ticked. A phrase that is a longer
+ * page's name belongs to that page ("linear kinematics" is not a mention of
+ * Kinematics), and a page that already links the other gets no row.
+ */
+export function planMentions(pages: MentionPage[], wikiPrefix: string): Fix[] {
+  const named = pages.map((page) => ({ page, names: mentionNames(page) })).filter((x) => x.names.length > 0);
+  const allNames = named.flatMap((x) => x.names);
+  const fixes: Fix[] = [];
+  for (const target of named) {
+    const linkPath = linkPathOf(target.page.path, wikiPrefix);
+    // Longer names of any page that hold one of this page's names inside them.
+    const avoid = allNames.filter((long) =>
+      target.names.some((n) => long.length > n.length && long.toLowerCase().includes(n.toLowerCase()) && !target.names.includes(long)),
+    );
+    for (const source of pages) {
+      if (source.path === target.page.path) continue;
+      const hit = findMention(source.content, target.names, linkPath, avoid);
+      if (!hit) continue;
+      fixes.push({
+        id: `mention:${source.path}:${target.page.path}`,
+        kind: "mention",
+        path: source.path,
+        label: `Link \u201C${hit.text}\u201D in ${shown(source)} \u2192 ${shown(target.page)}`,
+        enabled: true,
+        apply: (content: string) => linkMention(content, target.names, linkPath, avoid),
+      });
+    }
+  }
+  return fixes;
+}
+
 /**
  * Upstream's causal order: names, then the links that depend on names, then the
  * evidence that depends on the links. Aliases first because a dead link may
@@ -1007,6 +1079,7 @@ const KIND_ORDER: FixKind[] = [
   "hub-link",
   "related-link",
   "add-link",
+  "mention",
   "rect-callout",
   "attribute",
 ];

@@ -39,6 +39,7 @@ import {
   type FixPageInfo,
   type RectText,
   type DuplicateVerdicts,
+  planMentions,
 } from "./fixPlan";
 import { buildGraph, isGraphUsable, linkKey, noteLinks, pprFromSeeds, type Graph } from "./graph";
 import { CONCEPT_TAGS, ENTITY_TAGS, fmList, noteAliases, parseTopicNote } from "./topicNote";
@@ -279,7 +280,15 @@ export function fixPagesFor(plugin: WikiLmPlugin, pages: LintPage[]): FixPage[] 
 export async function buildPlan(plugin: WikiLmPlugin, ctx: FixContext): Promise<Fix[]> {
   const infos = pageInfos(plugin, ctx.pages);
   const contents = new Map(ctx.pages.map((p) => [p.path, p.content]));
-  const links = planLinkFixes(ctx.report.issues, fixPagesFor(plugin, ctx.pages), contents, ctx.prefix);
+  const fixPages = fixPagesFor(plugin, ctx.pages);
+  const links = planLinkFixes(ctx.report.issues, fixPages, contents, ctx.prefix);
+  // Pages that name another page in their text without linking it. A source
+  // note is left as it was captured, so it is never the page a link is
+  // written into, though other pages may link to it.
+  const mentions = planMentions(
+    fixPages.map((p) => ({ ...p, content: contents.get(p.path) ?? "" })),
+    ctx.prefix,
+  ).filter((f) => !f.path.split("/").includes("sources"));
 
   const graph = buildGraph(ctx.pages);
   // Only the notes a rect-callout row could be about; see `rectText`.
@@ -293,6 +302,7 @@ export async function buildPlan(plugin: WikiLmPlugin, ctx: FixContext): Promise<
     ...planUnwraps(links.unresolved, contents, ctx.prefix),
     ...planHubLinks(ctx.report.issues, infos, hubs(infos), ctx.prefix),
     ...planRelatedFrom(ctx.report.issues, infos, neighbourOf(infos, graph), ctx.prefix, hubs(infos)),
+    ...mentions,
     ...planRectCallouts(ctx.report.issues, lookup),
     ...planAttributions(ctx.report.issues, ctx.sources),
   ]);

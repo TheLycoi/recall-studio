@@ -361,3 +361,58 @@ test("an indented continuation line under a list item is still prose", () => {
   const body = "- a point\n    [[Missing]] continues it.\n";
   assert.equal(vf.unwrapDeadLink(body, "Missing"), "- a point\n    Missing continues it.\n");
 });
+
+// ---- Mentions: a page named in another page's text, linked where it stands -------
+
+const MC = "concepts/Muscle Contraction";
+
+test("linkMention links the first place a page is named, and keeps the reader's words", () => {
+  const before = "## Gravity\n- Opposes muscle contraction to return a muscle to its resting state\n- muscle contraction again\n";
+  const after = vf.linkMention(before, ["Muscle Contraction"], MC);
+  assert.equal(after, "## Gravity\n- Opposes [[concepts/Muscle Contraction|muscle contraction]] to return a muscle to its resting state\n- muscle contraction again\n");
+});
+
+test("linkMention takes a plural with the name, and matches whole words only", () => {
+  assert.equal(vf.linkMention("Opposing muscle contractions reverse it.", ["Muscle Contraction"], MC), "Opposing [[concepts/Muscle Contraction|muscle contractions]] reverse it.");
+  assert.equal(vf.linkMention("Pharmacokinetics is not it.", ["Kinetics"], "concepts/Kinetics"), "Pharmacokinetics is not it.");
+});
+
+test("linkMention leaves headings, quotes, code, frontmatter, tables and existing links alone", () => {
+  const untouched = [
+    "---\ntitle: muscle contraction\n---\nNothing here.",
+    "## Muscle Contraction\nBody.",
+    "> [!PDF|yellow] [[Deck.pdf#page=2|Deck, p.2]]\n> > muscle contraction is quoted",
+    "`muscle contraction` in code",
+    "```\nmuscle contraction\n```",
+    "| muscle contraction | x |",
+    "See [[Other|muscle contraction]] and [muscle contraction](https://example.com).",
+  ];
+  for (const text of untouched) assert.equal(vf.linkMention(text, ["Muscle Contraction"], MC), text, text);
+});
+
+test("linkMention does nothing when the page already links there", () => {
+  const text = "Opposes muscle contraction.\n\n## Related topics\n- [[concepts/Muscle Contraction|Muscle Contraction]]\n";
+  assert.equal(vf.linkMention(text, ["Muscle Contraction"], MC), text);
+  const bare = "Opposes muscle contraction, see [[Muscle Contraction]].";
+  assert.equal(vf.linkMention(bare, ["Muscle Contraction"], MC), bare);
+});
+
+test("linkMention does not link a name inside a longer page name", () => {
+  const text = "Linear kinematics comes first. Later, kinematics in general.";
+  assert.equal(
+    vf.linkMention(text, ["Kinematics"], "concepts/Kinematics", ["Linear Kinematics", "Angular Kinematics"]),
+    "Linear kinematics comes first. Later, [[concepts/Kinematics|kinematics]] in general.",
+  );
+});
+
+test("linkMention matches an acronym by its exact case and ignores names too short to mean anything", () => {
+  assert.equal(vf.linkMention("LDH regenerates NAD+.", ["LDH"], "concepts/Lactate Production (LDH)"), "[[concepts/Lactate Production (LDH)|LDH]] regenerates NAD+.");
+  assert.equal(vf.linkMention("the ldh word", ["LDH"], "concepts/LDH"), "the ldh word");
+  assert.equal(vf.linkMention("a tea break", ["Tea"], "concepts/Tea"), "a tea break");
+});
+
+test("findMention reports the words it found, for the row's label", () => {
+  const hit = vf.findMention("Opposes Muscle contraction here.", ["Muscle Contraction"], MC);
+  assert.equal(hit.text, "Muscle contraction");
+  assert.equal(vf.findMention("Nothing.", ["Muscle Contraction"], MC), null);
+});
