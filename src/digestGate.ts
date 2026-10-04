@@ -31,6 +31,52 @@ export function decideGate(manifest: Pick<Manifest, "highlights">): GateDecision
   return { action: usable > 0 ? "digest" : "offer", usable, total };
 }
 
+/**
+ * What the reader is told when the gate offers instead of digesting. A PDF
+ * with highlights that hold no text used to get the same line as one with
+ * none, with a count in brackets; a reader who had drawn a box around a
+ * figure saw "no highlights" on a PDF they had highlighted.
+ */
+export function noHighlightsMessage(decision: Pick<GateDecision, "total">): string {
+  const n = decision.total;
+  const why =
+    n === 0
+      ? "This PDF has no highlights yet."
+      : `This PDF has ${n} highlight${n === 1 ? ", and it holds no text" : "s, and none holds text"}, which is what a box drawn around a figure gives. A digest writes from highlighted words, so there is nothing to write from yet.`;
+  return `${why} Highlight some text in PDF++, let the model suggest highlights, or say “digest <topic> into <note>” to have the model find a topic in the PDF.`;
+}
+
+/** What the suggester is told on a topic digest: pick for the topic, and nothing else. */
+export function topicSuggestInstruction(topic: string): string {
+  return `Select only passages about “${topic}”. A page that says nothing about it gets no span, and no spans at all is the right answer when these pages do not cover it.`;
+}
+
+/** What the digest is told on a topic digest: the subject, and where its notes end up. */
+export function topicDigestInstruction(topic: string, noteTitle: string): string {
+  return `Every highlight here was picked for “${topic}”. Write about that topic only. Each note becomes a section of the existing note “${noteTitle}”, so title it for the part of the topic it covers, not for that note.`;
+}
+
+/** How a topic digest ended. "nothing": the PDF was read and no passage was about the topic. */
+export type TopicStatus = "digested" | "skipped" | "failed" | "nothing" | "no-text" | "not-a-page";
+
+/** The chat's one line on how a topic digest ended: what was filed where, or why nothing was. */
+export function topicOutcomeLine(o: { status: TopicStatus; topic: string; pdf: string; note: string; pages: number; spans: number }): string {
+  switch (o.status) {
+    case "digested":
+      return `Filed “${o.topic}” in [[${o.note}]]: ${o.spans} passage${o.spans === 1 ? "" : "s"} from ${o.pdf}.`;
+    case "nothing":
+      return `Nothing about “${o.topic}” in ${o.pdf} (${o.pages} page${o.pages === 1 ? "" : "s"} read). Nothing was written.`;
+    case "no-text":
+      return `${o.pdf} has no text layer. It looks like a scan, and needs OCR before a topic can be found in it.`;
+    case "not-a-page":
+      return `${o.note} is not a page a digest can write into. Name a concept or entity page.`;
+    case "skipped":
+      return `Nothing was written: the digest of “${o.topic}” was closed before it finished.`;
+    case "failed":
+      return `The digest of “${o.topic}” failed. The notice says why.`;
+  }
+}
+
 /** The two facts the folder planner needs about a file, so it can be tested without a vault. */
 export interface FolderFile {
   path: string;

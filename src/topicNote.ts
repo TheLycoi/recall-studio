@@ -526,6 +526,14 @@ export interface PlanTopicNotesOptions {
    * the re-plan as an append to a page the reader was never shown.
    */
   keepAsNew?: string[];
+  /**
+   * The path of the one page everything is filed in, when the reader named it
+   * ("digest history of X into the Y note"). A proposal titled as that page,
+   * or as one of its aliases, merges into it whole; every other proposal
+   * becomes a section of it, even one titled as another page. No other page
+   * is written and none is created.
+   */
+  into?: string;
 }
 
 export interface PreparedNote {
@@ -1147,6 +1155,9 @@ export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: Pl
   // rename that happens to specialize an existing title ("Receptor Subtypes"
   // over "Receptors") cannot turn an accepted creation into an append.
   const keepAsNew = new Set((opts.keepAsNew ?? []).map((t) => safeTitle(t).toLowerCase()));
+  // The page the reader named, when they named one: the only page this plan writes.
+  const forced = opts.into ? opts.pages.find((p) => p.path === opts.into) : undefined;
+  const forcedNames = new Set(forced ? [forced.title, ...forced.aliases].map((n) => safeTitle(n).toLowerCase()) : []);
 
   // Two groups routed into the same page must each see the previous one's
   // work, or the second merge would be computed against the file on disk and
@@ -1177,7 +1188,7 @@ export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: Pl
     };
     const coveredIn = (path: string | null) => (opts.coveredBy ? (text: string) => opts.coveredBy!(path, text) : undefined);
 
-    const home = byName.get(group.title.toLowerCase());
+    const home = forced ? (forcedNames.has(group.title.toLowerCase()) ? forced : undefined) : byName.get(group.title.toLowerCase());
     if (home) {
       const merged = mergeArticle(mdOf(home), manifest.pdfBasename, article, { classCode: opts.classCode, covered: coveredIn(home.path), title: home.title });
       latest.set(home.path, merged.md);
@@ -1201,7 +1212,9 @@ export function planTopicNotes(draft: PlannerDraft, manifest: Manifest, opts: Pl
       continue;
     }
 
-    const route = routeProposed(
+    const route = forced
+      ? { to: forced, heading: group.title, why: "you asked for it to be filed there" }
+      : routeProposed(
       group.title,
       draftNote
         ? {

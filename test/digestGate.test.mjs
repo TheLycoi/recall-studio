@@ -198,3 +198,35 @@ test("fileTargets lists the plan's own pages first, then the rest by title, once
   assert.deepEqual(dg.fileTargets(rows, pages), ["Psychopathology", "Alpha", "Zeta"]);
   assert.deepEqual(dg.fileTargets([], []), []);
 });
+
+// ---- what the reader is told: no highlights, and how a topic digest ended ----------
+
+test("noHighlightsMessage says a highlight without text is why, and tells a bare PDF apart", () => {
+  const one = dg.noHighlightsMessage({ action: "offer", usable: 0, total: 1 });
+  assert.ok(one.includes("1 highlight, and it holds no text"), one);
+  assert.ok(one.includes("box drawn around a figure"), one);
+  assert.ok(dg.noHighlightsMessage({ action: "offer", usable: 0, total: 3 }).includes("3 highlights, and none holds text"));
+  const bare = dg.noHighlightsMessage({ action: "offer", usable: 0, total: 0 });
+  assert.ok(bare.startsWith("This PDF has no highlights yet."), bare);
+  for (const m of [one, bare]) assert.ok(m.includes("digest <topic> into <note>"), "each names the way to digest without highlighting");
+});
+
+test("topic instructions carry the topic, and the digest one names the note it is filed in", () => {
+  assert.ok(dg.topicSuggestInstruction("history of doping").includes("“history of doping”"));
+  const d = dg.topicDigestInstruction("history of doping", "Pharmacology");
+  assert.ok(d.includes("“history of doping”") && d.includes("“Pharmacology”"), d);
+});
+
+test("topicOutcomeLine says what a topic digest did, and why when it wrote nothing", () => {
+  const base = { topic: "history of doping", pdf: "Deck", note: "Pharmacology", pages: 12, spans: 0 };
+  assert.equal(
+    dg.topicOutcomeLine({ ...base, status: "digested", spans: 4 }),
+    "Filed “history of doping” in [[Pharmacology]]: 4 passages from Deck.",
+  );
+  assert.equal(dg.topicOutcomeLine({ ...base, status: "digested", spans: 1 }), "Filed “history of doping” in [[Pharmacology]]: 1 passage from Deck.");
+  assert.equal(dg.topicOutcomeLine({ ...base, status: "nothing" }), "Nothing about “history of doping” in Deck (12 pages read). Nothing was written.");
+  assert.ok(dg.topicOutcomeLine({ ...base, status: "no-text" }).includes("no text layer"));
+  assert.ok(dg.topicOutcomeLine({ ...base, status: "not-a-page" }).includes("Pharmacology is not a page"));
+  assert.ok(dg.topicOutcomeLine({ ...base, status: "skipped", spans: 4 }).startsWith("Nothing was written"));
+  assert.ok(dg.topicOutcomeLine({ ...base, status: "failed" }).includes("failed"));
+});

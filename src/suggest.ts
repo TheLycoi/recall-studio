@@ -16,6 +16,8 @@ import { describeError } from "./llm";
 import { askDigestOptions, askInstruction, previewSuggestions } from "./modals";
 import { buildPageMap, type PageMap } from "./pageMap";
 import { collectPdfHighlights, frontmatterClasses } from "./pdfHighlights";
+import { topicSuggestInstruction } from "./digestGate";
+import type { Manifest, ManifestHighlight } from "./manifest";
 import type { SuggestDraft } from "./schemas";
 import type { SuggestExistingNote } from "./prompt";
 import { SUGGEST_PER_PAGE } from "./settings";
@@ -184,6 +186,83 @@ export async function writeNotes(
     if (!note.exists) result.newCount++;
   }
   return result;
+}
+
+/** What reading a PDF for one topic came back with. */
+export interface TopicSpans {
+  /** "no-text": a scan, nothing to read. "nothing": read, and no passage was about the topic. */
+  status: "found" | "nothing" | "no-text";
+  manifest: Manifest;
+  paperText: string;
+  /** The passages found, verified against the text layer; the reader's own highlights are not among them. */
+  highlights: ManifestHighlight[];
+  /** Pages in the PDF. */
+  pages: number;
+}
+
+/**
+ * The first half of "digest <topic> into <note>": every page of the PDF is
+ * read for the topic, highlighted or not, and each span the model picks is
+ * verified verbatim against its page like any AI highlight.
+ *
+ * The reader's own highlights neither count nor block here. They are about
+ * whatever the reader marked, and a passage on the topic is wanted whether or
+ * not it was already highlighted. No transcript either: it says what the
+ * lecture stressed, and the reader has just said what they want.
+ */
+export async function findTopicSpans(plugin: WikiLmPlugin, pdf: TFile, topic: string, classCode: string): Promise<TopicSpans> {
+  const s = plugin.settings;
+  const { manifest, paperText, pages, warnings } = await collectPdfHighlights(plugin, pdf, { paperText: true, pages: true });
+  if (warnings.length) new Notice(`WikiLM: ${warnings.join("; ")}`, 8000);
+  if (!manifest.classCode && classCode) manifest.classCode = classCode;
+  if (pages.length === 0 || pages.every((p) => p.items.length === 0)) {
+    return { status: "no-text", manifest, paperText, highlights: [], pages: pages.length };
+  }
+  const maps = new Map<number, PageMap>(pages.map((p, i) => [i + 1, buildPageMap(p.items)]));
+
+  const perPage = SUGGEST_PER_PAGE[s.suggestGranularity];
+  const cap = s.suggestMaxPerPdf;
+  const existingKeys = new Set<string>();
+  const accepted: VerifiedSpan[] = [];
+
+  // Taken only when nothing holds it, as in suggestPdfHighlights.
+  const owner = plugin.cancel.active ? undefined : plugin.cancel.begin(`finding “${topic}” in ${manifest.pdfBasename}`);
+  try {
+    for (const batch of batchPages(pages.length, s.suggestPagesPerBatch)) {
+      if (plugin.cancel.cancelled) {
+        new Notice("WikiLM: stopped; keeping what was already found.");
+        break;
+      }
+      const remaining = cap - accepted.length;
+      if (remaining <= 0) break;
+      plugin.cancel.progress(`pages ${batch.from}–${batch.to} of ${pages.length}`, owner);
+
+      const range: number[] = [];
+      for (let n = batch.from; n <= batch.to; n++) range.push(n);
+
+      const draft = await plugin.llm.suggest({
+        pdfTitle: manifest.pdfBasename,
+        classCode: manifest.classCode,
+        pages: range.map((n) => ({ page: n, text: maps.get(n)?.text ?? "" })),
+        transcript: null,
+        existingNotes: [],
+        alreadySelected: [],
+        perPage,
+        remaining,
+        standingInstructions: s.suggestInstructions,
+        instruction: topicSuggestInstruction(topic),
+      });
+
+      const r = verifySpans(draft, maps, { perPage, remaining, existingKeys, batch });
+      accepted.push(...r.spans);
+      for (const sp of r.spans) existingKeys.add(sp.key);
+    }
+  } finally {
+    plugin.cancel.end(owner);
+  }
+
+  const highlights = toManifestHighlights(accepted, maps, s.contextChars);
+  return { status: highlights.length ? "found" : "nothing", manifest, paperText, highlights, pages: pages.length };
 }
 
 /**

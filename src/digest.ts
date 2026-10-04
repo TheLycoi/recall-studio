@@ -10,14 +10,25 @@
 import { Notice, TFile, normalizePath } from "obsidian";
 import type WikiLmPlugin from "./main";
 import { captureManifestHighlights } from "./capture";
-import { decideGate, digestFolderSummary, fileTargets, isDigestTarget, planDigestFolder, type DigestFolderTally, type GateDecision } from "./digestGate";
+import {
+  decideGate,
+  digestFolderSummary,
+  fileTargets,
+  isDigestTarget,
+  noHighlightsMessage,
+  planDigestFolder,
+  topicDigestInstruction,
+  type DigestFolderTally,
+  type GateDecision,
+  type TopicStatus,
+} from "./digestGate";
 import { describeError } from "./llm";
 import { withSuggested, type Manifest, type ManifestHighlight } from "./manifest";
 import { askDigestOptions, askInstruction, previewDigest, type DigestProduct } from "./modals";
 import { collectPdfHighlights } from "./pdfHighlights";
 import { isPdfFile } from "./pdf";
 import type { DigestDraft } from "./schemas";
-import { suggestPdfHighlights } from "./suggest";
+import { findTopicSpans, suggestPdfHighlights } from "./suggest";
 import { applyDigestChoices, mergeTopicHighlights, noteAliases, noteOutline, noteSections, parseTopicNote, planTopicNotes, replayArticles, type ExistingPage, type PreparedNote } from "./topicNote";
 import { coveredBy, indexNote, type EvidenceUnit } from "./retrieval";
 import type { DigestExistingNote } from "./prompt";
@@ -233,6 +244,12 @@ export interface DigestOptions {
    * parsing the document a second time.
    */
   resolved?: Resolved;
+  /**
+   * The one page everything is filed in, when the reader named it. Every
+   * topic of the draft becomes a section of that page (src/topicNote.ts
+   * planTopicNotes `into`); no other page is written.
+   */
+  into?: { path: string; title: string };
 }
 
 /**
@@ -259,6 +276,44 @@ export async function digestSuggestedSpans(
   return digestPdf(plugin, pdf, { resolved, options });
 }
 
+/**
+ * "digest <topic> into <note>" from the chat: the model reads every page of
+ * the PDF for the topic, highlighted or not, and what it finds is digested
+ * into the one note the reader named. Only those passages are digested: the
+ * reader's other highlights in this PDF are about other things, and a digest
+ * of all of them is what "digest" alone does. The preview still decides what
+ * is written.
+ */
+export async function digestTopic(
+  plugin: WikiLmPlugin,
+  pdf: TFile,
+  topic: string,
+  into: { path: string; title: string },
+): Promise<{ status: TopicStatus; pages: number; spans: number }> {
+  try {
+    // The note has to be a page a digest may write into, or the plan would
+    // quietly fall back to routing and found pages the reader never asked for.
+    const page = (await existingPages(plugin, plugin.settings.topicFolder)).find((p) => p.path === into.path);
+    if (!page) return { status: "not-a-page", pages: 0, spans: 0 };
+
+    const found = await findTopicSpans(plugin, pdf, topic, page.classCodes[0] ?? "");
+    if (found.status !== "found") return { status: found.status, pages: found.pages, spans: 0 };
+
+    const manifest = found.manifest;
+    manifest.highlights = withSuggested([], found.highlights);
+    const status = await digestPdf(plugin, pdf, {
+      resolved: { manifest, paperText: found.paperText },
+      options: { product: "notes", instruction: topicDigestInstruction(topic, page.title) },
+      into: { path: page.path, title: page.title },
+    });
+    return { status, pages: found.pages, spans: manifest.highlights.length };
+  } catch (e) {
+    console.error("WikiLM: topic digest failed", e);
+    new Notice(`WikiLM: digest failed. ${describeError(e)}`, 8000);
+    return { status: "failed", pages: 0, spans: 0 };
+  }
+}
+
 /** How one PDF's digest ended, for a folder run's tally. */
 export type DigestOutcome = "digested" | "skipped" | "failed";
 
@@ -276,10 +331,7 @@ export async function digestPdf(plugin: WikiLmPlugin, source: TFile, opts: Diges
     const gate = decideGate(manifest);
     if (gate.action === "offer") {
       if (!opts.gate) {
-        new Notice(
-          `WikiLM: ${manifest.pdfBasename} has no highlights with text (${gate.total} without). Highlight it in PDF++, or run “AI highlight…” first.`,
-          10000,
-        );
+        new Notice(`WikiLM: ${manifest.pdfBasename}. ${noHighlightsMessage(gate)}`, 12000);
         return "skipped";
       }
       const choice = await opts.gate(gate);
@@ -320,7 +372,7 @@ export async function digestPdf(plugin: WikiLmPlugin, source: TFile, opts: Diges
     const created = today();
     const covered = coverageCheck(pages, classCode);
     const plan = async (d: DigestDraft, keepAsNew: string[] = []) =>
-      planTopicNotes(d, manifest, { classCode, topicFolder, created, pages, keepAsNew, coveredBy: covered });
+      planTopicNotes(d, manifest, { classCode, topicFolder, created, pages, keepAsNew, coveredBy: covered, into: opts.into?.path });
 
     const planned = await plan(draft);
     if (planned.notes.length === 0) {

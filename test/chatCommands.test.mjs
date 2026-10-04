@@ -333,3 +333,42 @@ test("help describes one inbox row per answer, lists the send phrases, and the c
   for (const p of ["send it", "add to inbox", "card it"]) assert.ok(help.includes(p), `help lists ${p}`);
   assert.ok(help.includes("**ask BIO101 …**") && help.includes("**… in BIO101**"));
 });
+
+// ---- "digest <topic> into <note>": find a topic in the PDF and file it in a note ----
+
+const TOPIC_CTX = {
+  pages: [
+    { path: "wiki/concepts/Pyschopathlogy.md", title: "Pyschopathlogy", aliases: ["Abnormal psychology"], classCodes: ["PSY220"], hasPdfLinks: true },
+    { path: "wiki/concepts/Pharmacology.md", title: "Pharmacology", aliases: [], classCodes: ["BIO101"], hasPdfLinks: true },
+  ],
+  pdfs: [{ path: "wiki/sources/An Overview of Psychopathology.pdf", basename: "An Overview of Psychopathology" }],
+  manifests: [],
+  commands: [],
+};
+
+test("digest <topic> into <note> is a topic digest, and a typo in the note's name still finds it", () => {
+  assert.deepEqual(cc.matchIntent("digest history of psychopathology into the psychopathlogy note", TOPIC_CTX), {
+    kind: "digest-topic",
+    topic: "history of psychopathology",
+    into: { path: "wiki/concepts/Pyschopathlogy.md", title: "Pyschopathlogy" },
+    pdf: null,
+  });
+  const exact = cc.matchIntent("Digest receptor binding into Pharmacology", TOPIC_CTX);
+  assert.equal(exact.kind, "digest-topic");
+  assert.equal(exact.topic, "receptor binding");
+  assert.equal(exact.into.title, "Pharmacology");
+});
+
+test("a topic digest can name the note by an alias and the PDF with from", () => {
+  const m = cc.matchIntent("digest the history of treatment from the overview pdf into abnormal psychology", TOPIC_CTX);
+  assert.equal(m.kind, "digest-topic");
+  assert.equal(m.topic, "the history of treatment");
+  assert.equal(m.into.title, "Pyschopathlogy");
+  assert.deepEqual(m.pdf, { path: "wiki/sources/An Overview of Psychopathology.pdf", basename: "An Overview of Psychopathology" });
+});
+
+test("digest words that name no note after into are not a topic digest", () => {
+  const m = cc.matchIntent("digest history of psychopathology into something else entirely", TOPIC_CTX);
+  assert.notEqual(m.kind, "digest-topic");
+  assert.equal(cc.matchIntent("digest", TOPIC_CTX).kind, "digest", "the bare verb still digests the open file");
+});

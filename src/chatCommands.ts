@@ -30,6 +30,17 @@ export type Target =
 export type Intent =
   | { kind: "quiz"; target: Target }
   | { kind: "digest"; target: Target }
+  | {
+      /**
+       * "digest history of X into the Y note": find a topic in a PDF and file
+       * what is found in a note the reader named. The PDF is the one named
+       * after "from", or null for the panel to work out from what is open.
+       */
+      kind: "digest-topic";
+      topic: string;
+      into: { path: string; title: string };
+      pdf: { path: string; basename: string } | null;
+    }
   | { kind: "highlight"; target: Target }
   | { kind: "lint" }
   | { kind: "export" }
@@ -124,6 +135,74 @@ function pageFor(words: string, ctx: IntentContext): IntentPage | null {
   const k = fold(words);
   if (!k) return null;
   return ctx.pages.find((p) => fold(p.title) === k || p.aliases.some((a) => fold(a) === k)) ?? null;
+}
+
+/** Edits between two short strings, a swap of neighbours counting as one; stops caring past `max`. */
+function editDistance(a: string, b: string, max: number): number {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [i, ...new Array<number>(b.length).fill(0)]);
+  for (let j = 0; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+  }
+  return d[a.length][b.length];
+}
+
+/**
+ * The page a reader named, allowing for a slip of the fingers: the exact
+ * title or alias first, then the one page whose name is within two edits of
+ * what was typed. Two pages equally close is no answer. A name under six
+ * letters has to be exact, since two edits would turn it into another word.
+ */
+function nearPageFor(words: string, ctx: IntentContext): IntentPage | null {
+  const exact = pageFor(words, ctx) ?? pageFor(stripArticles(words), ctx);
+  if (exact) return exact;
+  const k = fold(stripArticles(words));
+  if (k.length < 6) return null;
+  let best: IntentPage | null = null;
+  let bestDistance = 3;
+  let tied = false;
+  for (const p of ctx.pages) {
+    for (const name of [p.title, ...p.aliases]) {
+      const dist = editDistance(k, fold(name), 2);
+      if (dist < bestDistance) {
+        best = p;
+        bestDistance = dist;
+        tied = false;
+      } else if (dist === bestDistance && best && best.path !== p.path) {
+        tied = true;
+      }
+    }
+  }
+  return best && !tied ? best : null;
+}
+
+/**
+ * "digest <topic> into <note>", with an optional "from <pdf>" before the
+ * note. Null unless the words after the last "into" name a page, so a
+ * sentence that merely contains "into" stays whatever it was.
+ */
+function topicDigest(words: string, ctx: IntentContext): Intent | null {
+  const m = /^(.+)\s+(?:into|in to|onto)\s+(.+)$/.exec(words.trim());
+  if (!m) return null;
+  const page = nearPageFor(m[2], ctx);
+  if (!page) return null;
+  let topic = m[1].trim();
+  let pdf: { path: string; basename: string } | null = null;
+  const from = /^(.+)\s+from\s+(.+)$/.exec(topic);
+  if (from) {
+    const files = filesFor(from[2], ctx, false).filter((t): t is Extract<Target, { kind: "pdf" }> => t.kind === "pdf");
+    if (files.length === 1) {
+      pdf = { path: files[0].path, basename: files[0].basename };
+      topic = from[1].trim();
+    }
+  }
+  if (!topic) return null;
+  return { kind: "digest-topic", topic, into: { path: page.path, title: page.title }, pdf };
 }
 
 function classFor(words: string, ctx: IntentContext): string | null {
@@ -236,7 +315,7 @@ export function matchIntent(text: string, ctx: IntentContext): Intent {
     return intent;
   };
   const digest = /^(?:ai[- ])?digest(?:\s+(.*))?$/.exec(t);
-  if (digest) return fileOrQuestion("digest", digest[1] ?? "");
+  if (digest) return topicDigest(digest[1] ?? "", ctx) ?? fileOrQuestion("digest", digest[1] ?? "");
   const highlight = /^(?:(?:ai[- ])?highlight|suggest highlights?|ai[- ]suggest)(?:\s+(.*))?$/.exec(t);
   if (highlight) return fileOrQuestion("highlight", highlight[1] ?? "");
 
@@ -309,7 +388,7 @@ function chatOnlyLine(): string {
 export function renderHelp(): string {
   return [
     "- **quiz me** — a question on each section of the open note, answered in a few sentences, the misses become cards; **quiz me on Receptors**, **quiz me on BIO101**, **quiz me on everything**",
-    "- **digest** — group the open PDF's highlights into concept and entity pages; **digest Doping** names a PDF or a note with PDF++ links",
+    "- **digest** — group the open PDF's highlights into concept and entity pages; **digest Doping** names a PDF or a note with PDF++ links; **digest history of doping into Pharmacology** finds that topic in the PDF, highlighted or not, and files it in the note you name",
     "- **highlight** — let the model pick spans in the open PDF, each checked against the text layer; **highlight Ch3**",
     "- **lint** — check the wiki for wrong quotes, dead links and duplicate pages",
     "- **export** — send every reviewed card to Anki",

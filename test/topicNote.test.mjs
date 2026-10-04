@@ -2219,3 +2219,30 @@ test("mergeArticle counts a highlight that arrives only as a bullet's citation",
   const again = tn.mergeArticle(r.md, PDF_BASENAME, article);
   assert.equal(again.added, 0, "already on the page the second time");
 });
+
+test("planTopicNotes with into files every proposal in the page the reader named, even one titled as another page", () => {
+  const page = (title, aliases = []) => ({
+    path: `classes/BIO101/${title}.md`,
+    title,
+    kind: "concept",
+    aliases,
+    classCodes: ["BIO101"],
+    md: `---\ntype: concept\nclass: BIO101\n---\n\n# ${title}\n\n## Summary\nS.\n\n## Highlights\n\n## Related topics\n`,
+  });
+  const home = page("Pharmacology", ["Drug science"]);
+  const other = page("Receptors");
+  const third = { ...SELECTION_HIGHLIGHT, id: "H06", key: "page=6&selection=1,0,2,5", page: 6, text: "Paracelsus tied the dose to the poison." };
+  const manifest = { pdfPath: "sources/class notes/BIO101/Deck.pdf", pdfBasename: "Deck", classCode: "BIO101", extracted: "", sources: [], highlights: [SELECTION_HIGHLIGHT, { ...RECT_HIGHLIGHT, text: "Aspirin inhibits COX." }, third] };
+  const note = (title, id) => ({ title, kind: "concept", aliases: [], tag: "term", closest_existing: "", why_new: "", summary: "S.", highlight_ids: [id], related: [] });
+  const draft = { notes: [note("Receptors", "H04"), note("History of Pharmacology", "H06"), note("Drug science", "H05")], unused_ids: [] };
+  const out = tn.planTopicNotes(draft, manifest, { classCode: "BIO101", topicFolder: "classes", created: "2026-10-03", pages: [home, other], into: home.path });
+  assert.deepEqual(out.notes.map((n) => n.path), [home.path], "one row, the named page");
+  const row = out.notes[0];
+  assert.equal(row.exists, true);
+  assert.equal(row.highlights.length, 3, "every highlight went there");
+  const sections = tn.noteSections(row.content);
+  assert.ok(sections.includes("Receptors"), "a proposal titled as another page is a section here, not a merge there");
+  assert.ok(sections.includes("History of Pharmacology"));
+  assert.ok(!sections.includes("Drug science"), "the page's own alias merges into the page as a whole");
+  assert.deepEqual(row.routed.map((r) => r.from), ["Receptors", "History of Pharmacology"]);
+});

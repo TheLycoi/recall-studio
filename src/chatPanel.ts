@@ -76,8 +76,8 @@ import { pdfFileName, renderPdfSubpath, findAllPdfReferences } from "./pdflink";
 import { parseTopicNote, noteAliases } from "./topicNote";
 import { isPdfFile, pdfsLinkedFrom } from "./pdf";
 import { frontmatterClasses } from "./pdfHighlights";
-import { digestPdf } from "./digest";
-import type { GateDecision } from "./digestGate";
+import { digestPdf, digestTopic } from "./digest";
+import { noHighlightsMessage, topicOutcomeLine, type GateDecision } from "./digestGate";
 import { suggestPdfHighlights } from "./suggest";
 import { askTranscript } from "./modals";
 import { isUnderFolder, normalizeTranscript, truncateTranscript } from "./util";
@@ -873,6 +873,9 @@ export class ChatPanel {
       case "highlight":
         await this.highlightTarget(intent.target);
         return;
+      case "digest-topic":
+        await this.digestTopicInto(intent.topic, intent.into, intent.pdf);
+        return;
       case "send-answer":
         await this.sendLastAnswerToInbox();
         return;
@@ -1042,6 +1045,47 @@ export class ChatPanel {
     );
   }
 
+  /**
+   * "digest <topic> into <note>": find the topic in a PDF and file it in the
+   * note. The PDF is the one named after "from", else the one open, else the
+   * one the note already cites; a note citing several is asked about, and a
+   * note citing none says how to name one.
+   */
+  private async digestTopicInto(topic: string, into: { path: string; title: string }, named: { path: string; basename: string } | null): Promise<void> {
+    const pdf = this.topicPdf(into, named);
+    if (Array.isArray(pdf)) {
+      if (pdf.length === 0) {
+        this.pushSystem(`Which PDF holds “${topic}”? Open it and say this again, or add “from” and its name: “digest ${topic} from <pdf> into ${into.title}”.`);
+        return;
+      }
+      this.pushChips(
+        `${into.title} cites ${pdf.length} PDFs. Which one holds “${topic}”?`,
+        pdf.slice(0, 4).map((p) => ({ label: p.basename, run: () => void this.digestTopicInto(topic, into, { path: p.path, basename: p.basename }) })),
+      );
+      return;
+    }
+    const turn: ChatTurn = { role: "system", text: `Reading ${pdf.basename} for “${topic}”…` };
+    this.turns.push(turn);
+    this.trim();
+    this.rerender();
+    const result = await digestTopic(this.plugin, pdf, topic, into);
+    turn.text = topicOutcomeLine({ ...result, topic, pdf: pdf.basename, note: into.title });
+    this.rerender();
+  }
+
+  /** The PDF a topic digest reads, or the candidates when it is not one PDF. */
+  private topicPdf(into: { path: string }, named: { path: string } | null): TFile | TFile[] {
+    if (named) {
+      const f = this.plugin.app.vault.getAbstractFileByPath(named.path);
+      if (f instanceof TFile) return f;
+    }
+    const active = this.plugin.app.workspace.getActiveFile();
+    if (active && active.extension.toLowerCase() === "pdf") return active;
+    const note = this.plugin.app.vault.getAbstractFileByPath(into.path);
+    const cited = note instanceof TFile ? pdfsLinkedFrom(this.plugin.app, note) : [];
+    return cited.length === 1 ? cited[0] : cited;
+  }
+
   /** The file a target names, or null when it names none. */
   private fileFor(target: Target): TFile | null {
     if (target.kind === "active") return this.plugin.app.workspace.getActiveFile();
@@ -1076,7 +1120,7 @@ export class ChatPanel {
   private gateChips(decision: GateDecision): Promise<"highlight" | "cancel"> {
     return new Promise((resolve) => {
       this.pushChips(
-        `No highlights with text in this PDF (${decision.total} without). Highlight it in PDF++ first, or let the model suggest highlights.`,
+        noHighlightsMessage(decision),
         [
           { label: "AI highlight first", run: () => resolve("highlight") },
           { label: "Cancel", run: () => resolve("cancel") },
