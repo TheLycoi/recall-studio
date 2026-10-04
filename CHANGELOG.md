@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.17.0
+
+- The chat digests a topic into a note you name. Say "digest history of psychopathology into the psychopathology note". The model reads every page of the PDF for that topic, highlighted or not, checks each passage against the page, and files what it finds as a section of that note. The preview still decides what is written. Before, the chat read this line as a question and answered from your notes.
+- The PDF is the one you have open, or the one the note already cites. To name another, add "from": "digest history of treatment from the overview pdf into Psychopathology".
+- A slip in the note's name still finds it. One or two wrong letters are allowed when only one page is that close.
+- A topic digest writes to that note only. It makes no new pages and leaves your other highlights in the PDF out.
+- When nothing in the PDF is about the topic, the chat says so and writes nothing.
+- A PDF whose only highlights hold no text now says why it cannot be digested. A box drawn around a figure is a highlight with no words in it. The old message said "no highlights" on a PDF you had highlighted.
+
 ## 0.16.0
 
 - Lint wiki finds links by reading. Every page is searched for the names of your other pages: a filename, a heading or an alias, as a whole word. Where a page names another one without linking it, the fix plan offers a row under Missing links that links the first mention where it stands. Your words stay as the link's text, so "muscle contraction" in Muscle Tension becomes a link to Muscle Contraction and reads the same.
