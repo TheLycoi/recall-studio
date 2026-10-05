@@ -271,8 +271,8 @@ function runCodex(bin: string, args: string[], stdin: string, signal?: AbortSign
     };
     live.add(entry);
 
-    // One call's own cancel (upstream's engine passes one) kills this child
-    // the way plugin unload kills them all.
+    // One call's own cancel kills this child the way plugin unload kills
+    // them all.
     const onAbort = () => {
       entry.aborted = true;
       entry.kill();

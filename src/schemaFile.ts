@@ -48,7 +48,7 @@ export class SchemaFile {
    * blocks, and re-reading and re-parsing a note nobody has touched for each
    * of them is work with a known answer.
    */
-  private cache: { mtime: number; blocks: { cards: string; wiki: string } } | null = null;
+  private cache: { mtime: number; blocks: { cards: string } } | null = null;
   /** The last read of the suggestions file, so the header can ask for a count synchronously. */
   private lastProposals: Proposal[] = [];
   /** Set once the folder has proved uncreatable, so the console gets one line rather than one per call. */
@@ -94,17 +94,17 @@ export class SchemaFile {
   }
 
   /**
-   * The two house-rule blocks for the prompts, or null when there is no schema
-   * to read. `cachedRead` rather than `read`, because this runs on the path to
-   * every model call and the cache is exactly what it is for.
+   * The card house-rule block for the prompts, or null when there is no
+   * schema to read. `cachedRead` rather than `read`, because this runs on the
+   * path to every model call and the cache is exactly what it is for.
    */
-  async blocks(): Promise<{ cards: string; wiki: string } | null> {
+  async blocks(): Promise<{ cards: string } | null> {
     try {
       const file = await this.ensure();
       const mtime = file.stat.mtime;
       if (this.cache && this.cache.mtime === mtime) return this.cache.blocks;
       const md = await this.plugin.app.vault.cachedRead(file); // obsidian.d.ts:7434
-      const blocks = schemaBlocks(parseSchema(md));
+      const blocks = { cards: schemaBlocks(parseSchema(md)).cards };
       this.cache = { mtime, blocks };
       return blocks;
     } catch (e) {

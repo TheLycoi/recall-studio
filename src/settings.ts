@@ -1,9 +1,8 @@
-import { CLAUDE_CLI_MODELS, CODEX_FALLBACK_MODELS, DEFAULT_ROLES, modelOptions, providerModel, type ModelRole, type RoleChoice } from "./modelRoles";
+import { CODEX_FALLBACK_MODELS, modelOptions } from "./modelRoles";
 import { App, Notice, PluginSettingTab, Setting, ButtonComponent } from "obsidian";
 import type WikiLmPlugin from "./main";
 
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
-export type Provider = "anthropic" | "gemini" | "codex" | "claudecli";
 export type MarkMode = "none" | "highlight" | "highlight+block";
 export type LintMode = "badge" | "hide" | "drop";
 export type SuggestGranularity = "minimal" | "standard" | "detailed";
@@ -11,28 +10,12 @@ export const SUGGEST_PER_PAGE: Record<SuggestGranularity, number> = { minimal: 1
 
 export interface WikiLmSettings {
   // LLM
-  /** "anthropic": Messages API with an API key. "codex": OpenAI's Codex CLI signed in with a ChatGPT subscription. */
-  provider: Provider;
-  apiKey: string;
-  /** Claude model ID (Anthropic provider). */
-  model: string;
   /** Absolute path to the codex binary; empty = auto-detect (PATH, then the ChatGPT app bundle). */
   codexPath: string;
   /** Codex model slug, e.g. gpt-5.5. */
   codexModel: string;
-  /** Absolute path to the claude binary; empty = auto-detect (PATH, then ~/.local/bin). */
-  claudeCliPath: string;
-  /** Claude Code model alias or ID, e.g. sonnet. */
-  claudeCliModel: string;
-  /** Google AI Studio API key (Gemini provider). */
-  geminiApiKey: string;
-  /** Gemini model ID, e.g. gemini-3.1-pro-preview. */
-  geminiModel: string;
-  /** What the last Test found each provider offering; the model dropdowns are built from it. */
-  knownModels: Partial<Record<Provider, string[]>>;
-  /** When on, lint, query and digest may each run on their own provider and model. */
-  rolesEnabled: boolean;
-  roles: Record<ModelRole, RoleChoice>;
+  /** What the last Test found Codex offering; the model dropdown is built from it. */
+  knownModels: string[];
   effort: Effort;
   maxCardsPerHighlight: number;
   contextChars: number;
@@ -140,36 +123,12 @@ export interface WikiLmSettings {
   schemaLearning: boolean;
 }
 
-const PROVIDER_LABELS: Record<Provider, string> = {
-  anthropic: "Anthropic (API key)",
-  gemini: "Google Gemini (API key)",
-  codex: "Codex (ChatGPT subscription)",
-  claudecli: "Claude Code (Claude subscription)",
-};
-/** The names a provider's dropdown shows before any Test has listed its models. */
-const FALLBACK_MODELS: Record<Provider, string[]> = { anthropic: [], gemini: [], codex: CODEX_FALLBACK_MODELS, claudecli: CLAUDE_CLI_MODELS };
 const CUSTOM_MODEL = "__custom__";
-const ROLE_ORDER: ModelRole[] = ["lint", "query", "digest"];
-const ROLE_LABELS: Record<ModelRole, string> = { lint: "Lint", query: "Query", digest: "Digest" };
-const ROLE_WORK: Record<ModelRole, string> = {
-  lint: "the model review in Lint wiki and the fix plan's aliases, tags and duplicate checks",
-  query: "Ask answers and the search terms behind them",
-  digest: "digesting highlights and AI-highlighting into the wiki",
-};
 
 export const DEFAULT_SETTINGS: WikiLmSettings = {
-  provider: "anthropic",
-  apiKey: "",
-  model: "claude-opus-5",
   codexPath: "",
   codexModel: "gpt-5.5",
-  claudeCliPath: "",
-  claudeCliModel: "sonnet",
-  geminiApiKey: "",
-  geminiModel: "gemini-3.1-pro-preview",
-  knownModels: {},
-  rolesEnabled: false,
-  roles: { lint: { ...DEFAULT_ROLES.lint }, query: { ...DEFAULT_ROLES.query }, digest: { ...DEFAULT_ROLES.digest } },
+  knownModels: [],
   effort: "high",
   maxCardsPerHighlight: 5,
   contextChars: 700,
@@ -248,19 +207,19 @@ export class WikiLmSettingTab extends PluginSettingTab {
   }
 
   /**
-   * Test: one tiny request on the provider and model, then the provider's
-   * model list into the dropdowns. The probe is the answer; a list that
-   * cannot be fetched is said and does not fail the test.
+   * Test: one tiny request on Codex, then Codex's model list into the
+   * dropdown. The probe is the answer; a list that cannot be fetched is said
+   * and does not fail the test.
    */
-  private async testProvider(b: ButtonComponent, provider: Provider, model: string): Promise<void> {
+  private async testProvider(b: ButtonComponent): Promise<void> {
     const s = this.plugin.settings;
     b.setDisabled(true);
     try {
-      const r = await this.plugin.llm.probeWith(provider, model);
+      const r = await this.plugin.llm.probe(s.codexModel);
       let listed = "";
       try {
-        const list = await this.plugin.llm.listModels(provider);
-        s.knownModels = { ...s.knownModels, [provider]: list };
+        const list = await this.plugin.llm.listModels();
+        s.knownModels = list;
         await this.plugin.saveSettings();
         listed = ` ${list.length} model${list.length === 1 ? "" : "s"} listed.`;
         this.display();
@@ -284,29 +243,33 @@ export class WikiLmSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("Card writer").setHeading();
 
     new Setting(containerEl)
-      .setName("Provider")
+      .setName("Model")
       .setDesc(
-        "Anthropic and Gemini use an API key. Codex uses OpenAI's Codex CLI signed in with your ChatGPT subscription, so no key is needed. Claude Code runs the `claude` CLI signed in to your Claude subscription; no key. Test sends one tiny request and loads the provider's model list into the dropdown below.",
+        "Recall runs on OpenAI's Codex CLI, signed in with your ChatGPT account. No API key is needed. Sign in through the ChatGPT app or with `codex login`. Test sends one small request and loads the model list.",
       )
-      .addDropdown((d) =>
-        d
-          .addOptions(PROVIDER_LABELS)
-          .setValue(s.provider)
-          .onChange((v) => {
-            s.provider = v as Provider;
-            save();
-            this.display();
-          }),
+      .addButton((b) => b.setButtonText("Test").onClick(() => void this.testProvider(b)));
+
+    new Setting(containerEl)
+      .setName("Codex CLI path")
+      .setDesc(
+        "Leave empty to auto-detect: `codex` on the PATH, then the copy bundled in the ChatGPT app (/Applications/ChatGPT.app/Contents/Resources/codex). Otherwise paste the output of `which codex`. Sign in through the ChatGPT app or `codex login`.",
       )
-      .addButton((b) =>
-        b.setButtonText("Test").onClick(() => void this.testProvider(b, s.provider, providerModel(s, s.provider))),
+      .addText((t) =>
+        t.setPlaceholder("auto-detect").setValue(s.codexPath).onChange((v) => {
+          s.codexPath = v.trim();
+          save();
+        }),
       );
 
     // A model dropdown: what the last Test found, the value in use, and the
-    // provider's known names, plus "Other…" for an id the list lacks.
-    const modelRow = (name: string, desc: string, provider: Provider, get: () => string, set: (v: string) => void) => {
-      const options = modelOptions(s.knownModels?.[provider], get(), FALLBACK_MODELS[provider]);
-      const known = s.knownModels?.[provider]?.length ?? 0;
+    // known names, plus "Other…" for an id the list lacks.
+    {
+      const name = "Codex model";
+      const desc = "Model slug passed to codex exec. gpt-5.5 is the lightest on your usage limit; gpt-5.6-luna and gpt-5.6-terra are newer and heavier.";
+      const get = () => s.codexModel;
+      const set = (v: string) => (s.codexModel = v || DEFAULT_SETTINGS.codexModel);
+      const options = modelOptions(s.knownModels, get(), CODEX_FALLBACK_MODELS);
+      const known = s.knownModels?.length ?? 0;
       const custom = new Setting(containerEl)
         .setName(`${name}: type an id`)
         .setDesc("For a model the list does not show.")
@@ -334,100 +297,11 @@ export class WikiLmSettingTab extends PluginSettingTab {
         });
       containerEl.insertBefore(row.settingEl, custom.settingEl);
       custom.settingEl.hide();
-    };
-
-    if (s.provider === "codex") {
-      new Setting(containerEl)
-        .setName("Codex CLI path")
-        .setDesc(
-          "Leave empty to auto-detect: `codex` on the PATH, then the copy bundled in the ChatGPT app (/Applications/ChatGPT.app/Contents/Resources/codex). Otherwise paste the output of `which codex`. Sign in through the ChatGPT app or `codex login`.",
-        )
-        .addText((t) =>
-          t.setPlaceholder("auto-detect").setValue(s.codexPath).onChange((v) => {
-            s.codexPath = v.trim();
-            save();
-          }),
-        );
-
-      modelRow(
-        "Codex model",
-        "Model slug passed to codex exec. gpt-5.5 is the lightest on your usage limit; gpt-5.6-luna and gpt-5.6-terra are newer and heavier.",
-        "codex",
-        () => s.codexModel,
-        (v) => (s.codexModel = v || DEFAULT_SETTINGS.codexModel),
-      );
-    } else if (s.provider === "gemini") {
-      new Setting(containerEl)
-        .setName("Gemini API key")
-        .setDesc(
-          "Leave empty to read GEMINI_API_KEY from the environment or the macOS keychain (service \u201CGEMINI_API_KEY\u201D or \u201CWikiLM Gemini API key\u201D). A key typed here is stored in data.json, which syncs with your vault in plaintext. Get one from Google AI Studio.",
-        )
-        .addText((t) => {
-          t.inputEl.type = "password";
-          t.setPlaceholder("AIza\u2026 or leave empty for keychain")
-            .setValue(s.geminiApiKey)
-            .onChange((v) => {
-              s.geminiApiKey = v.trim();
-              save();
-            });
-        });
-      modelRow(
-        "Gemini model",
-        "gemini-3.1-pro-preview for quality; gemini-3-flash-preview is faster and cheaper.",
-        "gemini",
-        () => s.geminiModel,
-        (v) => (s.geminiModel = v || DEFAULT_SETTINGS.geminiModel),
-      );
-    } else if (s.provider === "claudecli") {
-      new Setting(containerEl)
-        .setName("Claude Code CLI path")
-        .setDesc(
-          "Leave empty to auto-detect `claude` on the PATH or in ~/.local/bin. Otherwise paste the output of `which claude`. Sign in by running `claude` in a terminal; check with `claude auth status`.",
-        )
-        .addText((t) =>
-          t.setPlaceholder("auto-detect").setValue(s.claudeCliPath).onChange((v) => {
-            s.claudeCliPath = v.trim();
-            save();
-          }),
-        );
-
-      modelRow(
-        "Claude Code model",
-        "An alias such as sonnet, opus, or fable, or a full model id. sonnet is the default because the Claude Code session limit is shared with your interactive Claude Code sessions; opus for quality.",
-        "claudecli",
-        () => s.claudeCliModel,
-        (v) => (s.claudeCliModel = v || DEFAULT_SETTINGS.claudeCliModel),
-      );
-    } else {
-      new Setting(containerEl)
-        .setName("Anthropic API key")
-        .setDesc(
-          "Leave empty to read ANTHROPIC_API_KEY from the environment or the macOS keychain (service “ANTHROPIC_API_KEY” or “WikiLM Anthropic API key”). A key typed here is stored in data.json, which syncs with your vault in plaintext.",
-        )
-        .addText((t) => {
-          t.inputEl.type = "password";
-          t.setPlaceholder("sk-ant-… or leave empty for keychain")
-            .setValue(s.apiKey)
-            .onChange((v) => {
-              s.apiKey = v.trim();
-              save();
-            });
-        });
-
-      modelRow("Model", "Claude model ID used for highlighting and card writing.", "anthropic", () => s.model, (v) => (s.model = v || DEFAULT_SETTINGS.model));
     }
 
     new Setting(containerEl)
       .setName("Effort")
-      .setDesc(
-        s.provider === "codex"
-          ? "Reasoning effort passed to Codex. Levels the chosen model does not support (gpt-5.5 stops at xhigh) are rounded down automatically."
-          : s.provider === "gemini"
-            ? "Sent to Gemini as its thinking level. Gemini's scale stops at high, so xhigh and max are rounded down to it."
-            : s.provider === "claudecli"
-              ? "Passed to the CLI as --effort; all five levels are accepted."
-              : "How much reasoning the model spends per highlight. Highlights are small, so high is cheap.",
-      )
+      .setDesc("Reasoning effort passed to Codex. Levels the chosen model does not support (gpt-5.5 stops at xhigh) are rounded down automatically.")
       .addDropdown((d) =>
         d
           .addOptions({ low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" })
@@ -437,48 +311,6 @@ export class WikiLmSettingTab extends PluginSettingTab {
             save();
           }),
       );
-
-    new Setting(containerEl)
-      .setName("Use different models for lint, query and digest")
-      .setDesc(
-        "Off, the provider above does everything. On, each of the three below may run on its own provider and model; card writing, critique, quizzes and highlighting stay on the provider above.",
-      )
-      .addToggle((t) =>
-        t.setValue(s.rolesEnabled).onChange((v) => {
-          s.rolesEnabled = v;
-          save();
-          this.display();
-        }),
-      );
-    if (s.rolesEnabled) {
-      for (const role of ROLE_ORDER) {
-        const choice = s.roles[role];
-        const row = new Setting(containerEl).setName(`${ROLE_LABELS[role]} model`).setDesc(`Runs ${ROLE_WORK[role]}.`);
-        row.addDropdown((d) =>
-          d
-            .addOptions({ default: "Same as above", ...PROVIDER_LABELS })
-            .setValue(choice.provider)
-            .onChange((v) => {
-              choice.provider = v as RoleChoice["provider"];
-              choice.model = "";
-              save();
-              this.display();
-            }),
-        );
-        if (choice.provider !== "default") {
-          const prov = choice.provider;
-          const inUse = choice.model || providerModel(s, prov);
-          row.addDropdown((d) => {
-            for (const m of modelOptions(s.knownModels?.[prov], inUse, FALLBACK_MODELS[prov])) d.addOption(m, m);
-            d.setValue(inUse).onChange((v) => {
-              choice.model = v;
-              save();
-            });
-          });
-          row.addButton((b) => b.setButtonText("Test").onClick(() => void this.testProvider(b, prov, choice.model || providerModel(s, prov))));
-        }
-      }
-    }
 
     new Setting(containerEl)
       .setName("Max cards per highlight")

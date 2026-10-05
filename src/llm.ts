@@ -1,57 +1,11 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { AnthropicBackend } from "./anthropic";
-import type { CompletionRequest, LlmBackend, ProviderName } from "./backend";
-import { ClaudeCliBackend, ClaudeCliError } from "./claudeCli";
 import { CodexBackend, CodexError } from "./codex";
-import { GeminiBackend, GeminiError } from "./gemini";
-import { resolveRole, type ModelRole } from "./modelRoles";
 import { buildExamplesBlock } from "./examples";
 import type { BloomLevel, Card, Highlight } from "./model";
-import type {
-  AliasesMessageArgs,
-  AskMessageArgs,
-  DuplicatesMessageArgs,
-  KeywordsMessageArgs,
-  RelevanceArgs,
-  DigestMessageArgs,
-  QuizQuestionMessageArgs,
-  QuizRecallGradeMessageArgs,
-  SuggestMessageArgs,
-  TitleScanArgs,
-  ReviewArgs,
-} from "./prompt";
-import {
-  buildAliasesMessage,
-  buildAskMessage,
-  buildDuplicatesMessage,
-  buildKeywordsMessage,
-  KEYWORDS_SYSTEM,
-  buildRelevanceMessage,
-  RELEVANCE_SYSTEM,
-  buildDigestMessage,
-  buildHighlighterMessage,
-  buildQuizQuestionMessage,
-  buildQuizRecallGradeMessage,
-  buildSuggestMessage,
-  buildTitleScanMessage,
-  buildReviewMessage,
-} from "./prompt";
-import {
-  AliasesTagsOut as AliasesTagsOutSchema,
-  AskOut as AskOutSchema,
-  DuplicatesOut,
-  KeywordsOut as KeywordsOutSchema,
-  RelevanceOut as RelevanceOutSchema,
-  DigestOut as DigestOutSchema,
-  QuizQuestionOut as QuizQuestionOutSchema,
-  QuizRecallGradeOut as QuizRecallGradeOutSchema,
-  SuggestOut as SuggestOutSchema,
-  TitleScanOut as TitleScanOutSchema,
-  ReviewOut as ReviewOutSchema,
-  reviewDraftOf,
-} from "./schemas";
-import type { AliasesTagsDraft, AskDraft, DigestDraft, DuplicatesDraft, QuizQuestionDraft, QuizRecallGradeDraft, RelevanceVerdict, ReviewDraft, SuggestDraft, TitleScanDraft } from "./schemas";
+import type { QuizQuestionMessageArgs, QuizRecallGradeMessageArgs } from "./prompt";
+import { buildQuizQuestionMessage, buildQuizRecallGradeMessage } from "./prompt";
+import { QuizQuestionOut as QuizQuestionOutSchema, QuizRecallGradeOut as QuizRecallGradeOutSchema } from "./schemas";
+import type { QuizQuestionDraft, QuizRecallGradeDraft } from "./schemas";
 import type { WikiLmSettings } from "./settings";
 
 const CardOut = z.object({
@@ -59,20 +13,12 @@ const CardOut = z.object({
   front: z
     .string()
     .describe("qa only: the question, naming its subject so it is answerable without the source. Empty string for cloze."),
-  back: z.string().describe("qa only: the answer as a term, number, name, or short phrase. Empty string for cloze."),
+  back: z.string().describe("qa only: the answer as a term, number, name, or short phrase. Empty string for qa."),
   text: z
     .string()
     .describe("cloze only: one sentence from the highlight with {{c1::...}} deletions. Empty string for qa."),
 });
 const CardsOut = z.object({ cards: z.array(CardOut) });
-const HighlightsOut = z.object({
-  highlights: z.array(
-    z.object({
-      quote: z.string().describe("Verbatim span copied exactly from the note, character for character."),
-      title: z.string().describe("Label of at most six words for this span."),
-    }),
-  ),
-});
 
 export type CardDraft = z.infer<typeof CardOut>;
 
@@ -343,48 +289,10 @@ Return exactly one verdict for every card you were given, and no verdict for a c
 Before you answer, check that every fact in every revision appears in the highlight, that you returned one verdict per card, and that each index matches the number printed beside its card.`;
 
 /**
- * Highlighter system prompt: picks spans of a whole note worth turning into
- * cards. Follows Wozniak's prioritize / build-on-basics rules and the
- * grounding rule that every span must be locatable verbatim in the note.
- * When a lecture transcript accompanies the note it is evidence of emphasis,
- * never a source of quotes.
- */
-const HIGHLIGHTER_SYSTEM = `You select spans of a note that are worth remembering, so that each span can be handed to a card writer and turned into flashcards. The reader will review the resulting cards for years, so a span is worth selecting only if forgetting its content would matter.
-
-Return each span as a verbatim quote copied exactly from the note, character for character, including punctuation. The span is located in the note by exact string match, so an ellipsis, a paraphrase, or a trimmed word makes it unusable. Start and end on sentence boundaries where possible.
-
-Each span is one to four sentences and self-contained: it carries a definition, a mechanism, a number, a name, a date, a causal claim, a distinction between similar things, or a memorable formulation, and it can be understood without the surrounding paragraph. Prefer the fundamentals a reader needs before the details, and prefer material with lasting use over trivia. Prefer fewer, denser spans over many thin ones.
-
-Spans must not overlap. Skip frontmatter, navigation, link lists, boilerplate, transitions, and the author's asides.
-
-A transcript, when one is present, is the recording of the lecture that accompanies the note. It tells you what the lecturer treated as important; it is not a source of quotes, so every span is still copied from the note itself. Prefer the passages the lecturer dwells on, repeats, calls important, or says will be tested, and pass over slide content that was skipped or read out without comment. Where the transcript and the note differ in wording, the note's wording is what gets quoted.
-
-The limit you are given is a ceiling, not a target. Over-highlighting fills the reader's inbox with cards they will delete, so returning fewer spans than the limit is the expected outcome, and returning none is right when nothing in the note is supported by the transcript.
-
-Give each span a label of at most six words that names the fact it carries.`;
-
-/**
- * Append the reader's house rules to a user message a pure builder produced.
- *
- * The wiki messages are assembled in `src/prompt.ts`, which knows nothing
- * about the vault and so cannot be handed the schema note; adding the block
- * here keeps that module pure and puts the rules where the card prompts put
- * them, after the standing instructions and last in the message.
- */
-function withRules(message: string, rules: string): string {
-  return rules ? `${message}\n\n${rules}` : message;
-}
-
-/**
- * Prompts and schemas live here; the provider chosen in settings does the
- * actual call. The backend is picked per request so switching providers in
- * the settings tab takes effect immediately.
+ * Prompts and schemas live here. The Codex CLI does the call.
  */
 export class LlmClient {
-  private anthropic: AnthropicBackend;
-  private gemini: GeminiBackend;
   private codex: CodexBackend;
-  private claudeCli: ClaudeCliBackend;
 
   /**
    * `getHighlights` mirrors the `getSettings` callback rather than importing
@@ -396,12 +304,9 @@ export class LlmClient {
   constructor(
     private getSettings: () => WikiLmSettings,
     private getHighlights: () => Highlight[] = () => [],
-    private getSchema: () => Promise<{ cards: string; wiki: string } | null> = async () => null,
+    private getSchema: () => Promise<{ cards: string } | null> = async () => null,
   ) {
-    this.anthropic = new AnthropicBackend(getSettings);
-    this.gemini = new GeminiBackend(getSettings);
     this.codex = new CodexBackend(getSettings);
-    this.claudeCli = new ClaudeCliBackend(getSettings);
   }
 
   /**
@@ -416,63 +321,32 @@ export class LlmClient {
 
   /**
    * The reader's house rules from their schema note (src/schemaFile.ts), for
-   * the half of the prompts this call belongs to. "" when there is no schema,
-   * when the sections that would feed this call are empty, or when the note
-   * could not be read — a call without house rules is the prompt as it was
-   * before the schema existed, which is a working prompt.
+   * the card prompts. "" when there is no schema, when the cards section is
+   * empty, or when the note could not be read — a call without house rules is
+   * the prompt as it was before the schema existed, which is a working prompt.
    */
-  private async rulesBlock(kind: "cards" | "wiki"): Promise<string> {
+  private async rulesBlock(): Promise<string> {
     try {
       const blocks = await this.getSchema();
-      return blocks?.[kind]?.trim() ? blocks[kind] : "";
+      return blocks?.cards?.trim() ? blocks.cards : "";
     } catch {
       return "";
     }
   }
 
-  /** The backend for a provider. Public for upstream's engine (src/upstream/host.ts), which shares these backends rather than building its own. */
-  backendFor(provider: ProviderName): LlmBackend {
-    if (provider === "gemini") return this.gemini;
-    if (provider === "codex") return this.codex;
-    if (provider === "claudecli") return this.claudeCli;
-    return this.anthropic;
+  /** One tiny request, so the settings tab can say whether Codex works. */
+  probe(model?: string): Promise<{ model: string; via: string }> {
+    return this.codex.probe(model);
   }
 
-  /** The main provider: what every call runs on unless it names a role. */
-  private backend(): LlmBackend {
-    return this.backendFor(this.getSettings().provider);
+  /** The models Codex offers, for the settings dropdown. */
+  listModels(): Promise<string[]> {
+    return this.codex.listModels();
   }
 
-  /**
-   * One request on the provider and model a role resolves to
-   * (src/modelRoles.ts): the role's own when the reader set one, the main
-   * choice otherwise. Lint, query and digest name their role; everything
-   * else runs on the main provider through `backend()`.
-   */
-  private run<T>(role: ModelRole, req: CompletionRequest<T>): Promise<T> {
-    const { provider, model } = resolveRole(this.getSettings(), role);
-    return this.backendFor(provider).complete({ ...req, model });
-  }
-
-  /** One tiny request, so the settings tab can say whether the main provider works. */
-  probe(): Promise<{ model: string; via: string }> {
-    const { provider, model } = resolveRole(this.getSettings(), undefined);
-    return this.probeWith(provider, model);
-  }
-
-  /** The same, on any provider and model: the Test button beside a role's row. */
-  probeWith(provider: ProviderName, model: string): Promise<{ model: string; via: string }> {
-    return this.backendFor(provider).probe(model || undefined);
-  }
-
-  /** The models a provider offers, for the settings dropdown. */
-  listModels(provider: ProviderName): Promise<string[]> {
-    return this.backendFor(provider).listModels();
-  }
-
-  /** Cancel in-flight work on every backend (plugin unload). */
+  /** Cancel in-flight work (plugin unload). */
   async abort(): Promise<void> {
-    await Promise.all([this.anthropic.abort(), this.gemini.abort(), this.codex.abort(), this.claudeCli.abort()]);
+    await this.codex.abort();
   }
 
   /** "write cards": one highlight (plus context) in, a handful of cards out. */
@@ -492,7 +366,7 @@ export class LlmClient {
     // The reader's own rules sit after the examples and before this
     // highlight's instruction: they are standing rules, so they read with the
     // other standing material, and the one-off instruction still reads last.
-    const writerRules = await this.rulesBlock("cards");
+    const writerRules = await this.rulesBlock();
     if (writerRules) parts.push(writerRules);
     if (h.instruction.trim()) parts.push(`Instructions for this highlight: ${h.instruction.trim()}`);
     if (existing.length) {
@@ -501,7 +375,7 @@ export class LlmClient {
           existing.map((c) => `- ${c.kind === "qa" ? `${c.front} -> ${c.back}` : c.text}`).join("\n"),
       );
     }
-    const parsed = await this.backend().complete({
+    const parsed = await this.codex.complete({
       system: WRITER_SYSTEM,
       user: parts.join("\n\n"),
       schema: CardsOut,
@@ -543,7 +417,7 @@ export class LlmClient {
     if (criticExamples) parts.push(criticExamples);
     // Same place as in writeCards: the critic holds cards to the rules the
     // writer was given, or it grades them against a standard nobody set.
-    const criticRules = await this.rulesBlock("cards");
+    const criticRules = await this.rulesBlock();
     if (criticRules) parts.push(criticRules);
     if (h.instruction.trim()) parts.push(`Instructions for this highlight: ${h.instruction.trim()}`);
     if (existing.length) {
@@ -553,7 +427,7 @@ export class LlmClient {
       );
     }
     parts.push(`Return exactly one verdict for each of the ${cards.length} cards above.`);
-    const parsed = await this.backend().complete({
+    const parsed = await this.codex.complete({
       system: CRITIC_SYSTEM,
       user: parts.join("\n\n"),
       schema: VerdictsOut,
@@ -594,192 +468,10 @@ export class LlmClient {
     // A rewrite is held to the writer's rules (see the framing above), and the
     // house rules are part of them — often the very rules the rewrite exists
     // to apply, since `## Learned` is promoted from edits like this one.
-    const rewriteRules = await this.rulesBlock("cards");
+    const rewriteRules = await this.rulesBlock();
     if (rewriteRules) parts.push(rewriteRules);
     if (h.instruction.trim()) parts.push(`Instructions for this highlight: ${h.instruction.trim()}`);
-    return this.backend().complete({ system: WRITER_SYSTEM, user: parts.join("\n\n"), schema: CardOut, label: "card", maxTokens: 4000 });
-  }
-
-  /** "highlight": pick spans of a whole note worth turning into sections. */
-  async highlight(
-    noteTitle: string,
-    body: string,
-    instruction: string,
-    transcript: string | null = null,
-  ): Promise<Array<{ quote: string; title: string }>> {
-    const s = this.getSettings();
-    const content = buildHighlighterMessage({
-      noteTitle,
-      body,
-      transcript,
-      maxSpans: s.maxAiHighlights,
-      standingInstructions: s.highlighterInstructions,
-      instruction,
-    });
-    const parsed = await this.backend().complete({
-      system: HIGHLIGHTER_SYSTEM,
-      user: content,
-      schema: HighlightsOut,
-      label: "highlights",
-      maxTokens: 16000,
-    });
-    return parsed.highlights;
-  }
-
-  /** "digest": one lecture PDF's text and its highlights in, a handful of topic notes out. */
-  async digest(args: DigestMessageArgs): Promise<DigestDraft> {
-    return this.run("digest", {
-      system: DIGEST_SYSTEM,
-      // `buildDigestMessage` is pure and ends with the standing instructions
-      // and this PDF's instruction; the house rules are appended after it, in
-      // the same last-read position the card prompts give them.
-      user: withRules(buildDigestMessage(args), await this.rulesBlock("wiki")),
-      schema: DigestOutSchema,
-      label: "topic notes",
-      maxTokens: 16000,
-    });
-  }
-
-  /** "suggest": a batch of pages in, highlight candidates assigned to wiki notes out. */
-  async suggest(args: SuggestMessageArgs): Promise<SuggestDraft> {
-    return this.run("digest", {
-      system: SUGGEST_SYSTEM,
-      user: withRules(buildSuggestMessage(args), await this.rulesBlock("wiki")),
-      schema: SuggestOutSchema,
-      label: "highlight suggestions",
-      maxTokens: 16000,
-    });
-  }
-
-  /**
-   * "ask": one question against numbered evidence from the reader's own notes.
-   * The draft is structured, not prose: the caller assembles the answer from
-   * it, drops citations past the end of the evidence, and matches each answer
-   * sentence against the cited passages, so nothing is validated here.
-   */
-  async ask(args: AskMessageArgs): Promise<AskDraft> {
-    return this.run("query", {
-      system: ASK_SYSTEM,
-      user: buildAskMessage(args),
-      schema: AskOutSchema,
-      label: "answer",
-      maxTokens: 1500,
-      // Reading evidence and saying what it means is not work that extended
-      // thinking improves; it is work the reader waits for.
-      effort: "low",
-    });
-  }
-
-
-  /**
-   * "keywords": the terms to search the notes with when the reader's own words
-   * found nothing useful. No evidence is sent and no answer comes back — only
-   * search terms — so this stays cheap and cannot invent a claim.
-   */
-  async keywords(args: KeywordsMessageArgs): Promise<{ keywords: string[] }> {
-    return this.run("query", {
-      system: KEYWORDS_SYSTEM,
-      user: buildKeywordsMessage(args),
-      schema: KeywordsOutSchema,
-      label: "search terms",
-      maxTokens: 400,
-      effort: "low",
-    });
-  }
-
-  /**
-   * "relevance": which of the retrieved passages bear on the question. The
-   * pool goes out as the same numbered lines the drafter will see and only
-   * numbers come back, so the call can narrow the evidence but can never
-   * reword a passage or answer anything. Omission is the verdict.
-   */
-  async relevance(args: RelevanceArgs): Promise<RelevanceVerdict> {
-    return this.run("query", {
-      system: RELEVANCE_SYSTEM,
-      user: buildRelevanceMessage(args),
-      schema: RelevanceOutSchema,
-      label: "relevance",
-      maxTokens: 200,
-      effort: "low",
-    });
-  }
-
-  /**
-   * "aliases and tags": the names a page is missing and the subtype it was
-   * never given. Nothing here is written to the vault — every proposal
-   * becomes a row in the fix plan, and only the rows the reader leaves ticked
-   * are applied — so the call is cheap by design: a short excerpt per page,
-   * twenty pages a request, and no extended thinking, because naming a thing
-   * that is already defined in front of you is recognition, not reasoning.
-   */
-  async aliasesAndTags(args: AliasesMessageArgs): Promise<AliasesTagsDraft> {
-    return this.run("lint", {
-      system: ALIASES_SYSTEM,
-      user: buildAliasesMessage(args),
-      schema: AliasesTagsOutSchema,
-      label: "aliases and tags",
-      maxTokens: 4000,
-      effort: "low",
-    });
-  }
-
-  /**
-   * "duplicates": are two pages about one subject? The lint finds the pairs
-   * (a shared name, a shared PDF span, or names spelled alike) and the model
-   * reads both openings and says same or different. Nothing is merged on a
-   * "same": the fix plan offers a link each way, and a "different" withdraws
-   * the offer. Low effort, as with aliases: recognition, not reasoning.
-   */
-  async verifyDuplicates(args: DuplicatesMessageArgs): Promise<DuplicatesDraft> {
-    return this.run("lint", {
-      system: DUPLICATES_SYSTEM,
-      user: buildDuplicatesMessage(args),
-      schema: DuplicatesOut,
-      label: "duplicates",
-      maxTokens: 4000,
-      effort: "low",
-    });
-  }
-
-  /**
-   * "title scan": which pages are one subject under two names. The model is
-   * shown every page's title, kind and aliases and nothing of their text, so
-   * it can see the whole wiki in one request and catch the abbreviations and
-   * translations a spelling comparison misses. It only nominates: each pair
-   * joins the duplicate candidates and is read by `verifyDuplicates` before
-   * the reader is offered a link. Low effort: recognising two names for one
-   * thing is recognition, not reasoning.
-   */
-  async scanTitles(args: TitleScanArgs): Promise<TitleScanDraft> {
-    return this.run("lint", {
-      system: TITLE_SCAN_SYSTEM,
-      user: buildTitleScanMessage(args),
-      schema: TitleScanOutSchema,
-      label: "title scan",
-      maxTokens: 4000,
-      effort: "low",
-    });
-  }
-
-  /**
-   * "page review": a few pages read in full, each asked which flagged
-   * sentences its own quotes support, which directory pages it should link
-   * to, and whether it is filed under the right kind. Every answer is
-   * verified in src/lintReview.ts and every proposal is a row the reader
-   * ticks, so nothing here writes. No effort override: deciding whether a
-   * quote states a sentence, and whether prose really discusses a subject,
-   * is reasoning, and the configured effort is what it gets. The wire's
-   * `none` kind becomes null here, so callers only ever see `ReviewDraft`.
-   */
-  async reviewPages(args: ReviewArgs): Promise<ReviewDraft> {
-    const wire = await this.run("lint", {
-      system: REVIEW_SYSTEM,
-      user: buildReviewMessage(args),
-      schema: ReviewOutSchema,
-      label: "page review",
-      maxTokens: 6000,
-    });
-    return reviewDraftOf(wire);
+    return this.codex.complete({ system: WRITER_SYSTEM, user: parts.join("\n\n"), schema: CardOut, label: "card", maxTokens: 4000 });
   }
 
   /**
@@ -788,7 +480,7 @@ export class LlmClient {
    * section's points and asks again with the failure named.
    */
   async quizQuestion(args: QuizQuestionMessageArgs): Promise<QuizQuestionDraft> {
-    return this.backend().complete({
+    return this.codex.complete({
       system: QUIZ_QUESTION_SYSTEM,
       user: buildQuizQuestionMessage(args),
       schema: QuizQuestionOutSchema,
@@ -803,7 +495,7 @@ export class LlmClient {
    * against the answer and each cue against its point.
    */
   async quizRecallGrade(args: QuizRecallGradeMessageArgs): Promise<QuizRecallGradeDraft> {
-    return this.backend().complete({
+    return this.codex.complete({
       system: QUIZ_RECALL_GRADE_SYSTEM,
       user: buildQuizRecallGradeMessage(args),
       schema: QuizRecallGradeOutSchema,
@@ -814,384 +506,10 @@ export class LlmClient {
 }
 
 export function describeError(e: unknown): string {
-  if (e instanceof ClaudeCliError) return e.message;
   if (e instanceof CodexError) return e.message;
-  if (e instanceof GeminiError) return e.message;
-  if (e instanceof Anthropic.AuthenticationError) return "Invalid Anthropic API key.";
-  if (e instanceof Anthropic.RateLimitError) return "Rate limited by the Anthropic API; will retry later.";
-  if (e instanceof Anthropic.BadRequestError) return `Bad request: ${e.message}`;
-  if (e instanceof Anthropic.APIConnectionError) return `Could not reach the Anthropic API: ${e.message}`;
-  if (e instanceof Anthropic.APIError) return `API error ${e.status}: ${e.message}`;
   if (e instanceof Error) return e.message;
   return String(e);
 }
-
-/**
- * Digest system prompt: one lecture PDF's text plus the highlights the reader
- * made in it, out come a handful of topic notes. Same register as
- * WRITER_SYSTEM above: the reader's own material is the only source, and the
- * model writes prose and assignments, never links or callouts (the plugin
- * renders every callout from the manifest).
- */
-const DIGEST_SYSTEM = `You turn one lecture PDF and the highlights a student made in it into a handful of topic notes. You are given the paper's text, so that you can see what each highlight is about, and the highlights themselves, each with an id and a page. You return, for each topic, a title, its kind, one or two aliases, a tag, a short summary, and one passage per highlight that belongs to it. You never write links, callouts, or ids into your prose: the plugin renders each highlight back into the note from its own record, and prose that mentions H04 will be read by a person, not resolved by a machine.
-
-<what_a_topic_is>
-A topic is something the reader would look up by name later: a mechanism, a classification, a definition together with what follows from it, a distinction between two things that are easy to confuse. It is not a slide, not a section of the deck, and not the lecture itself. One lecture usually holds two to six of them. Fewer, larger topics beat many thin ones, because a note with one highlight in it is a note the reader will never open twice.
-
-Every highlight belongs to the topic it serves best, and a highlight may serve more than one: a definition of affinity can sit under both the receptor topic and the dose-response topic, and putting it in both is right when a reader arriving at either would want it. What does not belong in any topic goes in unused_ids: slide titles, course logistics, dates, a name on a title page, a rectangle whose text came out empty. Leaving such a highlight in a topic costs the reader more than dropping it, because it dilutes the note it lands in.
-
-You are shown every page the wiki already has, across every class, each with its kind, its aliases, its section headings, its class, and a line of its summary; a page of this class also shows, after each heading, the first sentence it already says there. Read those before you write: a highlight a page already states adds nothing, so file it where it belongs and write the section's prose about what is new, and the plugin leaves out what the page already says. The order of preference is fixed. First, an existing page whose title or alias is the topic: reuse the title exactly, character for character, because the plugin then appends the highlights to that page — even a page from another class, since a concept the reader met in physiology is the same concept when biomechanics meets it, and the page simply gains the second class. Second, an existing page the topic is part of — a parent topic, one whose headings it would sit under: give the new title, name that page in closest_existing, and say why in why_new; the plugin files the highlights under a heading inside it. Only when no existing page is related at all does a topic become a page of its own, with closest_existing empty and why_new saying what makes it new. A new page is the exception you reach at that wall, not the default for every subject with a name.
-
-Kind follows the subject. A named person, organisation, agency, product, drug or event that is itself what the reader would look up is an entity; a mechanism, method, theory, classification, phenomenon, or any term that explains how something works is a concept. When unsure, prefer concept. The tag is the note's subtype, one word from a closed list: a concept is a method, theory, term, phenomenon, standard or field, and an entity is a product, person, organization, project, event or place; "other" is the escape hatch, not a default. Aliases are the other names a reader would search under — an abbreviation, the expanded form, a variant spelling — one or two, taken from the paper, never coined.
-</what_a_topic_is>
-
-<the_article>
-Each page is a wiki page, organised by its links to other pages and read as a mind map: the reader's mind-map plugin draws every heading as a branch and every bullet beneath it as a twig, so the shape of the markdown is the shape they study from. A highlight may arrive as one line or as a block holding the quote and the reader's own notes beneath it: the words they wrote in class under the link to that slide. The notes tell you what the reader took the slide to mean; the quote and the paper tell you what it said.
-
-The summary is the page's opening: two to five sentences that define or describe the topic. Then one to four sections, each a subtopic with a heading in Title Case. A section's prose is one lead line, a sentence that says what the branch is, and then a bullet list: one claim per bullet, the term it is about in bold at the front, "- **Epimysium** — covers the whole muscle and separates it from other tissues [H03]", nested with a tab under the bullet it belongs to, two levels at most, never a paragraph. The bullets hold digested knowledge in your own words — what a reader revising later wants to understand, not the quotes said again — drawn from the highlights filed there, the reader's notes under them, and the paper, and from nothing outside the paper. Where the reader's notes explain a slide, follow them; where they only name it, the paper fills in.
-
-Cite as you write. After each sentence or bullet that rests on a highlight, put that highlight's id in square brackets: "Linear impulse is the area under the force-time curve [H01]." Two supports are [H01, H03]. The plugin turns each id into the link that opens the PDF at that highlight, with the file's title and page as its text, so a sentence with no id is a sentence the reader cannot check; write only sentences you can cite. Never write a bracketed link or a page number into the prose yourself.
-
-When you mention a page you were shown — by its title or one of its aliases — wrap the name in double braces: "impulse translates the {{TBCM}}". The plugin resolves the name to the page and links it; a name no page answers to is left as plain words. Never write [[ ]] yourself. The links are how the wiki is organised, so a bullet that names a page is written to be one: "- {{Sarcomere}} — the smallest functional unit of a myofibril [H07]" becomes a twig the reader can follow to that page.
-
-Say each thing once. A highlight reaches the page in one of two ways, never both. Most are carried by the bullet that cites them: the bullet says what the highlight says in your own words, the id after it opens the slide, and nothing more is printed. A few are quoted: list a highlight in a section's quote_ids only when its own wording is what the reader needs, which means a definition the source states outright, a formula, a list of criteria, or a passage long enough that a paraphrase would lose it. The plugin prints those verbatim beneath the section's bullets as PDF++ callouts. What you quote you do not also paraphrase in a bullet, and what a bullet already says you do not quote; the plugin drops the quote of a short highlight that a bullet cites. A figure, a rectangle with no text, always goes in quote_ids, since it can only be shown. Most sections have an empty quote_ids. Every highlight is cited in a bullet, quoted, or listed in unused_ids: slide titles, headings, course logistics, an empty rectangle.
-</the_article>
-
-<the_summary>
-Three to five sentences about this topic, drawn from the whole paper but weighted toward what the reader chose to highlight. The highlights tell you what they cared about; the rest of the paper tells you what those highlights mean, and lets you write the sentence that connects two of them. Write in the reader's language, the one the paper is written in, and keep close to its wording so the summary reads as their own note rather than as a stranger's gloss.
-
-Nothing from outside the paper. If you know more about the subject than the paper says, that knowledge does not belong here: the reader will study from this note and cannot tell your additions from theirs. No citations, no links, no highlight ids, no page numbers in the prose. The highlights appear underneath the summary in the finished note, so the summary does not need to quote them; it needs to say what they add up to.
-</the_summary>
-
-<titles_and_related>
-A title is a short noun phrase in Title Case, the way an index entry reads: "Receptor Binding", "First-Pass Metabolism", "Stages of Change". Not a sentence, not a question, and unique within your response. Two titles that differ only in case or in a plural are the same title, and one of the two notes will be lost.
-
-related lists the titles of other notes you are writing in this response, or of the existing notes you were shown, and nothing else. An invented title points at a note that does not exist. Leave it empty when nothing connects.
-</titles_and_related>
-
-<examples>
-<example>
-<input>Highlights H01 "Pharmacology, Pharmacodynamics and Pharmacokinetics — Lecture 1" (p.1), H02 "Pharmacology is the study of the action of drugs in the human body" (p.2), H03 "Pharmacodynamics = what drugs do in the body; pharmacokinetics = what the body does to drugs" (p.2), H04 "Receptors bind ligands with relatively high affinity" (p.4), H05 "Receptors transduce a signal to produce a biological effect; this distinguishes them from inert binding sites such as albumin" (p.4). Existing notes: Pharmacology.</input>
-<output>Two notes. "Pharmacology" (reusing the existing title, so kind, tag and aliases are ignored there) takes H02 and H03, with a summary that defines the field and sets its two branches against each other. "Receptors", kind concept, tag term, aliases "Drug Receptors", closest_existing empty, why_new "no listed page is about receptors themselves", takes H04 and H05, with a summary that names the two properties and says why the second one is what separates a receptor from a carrier protein. related on each names the other. H01 is a slide title and goes to unused_ids.</output>
-<note>Five highlights, two topics, one dropped. The existing title is reused verbatim so the two highlights land in the note the reader already has.</note>
-</example>
-<example>
-<input>Twelve highlights, of which nine are on absorption, distribution, metabolism and excretion, two are on the definition of half-life, and one is a rectangle with no text.</input>
-<output>Two notes, not four. "Drug Disposition", kind concept, tag phenomenon, aliases "ADME", takes the nine, because absorption, distribution, metabolism and excretion are the four stages of one process and a reader looking any of them up wants the others in view; "Half-Life", kind concept, tag term, aliases "t½", takes the two, and also takes one of the excretion highlights, since half-life is defined there. Neither names a closest_existing, and each why_new says no listed page covers the process. The empty rectangle goes to unused_ids.</output>
-<note>Splitting one process into four notes of two highlights each would make four notes nobody opens. One highlight sits in two notes because it belongs in both.</note>
-</example>
-</examples>
-
-Before returning, check your answer against the input: every id you used appears there, every id in the input appears either in exactly the notes it belongs to or in unused_ids, no note has an empty sections list, every section has a heading, a lead line and bullets, no bullet nests deeper than two levels, every sentence or bullet that states a fact carries an id, every id in the input is cited in a bullet, listed in one section's quote_ids, or in unused_ids, no short highlight is both cited and quoted, no prose holds a bracketed link, no two titles collide, every related title is one you wrote or were shown, no summary contains a link, an id, or a fact the paper does not state, every new title gives a kind, a tag from its kind's list, one or two aliases, and either a closest_existing you were shown or a why_new that says why none fits.`;
-
-/**
- * Suggest system prompt: a batch of pages from a lecture PDF in, the spans
- * worth highlighting out, each one assigned to the wiki note it belongs to.
- *
- * It is the highlighter and the digest joined at the seam. The paragraphs on
- * how a span is quoted, how long it is, what a transcript is for, and what the
- * limit means are copied word for word from HIGHLIGHTER_SYSTEM, because the
- * judgement is the same one and two drifting copies of a rule is worse than
- * one repeated; the sentences on reusing an existing title and on what a
- * summary may contain are copied the same way from DIGEST_SYSTEM. Only "note"
- * becomes "page" where the source sentence would otherwise point at the wrong
- * thing, since here the material being quoted is a page, not a note.
- */
-const SUGGEST_SYSTEM = `You read the pages of a lecture PDF and choose the spans a student would highlight and later study, and you say which wiki note in their vault each span belongs to. The reader will revise from those notes for the rest of the course, so a span is worth selecting only if forgetting its content would matter, and a note is worth naming only if a reader would look it up by that name.
-
-Return each span as a verbatim quote copied exactly from the page, character for character, including punctuation. The span is located in the page by exact string match, so an ellipsis, a paraphrase, or a trimmed word makes it unusable. Start and end on sentence boundaries where possible.
-
-Each span is one to four sentences and self-contained: it carries a definition, a mechanism, a number, a name, a date, a causal claim, a distinction between similar things, or a memorable formulation, and it can be understood without the surrounding paragraph. Prefer the fundamentals a reader needs before the details, and prefer material with lasting use over trivia. Prefer fewer, denser spans over many thin ones.
-
-The pages are marked \`[page N]\` and each span reports the page it was copied from. A span never crosses a page marker: a sentence that runs over onto the next page is quoted from one side of the break or left alone, because a quote spanning two pages matches neither of them.
-
-A transcript, when one is present, is the recording of the lecture that accompanies the page. It tells you what the lecturer treated as important; it is not a source of quotes, so every span is still copied from the page itself. Prefer the passages the lecturer dwells on, repeats, calls important, or says will be tested, and pass over slide content that was skipped or read out without comment. Where the transcript and the page differ in wording, the page's wording is what gets quoted.
-
-The limit you are given is a ceiling, not a target. Over-highlighting fills the reader's inbox with cards they will delete, so returning fewer spans than the limit is the expected outcome, and returning none is right when nothing in the page is supported by the transcript.
-
-Give each span a label of at most six words that names the fact it carries. The plugin writes the label as the text of the link that opens the PDF at the span, so it reads as the reader's own inline link: "Impact factor", "Primary vs secondary literature", "Peer review as a credibility test".
-
-For each span, also write the passage the page will hold under that link: one to three sentences of digested knowledge in your own words, drawn from the span and the page around it, and from nothing outside the paper. A passage says what the span means to a reader revising later, not what it says again. Set verbatim true only when the span's exact wording is itself what the page should keep — a formula, a definition, a list of criteria the reader must reproduce — and leave text empty then: the plugin quotes the span in a callout instead of your words. Everything else is a passage.
-
-<which_note_a_span_belongs_to>
-Every span names its note, and the order of preference is fixed. First, an existing note whose title is the span's subject: reuse the title exactly, character for character, because the plugin then appends those highlights to that note instead of creating a second one beside it. Second, an existing note the span's subject is part of — a parent topic, a broader note, one whose headings it would sit under: name that note, and put the subtopic in note_section. Only when no existing note is related at all — when the subject belongs to none of them, and a reader looking for it would never open any of them — does a span go to a new note.
-
-The test is not whether an existing title matches; it is whether a reader looking for this fact would open that note. A pharmacology note holds a span about NSAIDs, a doping note holds a span about the agency that polices it, a biomechanics note holds a span about one kind of joint moment. A new note is the exception you reach at that wall, not the default for every subject with a name of its own.
-
-A title that is not on the list is a new note, and it appears in new_notes — with its kind, one or two aliases, a tag, a summary, the closest existing note, and one sentence on the decision — before any span may point at it. If you can name a closest existing note, you have not reached the wall: the spans belong in it, and the plugin files them there under a heading whatever you do. Leave closest_existing empty only when nothing listed is related. A note_title that is neither an existing title nor one of your new_notes points at nothing, and the spans under it are lost.
-
-Kind follows the subject, in this order. A named person, organisation, project, place or event is an entity. A named product, drug or instrument is an entity only when it is itself what the reader would look up; used as a tool or an example in a discussion of something else, it is a concept of its role. A mechanism, method, theory, classification, phenomenon, or any term that explains how something works is a concept. When unsure, prefer concept. Titles are short noun phrases in Title Case, the way an index entry reads, and unique within your response; two titles that differ only in case or in a plural are the same title, and one of the two notes will be lost.
-
-The tag is the note's subtype, one word from a closed list, and the page is filed by it: a concept is a method, theory, term, phenomenon, standard or field, and an entity is a product, person, organization, project, event or place. "other" is the escape hatch for a subject none of them fits, not a default. Aliases are the other names a reader would search under — an abbreviation, the expanded form, a variant spelling — one or two, taken from the paper or from common usage, never coined. A page found only under its exact title is a page half the searches for it will miss.
-</which_note_a_span_belongs_to>
-
-<where_in_a_note_a_span_goes>
-Each existing note is listed with the section headings it already has, indented under its title. Those headings are the reader's own subtopics, and a span that belongs to one of them names it in note_section, copied exactly as shown, so the plugin appends the highlight under that heading rather than at the bottom of the page.
-
-A subtopic of an existing note belongs inside that note, not beside it. When a span is about a subtopic the note has no section for yet, still name the note and give note_section a short new heading in Title Case; the plugin creates the section inside that note. "COX inhibitors" is a section of a pharmacology note, not a second note: a reader who wants it opens the pharmacology note and looks for the heading. Reserve new_notes for a subject the reader would look up under its own name — one they would expect to find as its own page, not as a heading in a page they already have.
-
-Leave note_section empty when the span is about the note as a whole and no heading fits, and always for a note in new_notes, which has no sections yet.
-</where_in_a_note_a_span_goes>
-
-<the_summary>
-Three to five sentences about this topic, drawn from the whole paper but weighted toward the spans you chose. The spans you chose tell you what the reader cares about; the rest of the paper tells you what those spans mean, and lets you write the sentence that connects two of them. Write in the reader's language, the one the paper is written in, and keep close to its wording so the summary reads as their own note rather than as a stranger's gloss.
-
-Nothing from outside the paper. If you know more about the subject than the paper says, that knowledge does not belong here: the reader will study from this note and cannot tell your additions from theirs. No citations, no links, no highlight ids, no page numbers in the prose. The spans appear underneath the summary in the finished note, so the summary does not need to quote them; it needs to say what they add up to.
-</the_summary>
-
-<what_is_already_held>
-The already-selected list is what earlier batches and the reader already hold, printed short so you can recognise it. Those passages are not picked again: offering one back gives the reader the same card twice and costs them the time to delete it. The notes those passages went to are the ones to prefer for a neighbouring span, because material from the same run of pages usually belongs in the same note, and a second note beside the first splits the topic in half.
-
-Slide titles, course logistics, figure captions, and a line the lecturer read out without comment are never spans. They carry no fact to forget, and a note that collects them is a note the reader stops opening.
-</what_is_already_held>
-
-<examples>
-<example>
-<input>[page 7] holds "Doping is defined as the occurrence of one or more of the anti-doping rule violations set out in the Code" under the slide title "Anti-Doping: Definitions", [page 8] holds "The World Anti-Doping Agency was founded in 1999 to coordinate the fight against doping in sport across countries and sports.", and [page 12] holds "Self-efficacy is a person's belief in their capacity to carry out the behaviour a situation demands." Existing notes: Doping (concept) with the sections Definitions, Sanctions; Drug Testing (concept). Already selected: nothing.</input>
-<output>Three spans. The definition on page 7 goes to the existing title "Doping", note_section "Definitions", copied exactly. The sentence on page 8 also goes to "Doping", with note_section "World Anti-Doping Agency" — a heading the note does not have yet — because the agency is part of the doping topic and a reader looking for it opens the doping note. The sentence on page 12 goes to a new note "Self-Efficacy", kind concept, tag term, aliases "Self-efficacy belief", listed in new_notes with a summary, closest_existing empty, and why_new "the listed notes are about doping and testing; a belief construct from behavioural psychology belongs to none of them". The slide title "Anti-Doping: Definitions" is not a span.</output>
-<note>One existing title reused twice — once for its own subject, once for a subtopic under a new heading — and one note founded only because nothing listed could hold it. That last case is the wall, and it is the only case that makes a new note.</note>
-</example>
-<example>
-<input>[page 17] holds "Drugs often work on more than one receptor, and as a result produce more than one kind of biological response." and [page 19] holds "Non-selective NSAIDs such as aspirin and ibuprofen inhibit both COX-1 and COX-2." Existing notes: Pharmacology (concept) with the sections Dosing, Drug Safety & The Therapeutic Index, Receptors; Pharmacodynamics (concept) with no sections. Already selected: nothing.</input>
-<output>Two spans, both to the existing title "Pharmacology". The page 17 span carries note_section "Receptors", copied exactly, because receptor subtypes are what that section is about. The page 19 span carries note_section "COX Inhibitors and NSAIDs", a heading the note does not have yet, because NSAIDs are a subtopic of pharmacology the reader would look for inside that note. new_notes is empty.</output>
-<note>Neither span became a new note. The first landed under a heading the reader had already written; the second created a heading inside the note it belongs to, which is where the reader will look for it.</note>
-</example>
-</examples>
-
-Before returning, check your answer against the input: every note_title is either an existing title you were shown or a title in new_notes, every note_section is a heading you were shown for that note, a short new heading, or empty, every new note names a closest_existing that is empty or a title you were shown, gives a why_new, one or two aliases, and a tag from its kind's list, every quote is copied character for character from the page it names, every span has a label, text is empty only when verbatim is true, no span reports a page outside this batch, and no page carries more spans than the limit allows.`;
-
-/**
- * Ask system prompt: answer a question from numbered evidence taken from the
- * reader's own notes.
- *
- * Same register as WRITER_SYSTEM above: prose with the reason attached to each
- * rule, examples that show the shape rather than restate it. What it encodes
- * comes from the vault's own wiki pages on reducing hallucinations —
- * external knowledge restriction, permission to say "I don't know", direct
- * quotes for factual grounding, verification by citation, and a closing
- * self-check in place of a full chain-of-thought pass.
- *
- * The output is structured rather than prose: the software (src/askCheck.ts)
- * checks each quote against the evidence, appends the citations, and removes a
- * claim that cited nothing. The prompt says so, because a rule the model knows
- * will be checked is one it follows.
- */
-/**
- * The aliases-and-tags system prompt.
- *
- * The two questions are asked together because they are answered from the
- * same sentence: a page's first paragraph usually carries both the names the
- * subject goes by and the clue to what kind of thing it is. Aliases are
- * recalled, never invented — an alias nobody would type is a search that
- * still misses, and one the reader has to disown is worse than none — which
- * is why the excerpt is in front of the model and the instruction is to take
- * the names from it.
- */
-const DUPLICATES_SYSTEM = `You judge whether two pages in a reader's wiki are about one subject. You are shown, for each pair, both pages' titles, kinds, other names, and the opening of their own text, and the fact the reader's tools found them sharing: a name both answer to, a passage of one document both cite, or spellings that look alike.
-
-Two pages are the same subject only when one thing has ended up with two pages: an abbreviation and its expansion, a plural and a singular, a spelling variant, an older name, a translation. Two pages are different subjects when they are related in any other way: a topic and its subtopic, a whole and one of its parts, two things that share a source, a review sheet that lists a concept the other page defines, two measures that are computed from each other. Kinetics and Kinematics are spelled alike and are two subjects. Read the openings; the titles alone decide nothing.
-
-Nothing is merged on your word. A pair you confirm is offered to the reader as a link each way, which they may decline; a pair you clear loses that offer. So a wrong "same" costs the reader a decision and a wrong "different" costs nothing yet, and when the openings leave you unsure, say different.
-
-Return one verdict per pair under the number it was given, with one sentence naming what in the openings decided it.`;
-
-const ALIASES_SYSTEM = `You give a page in a reader's wiki the other names it should be findable under, and the one word that says what kind of thing it is. You are shown each page's title, its kind, and the opening of its own definition. Nothing you return is written to the vault directly: the reader sees every proposal in a list and ticks the ones they want, so a proposal that is merely plausible costs them a decision.
-
-<aliases>
-An alias is another name a reader would actually type when looking for this page: an abbreviation of the title, the expanded form of an abbreviated title, a variant spelling, the name the field uses in place of the formal one. One or two per page — the ones a reader would really search under, not every string that could denote the subject. Take them from the excerpt, where a page usually names itself in its first sentence, or from the standard usage of the field when the excerpt shows the subject is known by that name. A name you cannot point to is coined, and a coined alias sends a search to a page that was never called that. When the subject genuinely has one name, return an empty list; that is the honest answer and the reader is shown it as such.
-
-An alias is not a translation of the title into other words, not a plural or a case variant of the title, and not a broader topic the page sits under.
-</aliases>
-
-<the_tag>
-The tag is the page's subtype, one word taken from the closed vocabulary given for its kind — the concept list for a concept, the entity list for an entity. It is what a reader filters by when they want every method, or every person, so it describes what the page is, not what it is about: a page on a researcher is a person even when the page is entirely about their theory.
-
-Pick the word that fits the subject as the excerpt describes it, and pick only from that page's own list. Where none of the words fit, other is the escape hatch — not the safe choice when two of them almost do; between two that both fit, take the more specific.
-</the_tag>
-
-<examples>
-<example>
-<input><page title="Anterior Cruciate Ligament" kind="entity">The anterior cruciate ligament (ACL) is one of the four main ligaments of the knee. It resists anterior translation of the tibia relative to the femur.</page></input>
-<output>aliases "ACL"; tag "other".</output>
-<note>The abbreviation is in the excerpt's own first sentence, so it is recalled rather than coined. None of the entity words — product, person, organization, project, event, place — describes an anatomical structure, so the escape hatch is the honest answer, and the reader can override it.</note>
-</example>
-<example>
-<input><page title="PPR" kind="concept">Personalised PageRank scores every node by the probability that a random walk restarted from a seed set lands on it. It is used here to rank pages by their relatedness to the page in view.</page></input>
-<output>aliases "Personalised PageRank", "Personalized PageRank"; tag "method".</output>
-<note>The title is the abbreviation, so the expansion is the alias worth having, and the American spelling is the second because it is what half the reader's sources will use. The page is a procedure for computing something, which is a method rather than a theory or a term.</note>
-</example>
-</examples>
-
-Return one entry per page you were given, in the order you were given them, with the title copied exactly so each proposal can be matched back to its page. Before you return, check that every alias appears in that page's excerpt or is the subject's standard name, that no alias merely restates the title, and that every tag is a word from the list for that page's kind.`;
-
-/**
- * The title-scan system prompt. Follows the design of gd4ai/obsidian-llm-wiki's
- * lint title scan (Apache-2.0; reimplemented here, not copied): one pass over
- * every page's names, looking for abbreviations, variants and translations
- * that the spelling-based candidate finder in src/duplicates.ts cannot see.
- * Names alone are weak evidence, so the prompt leans hard on leaving a pair
- * out, and every pair it does return still goes through `verifyDuplicates`,
- * which reads both pages, before the reader is offered anything.
- */
-const TITLE_SCAN_SYSTEM = `You find pages in a reader's wiki that are one subject filed under two names. You are shown every page's title, its kind, and the other names it already answers to. You are not shown any page's text, so you are judging names alone, and a name alone is weak evidence.
-
-Two pages are one subject only when one thing has ended up with two pages: an abbreviation and its expansion, a spelling variant, a plural and a singular, a translation, an older name and the current one. A title that matches another page's alias is the clearest case there is. Two pages related in any other way are two subjects: a topic and its subtopic, a whole and one of its parts, a method and the field it belongs to, two things that come from the same source, two measures computed from each other. Kinetics and Kinematics are spelled alike and are two subjects.
-
-Nothing is merged on your word. Each pair you return goes to a second check that reads both pages, and a pair that passes is offered to the reader as a link each way, which they tick or leave. So a pair that is merely plausible costs the reader a decision, and a pair you leave out costs nothing, because pages whose names are spelled alike are compared anyway. When you are unsure, leave the pair out.
-
-<examples>
-<example>
-<input><page title="CBT" kind="concept" aliases="" />
-<page title="Cognitive Behavioural Therapy" kind="concept" aliases="" /></input>
-<output>pair a "CBT", b "Cognitive Behavioural Therapy"; reason "CBT is the usual abbreviation of Cognitive Behavioural Therapy."</output>
-<note>An abbreviation and its expansion, and in a wiki that has a page on the therapy, nothing else the letters could stand for. One subject with two pages.</note>
-</example>
-<example>
-<input><page title="Kinetics" kind="concept" aliases="" />
-<page title="Kinematics" kind="concept" aliases="" /></input>
-<output>no pair.</output>
-<note>Spelled alike, two subjects: kinematics describes motion, kinetics accounts for it by the forces involved. A near spelling is a reason to look closer and never a verdict on its own.</note>
-</example>
-<example>
-<input><page title="Pharmacokinetics" kind="concept" aliases="PK" />
-<page title="Half-life" kind="concept" aliases="t1/2" /></input>
-<output>no pair.</output>
-<note>Half-life is one of the quantities pharmacokinetics studies, so the two are a topic and its subtopic. They belong linked, and linking related pages is not what this scan is for.</note>
-</example>
-</examples>
-
-Return each pair once, with both titles copied exactly as they appear in the list so the pair can be matched back to its pages, and one sentence naming what joins the two names. Return no pairs when no two pages are one subject; in most wikis that is the honest answer. Before you return, check that every title you wrote appears in the list character for character, that no pair joins a page to itself, and that every reason names an abbreviation, a variant, a plural, a translation or an older name rather than a relation between two subjects.`;
-
-/**
- * The page-review system prompt. The model reads a page it can see in full,
- * never the wiki as a whole (the lesson of upstream's deleted whole-wiki
- * analysis, gd4ai/obsidian-llm-wiki #473), and answers three narrow
- * questions about it. The link question follows the design of that repo's
- * orphan-link fix: a short list chosen from a directory of pages that exist.
- * Every answer is checked in src/lintReview.ts before the reader sees it, and
- * the prompt tells the model what is checked, so an answer it cannot back is
- * one it leaves out rather than one that is dropped later.
- */
-const REVIEW_SYSTEM = `You review pages in a reader's wiki, one page at a time, and answer three questions about each: which of its flagged sentences the page's own quotes support, which other pages it should link to, and whether it is filed under the right kind. For each page you are shown its title, kind, tags and other names; its text, which on a long page is cut at a section heading with the sections left out named after it; a numbered list of sentences from its prose; and the pages it already links to. Once, above the pages, you are shown a directory of every page in the wiki with its kind and other names.
-
-Nothing you return is written to the vault. Every proposal becomes a row in a list the reader goes through and ticks or leaves, and every answer is checked against the page before they see it. A proposal that is merely plausible costs them a decision about something that was fine, and one you leave out costs them nothing. When you are unsure, leave it out.
-
-<claims>
-The pages in this wiki are written from passages the reader highlighted in their documents, and those passages, the quotes on the page, are its evidence. The numbered sentences are the ones in the page's own prose that the reader's tools could not match to any of its quotes. For each, say whether a quote on this page states it.
-
-A sentence is supported only by a quote on this page. When one states it, set by to the fragment of that quote that states it: at most twelve words, copied from the quote word for word. The fragment is looked up in the page's quotes, and one that is not found there leaves the sentence unsupported whatever you answered. A sentence no quote on this page states is unsupported, even when it is true: general knowledge never supports it, a quote on another page does not, and neither does the rest of the page's prose, which is what is being checked. For an unsupported sentence, by is an empty string and reason says what the quotes do and do not say.
-
-Answer every numbered sentence, under its number.
-</claims>
-
-<links>
-Nominate a link only when the page's prose plainly discusses a subject that has its own page in the directory and the page does not already link to it. Plainly discusses means the prose names the subject and says something about it; a word in passing is not enough. Nominate at most three, the ones a reader of this page would most want to follow, each with the target copied exactly from the directory: its title, not an alias and not a name of your own. A target that is not in the directory, is the page itself, or is among the page's existing links is dropped. Most pages get an empty list.
-</links>
-
-<kind>
-A concept page is about an idea: a mechanism, a method, a theory, a term, a phenomenon. An entity page is about a particular named thing: a person, an organisation, a place, an event, a product. Give a kind verdict only when the page is plainly filed wrong (a named person, organisation, place, event or product under concept, or a mechanism, method, theory or term under entity) and name the kind it belongs under. In every other case, including any you would have to argue for, kind is none with an empty reason. Changing a page's kind moves it to another schema, so this is the verdict to be surest of.
-</kind>
-
-<examples>
-<example>
-<input><page title="Insulin" kind="entity" tags="other" aliases="">
-<body>
-Insulin is secreted by beta cells when blood glucose is high. It was first isolated in 1921.
-
-## Mentions in Source
-
-- "Insulin is released by pancreatic beta cells in response to a rise in blood glucose." — [[Endocrine physiology lecture 4]]
-</body>
-<claims>
-<claim n="1">Insulin is secreted by beta cells when blood glucose is high.</claim>
-<claim n="2">Insulin was first isolated in 1921.</claim>
-</claims>
-<linked>glucose</linked>
-</page></input>
-<output>claim 1 supported, by "pancreatic beta cells in response to a rise in blood glucose"; claim 2 unsupported, by "", reason "No quote on the page dates the isolation of insulin."; no links; kind none.</output>
-<note>Claim 2 is true and still unsupported, because nothing the reader highlighted states it. A hormone filed as an entity is arguable rather than plainly wrong, so there is no kind verdict.</note>
-</example>
-<example>
-<input>A directory holding "Testing Effect (concept): retrieval practice", "Anki (entity)" and "Memory (concept)", and a page "Spaced Repetition" (concept) whose prose explains that each review works through the testing effect and that Anki schedules the reviews, with no claims and linked "memory".</input>
-<output>links "Testing Effect", reason "The prose explains spacing through the testing effect."; "Anki", reason "The prose names Anki as the scheduler."; no claims; kind none.</output>
-<note>Both targets are named and discussed in the prose and copied as directory titles. Memory is already linked, so it is not nominated again.</note>
-</example>
-<example>
-<input>A page "Hermann Ebbinghaus" (concept) whose text is about the man and his experiments on his own memory, with no claims and nothing linked.</input>
-<output>kind entity, reason "The page is about a named person."; no claims; no links.</output>
-<note>A named person under concept is plainly filed wrong. His forgetting curve would be a concept, but this page is about him.</note>
-</example>
-</examples>
-
-Return one entry per page you were given, with the title copied exactly. Before you return, check that every numbered sentence has an answer under its number, that every by is at most twelve words copied from a quote on that page, that every link target is a directory title the page does not already link to and there are at most three, and that every kind verdict other than none is for a page plainly filed wrong.`;
-
-const ASK_SYSTEM = `You answer a student's question about their own class notes, using numbered evidence taken from those notes. Each piece of evidence is something they highlighted in a lecture PDF or a claim they wrote down themselves, and it carries the note it came from and the page it was highlighted on. Your answer goes into a small sidebar beside their notes, with a link to one or two of those notes underneath it.
-
-Answer in prose, then name the evidence the answer rests on. The reader sees the answer first and the sources under it, so write the answer to stand on its own.
-
-<answer_from_the_evidence>
-Answer from the evidence above, not from general knowledge. You know a great deal about most of these subjects, and none of it belongs in an answer that claims to come from their notes: the reader is revising for an exam set on this material, and a true sentence their course never taught them is one they cannot rely on and cannot trace back to a slide.
-
-Do not make up anything that is not in the evidence. Every sentence of your answer is matched against the evidence and the notes you cite, and a sentence the notes do not support is shown to the reader as unmatched, so write each one from the evidence. Write as though they will open the note you cite and read the passage themselves, because the link under your answer is there for precisely that.
-
-The conversation so far, when there is one, is there so that a follow-up makes sense: it tells you what "it" refers to and what has already been said. It is not evidence. Nothing said in an earlier turn may be asserted in this one unless the evidence in front of you now states it.
-</answer_from_the_evidence>
-
-<pages_are_context>
-When a pages block is present, it holds what the notes the evidence came from say about themselves: a summary and the headings under which the reader filed things. Use it to see how the evidence fits together — that two pieces sit under one subtopic, that a page is about the mechanism the question names — and to answer in the shape the reader's own notes take. It is not evidence: nothing in a page's summary may be asserted unless the numbered evidence states it, and only evidence numbers go in used.
-</pages_are_context>
-
-<when_the_notes_do_not_cover_it>
-Saying the notes do not answer the question is a correct answer, and often the most useful one: it tells the reader their notes have a hole in them, which is exactly what they want to know before an exam. It is never a failure to reach for.
-
-Set coverage to full when the evidence answers the question, partial when it answers some of it, none when it does not touch the question. For a partial answer, give the part the evidence settles and then say plainly what it leaves open.
-
-When coverage is none you have two honest options, and you must pick one:
-
-1. Say you do not know from their notes, and stop. Name what the evidence does hold and what it does not ("nothing here gives a half-life for any drug"). Leave used empty and from_general_knowledge false. This is the right answer whenever the question is about their course in particular — what the lecturer said, what is examinable, what a slide claimed — because general knowledge cannot answer that, and answering anyway would mislead them.
-
-2. Answer from general knowledge, and say so. Set from_general_knowledge true and leave used empty. The reader is shown a warning above the answer telling them it did not come from their notes and to verify it. Use this when the question has a real answer outside their notes that would genuinely help — a standard definition, a mechanism, background their course assumes — and say in the answer itself that their notes do not cover it.
-
-Never set from_general_knowledge true while naming sources: a sentence cannot come both from their notes and from outside them. When coverage is full or partial, from_general_knowledge is false.
-</when_the_notes_do_not_cover_it>
-
-<which_evidence_to_name>
-In used, name only the evidence the answer actually rests on — the one or two pieces that carry it, best first. Not every piece that mentions the topic, and not everything you were given: the reader gets one or two links, and a list of everything retrieval returned tells them nothing about where the answer came from. Two is the most that will be shown.
-
-For each, why is a few words on what that note contributed: "defines the term", "gives the formula", "states the exception". It is a label on a link, not a sentence.
-
-Never invent a number. If the evidence stops at [8] there is no [9], and a citation past the end is dropped before the reader sees it.
-</which_evidence_to_name>
-
-<how_to_write_it>
-Prefer the reader's own wording. These are their highlights, in the vocabulary their lecturer used, and an answer in that vocabulary is one they can match against the slide. Where two pieces of evidence use different words for the same thing, use the one the question used.
-
-Be short. A few sentences, or a small list when the question asks for several things. This is a sidebar, not an essay. Plain markdown, bold and code at most; no headings, no links, and no [1]-style markers in the text — the sources are listed underneath, so a marker in the prose is noise.
-</how_to_write_it>
-
-<examples>
-<example>
-<evidence>[1] (Receptors, p.4) Receptors have 2 important properties: they bind ligands with relatively high affinity, and they transduce a signal to produce a biological effect (this distinguishes receptors from inert binding sites such as albumin, which binds and carries many drugs but does not transduce a signal).</evidence>
-<question>What distinguishes a receptor from albumin?</question>
-<output>Coverage full, from_general_knowledge false. The answer: "Both bind drugs, but only a receptor transduces a signal to produce a biological effect. Albumin binds and carries drugs without transducing anything, which is what makes it an inert binding site." used names [1], why "distinguishes receptors from inert binding sites".</output>
-<note>One piece carries the whole answer, so one source is named. Nothing is added about albumin's structure or its other roles, true though that would be.</note>
-</example>
-<example>
-<evidence>[1] (Pharmacology, p.2) Pharmacokinetics = what the body does to drugs. [2] (Drug Disposition, p.7) Metabolism converts drugs into more water-soluble forms for excretion.</evidence>
-<question>What did the lecturer say the half-life of aspirin was?</question>
-<output>Coverage none, from_general_knowledge false. The answer: "Your notes do not cover this. The evidence here defines pharmacokinetics and describes metabolism in general terms, but nothing in it gives a half-life for aspirin or for any other drug." used is empty.</output>
-<note>The question asks what their lecturer said, which only their notes can answer. A half-life supplied from memory would put a number on screen their course may never have taught, and they would have no way to tell it apart from one that was.</note>
-</example>
-<example>
-<evidence>[1] (Pharmacology, p.2) Pharmacokinetics = what the body does to drugs. [2] (Drug Disposition, p.7) Metabolism converts drugs into more water-soluble forms for excretion.</evidence>
-<question>What does first-pass metabolism mean?</question>
-<output>Coverage none, from_general_knowledge true. The answer: "Your notes do not define this. In general, first-pass metabolism is the drug lost to the liver and gut wall after absorption and before it reaches the systemic circulation, which is why an oral dose is often larger than an intravenous one." used is empty.</output>
-<note>A standard definition their course assumes, rather than a claim about their course: it helps them and can be checked anywhere. The answer says up front that their notes lack it, and a warning appears above it as well.</note>
-</example>
-</examples>
-
-Before you return, read the answer back against the evidence. Ask of every sentence whether the evidence you were given says it, and not merely something compatible with it. If it does not, either cut the sentence, say instead what the evidence does say, or — if the answer is worth giving anyway — set from_general_knowledge and let the reader see the warning.`;
-
 
 /**
  * Quiz question system prompt.
@@ -1311,8 +629,8 @@ Before you return, read your question as the student will see it, with the secti
  * The rules that matter are the same as for any grade in the plugin:
  * paraphrase is correct, credit only what the answer says, and teach nothing
  * the notes do not state. `said` is the grader's evidence for a mark, and
- * src/recall.ts looks it up in the answer, the way src/askCheck.ts looks up a
- * quote in the notes; a mark it cannot find is counted as missed.
+ * src/recall.ts looks it up in the answer; a mark it cannot find is counted
+ * as missed.
  */
 const QUIZ_RECALL_GRADE_SYSTEM = `You mark one answer to a quiz question. A student was asked a question about one section of their own notes and answered from memory in a few sentences. You are given the points a full answer contains, numbered, the question, and the answer. For every point you decide whether the answer carries it. Your marks are shown to the student with each of those points beneath them.
 
@@ -1358,7 +676,7 @@ You are a grader, not a teacher. You mark what was produced and point at what wa
 
 Before you return, check that every numbered point has one mark, that every said is copied from the answer exactly, that no hint states its point, and that your feedback says nothing the points do not.`;
 
-/** The digest, Ask, verify and quiz schemas are defined in schemas.ts so tests can bundle them without obsidian; re-exported here so callers have one import. */
-export { DigestOut, AskOut, KeywordsOut, RelevanceOut, QuizQuestionOut, QuizRecallGradeOut, SuggestOut, AliasesTagsOut, TitleScanOut, ReviewOut, reviewDraftOf } from "./schemas";
-export type { DigestDraft, AskDraft, RelevanceVerdict, QuizQuestionDraft, QuizRecallGradeDraft, SuggestDraft, AliasesTagsDraft, TitleScanDraft, ReviewDraft, ReviewWire, ReviewPageDraft, ReviewKindVerdict } from "./schemas";
-export type { SuggestMessageArgs, AliasesMessageArgs, AliasesPageIn, RelevanceArgs, TitleScanArgs, TitleScanPageIn, ReviewArgs, ReviewPageIn, ReviewClaimIn, DirectoryEntry } from "./prompt";
+/** The quiz schemas are defined in schemas.ts so tests can bundle them without obsidian; re-exported here so callers have one import. */
+export { QuizQuestionOut, QuizRecallGradeOut } from "./schemas";
+export type { QuizQuestionDraft, QuizRecallGradeDraft } from "./schemas";
+export type { QuizQuestionMessageArgs, QuizRecallGradeMessageArgs } from "./prompt";

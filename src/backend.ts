@@ -1,6 +1,6 @@
 import type { z } from "zod";
 
-export type ProviderName = "anthropic" | "gemini" | "codex" | "claudecli";
+export type ProviderName = "codex";
 
 /** One structured-output request: a system prompt, a user message, and the zod schema the answer must satisfy. */
 export interface CompletionRequest<T> {
@@ -34,8 +34,7 @@ export type TextStop = "end" | "length" | "other" | "unknown";
 
 /**
  * One plain-text request: the model's answer comes back as it wrote it, with
- * no schema and no parsing. Upstream's wiki engine (src/upstream/llmAdapter.ts)
- * writes its own prompts and parses its own answers, so this is all it needs.
+ * no schema and no parsing.
  */
 export interface TextRequest {
   system: string;
