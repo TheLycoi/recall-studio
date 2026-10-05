@@ -27,8 +27,8 @@
  * so test/recall.test.mjs bundles it with no Obsidian runtime.
  */
 import { normalizePlain } from "./util";
-import { significantTokens, type EvidenceUnit } from "./retrieval";
-import { splitSentences } from "./answerClaims";
+import { significantTokens, type EvidenceUnit } from "./pageIndex";
+import { splitSentences } from "./sentences";
 import { feedbackGrounded, quizzable, resolvePool, wordCoverage, type QuizMiss, type QuizScope } from "./quiz";
 import type { CueShape, QuizQuestionDraft, QuizRecallGradeDraft } from "./schemas";
 import type { QuizSectionIn } from "./prompt";

@@ -8,7 +8,7 @@
  * Pure by construction, so test/quiz.test.mjs bundles it without an Obsidian
  * runtime.
  */
-import { significantTokens, type EvidenceUnit } from "./retrieval";
+import { significantTokens, type EvidenceUnit } from "./pageIndex";
 import type { CueShape } from "./schemas";
 
 // ---- types -------------------------------------------------------------------
