@@ -197,9 +197,8 @@ export interface DigestTargetFolders {
 /**
  * Whether a note may be offered to a digest as a page to merge into.
  *
- * Only topic pages qualify. Ask and Lint already skip the schema and
- * transcript folders (isWikiPage in src/chatPanel.ts); a digest skips them
- * too, plus the topic folder's own `sources/` (source summaries, which Lint
+ * Only topic pages qualify. A digest skips the schema and transcript
+ * folders, plus the topic folder's own `sources/` (source summaries, which Lint
  * reads as sources rather than pages) and the engine's `index.md` and
  * `log.md` at the top of the topic folder. Without this a digest could write
  * a section into the reader's transcript.

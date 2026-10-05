@@ -2,8 +2,8 @@
  * Lint on upstream's engine: WikiLM's "lint-wiki-upstream" command, run by
  * obsidian-llm-wiki's own lint (runLintWiki,
  * vendor/llm-wiki/src/wiki/lint/controller.ts) and shown in its own report
- * modal. WikiLM's own "lint-wiki" (the chat panel's vault lint,
- * src/vaultLint.ts) is a different command and is not touched.
+ * modal. WikiLM's own vault lint (src/vaultLint.ts) is a different module
+ * and is not touched.
  *
  * Upstream's controller does the whole flow itself: the scan, the report
  * written into its log, then LintReportModal, whose buttons (each fix, Smart

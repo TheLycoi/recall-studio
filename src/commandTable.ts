@@ -25,7 +25,7 @@ export interface CommandSpec {
 }
 
 // The palette order is the workflow order the reader asked for:
-// AI highlight, Digest, Lint first, the capture and housekeeping commands
+// AI highlight and Digest first, the capture and housekeeping commands
 // after. The chat-only commands come last. Five commands were removed in that
 // change (capture-pdf-selection, capture-pdf-selection-with-instruction,
 // ai-highlight-with-instruction, ai-highlight-pdf, add-transcript); their
@@ -34,6 +34,8 @@ export interface CommandSpec {
 // On 2026-10-01 the reader asked for one Digest and one Lint: digest-folder
 // was absorbed into "Digest…" (a picker that takes a folder or several PDFs)
 // and upstream's lint left the palette for the chat.
+// On 2026-10-05 Recall was cut out of WikiLM: Lint wiki went, and Open chat
+// became Open quiz.
 export const COMMAND_TABLE: CommandSpec[] = [
   {
     id: "ai-highlight",
@@ -53,18 +55,6 @@ export const COMMAND_TABLE: CommandSpec[] = [
     hint: "always; starts from the open PDF, or the PDFs a note cites",
   },
   {
-    id: "lint-wiki",
-    // The name has to carry the word a reader searches for. "Check the wiki
-    // for gaps and dead links" described it well and was unfindable: the
-    // palette matches on the name only, so typing "lint" returned nothing.
-    // Aliases are a chat affordance and never reach the palette. It leads
-    // with links because the reader's rule (2026-10-01) is that creating
-    // links is the first job of a lint; the fix plan opens on those rows.
-    name: "Lint wiki: create missing links, fix dead links, check quotes",
-    aliases: ["wiki", "lint"],
-    hint: "always available",
-  },
-  {
     id: "capture-selection",
     name: "Send selection to inbox",
     aliases: ["capture", "send", "pdf"],
@@ -77,9 +67,9 @@ export const COMMAND_TABLE: CommandSpec[] = [
     hint: "needs an open note or PDF",
   },
   {
-    id: "open-chat",
-    name: "Open chat: ask the notes",
-    aliases: ["chat", "ask"],
+    id: "open-quiz",
+    name: "Open quiz",
+    aliases: ["quiz-panel"],
     hint: "always",
   },
   {

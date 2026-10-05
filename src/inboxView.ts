@@ -22,7 +22,7 @@ import { countClozes, fmtDate, locateQuote, splitFrontmatter, plainText } from "
 import { describeError } from "./llm";
 import { findCrossInterference, lintCard, LINT_FIX_INSTRUCTIONS, LINT_LABELS, wrapCloze } from "./lint";
 import { DEFAULT_SETTINGS } from "./settings";
-import { ChatPanel } from "./chatPanel";
+import { QuizPanel } from "./quizPanel";
 
 export const VIEW_TYPE_INBOX = "wikilm-notebook";
 
@@ -60,7 +60,7 @@ export class InboxView extends ItemView {
    */
   private dirty = false;
   /** Which half of the sidebar is showing. Persisted in `settings.sidebarMode`. */
-  private mode: "inbox" | "chat" = "inbox";
+  private mode: "inbox" | "quiz" = "inbox";
   /**
    * Scratch state for one render, never persisted: card id -> ids of cards in
    * OTHER highlights that would collide with it in Anki, plus card id -> the
@@ -69,7 +69,7 @@ export class InboxView extends ItemView {
    */
   private crossInterference = new Map<string, string[]>();
   private cardOwner = new Map<string, Highlight>();
-  private chat!: ChatPanel;
+  private quiz!: QuizPanel;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -92,7 +92,7 @@ export class InboxView extends ItemView {
     this.contentEl.addClass("wikilm-notebook");
     this.contentEl.tabIndex = 0;
     this.mode = this.plugin.settings.sidebarMode;
-    this.chat = new ChatPanel(this.plugin, this);
+    this.quiz = new QuizPanel(this.plugin, this);
     this.registerDomEvent(this.contentEl, "keydown", (e) => this.onKey(e));
     this.unsubscribe = this.plugin.store.onChange(() => this.scheduleRender());
     this.render();
@@ -100,16 +100,16 @@ export class InboxView extends ItemView {
 
   async onClose(): Promise<void> {
     this.unsubscribe?.();
-    this.chat?.dispose();
+    this.quiz?.dispose();
   }
 
-  /** Switch halves, remember the choice, redraw. Called by `openChat()` in main.ts. */
-  /** The chat panel, so a command can run a chat-local action in it. */
-  chatPanel(): ChatPanel {
-    return this.chat;
+  /** The quiz panel, so a command or a live check can reach the running quiz. */
+  quizPanel(): QuizPanel {
+    return this.quiz;
   }
 
-  async setMode(mode: "inbox" | "chat"): Promise<void> {
+  /** Switch halves, remember the choice, redraw. Called by `openQuiz()` in main.ts. */
+  async setMode(mode: "inbox" | "quiz"): Promise<void> {
     if (this.mode !== mode) {
       this.mode = mode;
       this.plugin.settings.sidebarMode = mode;
@@ -143,7 +143,7 @@ export class InboxView extends ItemView {
 
   /**
    * True when the editor for `this.editing` is actually on screen. Checked in
-   * the DOM rather than from the flag alone, so a card the filter or chat mode
+   * the DOM rather than from the flag alone, so a card the filter or quiz mode
    * hid, or a new hand-written card not drawn yet, does not hold renders back.
    */
   private editorOpen(): boolean {
@@ -180,13 +180,13 @@ export class InboxView extends ItemView {
     const scrollTop = root.scrollTop;
     this.dirty = false;
     root.empty();
-    root.toggleClass("is-chat", this.mode === "chat");
+    root.toggleClass("is-chat", this.mode === "quiz");
 
     this.renderTabs(root);
     this.renderHeader(root);
 
-    if (this.mode === "chat") {
-      this.chat.render(root);
+    if (this.mode === "quiz") {
+      this.quiz.render(root);
       return;
     }
 
@@ -230,13 +230,13 @@ export class InboxView extends ItemView {
     this.crossInterference = findCrossInterference(items);
   }
 
-  /** The Inbox | Chat switch, in its own row above the header so it sits in the same place in both modes. */
+  /** The Inbox | Quiz switch, in its own row above the header so it sits in the same place in both modes. */
   private renderTabs(root: HTMLElement): void {
     const row = root.createDiv({ cls: "wikilm-tabs-row" });
     const tabs = row.createDiv({ cls: "wikilm-tabs" });
     for (const [m, label] of [
       ["inbox", "Inbox"],
-      ["chat", "Chat"],
+      ["quiz", "Quiz"],
     ] as const) {
       const active = this.mode === m;
       const tab = tabs.createEl("button", { cls: `wikilm-tab${active ? " is-active" : ""}`, text: label });
@@ -247,10 +247,10 @@ export class InboxView extends ItemView {
 
   private renderHeader(root: HTMLElement): void {
     const counts = this.plugin.store.counts();
-    const chat = this.mode === "chat";
+    const quiz = this.mode === "quiz";
     const header = root.createDiv({ cls: "wikilm-header" });
     const left = header.createDiv({ cls: "wikilm-header-left" });
-    left.createEl("h2", { text: chat ? "Ask" : "Inbox" });
+    left.createEl("h2", { text: quiz ? "Quiz" : "Inbox" });
     const stats = left.createDiv({ cls: "wikilm-stats" });
     const stat = (label: string, n: number, cls = "") => {
       const s = stats.createSpan({ cls: `wikilm-stat ${cls}` });
@@ -258,7 +258,7 @@ export class InboxView extends ItemView {
       s.createSpan({ text: ` ${label}` });
       return s;
     };
-    if (!chat) {
+    if (!quiz) {
       stat("to review", counts.toReview);
       let withBloom = 0;
       let remember = 0;
@@ -287,7 +287,7 @@ export class InboxView extends ItemView {
 
     const right = header.createDiv({ cls: "wikilm-header-right" });
 
-    if (chat) return;
+    if (quiz) return;
 
     const filter = right.createEl("select", { cls: "dropdown wikilm-filter" });
     for (const [v, label] of [
@@ -1062,9 +1062,9 @@ export class InboxView extends ItemView {
   }
 
   private onKey(e: KeyboardEvent): void {
-    // Chat mode hides every card, so j/k/x/e/Enter would act on nothing the
-    // reader can see — and Enter belongs to the chat textarea.
-    if (this.mode === "chat") return;
+    // Quiz mode hides every card, so j/k/x/e/Enter would act on nothing the
+    // reader can see, and Enter belongs to the quiz textarea.
+    if (this.mode === "quiz") return;
     if (this.editing) return;
     const target = e.target as HTMLElement | null;
     if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT")) return;

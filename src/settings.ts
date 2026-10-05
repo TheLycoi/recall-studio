@@ -129,7 +129,7 @@ export interface WikiLmSettings {
 
   // Sidebar
   /** Persisted by the view; no setting UI. */
-  sidebarMode: "inbox" | "chat";
+  sidebarMode: "inbox" | "quiz";
 
   // Card quality
   /** Second model call per highlight that checks grounding, sibling interference, and Bloom fit before the card is stored. */

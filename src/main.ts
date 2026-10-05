@@ -130,6 +130,7 @@ export default class WikiLmPlugin extends Plugin {
   async loadSettings(): Promise<void> {
     const saved = (await this.loadData()) as Partial<WikiLmSettings> | null;
     this.settings = Object.assign({}, DEFAULT_SETTINGS, saved);
+    if ((this.settings.sidebarMode as string) === "chat") this.settings.sidebarMode = "quiz";
     // 0.9.2: capture no longer edits notes by default. An install that predates
     // the change has markMode saved, so the new default alone would not reach it.
     if (saved && !saved.markModeMigrated) {
@@ -192,29 +193,11 @@ export default class WikiLmPlugin extends Plugin {
     await this.app.workspace.revealLeaf(leaf);
   }
 
-  /** The inbox, switched to its Ask half. */
-  async openChat(): Promise<void> {
+  /** The inbox, switched to its quiz half. */
+  async openQuiz(): Promise<void> {
     await this.openInbox();
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_INBOX)) {
-      if (leaf.view instanceof InboxView) await leaf.view.setMode("chat");
-    }
-  }
-
-  /**
-   * Open the chat and check the wiki there.
-   *
-   * The lint lives in the chat panel because its report is a turn in the log —
-   * something to read, scroll back to and act on — rather than a Notice that
-   * disappears. Routing the command through the panel keeps one implementation
-   * instead of a second copy that drifts.
-   */
-  async lintWiki(): Promise<void> {
-    await this.openChat();
-    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_INBOX)) {
-      if (leaf.view instanceof InboxView) {
-        await leaf.view.chatPanel().runVaultLint();
-        return;
-      }
+      if (leaf.view instanceof InboxView) await leaf.view.setMode("quiz");
     }
   }
 

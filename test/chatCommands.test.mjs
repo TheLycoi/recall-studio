@@ -22,21 +22,15 @@ before(async () => {
 });
 
 // The ids and names in the table, in order. An id change orphans a user's
-// hotkey, a name change moves the entry in the palette. Updated for the
-// command simplification (2026-09-28): the palette commands first, then
-// the four the chat still reaches by alias. Five commands were removed outright
-// and their aliases moved onto the command that absorbed them. On 2026-10-01
-// the two digest commands became one "Digest…" with a picker (digest-folder
-// removed, its alias absorbed) and upstream's lint (lint-wiki-upstream, in
-// the palette since 2026-09-29) went chat-only, leaving one Lint wiki whose
-// name leads with links.
+// hotkey, a name change moves the entry in the palette. The Recall carve-out
+// (2026-10-05) removed lint-wiki and turned open-chat into open-quiz. The
+// wiki commands still listed here go in a later step.
 const EXPECTED = [
   ["ai-highlight", "AI highlight…"],
   ["digest-pdf-highlights", "Digest…"],
-  ["lint-wiki", "Lint wiki: create missing links, fix dead links, check quotes"],
   ["capture-selection", "Send selection to inbox"],
   ["capture-selection-with-instruction", "Send selection to inbox with instructions…"],
-  ["open-chat", "Open chat: ask the notes"],
+  ["open-quiz", "Open quiz"],
   ["open-inbox", "Open inbox"],
   ["export-reviewed", "Export all reviewed cards to Anki"],
   ["cancel-ingestion", "Cancel the running AI highlight, digest or ingest"],
@@ -50,10 +44,10 @@ const EXPECTED = [
 ];
 
 const HIDDEN = ["lint-wiki-upstream", "ingest-source", "ingest-folder", "capture-markdown-highlights", "retry-failed"];
-const REMOVED = ["capture-pdf-selection", "capture-pdf-selection-with-instruction", "ai-highlight-with-instruction", "ai-highlight-pdf", "add-transcript", "digest-folder"];
+const REMOVED = ["capture-pdf-selection", "capture-pdf-selection-with-instruction", "ai-highlight-with-instruction", "ai-highlight-pdf", "add-transcript", "digest-folder", "lint-wiki", "open-chat"];
 
-test("COMMAND_TABLE holds the sixteen (id, name) pairs verbatim and in order", () => {
-  assert.equal(table.COMMAND_TABLE.length, 16);
+test("COMMAND_TABLE holds the fifteen (id, name) pairs verbatim and in order", () => {
+  assert.equal(table.COMMAND_TABLE.length, 15);
   assert.deepEqual(
     table.COMMAND_TABLE.map((c) => [c.id, c.name]),
     EXPECTED,
@@ -68,14 +62,20 @@ test("exactly the five chat-only commands are hidden, and the removed ones are g
   for (const id of REMOVED) assert.ok(!table.COMMAND_TABLE.some((c) => c.id === id), `${id} should be removed`);
 });
 
-test("the palette gets the eleven visible commands and none of the hidden ones", () => {
+test("the palette gets the ten visible commands and none of the hidden ones", () => {
   const palette = table.paletteCommands(table.COMMAND_TABLE);
-  assert.equal(palette.length, 11);
+  assert.equal(palette.length, 10);
   assert.deepEqual(
     palette.map((c) => c.id),
-    EXPECTED.slice(0, 11).map(([id]) => id),
+    EXPECTED.slice(0, 10).map(([id]) => id),
   );
   for (const id of HIDDEN) assert.ok(!palette.some((c) => c.id === id), `${id} must not reach the palette`);
+});
+
+test("open-quiz answers to quiz-panel", () => {
+  const quiz = table.COMMAND_TABLE.find((c) => c.id === "open-quiz");
+  assert.deepEqual(quiz.aliases, ["quiz-panel"]);
+  assert.equal(quiz.hint, "always");
 });
 
 test("every id is unique", () => {
@@ -107,62 +107,23 @@ test("aliases are unique across the table and never collide with another id", ()
 // rather than capturing an undefined at import time.
 const CTX = {
   pages: [
-    { path: "classes/BIO101/Receptors.md", title: "Receptors", aliases: ["Drug Receptors"], classCodes: ["BIO101"], hasPdfLinks: true },
-    { path: "classes/KIN110/Stages of Change.md", title: "Stages of Change", aliases: [], classCodes: ["KIN110"], hasPdfLinks: false },
+    { path: "wiki/concepts/Receptors.md", title: "Receptors", aliases: ["Drug Receptors"] },
+    { path: "wiki/concepts/Stages of Change.md", title: "Stages of Change", aliases: [] },
   ],
-  pdfs: [
-    { path: "sources/class notes/BIO101/BIO101 History of Doping and Oversight.pdf", basename: "BIO101 History of Doping and Oversight" },
-    { path: "sources/class notes/PSY220/Ch3.pdf", basename: "Ch3" },
-    { path: "sources/class notes/PSY220/Ch3 notes.pdf", basename: "Ch3 notes" },
-  ],
-  manifests: ["wikilm-manifests/Ch3.md"],
   get commands() {
     return table.COMMAND_TABLE;
   },
 };
 
-test("quiz phrases resolve their target: active, page by title or alias, class, or query", () => {
+test("quiz phrases resolve their target: active, page by title or alias, or query", () => {
   assert.deepEqual(cc.matchIntent("quiz me", CTX), { kind: "quiz", target: { kind: "active" } });
   assert.deepEqual(cc.matchIntent("Quiz me on this note", CTX), { kind: "quiz", target: { kind: "active" } });
-  assert.deepEqual(cc.matchIntent("quiz me on receptors", CTX), { kind: "quiz", target: { kind: "page", path: "classes/BIO101/Receptors.md", title: "Receptors" } });
-  assert.deepEqual(cc.matchIntent("test me on drug receptors", CTX).target, { kind: "page", path: "classes/BIO101/Receptors.md", title: "Receptors" });
-  assert.deepEqual(cc.matchIntent("quiz me on bio101", CTX).target, { kind: "class", code: "BIO101" });
+  assert.deepEqual(cc.matchIntent("quiz me on receptors", CTX), { kind: "quiz", target: { kind: "page", path: "wiki/concepts/Receptors.md", title: "Receptors" } });
+  assert.deepEqual(cc.matchIntent("test me on drug receptors", CTX).target, { kind: "page", path: "wiki/concepts/Receptors.md", title: "Receptors" });
   assert.deepEqual(cc.matchIntent("quiz me about affinity and binding", CTX).target, { kind: "query", words: "affinity and binding" });
 });
 
-test("digest and highlight phrases resolve a PDF, a manifest, a note with PDF links, or the active file", () => {
-  assert.deepEqual(cc.matchIntent("digest", CTX), { kind: "digest", target: { kind: "active" } });
-  assert.deepEqual(cc.matchIntent("AI digest this", CTX), { kind: "digest", target: { kind: "active" } });
-  assert.deepEqual(cc.matchIntent("digest the doping pdf", CTX).target, {
-    kind: "pdf",
-    path: "sources/class notes/BIO101/BIO101 History of Doping and Oversight.pdf",
-    basename: "BIO101 History of Doping and Oversight",
-  });
-  assert.deepEqual(cc.matchIntent("digest receptors", CTX).target, { kind: "page", path: "classes/BIO101/Receptors.md", title: "Receptors" });
-  assert.equal(cc.matchIntent("digest stages of change", CTX).kind, "ambiguous", "a page with no PDF links cannot be digested");
-  assert.deepEqual(cc.matchIntent("highlight ch3 notes", CTX), { kind: "highlight", target: { kind: "pdf", path: "sources/class notes/PSY220/Ch3 notes.pdf", basename: "Ch3 notes" } });
-});
-
-test("two files that fit equally are offered as candidates, never guessed", () => {
-  const m = cc.matchIntent("digest ch3", CTX);
-  assert.equal(m.kind, "ambiguous");
-  assert.equal(m.verb, "digest");
-  assert.deepEqual(
-    m.candidates.map((c) => c.path),
-    ["sources/class notes/PSY220/Ch3.pdf", "sources/class notes/PSY220/Ch3 notes.pdf", "wikilm-manifests/Ch3.md"],
-  );
-});
-
-test("a target nothing matches is ambiguous with no candidates", () => {
-  const m = cc.matchIntent("digest the kinematics deck", CTX);
-  assert.equal(m.kind, "ambiguous");
-  assert.deepEqual(m.candidates, []);
-  assert.equal(m.words, "the kinematics deck");
-});
-
-test("lint, export, inbox and help are phrases", () => {
-  assert.deepEqual(cc.matchIntent("lint the wiki", CTX), { kind: "lint" });
-  assert.deepEqual(cc.matchIntent("check the wiki", CTX), { kind: "lint" });
+test("export, inbox and help are phrases", () => {
   assert.deepEqual(cc.matchIntent("export reviewed cards to anki", CTX), { kind: "export" });
   assert.deepEqual(cc.matchIntent("open the inbox", CTX), { kind: "inbox" });
   assert.deepEqual(cc.matchIntent("help", CTX), { kind: "help" });
@@ -171,11 +132,9 @@ test("lint, export, inbox and help are phrases", () => {
 
 test("a palette name or alias typed exactly still runs that command", () => {
   assert.deepEqual(cc.matchIntent("retry", CTX), { kind: "command", id: "retry-failed" });
-  // The schema aliases reach the exact-alias match at the bottom of the
-  // matcher rather than being eaten by an earlier verb rule: "suggest" opens
-  // AI highlight, and "suggestions" must not.
   assert.deepEqual(cc.matchIntent("schema", CTX), { kind: "command", id: "open-schema" });
   assert.deepEqual(cc.matchIntent("/suggestions", CTX), { kind: "command", id: "review-schema-suggestions" });
+  assert.deepEqual(cc.matchIntent("quiz-panel", CTX), { kind: "command", id: "open-quiz" });
 });
 
 test("hidden commands are still matched by their aliases", () => {
@@ -207,168 +166,114 @@ test("help lists the hidden commands on a chat-only line", () => {
 
 test("a leading slash is tolerated and means the same thing", () => {
   assert.deepEqual(cc.matchIntent("/quiz receptors", CTX).target.kind, "page");
-  assert.deepEqual(cc.matchIntent("/digest", CTX), { kind: "digest", target: { kind: "active" } });
   assert.deepEqual(cc.matchIntent("/help", CTX), { kind: "help" });
 });
 
-test("the all-vault scope is reachable as a phrase, while quiz-shaped prose stays a question", () => {
+test("the all-wiki scope is reachable as a phrase, while quiz-shaped prose is not a quiz", () => {
   const all = { kind: "quiz", target: { kind: "query", words: "" } };
   assert.deepEqual(cc.matchIntent("/quiz all", CTX), all);
   assert.deepEqual(cc.matchIntent("quiz all", CTX), all);
   assert.deepEqual(cc.matchIntent("quiz everything", CTX), all);
-  assert.deepEqual(cc.matchIntent("quiz results are in", CTX), { kind: "question" });
-  assert.deepEqual(cc.matchIntent("test the hypothesis", CTX), { kind: "question" });
-  assert.deepEqual(cc.matchIntent("drill down into receptors", CTX), { kind: "question" });
-});
-
-test("everything else is a question, including sentences that mention a verb", () => {
-  assert.deepEqual(cc.matchIntent("what does the wiki say about digestion of drugs?", CTX), { kind: "question" });
-  assert.deepEqual(cc.matchIntent("how do I highlight in PDF++", CTX), { kind: "question" });
-  assert.deepEqual(cc.matchIntent("receptors bind ligands with high affinity", CTX), { kind: "question" });
-  assert.deepEqual(cc.matchIntent("", CTX), { kind: "question" });
+  assert.deepEqual(cc.matchIntent("quiz results are in", CTX), { kind: "unknown" });
+  assert.deepEqual(cc.matchIntent("test the hypothesis", CTX), { kind: "unknown" });
+  assert.deepEqual(cc.matchIntent("drill down into receptors", CTX), { kind: "unknown" });
 });
 
 test("renderHelp lists phrases, not slash commands", () => {
   const help = cc.renderHelp();
   assert.ok(help.includes("**quiz me**"));
-  assert.ok(help.includes("**digest**"));
-  assert.ok(help.includes("**highlight**"));
   assert.ok(!help.includes("/quiz"), "no slash grammar is documented");
 });
 
-// ---- 2.0: a question scoped to a class
+// ---- send the quiz misses to the inbox ------------------------------------------
 
-const SCOPE_CTX = {
-  pages: [
-    { path: "wiki/concepts/Kinetics.md", title: "Kinetics", aliases: [], classCodes: ["BIO201"], hasPdfLinks: true },
-    { path: "wiki/concepts/Stages of Change.md", title: "Stages of Change", aliases: [], classCodes: ["KIN110"], hasPdfLinks: true },
-  ],
-  pdfs: [],
-  manifests: [],
-  commands: [],
-};
-
-test("'ask BIO201 what is impulse' and 'what is impulse in BIO201' are questions scoped to that class", () => {
-  assert.deepEqual(cc.matchIntent("ask BIO201 what is impulse", SCOPE_CTX), { kind: "question", classCode: "BIO201", text: "what is impulse" });
-  assert.deepEqual(cc.matchIntent("What is impulse in bio201?", SCOPE_CTX), { kind: "question", classCode: "BIO201", text: "What is impulse" });
-  assert.deepEqual(cc.matchIntent("in KIN110, what is decisional balance", SCOPE_CTX), { kind: "question", classCode: "KIN110", text: "what is decisional balance" });
-});
-
-test("a code no page carries, or a bare 'ask', is an ordinary question", () => {
-  assert.deepEqual(cc.matchIntent("ask BIOL101 what is impulse", SCOPE_CTX), { kind: "question" });
-  assert.deepEqual(cc.matchIntent("what happens in the cell", SCOPE_CTX), { kind: "question" });
-  assert.deepEqual(cc.matchIntent("ask", SCOPE_CTX), { kind: "question" });
-});
-
-// ---- send the last answer to the inbox ------------------------------------------
-
-test("send to inbox and its plain-language forms card the last answer; a question that mentions the inbox stays a question", () => {
-  for (const phrase of ["send to inbox", "send it to the inbox", "Send the answer to inbox", "card it", "make flashcards", "flashcard this"]) {
-    assert.deepEqual(cc.matchIntent(phrase, CTX), { kind: "send-answer" }, phrase);
+test("send to inbox and its plain-language forms card the quiz misses; a question that mentions the inbox is not", () => {
+  for (const phrase of ["send to inbox", "send it to the inbox", "send the misses to inbox", "card it", "make flashcards", "flashcard this"]) {
+    assert.deepEqual(cc.matchIntent(phrase, CTX), { kind: "send-misses" }, phrase);
   }
   assert.equal(cc.matchIntent("inbox", CTX).kind, "inbox", "the bare word still opens the inbox");
-  assert.equal(cc.matchIntent("what does the inbox send to the writer?", CTX).kind, "question");
+  assert.equal(cc.matchIntent("what does the inbox send to the writer?", CTX).kind, "unknown");
   assert.match(cc.renderHelp(), /\*\*send to inbox\*\*/);
 });
 
-// ---- 2.0 ask cleanup: send phrases (B3), file verbs that open questions (A15),
-// ---- "ask about X in CODE" (C15), help text (B6)
-
-test("every plain way of asking to send the last answer is the send-answer intent", () => {
+test("every plain way of asking to send the misses is the send-misses intent", () => {
   const phrases = [
     "send to inbox",
-    "send answer to inbox",
-    "send the answer to inbox",
+    "send them to inbox",
+    "send my misses to the inbox",
     "send it",
     "send that",
-    "send this",
+    "send them",
     "add to inbox",
     "add that to inbox",
     "card it",
     "card that",
-    "card the answer",
-    "card this answer",
+    "card them",
+    "card the misses",
   ];
   for (const phrase of phrases) {
-    assert.deepEqual(cc.matchIntent(phrase, CTX), { kind: "send-answer" }, phrase);
-    assert.deepEqual(cc.matchIntent(phrase.toUpperCase(), CTX), { kind: "send-answer" }, `${phrase} in capitals`);
-    assert.deepEqual(cc.matchIntent(`${phrase}.`, CTX), { kind: "send-answer" }, `${phrase} with a full stop`);
+    assert.deepEqual(cc.matchIntent(phrase, CTX), { kind: "send-misses" }, phrase);
+    assert.deepEqual(cc.matchIntent(phrase.toUpperCase(), CTX), { kind: "send-misses" }, `${phrase} in capitals`);
+    assert.deepEqual(cc.matchIntent(`${phrase}.`, CTX), { kind: "send-misses" }, `${phrase} with a full stop`);
   }
 });
 
-test("bare 'send' stays the capture alias, and questions that start with send or card stay questions", () => {
+test("bare 'send' stays the capture alias, and lines that start with send or card are not sends", () => {
   assert.deepEqual(cc.matchIntent("send", CTX), { kind: "command", id: "capture-selection" });
-  assert.deepEqual(cc.matchIntent("send a signal down the axon?", CTX), { kind: "question" });
-  assert.deepEqual(cc.matchIntent("what does card sorting measure", CTX), { kind: "question" });
+  assert.deepEqual(cc.matchIntent("send a signal down the axon?", CTX), { kind: "unknown" });
+  assert.deepEqual(cc.matchIntent("what does card sorting measure", CTX), { kind: "unknown" });
 });
 
-test("a file verb leading a real question is a question when no file fits", () => {
-  assert.deepEqual(cc.matchIntent("highlight the differences between kinetics and kinematics", CTX), { kind: "question" });
-  assert.deepEqual(cc.matchIntent("digest the main arguments of the doping debate", CTX), { kind: "question" });
-  // A short name that fits nothing is still a file command that missed, so
-  // the panel says "Nothing called…" rather than answering "lab4".
-  const miss = cc.matchIntent("digest lab4", CTX);
-  assert.equal(miss.kind, "ambiguous");
-  assert.deepEqual(miss.candidates, []);
-  assert.equal(miss.words, "lab4");
-});
+// ---- Recall: the quiz panel reads the wiki and does nothing else ----------------
 
-test("a file verb leading a question keeps a class scope the line names", () => {
-  assert.deepEqual(cc.matchIntent("highlight the differences between kinetics and kinematics in BIO201", SCOPE_CTX), {
-    kind: "question",
-    classCode: "BIO201",
-    text: "highlight the differences between kinetics and kinematics",
-  });
-});
-
-test("'ask about X in CODE' keeps its class", () => {
-  assert.deepEqual(cc.matchIntent("ask about impulse in BIO201", SCOPE_CTX), { kind: "question", classCode: "BIO201", text: "impulse" });
-  assert.deepEqual(cc.matchIntent("ask what is impulse in bio201?", SCOPE_CTX), { kind: "question", classCode: "BIO201", text: "what is impulse" });
-});
-
-test("help describes one inbox row per answer, lists the send phrases, and the class scope", () => {
-  const help = cc.renderHelp();
-  assert.ok(!/one inbox item per source/.test(help), "the retired one-item-per-source wording is gone");
-  assert.match(help, /one inbox row per answer, with the sources it rested on beneath it/);
-  for (const p of ["send it", "add to inbox", "card it"]) assert.ok(help.includes(p), `help lists ${p}`);
-  assert.ok(help.includes("**ask BIO101 …**") && help.includes("**… in BIO101**"));
-});
-
-// ---- "digest <topic> into <note>": find a topic in the PDF and file it in a note ----
-
-const TOPIC_CTX = {
+const ctx = {
   pages: [
-    { path: "wiki/concepts/Pyschopathlogy.md", title: "Pyschopathlogy", aliases: ["Abnormal psychology"], classCodes: ["PSY220"], hasPdfLinks: true },
-    { path: "wiki/concepts/Pharmacology.md", title: "Pharmacology", aliases: [], classCodes: ["BIO101"], hasPdfLinks: true },
+    { path: "wiki/concepts/free-recall.md", title: "Free recall", aliases: ["Free-recall test"] },
+    { path: "wiki/entities/piotr-wozniak.md", title: "Piotr Wozniak", aliases: [] },
   ],
-  pdfs: [{ path: "wiki/sources/An Overview of Psychopathology.pdf", basename: "An Overview of Psychopathology" }],
-  manifests: [],
-  commands: [],
+  commands: [{ id: "open-inbox", name: "Open inbox", aliases: ["inbox"] }],
 };
 
-test("digest <topic> into <note> is a topic digest, and a typo in the note's name still finds it", () => {
-  assert.deepEqual(cc.matchIntent("digest history of psychopathology into the psychopathlogy note", TOPIC_CTX), {
-    kind: "digest-topic",
-    topic: "history of psychopathology",
-    into: { path: "wiki/concepts/Pyschopathlogy.md", title: "Pyschopathlogy" },
-    pdf: null,
-  });
-  const exact = cc.matchIntent("Digest receptor binding into Pharmacology", TOPIC_CTX);
-  assert.equal(exact.kind, "digest-topic");
-  assert.equal(exact.topic, "receptor binding");
-  assert.equal(exact.into.title, "Pharmacology");
+test("quiz me is the open note", () => {
+  assert.deepEqual(cc.matchIntent("quiz me", ctx), { kind: "quiz", target: { kind: "active" } });
 });
 
-test("a topic digest can name the note by an alias and the PDF with from", () => {
-  const m = cc.matchIntent("digest the history of treatment from the overview pdf into abnormal psychology", TOPIC_CTX);
-  assert.equal(m.kind, "digest-topic");
-  assert.equal(m.topic, "the history of treatment");
-  assert.equal(m.into.title, "Pyschopathlogy");
-  assert.deepEqual(m.pdf, { path: "wiki/sources/An Overview of Psychopathology.pdf", basename: "An Overview of Psychopathology" });
+test("quiz me on a page title or alias names that page", () => {
+  assert.deepEqual(cc.matchIntent("Quiz me on Free recall", ctx), { kind: "quiz", target: { kind: "page", path: "wiki/concepts/free-recall.md", title: "Free recall" } });
+  assert.deepEqual(cc.matchIntent("quiz me on the free-recall test", ctx), { kind: "quiz", target: { kind: "page", path: "wiki/concepts/free-recall.md", title: "Free recall" } });
 });
 
-test("digest words that name no note after into are not a topic digest", () => {
-  const m = cc.matchIntent("digest history of psychopathology into something else entirely", TOPIC_CTX);
-  assert.notEqual(m.kind, "digest-topic");
-  assert.equal(cc.matchIntent("digest", TOPIC_CTX).kind, "digest", "the bare verb still digests the open file");
+test("quiz me on words that name no page is a subject", () => {
+  assert.deepEqual(cc.matchIntent("quiz me on spacing", ctx), { kind: "quiz", target: { kind: "query", words: "spacing" } });
+});
+
+test("quiz me on everything is the whole wiki folder", () => {
+  assert.deepEqual(cc.matchIntent("quiz me on everything", ctx), { kind: "quiz", target: { kind: "query", words: "" } });
+});
+
+test("wiki verbs are not Recall's", () => {
+  for (const line of ["digest", "digest Doping", "highlight Ch3", "lint", "check the wiki"]) {
+    assert.deepEqual(cc.matchIntent(line, ctx), { kind: "unknown" }, line);
+  }
+});
+
+test("a question is not answered here", () => {
+  assert.deepEqual(cc.matchIntent("what is free recall?", ctx), { kind: "unknown" });
+  assert.deepEqual(cc.matchIntent("", ctx), { kind: "unknown" });
+});
+
+test("card it sends the quiz misses", () => {
+  assert.deepEqual(cc.matchIntent("card it", ctx), { kind: "send-misses" });
+  assert.deepEqual(cc.matchIntent("send to inbox", ctx), { kind: "send-misses" });
+});
+
+test("help lists the quiz and no wiki verb", () => {
+  const help = cc.renderHelp();
+  assert.match(help, /quiz me/);
+  // The chat-only line is generated from the hidden commands in the table,
+  // which still hold wiki commands until they are removed, and Recall's own
+  // "retry failed highlights". The phrases the panel itself answers are the
+  // other lines.
+  const phrases = help.split("\n").filter((l) => !/^- chat only:/.test(l)).join("\n");
+  assert.doesNotMatch(phrases, /digest|highlight|lint/);
 });

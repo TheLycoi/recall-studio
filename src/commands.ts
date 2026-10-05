@@ -151,7 +151,7 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
       const file = noteOrPdf(p);
       if (!file) return;
       // A plain boolean, not the `isPdfFile` guard: the guard would narrow
-      // `file` to `never` on the note branch (see chatPanel.ts digestTarget).
+      // `file` to `never` on the note branch.
       const pdf = file.extension.toLowerCase() === "pdf";
       const choice = await askHighlightOptions(p.app, {
         fileName: file.basename,
@@ -201,13 +201,9 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
       else await digestFiles(p, files);
     },
   },
-  "open-chat": {
+  "open-quiz": {
     available: () => true,
-    run: (p) => void p.openChat(),
-  },
-  "lint-wiki": {
-    available: () => true,
-    run: (p) => void p.lintWiki(),
+    run: (p) => void p.openQuiz(),
   },
   // Upstream's lint on upstream's engine; the scan ends with its report
   // modal open, and each fix runs from a button there.

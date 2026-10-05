@@ -77,7 +77,7 @@ Type `help` in the chat to see them all.
 - **Lint wiki: create missing links, fix dead links, check quotes** (`lint`, `wiki`): checks the wiki and opens a fix plan. It reads every page for the names of your other pages: where a page names another one in its text without linking it, the plan offers to link the first mention where it stands, with your words kept as the link's text. No model is used for that. Nothing is written until you press Apply.
 - **Send selection to inbox** (`capture`, `send`, `pdf`): queues the selected text for card writing. On a PDF it keeps the page number.
 - **Send selection to inbox with instructions…** (`capture-instruct`, `pdf-instruct`): the same, with a one-line instruction for the card writer first.
-- **Open chat: ask the notes** (`chat`, `ask`): opens the chat panel.
+- **Open quiz** (`quiz-panel`): opens the quiz panel.
 - **Open inbox** (`inbox`): opens the flashcard inbox.
 - **Export all reviewed cards to Anki** (`export`): sends every card you approved to Anki.
 - **Cancel the running AI highlight, digest or ingest** (`cancel`, `stop-run`): stops a long run at its next step.

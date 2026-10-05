@@ -1,12 +1,9 @@
-// Deciding what a line typed into the Ask box means: an action to run, or a
-// question for the notes. Pure — no `obsidian` import — so the whole decision
-// table is testable.
+// Deciding what a line typed into the quiz panel means: a quiz to start, one
+// of Recall's commands, or something the panel does not do. Pure, with no
+// `obsidian` import, so the whole decision table is testable.
 //
-// Policy (chat-studio design, 2026-09-17): the chat is the studio. A plain
-// phrase with a verb and a target runs the action; a target that fits two
-// files is offered as chips rather than guessed; everything else is a
-// question. A leading slash is tolerated and means the same thing, so older
-// habits keep working, but no slash grammar is documented.
+// A leading slash is tolerated and means the same thing, so older habits keep
+// working, but no slash grammar is documented.
 
 import { COMMAND_TABLE } from "./commandTable";
 import { parseQuizCommand } from "./quiz";
@@ -17,77 +14,41 @@ export interface CommandLike {
   aliases: string[];
 }
 
-/** What an action is about: the open file, a page, a class, a PDF, a manifest, or words. */
+/** What a quiz phrase points at. */
 export type Target =
   | { kind: "active" }
   | { kind: "page"; path: string; title: string }
-  | { kind: "class"; code: string }
-  | { kind: "pdf"; path: string; basename: string }
-  | { kind: "manifest"; path: string }
   | { kind: "query"; words: string };
 
-/** What a typed line means. `ambiguous` is the panel's cue to ask rather than guess. */
+/** What a typed line means. "unknown" is anything the quiz panel does not do. */
 export type Intent =
   | { kind: "quiz"; target: Target }
-  | { kind: "digest"; target: Target }
-  | {
-      /**
-       * "digest history of X into the Y note": find a topic in a PDF and file
-       * what is found in a note the reader named. The PDF is the one named
-       * after "from", or null for the panel to work out from what is open.
-       */
-      kind: "digest-topic";
-      topic: string;
-      into: { path: string; title: string };
-      pdf: { path: string; basename: string } | null;
-    }
-  | { kind: "highlight"; target: Target }
-  | { kind: "lint" }
   | { kind: "export" }
   | { kind: "inbox" }
-  | { kind: "send-answer" }
+  | { kind: "send-misses" }
   | { kind: "help" }
   | { kind: "command"; id: string }
-  | { kind: "ambiguous"; verb: "digest" | "highlight"; words: string; candidates: Target[] }
-  | {
-      kind: "question";
-      /** The class the question is scoped to, when the phrase named one: "ask BIO101 …", "… in BIO101". */
-      classCode?: string;
-      /** The question with the scope words removed; absent for an unscoped question. */
-      text?: string;
-    };
+  | { kind: "unknown" };
 
-/** One page of the retrieval index, as the matcher needs to see it. */
 export interface IntentPage {
   path: string;
   title: string;
   aliases: string[];
-  classCodes: string[];
-  hasPdfLinks: boolean;
 }
 
-/** Everything in the vault a target could name, plus the palette. */
 export interface IntentContext {
   pages: IntentPage[];
-  pdfs: Array<{ path: string; basename: string }>;
-  manifests: string[];
   commands: CommandLike[];
 }
 
-/**
- * "Card the last answer", every way it is said: send / add … to inbox, send
- * it / that / this, card it / that / the answer, make cards, flashcard it.
- * Matched against the normalized line, so case and a trailing full stop do
- * not matter.
- */
-const SEND_ANSWER = new RegExp(
+const SEND_MISSES = new RegExp(
   "^(?:" +
     [
-      "(?:send|add) (?:(?:it|this|that|answer|the answer|this answer|that answer|my answer) )?to (?:the |my )?inbox",
-      "send (?:it|this|that)",
-      "card (?:it|this|that|answer|the answer|this answer|that answer|my answer)",
+      "(?:send|add) (?:(?:it|this|that|them|these|the misses|my misses) )?to (?:the |my )?inbox",
+      "send (?:it|this|that|them)",
+      "card (?:it|this|that|them|the misses|my misses)",
       "make (?:cards|flashcards)",
-      "flashcard (?:it|this|that)",
+      "flashcard (?:it|this|that|them)",
     ].join("|") +
     ")$",
 );
@@ -115,131 +76,10 @@ function stripArticles(s: string): string {
   return s.replace(/^(?:the|a|an|my)\s+/, "").replace(/\s+(?:pdf|deck|file|note|notes|page|lecture)$/, "").trim();
 }
 
-/** Words of the target, folded, two characters or longer. */
-function tokens(s: string): string[] {
-  return fold(s).split(" ").filter((w) => w.length >= 2);
-}
-
-/**
- * Words that carry no subject: articles, connectives, and the file nouns
- * `stripArticles` drops. What is left is what a question would be about.
- */
-const FILLER = new Set(["the", "a", "an", "my", "and", "or", "of", "to", "in", "on", "for", "with", "is", "are", "pdf", "deck", "file", "note", "notes", "page", "lecture"]);
-
-/** The subject words of a target, for telling a file name from a question. */
-function significantTokens(s: string): string[] {
-  return tokens(s).filter((w) => !FILLER.has(w));
-}
-
 function pageFor(words: string, ctx: IntentContext): IntentPage | null {
   const k = fold(words);
   if (!k) return null;
   return ctx.pages.find((p) => fold(p.title) === k || p.aliases.some((a) => fold(a) === k)) ?? null;
-}
-
-/** Edits between two short strings, a swap of neighbours counting as one; stops caring past `max`. */
-function editDistance(a: string, b: string, max: number): number {
-  if (Math.abs(a.length - b.length) > max) return max + 1;
-  const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [i, ...new Array<number>(b.length).fill(0)]);
-  for (let j = 0; j <= b.length; j++) d[0][j] = j;
-  for (let i = 1; i <= a.length; i++) {
-    for (let j = 1; j <= b.length; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
-      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
-    }
-  }
-  return d[a.length][b.length];
-}
-
-/**
- * The page a reader named, allowing for a slip of the fingers: the exact
- * title or alias first, then the one page whose name is within two edits of
- * what was typed. Two pages equally close is no answer. A name under six
- * letters has to be exact, since two edits would turn it into another word.
- */
-function nearPageFor(words: string, ctx: IntentContext): IntentPage | null {
-  const exact = pageFor(words, ctx) ?? pageFor(stripArticles(words), ctx);
-  if (exact) return exact;
-  const k = fold(stripArticles(words));
-  if (k.length < 6) return null;
-  let best: IntentPage | null = null;
-  let bestDistance = 3;
-  let tied = false;
-  for (const p of ctx.pages) {
-    for (const name of [p.title, ...p.aliases]) {
-      const dist = editDistance(k, fold(name), 2);
-      if (dist < bestDistance) {
-        best = p;
-        bestDistance = dist;
-        tied = false;
-      } else if (dist === bestDistance && best && best.path !== p.path) {
-        tied = true;
-      }
-    }
-  }
-  return best && !tied ? best : null;
-}
-
-/**
- * "digest <topic> into <note>", with an optional "from <pdf>" before the
- * note. Null unless the words after the last "into" name a page, so a
- * sentence that merely contains "into" stays whatever it was.
- */
-function topicDigest(words: string, ctx: IntentContext): Intent | null {
-  const m = /^(.+)\s+(?:into|in to|onto)\s+(.+)$/.exec(words.trim());
-  if (!m) return null;
-  const page = nearPageFor(m[2], ctx);
-  if (!page) return null;
-  let topic = m[1].trim();
-  let pdf: { path: string; basename: string } | null = null;
-  const from = /^(.+)\s+from\s+(.+)$/.exec(topic);
-  if (from) {
-    const files = filesFor(from[2], ctx, false).filter((t): t is Extract<Target, { kind: "pdf" }> => t.kind === "pdf");
-    if (files.length === 1) {
-      pdf = { path: files[0].path, basename: files[0].basename };
-      topic = from[1].trim();
-    }
-  }
-  if (!topic) return null;
-  return { kind: "digest-topic", topic, into: { path: page.path, title: page.title }, pdf };
-}
-
-function classFor(words: string, ctx: IntentContext): string | null {
-  const k = fold(words).replace(/\s+/g, "");
-  for (const p of ctx.pages) for (const c of p.classCodes) if (fold(c).replace(/\s+/g, "") === k) return c;
-  return null;
-}
-
-/** Files whose name holds every word of the target. */
-function matchingFiles(words: string, ctx: IntentContext, allowNotes: boolean): Target[] {
-  const ws = tokens(words);
-  if (ws.length === 0) return [];
-  const has = (name: string) => {
-    const f = ` ${fold(name)} `;
-    return ws.every((w) => f.includes(w));
-  };
-  const out: Target[] = [];
-  for (const pdf of ctx.pdfs) if (has(pdf.basename)) out.push({ kind: "pdf", path: pdf.path, basename: pdf.basename });
-  if (allowNotes) for (const p of ctx.pages) if (p.hasPdfLinks && (has(p.title) || p.aliases.some(has))) out.push({ kind: "page", path: p.path, title: p.title });
-  for (const m of ctx.manifests) if (has(m.split("/").pop()?.replace(/\.md$/i, "") ?? m)) out.push({ kind: "manifest", path: m });
-  return out;
-}
-
-/**
- * Files fitting the target, words as typed first.
- *
- * `stripArticles` drops a trailing "notes", "pdf", "deck" so "the doping pdf"
- * finds a PDF that never says "pdf" in its name. That same strip turns
- * "ch3 notes" — the exact name of a file — into "ch3", which fits three files
- * and would be handed back as a question to answer. So the words as typed are
- * tried first, and the stripped form only when they fit nothing: naming a file
- * exactly can never be made ambiguous by a word another file happens to share.
- */
-function filesFor(words: string, ctx: IntentContext, allowNotes: boolean): Target[] {
-  const literal = matchingFiles(words, ctx, allowNotes);
-  if (literal.length > 0) return literal;
-  return matchingFiles(stripArticles(words), ctx, allowNotes);
 }
 
 function quizTarget(words: string, ctx: IntentContext): Target {
@@ -247,32 +87,12 @@ function quizTarget(words: string, ctx: IntentContext): Target {
   if (!w || THIS.test(w)) return { kind: "active" };
   const page = pageFor(w, ctx) ?? pageFor(stripArticles(w), ctx);
   if (page) return { kind: "page", path: page.path, title: page.title };
-  const code = classFor(w, ctx);
-  if (code) return { kind: "class", code };
   return { kind: "query", words: w };
-}
-
-/**
- * A digest or highlight target, which must be a real file: a quiz can fall
- * back to searching the index for words, but nothing can be digested that is
- * not a PDF, a manifest, or a note citing one. A name that fits two files, or
- * none, is returned as `ambiguous` for the panel to ask about.
- */
-function fileIntent(verb: "digest" | "highlight", words: string, ctx: IntentContext): Intent {
-  const w = words.trim().replace(TARGET_LEAD, "").trim();
-  if (!w || THIS.test(w)) return { kind: verb, target: { kind: "active" } };
-  if (verb === "digest") {
-    const page = pageFor(w, ctx) ?? pageFor(stripArticles(w), ctx);
-    if (page) return page.hasPdfLinks ? { kind: verb, target: { kind: "page", path: page.path, title: page.title } } : { kind: "ambiguous", verb, words: w, candidates: [] };
-  }
-  const found = filesFor(w, ctx, verb === "digest");
-  if (found.length === 1) return { kind: verb, target: found[0] };
-  return { kind: "ambiguous", verb, words: w, candidates: found.slice(0, 3) };
 }
 
 export function matchIntent(text: string, ctx: IntentContext): Intent {
   const t = normalize(text);
-  if (!t) return { kind: "question" };
+  if (!t) return { kind: "unknown" };
 
   if (/^(?:help|what can you do|what can i say|commands)$/.test(t)) return { kind: "help" };
 
@@ -281,19 +101,18 @@ export function matchIntent(text: string, ctx: IntentContext): Intent {
   // one shape into a form it already knows keeps the old slash habit working.
   //
   // Only the verb "quiz" opens it: "test" and "drill" lead ordinary sentences
-  // ("test the hypothesis", "drill down into receptors") that must stay
-  // questions, and they are reachable as "test me on X" either way. The target
-  // has to be a page, an alias or a class code as well — a bare "quiz" plus
-  // loose words is prose ("quiz results are in"), and the reader who means a
-  // subject can say "quiz me about it".
-  // "quiz all" and "quiz everything" name the whole vault, which
+  // ("test the hypothesis", "drill down into receptors"), and they are
+  // reachable as "test me on X" either way. The target has to be a page or an
+  // alias as well. A bare "quiz" plus loose words is prose ("quiz results are
+  // in"), and the reader who means a subject can say "quiz me about it".
+  // "quiz all" and "quiz everything" name the whole wiki folder, which
   // `parseQuizCommand`'s plain-phrase grammar also does not reach in this
-  // shape; an empty query is how the panel reads the all-vault scope.
+  // shape. An empty query is how the panel reads that scope.
   if (/^quiz\s+(?:all|everything)$/.test(t)) return { kind: "quiz", target: { kind: "query", words: "" } };
   const bare = /^quiz\s+(?!me\b|all\b|everything\b|on\b|about\b|from\b|over\b)(.+)$/.exec(t);
   if (bare) {
     const named = quizTarget(bare[1], ctx);
-    if (named.kind === "page" || named.kind === "class") return { kind: "quiz", target: named };
+    if (named.kind === "page") return { kind: "quiz", target: named };
   }
   const quiz = parseQuizCommand(t, false);
   if (quiz && quiz.kind === "start") {
@@ -302,32 +121,13 @@ export function matchIntent(text: string, ctx: IntentContext): Intent {
     return { kind: "quiz", target: quizTarget(quiz.query, ctx) };
   }
 
-  // A file verb followed by words no file fits is usually a question that
-  // happens to start with "highlight" or "digest" ("highlight the differences
-  // between kinetics and kinematics"). Three or more subject words is a
-  // sentence, not a file name, so it is answered rather than refused with
-  // "Nothing called…"; a short miss ("digest lab4") is still reported as one.
-  const fileOrQuestion = (verb: "digest" | "highlight", words: string): Intent => {
-    const intent = fileIntent(verb, words, ctx);
-    if (intent.kind === "ambiguous" && intent.candidates.length === 0 && significantTokens(intent.words).length >= 3) {
-      return scopedQuestion(text, ctx) ?? { kind: "question" };
-    }
-    return intent;
-  };
-  const digest = /^(?:ai[- ])?digest(?:\s+(.*))?$/.exec(t);
-  if (digest) return topicDigest(digest[1] ?? "", ctx) ?? fileOrQuestion("digest", digest[1] ?? "");
-  const highlight = /^(?:(?:ai[- ])?highlight|suggest highlights?|ai[- ]suggest)(?:\s+(.*))?$/.exec(t);
-  if (highlight) return fileOrQuestion("highlight", highlight[1] ?? "");
-
-  if (/^(?:lint(?: the)?(?: wiki)?|check the wiki|wiki check|check my wiki)$/.test(t)) return { kind: "lint" };
   if (/^export(?: (?:all|reviewed|cards|the cards|to anki|reviewed cards to anki|reviewed cards|cards to anki))*$/.test(t)) return { kind: "export" };
   // Before the bare "inbox" rule below, whose phrasing this overlaps. Anchored
-  // whole-line and led by a verb, so a question that merely mentions the words
-  // ("what does the inbox send to the writer?", "send a signal down the
-  // axon?", "what does card sorting measure") stays a question. Bare "send" is
+  // whole-line and led by a verb, so a line that merely mentions the words
+  // ("what does the inbox send to the writer?") is not a send. Bare "send" is
   // not here: it is the palette alias of "Send selection to inbox" and reaches
   // that command through the exact-alias match below.
-  if (SEND_ANSWER.test(t)) return { kind: "send-answer" };
+  if (SEND_MISSES.test(t)) return { kind: "send-misses" };
   if (/^(?:open (?:the )?inbox|show (?:the )?inbox|inbox)$/.test(t)) return { kind: "inbox" };
 
   // A palette name or alias typed exactly: unambiguous enough to run.
@@ -337,39 +137,7 @@ export function matchIntent(text: string, ctx: IntentContext): Intent {
       return { kind: "command", id: c.id };
     }
   }
-  return scopedQuestion(text, ctx) ?? { kind: "question" };
-}
-
-/**
- * A question that names its class: "ask BIO101 what is impulse", "what is
- * impulse in BIO101", "in BIO101, what is impulse". The code has to be one
- * some page carries, or the words are left as an ordinary question — "in the
- * cell" is not a scope. The question keeps its own casing; only the scope
- * words and a trailing question mark are removed.
- */
-function scopedQuestion(text: string, ctx: IntentContext): Intent | null {
-  const raw = text.trim().replace(/^\/+/, "").replace(new RegExp(POLITENESS.source, "i"), "").trim();
-  const scoped = (codeWords: string, rest: string): Intent | null => {
-    const code = classFor(codeWords, ctx);
-    const question = rest.trim().replace(/[?!.]+$/, "").trim();
-    return code && question ? { kind: "question", classCode: code, text: question } : null;
-  };
-  let m = /^ask\s+(\S+)\s+(.+)$/i.exec(raw);
-  if (m) {
-    const hit = scoped(m[1], m[2]);
-    if (hit) return hit;
-  }
-  m = /^in\s+(\S+?),?\s+(.+)$/i.exec(raw);
-  if (m) {
-    const hit = scoped(m[1], m[2]);
-    if (hit) return hit;
-  }
-  // "… in CODE", including "ask about impulse in BIO101": the word after
-  // "ask" was not a class, so the leading "ask" (and "about") is the
-  // request, not the question.
-  m = /^(.+?)\s+in\s+(\S+?)\s*[?!.]*$/i.exec(raw);
-  if (m) return scoped(m[2], m[1].replace(/^ask\s+(?:about\s+)?(?=\S)/i, ""));
-  return null;
+  return { kind: "unknown" };
 }
 
 /**
@@ -387,16 +155,11 @@ function chatOnlyLine(): string {
 /** What the box understands, one phrase per line. Shown for "help". */
 export function renderHelp(): string {
   return [
-    "- **quiz me** — a question on each section of the open note, answered in a few sentences, the misses become cards; **quiz me on Receptors**, **quiz me on BIO101**, **quiz me on everything**",
-    "- **digest** — group the open PDF's highlights into concept and entity pages; **digest Doping** names a PDF or a note with PDF++ links; **digest history of doping into Pharmacology** finds that topic in the PDF, highlighted or not, and files it in the note you name",
-    "- **highlight** — let the model pick spans in the open PDF, each checked against the text layer; **highlight Ch3**",
-    "- **lint** — check the wiki for wrong quotes, dead links and duplicate pages",
-    "- **export** — send every reviewed card to Anki",
-    "- **inbox** — open the inbox",
-    "- **send to inbox** — card the last answer: one inbox row per answer, with the sources it rested on beneath it. Also **send it**, **add to inbox**, **card it**, **card the answer**",
+    "- **quiz me**: one question on each section of the open note, answered in a few sentences. **quiz me on Receptors** names a wiki page. **quiz me on everything** covers the whole wiki folder.",
     "- while a quiz runs: **hint**, **skip**, **stop**",
+    "- **send to inbox**: after a quiz, turn what you missed into cards. Also **card it**.",
+    "- **export**: send every reviewed card to Anki",
+    "- **inbox**: open the inbox",
     chatOnlyLine(),
-    "",
-    "Anything else is a question for your notes. **ask BIO101 …** or **… in BIO101** keeps it to one class.",
   ].join("\n");
 }
