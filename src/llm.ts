@@ -13,7 +13,7 @@ const CardOut = z.object({
   front: z
     .string()
     .describe("qa only: the question, naming its subject so it is answerable without the source. Empty string for cloze."),
-  back: z.string().describe("qa only: the answer as a term, number, name, or short phrase. Empty string for qa."),
+  back: z.string().describe("qa only: the answer as a term, number, name, or short phrase. Empty string for cloze."),
   text: z
     .string()
     .describe("cloze only: one sentence from the highlight with {{c1::...}} deletions. Empty string for qa."),

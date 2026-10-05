@@ -12,8 +12,8 @@ import type { WikiLmSettings } from "./settings";
  * signed in with the user's ChatGPT subscription, so no API key is needed.
  *
  * Structured output comes from `--output-schema` (a strict JSON Schema
- * derived from the same zod schema the Anthropic backend uses) and the final
- * agent message is read from the `--json` event stream. The process runs in
+ * derived from the call's zod schema) and the final agent message is read
+ * from the `--json` event stream. The process runs in
  * a throwaway temp directory with a read-only sandbox and the user's
  * config.toml ignored, so no notify hooks, plugins or MCP servers fire and
  * the agent never sees the vault.

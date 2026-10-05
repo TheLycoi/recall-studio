@@ -13,13 +13,12 @@ export interface CompletionRequest<T> {
   /**
    * Reasoning effort for this one call, overriding the configured default.
    *
-   * Set to "low" for work that is reading rather than reasoning. Answering
+   * Set to "low" for work that is reading rather than reasoning: answering
    * from evidence already on screen does not improve with extended thinking,
-   * but it does wait for it: the same question took a noticeably long time to
-   * come back because every Ask ran at the effort a card critique needs.
+   * but it does wait for it.
    */
   effort?: "low" | "medium" | "high";
-  /** The model for this one call (a role's own choice, src/modelRoles.ts); the provider's configured model otherwise. */
+  /** The model for this one call, else the configured Codex model. */
   model?: string;
 }
 
@@ -44,12 +43,11 @@ export interface TextRequest {
   effort?: "low" | "medium" | "high";
   /** As in CompletionRequest. */
   model?: string;
-  /** Cancels this one call: a CLI backend kills its child, an HTTP backend stops waiting where it can. */
+  /** Cancels this one call: the Codex backend kills its child process. */
   signal?: AbortSignal;
   /**
    * Told why the model stopped, once, just before the text is returned; never
-   * when the call throws. Upstream keeps a page's existing body when a
-   * rewrite stopped at the token cap, and this is how it learns that.
+   * when the call throws.
    */
   onStop?: (stop: TextStop) => void;
 }

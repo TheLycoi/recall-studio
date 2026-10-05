@@ -121,3 +121,17 @@ test("the quiz prompts ask free-response questions with an answer key and a leve
   assert.equal(body("QUIZ_CUE_SYSTEM"), "", "the free-recall cue prompt is gone");
   assert.equal(body("QUIZ_GRADE_SYSTEM"), "", "the passage grade prompt is gone");
 });
+
+test("the card schema says which kind of card leaves each field empty", () => {
+  const src = readFileSync("src/llm.ts", "utf8");
+  for (const line of [
+    'qa only: the question, naming its subject so it is answerable without the source. Empty string for cloze.',
+    'qa only: the answer as a term, number, name, or short phrase. Empty string for cloze.',
+    'cloze only: one sentence from the highlight with {{c1::...}} deletions. Empty string for qa.',
+    'revise + qa only: the corrected question. Empty string otherwise.',
+    'revise + qa only: the corrected answer. Empty string otherwise.',
+    'revise + cloze only: the corrected sentence with {{c1::...}} deletions. Empty string otherwise.',
+  ]) {
+    assert.ok(src.includes(`"${line}"`), line);
+  }
+});
