@@ -33,5 +33,7 @@ export function sharedBuildOptions() {
     format: "cjs",
     target: "es2022",
     platform: "browser",
+    // Obsidian loads the plugin as CommonJS, so a native import() left in the bundle would fail at run time.
+    supported: { "dynamic-import": false },
   };
 }

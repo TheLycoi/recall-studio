@@ -19,7 +19,7 @@ export interface EvidenceUnit {
   page: number | null;
   text: string;
   kind: "highlight" | "claim";
-  /** The note's `class:` codes, so a quiz can be scoped to one class. */
+  /** Always empty in Recall. Kept so the unit keeps the shape the quiz code and its tests expect. */
   classCodes: string[];
   /**
    * The heading path the passage sits under, below the note's title:

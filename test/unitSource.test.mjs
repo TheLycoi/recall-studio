@@ -50,3 +50,18 @@ test("a miss backed by a PDF selection points at the PDF page", () => {
   assert.equal(got.heading, "page 3");
   assert.ok(typeof got.subpath === "string" && got.subpath.length > 0);
 });
+
+test("a miss backed by a PDF that does not resolve falls back to the page", () => {
+  const target = { page: 3, selection: { beginIndex: 4, beginOffset: 0, endIndex: 6, endOffset: 12 } };
+  assert.deepEqual(u.resolveUnitSource(unit({ pdfBasename: "Lecture 2", target, page: 3 }), () => null), {
+    sourcePath: "wiki/concepts/free-recall.md",
+    page: null,
+    heading: "Free recall › Definition",
+    subpath: undefined,
+  });
+});
+
+test("a unit with a PDF name but no target is a page unit, and the resolver is not asked", () => {
+  const got = u.resolveUnitSource(unit({ pdfBasename: "Lecture 2", target: null }), () => assert.fail("not asked"));
+  assert.equal(got.sourcePath, "wiki/concepts/free-recall.md");
+});
