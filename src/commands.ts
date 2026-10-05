@@ -1,28 +1,21 @@
 // The command registry's behaviour half. Each entry in COMMAND_TABLE gets an
-// `available` predicate and a `run` action here; `src/main.ts` registers the
-// merged list with a single `addCommand` loop, and the chat panel runs the same
+// `available` predicate and a `run` action here. `src/main.ts` registers the
+// merged list with a single `addCommand` loop, and the quiz panel runs the same
 // objects directly. There is no `app.commands` in the public Obsidian typings,
-// so WikiLM owning the registry is the only way the chat can run a command.
+// so the plugin owning the registry is the only way the panel can run a command.
 //
 // Most bodies began as the addCommand blocks of 0.5.0: `available` is the
-// checkCallback's availability test, `run` its `!checking` branch. The
-// command simplification of 2026-09-28 merged five commands into "AI
-// highlight…" and the two selection commands, whose bodies now dispatch on
-// what is open. Hidden commands keep an implementation here because the chat
-// still runs them by alias; main.ts only leaves them out of the palette.
+// checkCallback's availability test, `run` its `!checking` branch. The two
+// selection commands dispatch on what is open. Hidden commands keep an
+// implementation here because the quiz panel still runs them by alias.
+// main.ts only leaves them out of the palette.
 
-import { Notice, type TFile } from "obsidian";
+import { Notice } from "obsidian";
 import type WikiLmPlugin from "./main";
 import { COMMAND_TABLE, type CommandSpec } from "./commandTable";
-import { ingestSourceNote } from "./ingestSource";
-import { ingestFolderWithUpstream, ingestWithUpstream } from "./upstream/ingest";
-import { lintWithUpstream } from "./upstream/lint";
-import { aiHighlightNote, captureMarkdownHighlights, capturePdfSelection, captureReadingSelection, captureSelection } from "./capture";
-import { isPdfFile, pdfsLinkedFrom, readPdfSelection } from "./pdf";
-import { digestFiles, digestPdf } from "./digest";
-import { suggestPdfHighlights } from "./suggest";
-import { pickDigestFiles } from "./digestPicker";
-import { askHighlightOptions, askInstruction, pickFolder, SchemaSuggestionsModal } from "./modals";
+import { captureMarkdownHighlights, capturePdfSelection, captureReadingSelection, captureSelection } from "./capture";
+import { isPdfFile, readPdfSelection } from "./pdf";
+import { askInstruction, SchemaSuggestionsModal } from "./modals";
 
 export interface WikiLmCommand extends CommandSpec {
   /** True when the command can run right now; the palette hides it otherwise. */
@@ -32,12 +25,6 @@ export interface WikiLmCommand extends CommandSpec {
 }
 
 type Implementation = Pick<WikiLmCommand, "available" | "run">;
-
-/** The file "AI highlight…" and the selection commands work on: an open markdown note or PDF. */
-function noteOrPdf(p: WikiLmPlugin): TFile | null {
-  const file = p.app.workspace.getActiveFile();
-  return file && (file.extension === "md" || isPdfFile(file)) ? file : null;
-}
 
 const INSTRUCTION_TITLE = "Instructions for this highlight";
 const INSTRUCTION_PLACEHOLDER = "e.g. one cloze on the number; cards in Dutch; focus on the mechanism";
@@ -108,108 +95,9 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
       void captureMarkdownHighlights(p, file);
     },
   },
-  "ingest-source": {
-    available: (p) => {
-      const file = p.app.workspace.getActiveFile();
-      return !!file && file.extension === "md";
-    },
-    // Both ingest commands run on upstream's engine (src/upstream/ingest.ts).
-    // src/ingestSource.ts is the pipeline they ran before; "AI highlight…"
-    // still uses it for a note whose product is wiki notes.
-    run: async (p) => {
-      const file = p.app.workspace.getActiveFile();
-      if (!file || file.extension !== "md") return;
-      await ingestWithUpstream(p, file);
-    },
-  },
-  "ingest-folder": {
-    available: () => true,
-    run: async (p) => {
-      const folder = await pickFolder(p.app);
-      if (folder) await ingestFolderWithUpstream(p, folder);
-    },
-  },
-  // An ingest on upstream's engine listens on the same token and passes the
-  // cancel on to the engine's cancelIngestion(), which aborts the model call
-  // in flight (src/upstream/ingest.ts, withEngineRun). A click on the status
-  // bar takes the same path.
-  "cancel-ingestion": {
-    available: (p) => p.cancel.active,
-    run: (p) => {
-      p.cancel.cancel();
-      new Notice("WikiLM: stopping after this batch.");
-    },
-  },
-  // One form for everything the highlighter can be told (what to look for,
-  // the guide, what to make), then the pipeline that already makes it. It
-  // absorbed the instruction form, the PDF highlighter and "Add transcript".
-  // What the reader typed and picked is saved before the run starts, so a run
-  // that fails does not lose it.
-  "ai-highlight": {
-    available: (p) => !!noteOrPdf(p),
-    run: async (p) => {
-      const file = noteOrPdf(p);
-      if (!file) return;
-      // A plain boolean, not the `isPdfFile` guard: the guard would narrow
-      // `file` to `never` on the note branch.
-      const pdf = file.extension.toLowerCase() === "pdf";
-      const choice = await askHighlightOptions(p.app, {
-        fileName: file.basename,
-        kind: pdf ? "pdf" : "note",
-        instruction: p.store.getHighlightInstruction(file.path),
-        guide: p.store.getTranscript(file.path),
-        transcriptFolder: p.settings.transcriptFolder,
-        transcriptMaxChars: p.settings.transcriptMaxChars,
-      });
-      if (choice === null) return;
-      p.store.setHighlightInstruction(file.path, choice.instruction);
-      if (choice.guide.action === "set") {
-        const rec = choice.guide.record;
-        p.store.setTranscript(file.path, rec);
-        new Notice(`WikiLM: guide saved (${rec.text.length.toLocaleString()} characters)${rec.truncated ? ", cut to the size limit" : ""}.`);
-      } else if (choice.guide.action === "clear" && p.store.clearTranscript(file.path)) {
-        new Notice("WikiLM: guide removed.");
-      }
-      // Each path reads the stored guide itself (capture.ts aiHighlightNote,
-      // ingestSource.ts ingestSourceNote, suggest.ts suggestPdfHighlights), so
-      // the one just saved is the one used.
-      if (pdf) {
-        // No gate: the form already settled the guide.
-        await suggestPdfHighlights(p, file, { instruction: choice.instruction });
-      } else if (choice.product === "wiki") {
-        await ingestSourceNote(p, file, { instruction: choice.instruction });
-      } else {
-        aiHighlightNote(p, file, choice.instruction);
-      }
-    },
-  },
-  // One Digest for one PDF or many (2026-10-01). The picker opens with the
-  // active PDF ticked, or the PDFs the active note cites, and the reader can
-  // tick a whole folder or several files under it. One PDF runs as the
-  // single-PDF digest always did; more run in turn behind one options form.
-  "digest-pdf-highlights": {
-    available: () => true,
-    run: async (p) => {
-      const active = p.app.workspace.getActiveFile();
-      // A plain boolean, not the `isPdfFile` guard: the guard would narrow
-      // `active` to `never` on the note branch (see "ai-highlight" above).
-      const pdf = !!active && active.extension.toLowerCase() === "pdf";
-      const preselected = !active ? [] : pdf ? [active] : active.extension === "md" ? pdfsLinkedFrom(p.app, active) : [];
-      const files = await pickDigestFiles(p.app, preselected);
-      if (!files || files.length === 0) return;
-      if (files.length === 1) await digestPdf(p, files[0]);
-      else await digestFiles(p, files);
-    },
-  },
   "open-quiz": {
     available: () => true,
     run: (p) => void p.openQuiz(),
-  },
-  // Upstream's lint on upstream's engine; the scan ends with its report
-  // modal open, and each fix runs from a button there.
-  "lint-wiki-upstream": {
-    available: () => true,
-    run: (p) => void lintWithUpstream(p),
   },
   "open-inbox": {
     available: () => true,

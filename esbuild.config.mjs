@@ -3,18 +3,14 @@ import process from "process";
 import { sharedBuildOptions } from "./scripts/esbuild-shared.mjs";
 
 const banner = `/*
-WikiLM for Obsidian. MIT License, Copyright (c) 2026 Conrad Kelonu.
-Includes code from obsidian-llm-wiki (Apache-2.0, Copyright 2025-2026 Greener-Dalii);
-see NOTICE and LICENSE-APACHE-2.0.txt in the source repository.
-Source: https://github.com/TheLycoi/wikipedia-lm
+Recall for Obsidian. MIT License, Copyright (c) 2026 Conrad Kelonu.
 */
 `;
 
 const prod = process.argv[2] === "production";
 
-// Externals, the @llm-wiki alias onto vendor/llm-wiki/src and the
-// dynamic-import setting live in scripts/esbuild-shared.mjs, so the tests that
-// bundle upstream code use exactly what this build uses.
+// Externals live in scripts/esbuild-shared.mjs, so the tests that bundle src
+// modules use exactly what this build uses.
 const context = await esbuild.context({
   ...sharedBuildOptions(),
   banner: { js: banner },

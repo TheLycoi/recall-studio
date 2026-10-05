@@ -1,7 +1,6 @@
 import { MarkdownView, Notice, Plugin, TFile, normalizePath } from "obsidian";
 import { WIKILM_ICON, WIKILM_SPARK_ICON, registerWikiLmIcon } from "./icon";
 import { AnkiClient, exportToAnki, finalizeHighlights, buildNote } from "./anki";
-import { CancelToken } from "./cancel";
 import { captureSelection } from "./capture";
 import { WIKILM_COMMANDS } from "./commands";
 import { paletteCommands } from "./commandTable";
@@ -12,10 +11,8 @@ import { LlmClient } from "./llm";
 import { askInstruction, pickDeck } from "./modals";
 import type { Card, Highlight } from "./model";
 import { DEFAULT_SETTINGS, WikiLmSettingTab, type WikiLmSettings } from "./settings";
-import { LEGACY_TOPIC_FOLDER, resolveTopicFolderDefault } from "./settingsDefaults";
 import { SchemaFile } from "./schemaFile";
 import { InboxStore } from "./store";
-import { UpstreamHost } from "./upstream/host";
 import { buildAnkiTextImport } from "./util";
 
 export default class WikiLmPlugin extends Plugin {
@@ -26,9 +23,7 @@ export default class WikiLmPlugin extends Plugin {
   schema!: SchemaFile;
   anki!: AnkiClient;
   highlighter!: Highlighter;
-  cancel = new CancelToken();
   private statusBar: HTMLElement | null = null;
-  private upstream: UpstreamHost | null = null;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -55,22 +50,14 @@ export default class WikiLmPlugin extends Plugin {
     this.addRibbonIcon(WIKILM_ICON, "WikiLM inbox", () => void this.openInbox());
     this.statusBar = this.addStatusBarItem();
     this.statusBar.addClass("wikilm-statusbar");
-    this.statusBar.addEventListener("click", () => {
-      if (this.cancel.active) {
-        this.cancel.cancel();
-        new Notice("WikiLM: stopping after this batch.");
-        return;
-      }
-      void this.openInbox();
-    });
+    this.statusBar.addEventListener("click", () => void this.openInbox());
     this.store.onChange(() => this.refreshStatusBar());
-    this.cancel.onChange(() => this.refreshStatusBar());
     this.highlighter = new Highlighter(this);
     this.highlighter.install();
     this.refreshStatusBar();
 
     // ---- commands -------------------------------------------------------
-    // Hidden commands stay in WIKILM_COMMANDS for the chat to run by alias,
+    // Hidden commands stay in WIKILM_COMMANDS for the quiz panel to run by alias,
     // but are not registered: no palette entry, no hotkey.
     for (const c of paletteCommands(WIKILM_COMMANDS))
       this.addCommand({
@@ -113,19 +100,12 @@ export default class WikiLmPlugin extends Plugin {
 
   async onunload(): Promise<void> {
     this.generator.stop();
-    this.upstream?.dispose();
-    this.upstream = null;
     await this.llm.abort();
     await this.store.flush();
     this.store.close();
   }
 
   // ---------------------------------------------------------------- helpers
-
-  /** Upstream's wiki engine host (src/upstream/host.ts), built the first time something asks for it. */
-  upstreamHost(): UpstreamHost {
-    return (this.upstream ??= new UpstreamHost(this));
-  }
 
   async loadSettings(): Promise<void> {
     const saved = (await this.loadData()) as Partial<WikiLmSettings> | null;
@@ -149,20 +129,6 @@ export default class WikiLmPlugin extends Plugin {
       delete (this.settings as LegacySettings).quizQuestions;
       await this.saveData(this.settings);
     }
-    // 0.14.0: the topic folder defaults to `wiki`, where ingest writes, not
-    // `classes`. Saved settings without the key predate it and were using
-    // `classes`; such an install keeps `classes` if the vault has that folder,
-    // and the choice is saved so it holds from now on. Nothing saved is a
-    // fresh install, which takes the new default. The folder is looked up on
-    // disk as well, because the vault's file index may still be filling while
-    // plugins load.
-    if (saved && !saved.topicFolder) {
-      const hasClasses =
-        this.app.vault.getFolderByPath(LEGACY_TOPIC_FOLDER) !== null ||
-        (await this.app.vault.adapter.stat(LEGACY_TOPIC_FOLDER))?.type === "folder";
-      this.settings.topicFolder = resolveTopicFolderDefault(saved, hasClasses);
-      await this.saveData(this.settings);
-    }
   }
 
   async saveSettings(): Promise<void> {
@@ -175,14 +141,13 @@ export default class WikiLmPlugin extends Plugin {
     const c = this.store.counts();
     const parts: string[] = [];
     if (this.highlighter?.enabled) parts.push("🖊 highlighter");
-    if (this.cancel.active) parts.push(`⏹ ${this.cancel.cancelled ? "stopping…" : this.cancel.label}`);
     if (c.queued + c.generating) parts.push(`✎ ${c.queued + c.generating}`);
     if (c.toReview) parts.push(`⧉ ${c.toReview}`);
     if (c.flagged) parts.push(`⚑ ${c.flagged}`);
     if (c.errors) parts.push(`⚠ ${c.errors}`);
     this.statusBar.setText(parts.length ? `WikiLM ${parts.join(" · ")}` : "WikiLM");
     this.statusBar.toggleClass("wikilm-statusbar-highlighter", !!this.highlighter?.enabled);
-    this.statusBar.title = `${this.cancel.active ? `Click to stop: ${this.cancel.label}. ` : ""}WikiLM: ${this.highlighter?.enabled ? "highlighter mode on, " : ""}${c.queued + c.generating} writing, ${c.toReview} cards to review${c.flagged ? `, ${c.flagged} flagged` : ""}${c.errors ? `, ${c.errors} failed` : ""}. Click to open the inbox.`;
+    this.statusBar.title = `WikiLM: ${this.highlighter?.enabled ? "highlighter mode on, " : ""}${c.queued + c.generating} writing, ${c.toReview} cards to review${c.flagged ? `, ${c.flagged} flagged` : ""}${c.errors ? `, ${c.errors} failed` : ""}. Click to open the inbox.`;
   }
 
   async openInbox(): Promise<void> {

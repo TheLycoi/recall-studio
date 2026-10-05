@@ -23,38 +23,46 @@ before(async () => {
 
 // The ids and names in the table, in order. An id change orphans a user's
 // hotkey, a name change moves the entry in the palette. The Recall carve-out
-// (2026-10-05) removed lint-wiki and turned open-chat into open-quiz. The
-// wiki commands still listed here go in a later step.
+// (2026-10-05) removed the wiki commands and turned open-chat into open-quiz.
 const EXPECTED = [
-  ["ai-highlight", "AI highlight…"],
-  ["digest-pdf-highlights", "Digest…"],
   ["capture-selection", "Send selection to inbox"],
   ["capture-selection-with-instruction", "Send selection to inbox with instructions…"],
   ["open-quiz", "Open quiz"],
   ["open-inbox", "Open inbox"],
   ["export-reviewed", "Export all reviewed cards to Anki"],
-  ["cancel-ingestion", "Cancel the running AI highlight, digest or ingest"],
   ["open-schema", "Open the schema note"],
   ["review-schema-suggestions", "Review schema suggestions"],
-  ["lint-wiki-upstream", "Lint wiki (llm-wiki): scan and Smart Fix All"],
-  ["ingest-source", "Ingest source: read this markdown into the wiki"],
-  ["ingest-folder", "Ingest folder: read every note in a folder into the wiki"],
   ["capture-markdown-highlights", "Send all ==highlights== in this note to inbox"],
   ["retry-failed", "Retry failed highlights"],
 ];
 
-const HIDDEN = ["lint-wiki-upstream", "ingest-source", "ingest-folder", "capture-markdown-highlights", "retry-failed"];
-const REMOVED = ["capture-pdf-selection", "capture-pdf-selection-with-instruction", "ai-highlight-with-instruction", "ai-highlight-pdf", "add-transcript", "digest-folder", "lint-wiki", "open-chat"];
+const HIDDEN = ["capture-markdown-highlights", "retry-failed"];
+const REMOVED = [
+  "capture-pdf-selection",
+  "capture-pdf-selection-with-instruction",
+  "ai-highlight-with-instruction",
+  "ai-highlight-pdf",
+  "add-transcript",
+  "digest-folder",
+  "lint-wiki",
+  "open-chat",
+  "ai-highlight",
+  "digest-pdf-highlights",
+  "cancel-ingestion",
+  "lint-wiki-upstream",
+  "ingest-source",
+  "ingest-folder",
+];
 
-test("COMMAND_TABLE holds the fifteen (id, name) pairs verbatim and in order", () => {
-  assert.equal(table.COMMAND_TABLE.length, 15);
+test("COMMAND_TABLE holds the nine (id, name) pairs verbatim and in order", () => {
+  assert.equal(table.COMMAND_TABLE.length, 9);
   assert.deepEqual(
     table.COMMAND_TABLE.map((c) => [c.id, c.name]),
     EXPECTED,
   );
 });
 
-test("exactly the five chat-only commands are hidden, and the removed ones are gone", () => {
+test("exactly the two quiz-panel-only commands are hidden, and the removed ones are gone", () => {
   assert.deepEqual(
     table.COMMAND_TABLE.filter((c) => c.hidden).map((c) => c.id),
     HIDDEN,
@@ -62,12 +70,12 @@ test("exactly the five chat-only commands are hidden, and the removed ones are g
   for (const id of REMOVED) assert.ok(!table.COMMAND_TABLE.some((c) => c.id === id), `${id} should be removed`);
 });
 
-test("the palette gets the ten visible commands and none of the hidden ones", () => {
+test("the palette gets the seven visible commands and none of the hidden ones", () => {
   const palette = table.paletteCommands(table.COMMAND_TABLE);
-  assert.equal(palette.length, 10);
+  assert.equal(palette.length, 7);
   assert.deepEqual(
     palette.map((c) => c.id),
-    EXPECTED.slice(0, 10).map(([id]) => id),
+    EXPECTED.slice(0, 7).map(([id]) => id),
   );
   for (const id of HIDDEN) assert.ok(!palette.some((c) => c.id === id), `${id} must not reach the palette`);
 });
@@ -138,8 +146,6 @@ test("a palette name or alias typed exactly still runs that command", () => {
 });
 
 test("hidden commands are still matched by their aliases", () => {
-  assert.deepEqual(cc.matchIntent("/ingest", CTX), { kind: "command", id: "ingest-source" });
-  assert.deepEqual(cc.matchIntent("ingest-folder", CTX), { kind: "command", id: "ingest-folder" });
   assert.deepEqual(cc.matchIntent("/highlights", CTX), { kind: "command", id: "capture-markdown-highlights" });
   assert.deepEqual(cc.matchIntent("/retry", CTX), { kind: "command", id: "retry-failed" });
 });
@@ -147,21 +153,14 @@ test("hidden commands are still matched by their aliases", () => {
 test("the aliases of removed commands reach the command that absorbed them", () => {
   assert.deepEqual(cc.matchIntent("pdf", CTX), { kind: "command", id: "capture-selection" });
   assert.deepEqual(cc.matchIntent("/pdf-instruct", CTX), { kind: "command", id: "capture-selection-with-instruction" });
-  for (const alias of ["ai", "ai-instruct", "suggest", "transcript"]) {
-    assert.deepEqual(cc.matchIntent(alias, CTX), { kind: "command", id: "ai-highlight" }, alias);
-  }
-  assert.deepEqual(cc.matchIntent("digest-folder", CTX), { kind: "command", id: "digest-pdf-highlights" });
-  for (const alias of ["llm-wiki-lint", "smart-fix"]) {
-    assert.deepEqual(cc.matchIntent(alias, CTX), { kind: "command", id: "lint-wiki-upstream" }, alias);
-  }
 });
 
-test("help lists the hidden commands on a chat-only line", () => {
+test("help lists the hidden commands on a quiz-panel-only line", () => {
   const help = cc.renderHelp();
-  const line = help.split("\n").find((l) => /chat only/i.test(l));
-  assert.ok(line, "help has a chat-only line");
-  for (const c of table.COMMAND_TABLE.filter((c) => c.hidden)) assert.ok(line.includes(`**${c.aliases[0]}**`), `chat-only line names ${c.aliases[0]}`);
-  assert.ok(!/\*\*schema\*\*/.test(line), "a palette command is not listed as chat only");
+  const line = help.split("\n").find((l) => /quiz panel only/i.test(l));
+  assert.ok(line, "help has a quiz-panel-only line");
+  for (const c of table.COMMAND_TABLE.filter((c) => c.hidden)) assert.ok(line.includes(`**${c.aliases[0]}**`), `quiz-panel-only line names ${c.aliases[0]}`);
+  assert.ok(!/\*\*schema\*\*/.test(line), "a palette command is not listed as quiz panel only");
 });
 
 test("a leading slash is tolerated and means the same thing", () => {
@@ -270,10 +269,13 @@ test("card it sends the quiz misses", () => {
 test("help lists the quiz and no wiki verb", () => {
   const help = cc.renderHelp();
   assert.match(help, /quiz me/);
-  // The chat-only line is generated from the hidden commands in the table,
-  // which still hold wiki commands until they are removed, and Recall's own
-  // "retry failed highlights". The phrases the panel itself answers are the
-  // other lines.
-  const phrases = help.split("\n").filter((l) => !/^- chat only:/.test(l)).join("\n");
-  assert.doesNotMatch(phrases, /digest|highlight|lint/);
+  assert.match(help, /quiz panel only/);
+  assert.doesNotMatch(help, /digest|lint|ingest/);
+});
+
+test("wiki verbs name no command in the real table", () => {
+  const real = { pages: [], commands: table.COMMAND_TABLE };
+  for (const line of ["digest", "digest Doping", "highlight Ch3", "lint", "check the wiki", "ingest", "smart-fix", "ai"]) {
+    assert.deepEqual(cc.matchIntent(line, real), { kind: "unknown" }, line);
+  }
 });

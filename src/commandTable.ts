@@ -1,6 +1,6 @@
-// The command registry's data half: ids, palette names, chat aliases, and a
+// The command registry's data half: ids, palette names, quiz-panel aliases, and a
 // one-clause availability hint each. Pure on purpose — no `obsidian` import —
-// so the chat matcher and its tests can read the table without a plugin.
+// so the quiz panel's matcher and its tests can read the table without a plugin.
 //
 // The ids and names of the visible entries are the ones Obsidian registers
 // (src/main.ts loops over the palette commands from src/commands.ts). Changing
@@ -12,48 +12,21 @@ export interface CommandSpec {
   id: string;
   /** What the command palette shows. */
   name: string;
-  /** Short words the chat box accepts, with or without a leading slash. */
+  /** Short words the quiz panel's box accepts, with or without a leading slash. */
   aliases: string[];
   /** One clause on when the command is available, shown by `/help`. */
   hint: string;
   /**
    * Kept out of the palette (and so out of the hotkey list) but still run by
-   * its chat aliases. The palette carries the workflow; these are the tools a
+   * its quiz-panel aliases. The palette carries the workflow; these are the tools a
    * reader reaches for by name when they already know what they want.
    */
   hidden?: boolean;
 }
 
-// The palette order is the workflow order the reader asked for:
-// AI highlight and Digest first, the capture and housekeeping commands
-// after. The chat-only commands come last. Five commands were removed in that
-// change (capture-pdf-selection, capture-pdf-selection-with-instruction,
-// ai-highlight-with-instruction, ai-highlight-pdf, add-transcript); their
-// aliases now live on the command that absorbed each one, so a chat habit
-// survives the merge even though a hotkey bound to the old id does not.
-// On 2026-10-01 the reader asked for one Digest and one Lint: digest-folder
-// was absorbed into "Digest…" (a picker that takes a folder or several PDFs)
-// and upstream's lint left the palette for the chat.
-// On 2026-10-05 Recall was cut out of WikiLM: Lint wiki went, and Open chat
-// became Open quiz.
+// The palette order is the order of use: capture, quiz, review, export, then
+// the card rules. The two hidden commands are run by name from the quiz panel.
 export const COMMAND_TABLE: CommandSpec[] = [
-  {
-    id: "ai-highlight",
-    name: "AI highlight…",
-    aliases: ["ai", "ai-instruct", "suggest", "transcript"],
-    hint: "needs an open note or PDF",
-  },
-  {
-    // One Digest for one PDF or many. The picker (
-    // DigestPickerModal, src/digestPicker.ts) starts from the open PDF, or the PDFs a note cites,
-    // and lets the reader tick a whole folder or several files under it. The
-    // id is the one the single-PDF command had, so its hotkey keeps firing;
-    // digest-folder's alias moved here, its hotkey did not.
-    id: "digest-pdf-highlights",
-    name: "Digest…",
-    aliases: ["digest", "digest-folder"],
-    hint: "always; starts from the open PDF, or the PDFs a note cites",
-  },
   {
     id: "capture-selection",
     name: "Send selection to inbox",
@@ -85,12 +58,6 @@ export const COMMAND_TABLE: CommandSpec[] = [
     hint: "always",
   },
   {
-    id: "cancel-ingestion",
-    name: "Cancel the running AI highlight, digest or ingest",
-    aliases: ["cancel", "stop-run"],
-    hint: "while a run is in progress",
-  },
-  {
     id: "open-schema",
     name: "Open the schema note",
     aliases: ["schema"],
@@ -101,31 +68,6 @@ export const COMMAND_TABLE: CommandSpec[] = [
     name: "Review schema suggestions",
     aliases: ["suggestions"],
     hint: "always",
-  },
-  {
-    // obsidian-llm-wiki's own lint, in its own report modal with its fix
-    // buttons, every write behind WikiLM's guard (src/upstream/lint.ts).
-    // Chat-only since 2026-10-01 so the palette has one Lint wiki, the entry
-    // above; "/smart-fix" still runs this one.
-    id: "lint-wiki-upstream",
-    name: "Lint wiki (llm-wiki): scan and Smart Fix All",
-    aliases: ["llm-wiki-lint", "smart-fix"],
-    hint: "always available",
-    hidden: true,
-  },
-  {
-    id: "ingest-source",
-    name: "Ingest source: read this markdown into the wiki",
-    aliases: ["ingest", "read-source"],
-    hint: "needs an open note",
-    hidden: true,
-  },
-  {
-    id: "ingest-folder",
-    name: "Ingest folder: read every note in a folder into the wiki",
-    aliases: ["ingest-folder", "read-folder"],
-    hint: "always",
-    hidden: true,
   },
   {
     id: "capture-markdown-highlights",
@@ -145,7 +87,7 @@ export const COMMAND_TABLE: CommandSpec[] = [
   },
 ];
 
-/** The commands Obsidian registers: everything but the chat-only ones. */
+/** The commands Obsidian registers: everything but the quiz-panel-only ones. */
 export function paletteCommands<T extends Pick<CommandSpec, "hidden">>(table: T[]): T[] {
   return table.filter((c) => !c.hidden);
 }

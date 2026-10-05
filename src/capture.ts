@@ -15,13 +15,9 @@ import {
   normalizeWs,
   splitFrontmatter,
 } from "./util";
-import { describeError } from "./llm";
-import type { Manifest, ManifestHighlight } from "./manifest";
-import { renderRowInstruction } from "./topicNote";
-import { renderPdfSubpath } from "./pdflink";
 import { missTitle, renderMissInstruction, type QuizMiss } from "./quiz";
-import { buildAskRow, resolveUnitSource, type UnitSource } from "./askCapture";
-import type { EvidenceUnit } from "./retrieval";
+import { resolveUnitSource, type UnitSource } from "./unitSource";
+import type { EvidenceUnit } from "./pageIndex";
 
 function stripMarks(s: string): string {
   return s.replace(/==/g, "");
@@ -170,13 +166,12 @@ export async function captureMarkdownHighlights(plugin: WikiLmPlugin, file: TFil
 interface LocatedSpan {
   start: number;
   end: number;
-  title?: string;
 }
 
 /**
  * Turn located character spans of a note's body into highlights: build the
  * records, mark the spans in the live note text (src/util.ts markQuotes), and
- * queue card writing. Shared by AI highlighting and reading-view capture.
+ * queue card writing. Used by reading-view capture.
  */
 async function captureSpans(
   plugin: WikiLmPlugin,
@@ -208,16 +203,15 @@ async function captureSpans(
         after: stripMarks(ctx.after),
         line: lineOf(raw, offset + l.start),
         heading: headingAbove(body, l.start),
-        title: l.title ?? "",
         instruction,
         origin,
       }),
     });
   }
 
-  // Marked in the live text: an AI pick arrives after a model call that can
-  // take minutes, and anything the reader typed meanwhile must survive. Each
-  // quote is found again in that text; one no longer there stays unmarked.
+  // Marked in the live text, so anything the reader typed since the note was
+  // read survives. Each quote is found again in that text; one no longer there
+  // stays unmarked.
   const mode = plugin.settings.markMode;
   if (mode !== "none" && created.length) {
     const quotes = created.map(({ span: l }) => ({ text: body.slice(l.start, l.end), start: l.start, end: l.end }));
@@ -321,105 +315,9 @@ export function capturePdfSelection(
 }
 
 /**
- * "highlight" operation: let the model choose spans, verify each one is really
- * in the note, mark it, and queue card writing. Fire-and-forget.
- */
-export function aiHighlightNote(plugin: WikiLmPlugin, file: TFile, instruction = ""): void {
-  const transcript = plugin.store.getTranscript(file.path)?.text ?? null;
-  new Notice(transcript !== null ? "WikiLM: choosing highlights from the transcript in the background…" : "WikiLM: choosing highlights in the background…");
-  void (async () => {
-    try {
-      const raw = await plugin.app.vault.read(file);
-      const { body } = splitFrontmatter(raw);
-      if (body.trim().length < 40) {
-        new Notice("WikiLM: note is too short to highlight.");
-        return;
-      }
-      const picks = await plugin.llm.highlight(basenameNoExt(file.path), body, instruction, transcript);
-      const located: LocatedSpan[] = [];
-      let missed = 0;
-      for (const p of picks) {
-        const loc = locateQuote(body, p.quote);
-        if (!loc) {
-          missed++;
-          continue;
-        }
-        if (located.some((l) => loc.start < l.end && loc.end > l.start)) continue;
-        located.push({ ...loc, title: p.title });
-      }
-      const { created, skipped } = await captureSpans(plugin, file, raw, located, "ai", instruction);
-      const bits = [`${created.length} highlight${created.length === 1 ? "" : "s"} queued`];
-      if (skipped) bits.push(`${skipped} already in inbox`);
-      if (missed) bits.push(`${missed} could not be located`);
-      new Notice(`WikiLM: ${bits.join(", ")}.`);
-    } catch (e) {
-      console.error("WikiLM: AI highlight failed", e);
-      new Notice(`WikiLM: highlighting failed. ${describeError(e)}`);
-    }
-  })();
-}
-
-/**
- * Queue every manifest highlight as an inbox highlight, so the 0.4.0 writer /
- * critique / linter chain turns it into cards. This is the "flashcards" and
- * "both" product of a digest run: the same shape `capturePdfSelection` (:276)
- * builds for a live PDF selection, with the manifest's own context and the
- * PDF++ subpath so the inbox's source link opens the exact highlight
- * (`src/inboxView.ts` `openSource`).
- */
-export function captureManifestHighlights(
-  plugin: WikiLmPlugin,
-  manifest: Manifest,
-  items: ManifestHighlight[],
-  noteTitle: string,
-  topicPath: string | null,
-): { added: number; skipped: number } {
-  let added = 0;
-  let skipped = 0;
-  for (const item of items) {
-    const text = item.text.trim();
-    // A row a page of the class already states is knowledge the reader has
-    // on a page already, and a card for it would be a near-twin of one they
-    // may hold; the planner flagged it, and it is not carded here.
-    if (text.length < 3 || item.covered) {
-      skipped++;
-      continue;
-    }
-    if (plugin.store.hasDuplicate(manifest.pdfPath, normalizeWs(text))) {
-      skipped++;
-      continue;
-    }
-    const h = makeHighlight({
-      sourcePath: manifest.pdfPath,
-      sourceTitle: basenameNoExt(manifest.pdfPath),
-      text,
-      before: item.before,
-      after: item.after,
-      line: 0,
-      page: item.page,
-      heading: `page ${item.page}`,
-      title: noteTitle,
-      subpath: renderPdfSubpath(item.target),
-      topicPath: topicPath ?? undefined,
-      origin: "pdf",
-      // A row the digest wrote carries its passage and label: the card is a
-      // view of the note, so the writer is told what the page says about this
-      // highlight (src/topicNote.ts renderRowInstruction). A raw manifest row
-      // — the flashcards-only product — carries nothing extra.
-      instruction: item.verbatim !== undefined || item.passage ? renderRowInstruction(item, noteTitle) : "",
-    });
-    plugin.store.add(h);
-    plugin.generator.enqueue(h);
-    added++;
-  }
-  new Notice(`WikiLM: ${added} highlight${added === 1 ? "" : "s"} queued as flashcards${skipped ? `, ${skipped} skipped` : ""}.`);
-  return { added, skipped };
-}
-
-/**
  * Where a row built from one evidence unit points: the PDF++ selection when
- * the unit's PDF resolves from its note, the note otherwise
- * (src/askCapture.ts resolveUnitSource). Shared by quiz misses and Ask answers.
+ * the unit's PDF resolves from its page, the page otherwise
+ * (src/unitSource.ts resolveUnitSource).
  */
 function pdfSourceFor(plugin: WikiLmPlugin, unit: EvidenceUnit): UnitSource {
   return resolveUnitSource(unit, (pdfBasename, notePath) => pdfDest(plugin, pdfBasename, notePath));
@@ -436,9 +334,8 @@ function pdfDest(plugin: WikiLmPlugin, pdfBasename: string, notePath: string): {
  * per-highlight instruction (src/quiz.ts renderMissInstruction), so the card
  * tests the fact the reader missed rather than whichever fact in the passage
  * the writer would have chosen on its own. A PDF-backed unit resolves back to
- * the PDF file (so the inbox opens the exact PDF++ highlight, as
- * `captureManifestHighlights` does above); otherwise the note itself is the
- * source.
+ * the PDF file, so the inbox opens the exact PDF++ highlight. Otherwise the
+ * wiki page itself is the source.
  *
  * Shows no Notice: the caller reports the result once. When nothing was
  * added, `reason` says why. `skipped` counts every miss not queued;
@@ -459,7 +356,6 @@ export function captureQuizMisses(
       skipped++;
       continue;
     }
-    // The quiz row does not set `topicPath` (it never has), so that field of the lookup is dropped.
     const { sourcePath, page, heading, subpath } = pdfSourceFor(plugin, unit);
     if (plugin.store.hasDuplicate(sourcePath, normalizeWs(text))) {
       skipped++;
@@ -494,51 +390,4 @@ export function captureQuizMisses(
           ? "too short to card."
           : `${duplicates} already in the inbox, ${skipped - duplicates} too short to card.`;
   return { added, skipped, duplicates, reason };
-}
-
-/**
- * Queue a chat answer as one inbox highlight: the answer itself, with the
- * passages it rested on under it, so the card writer works from the whole
- * answer and not from one passage at a time (by design).
- * The question is the item's title and, with what each source contributed,
- * the writer's instruction. The row is built by `buildAskRow`
- * (src/askCapture.ts): the source is the first passage's PDF page when it has
- * one, else its note; a general-knowledge answer links `fallbackSourcePath`
- * and says in its instruction that it is unverified.
- *
- * Shows no Notice: the caller reports the result once.
- */
-export function captureAskAnswer(
-  plugin: WikiLmPlugin,
-  args: {
-    question: string;
-    answer: string;
-    cited: Array<{ unit: EvidenceUnit; why: string }>;
-    generalKnowledge: boolean;
-    fallbackSourcePath?: string;
-  },
-): { status: "added" | "duplicate" | "skipped"; reason?: string } {
-  const row = buildAskRow({ ...args, resolvePdf: (pdfBasename, notePath) => pdfDest(plugin, pdfBasename, notePath) });
-  if ("reason" in row) return { status: "skipped", reason: row.reason };
-  if (plugin.store.hasDuplicate(row.sourcePath, normalizeWs(row.text))) {
-    return { status: "duplicate", reason: "this answer is already in the inbox." };
-  }
-  const h = makeHighlight({
-    sourcePath: row.sourcePath,
-    sourceTitle: basenameNoExt(row.sourcePath),
-    text: row.text,
-    before: "",
-    after: "",
-    line: row.line,
-    page: row.page,
-    heading: row.heading,
-    title: row.title,
-    instruction: row.instruction,
-    subpath: row.subpath,
-    topicPath: row.topicPath,
-    origin: "ask",
-  });
-  plugin.store.add(h);
-  plugin.generator.enqueue(h);
-  return { status: "added" };
 }

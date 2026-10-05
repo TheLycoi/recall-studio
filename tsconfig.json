@@ -16,10 +16,7 @@
     "inlineSources": true,
     "lib": ["DOM", "ES2022"],
     "types": ["node"],
-    "resolveJsonModule": true,
-    "paths": {
-      "@llm-wiki/*": ["./.types/llm-wiki/*"]
-    }
+    "resolveJsonModule": true
   },
   "include": ["src/**/*.ts"]
 }

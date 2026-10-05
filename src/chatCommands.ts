@@ -149,7 +149,7 @@ function chatOnlyLine(): string {
   // The part of the name after a colon says what the command does; a name
   // with no colon already is that sentence.
   const what = (name: string) => (name.includes(":") ? name.slice(name.indexOf(":") + 1) : name).trim().toLowerCase();
-  return `- chat only: ${hidden.map((c) => `**${c.aliases[0]}** (${what(c.name)})`).join(", ")}`;
+  return `- quiz panel only: ${hidden.map((c) => `**${c.aliases[0]}** (${what(c.name)})`).join(", ")}`;
 }
 
 /** What the box understands, one phrase per line. Shown for "help". */

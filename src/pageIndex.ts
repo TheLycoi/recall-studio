@@ -24,8 +24,7 @@ export interface EvidenceUnit {
   /**
    * The heading path the passage sits under, below the note's title:
    * "Motivational interviewing › Elicit-provide-elicit". "" for the lead
-   * before the first heading. Set only for prose-indexed notes; the quiz
-   * groups a note's passages by it, and Ask ignores it.
+   * before the first heading. The quiz groups a page's passages by it.
    */
   section?: string;
 }
@@ -50,14 +49,13 @@ function raw(md: string): string {
 const LINK_ONLY = /^(?:\s*>)*\s*(?:[-*+]|\d+[.)])?\s*(?:!?\[\[[^\]]+\]\]|\[[^\]]*\]\([^)]*\))\s*$/;
 
 /**
- * Evidence from an unstructured note: each prose line becomes a unit, so a
- * hand-written note is searchable by the same ranking as a digested one.
+ * Evidence from a page: each prose line of a page becomes a unit.
  *
  * Headings, image embeds and fenced code are skipped — a heading is a label
  * rather than a statement, and an embed carries no text to quote. List markers
  * and leading numbers are stripped so the text reads as a sentence, and a
  * line's PDF link (when it has one) is kept as the unit's target, which is
- * what lets an answer cite back to the page it came from.
+ * what lets a missed question's inbox row point back to the PDF page.
  */
 function proseUnits(path: string, noteTitle: string, body: string, classCodes: string[]): EvidenceUnit[] {
   const out: EvidenceUnit[] = [];
@@ -65,7 +63,7 @@ function proseUnits(path: string, noteTitle: string, body: string, classCodes: s
   let i = 0;
   // The PDF link from the callout header above, carried down to the quoted
   // lines inside it: the quote is the evidence, but the page it cites is
-  // written on the header, and an answer is only useful if it can point there.
+  // written on the header, and an inbox row is only useful if it can point there.
   let calloutTarget: { target: PdfTarget; pdfBasename: string } | null = null;
 
   // The heading path above the current line, from `##` down; the note's `#`
@@ -147,7 +145,7 @@ function proseUnits(path: string, noteTitle: string, body: string, classCodes: s
 /** Every quiz unit of one page. The title is the page's `# ` heading, or its file name. */
 export function indexPage(path: string, md: string): EvidenceUnit[] {
   const body = raw(md);
-  const h1 = /^#\s+(.+?)\s*$/m.exec(body);
+  const h1 = /^#[ \t]+(.+?)[ \t]*$/m.exec(body);
   return proseUnits(path, h1 ? h1[1].trim() : basenameNoExt(path), body, []);
 }
 
@@ -192,8 +190,8 @@ function firstPdfTarget(line: string): { target: PdfTarget; pdfBasename: string 
 /**
  * A prose line as a readable statement: list and quote markers off the front,
  * wikilinks reduced to their display text, and bold/italic/mark syntax
- * dropped. The words are left otherwise intact, because quote verification in
- * src/askCheck.ts matches the model's quotes against this text.
+ * dropped. The words are left otherwise intact, so a quiz answer can be
+ * checked against them.
  */
 function cleanProse(line: string): string {
   return stripMarks(line)
@@ -243,7 +241,7 @@ export function significantTokens(text: string): string[] {
 }
 
 /**
- * The scorer `rankEvidence` ranks a question's evidence with.
+ * The scorer the quiz ranks a subject's pool with.
  *
  * Given the corpus, a question's words are weighted by how rare they are in
  * it. Counting shared words treated every word alike, so a term the notes use

@@ -1,7 +1,7 @@
 // Run with: npm test. Bundles src/store.ts, the inbox store, through the same
 // esbuild options the plugin build uses. `obsidian` is replaced by a stub
-// whose Notice records its message; the vault is the in-memory one in
-// test/memoryVault.mjs. Each test is a way the store could write over the
+// whose Notice records its message; the vault is the small in-memory one
+// below, with only the adapter calls the store makes. Each test is a way the store could write over the
 // reader's inbox: after a read that threw, after the plugin unloaded, and an
 // older snapshot landing after a newer one.
 import { test, before, after } from "node:test";
@@ -13,7 +13,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { sharedBuildOptions } from "../scripts/esbuild-shared.mjs";
-import { memoryVault } from "./memoryVault.mjs";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const INBOX = "wiki/_schema/inbox.json";
@@ -49,7 +48,7 @@ before(async () => {
   await build({
     ...shared,
     stdin: {
-      contents: ['export * from "./src/store.ts";', 'export { TFile, TFolder, notices } from "obsidian";'].join("\n"),
+      contents: ['export * from "./src/store.ts";', 'export { notices } from "obsidian";'].join("\n"),
       resolveDir: ROOT,
       sourcefile: "store-probe.ts",
       loader: "ts",
@@ -57,7 +56,7 @@ before(async () => {
     outfile: out,
     logLevel: "error",
     external: shared.external.filter((e) => e !== "obsidian"),
-    plugins: [obsidianStub(), ...shared.plugins],
+    plugins: [obsidianStub()],
   });
   s = createRequire(import.meta.url)(out);
 });
@@ -66,9 +65,44 @@ after(() => {
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
+/**
+ * The vault adapter as far as src/store.ts reaches it (obsidian.d.ts
+ * DataAdapter): exists, mkdir, read, write and rename, over one map of files.
+ */
+function memoryVault(initial) {
+  const files = new Map(Object.entries(initial));
+  const dirs = new Set();
+  const parentOf = (p) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "");
+  const addDirs = (p) => {
+    for (let d = parentOf(p); d; d = parentOf(d)) dirs.add(d);
+  };
+  for (const p of files.keys()) addDirs(p);
+  const adapter = {
+    exists: async (p) => files.has(p) || dirs.has(p),
+    mkdir: async (p) => {
+      dirs.add(p);
+      addDirs(p);
+    },
+    read: async (p) => {
+      if (!files.has(p)) throw new Error(`ENOENT: ${p}`);
+      return files.get(p);
+    },
+    write: async (p, data) => {
+      files.set(p, data);
+      addDirs(p);
+    },
+    rename: async (p, to) => {
+      files.set(to, files.get(p));
+      files.delete(p);
+      addDirs(to);
+    },
+  };
+  return { files, app: { vault: { adapter } } };
+}
+
 /** A memory vault holding a real inbox, with every adapter write counted. */
 function vaultWithInbox() {
-  const v = memoryVault({ [INBOX]: REAL }, s);
+  const v = memoryVault({ [INBOX]: REAL });
   const writes = [];
   const write = v.app.vault.adapter.write;
   v.app.vault.adapter.write = async (p, data) => {

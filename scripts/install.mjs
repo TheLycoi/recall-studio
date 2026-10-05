@@ -1,6 +1,6 @@
-// Copies the built plugin and its licence notices into the vault's
-// .obsidian/plugins/wikilm folder. Nothing else in that folder is touched:
-// data.json there holds the reader's settings and keys.
+// Copies the built plugin into the vault's .obsidian/plugins/wikilm folder.
+// Nothing else in that folder is touched: data.json there holds the reader's
+// settings and keys.
 // Usage: node scripts/install.mjs <vault-path>   (or set WIKILM_VAULT)
 import fs from "node:fs";
 import path from "node:path";
@@ -8,16 +8,12 @@ import { fileURLToPath } from "node:url";
 
 /**
  * What is installed, relative to the repository root, and the name it takes in
- * the plugin folder. The notices travel with main.js because main.js contains
- * code compiled from the vendored Apache-2.0 project.
+ * the plugin folder.
  */
 export const INSTALLED_FILES = [
   { from: "main.js", to: "main.js" },
   { from: "manifest.json", to: "manifest.json" },
   { from: "styles.css", to: "styles.css" },
-  { from: "NOTICE", to: "NOTICE" },
-  { from: "LICENSE-APACHE-2.0.txt", to: "LICENSE-APACHE-2.0.txt" },
-  { from: "vendor/llm-wiki/NOTICE", to: "NOTICE-llm-wiki" },
 ];
 
 /**
