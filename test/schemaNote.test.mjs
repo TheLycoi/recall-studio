@@ -23,6 +23,7 @@ test("the default schema carries today's date", () => {
   const md = s.renderDefaultSchema(opts);
   assert.match(md, /^---\nversion: 1\nupdated: 2026-09-19\nlearned_count: 0\n---\n/);
   assert.match(md, /^# WikiLM Schema Configuration$/m);
+  assert.ok(md.includes("These are your rules for the cards Recall writes."));
 });
 
 test("the rules note has no wiki sections", () => {
@@ -139,7 +140,7 @@ test("the empty suggestions file explains itself", () => {
   assert.ok(!md.startsWith("---\n"), "no frontmatter");
   assert.match(md, /^# WikiLM Schema Suggestions$/m);
   assert.match(md, /^> .+$/m);
-  assert.ok(md.includes("schema/wikilm.md"));
+  assert.ok(md.includes("Recall/recall-rules.md"));
   assert.deepEqual(s.parseProposals(md), []);
 });
 
@@ -148,7 +149,7 @@ test("the suggestions file points at the reader's own schema path", () => {
   // accept a rule by hand has to name the file they actually have.
   const md = s.renderEmptySuggestions("study/rules/wikilm.md");
   assert.ok(md.includes("`study/rules/wikilm.md`"), "names the configured schema note");
-  assert.ok(!md.includes("schema/wikilm.md"), "and does not also name the default one");
+  assert.ok(!md.includes("Recall/recall-rules.md"), "and does not also name the default one");
 });
 
 const p1 = {

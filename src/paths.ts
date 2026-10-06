@@ -2,8 +2,9 @@
  * Where things live by default.
  *
  * The wiki folder belongs to the wiki plugin, and Recall only reads it. So
- * the two things Recall writes to the vault, the card rules note and the Anki
- * text exports, default to a folder of Recall's own.
+ * the three kinds of file Recall writes to the vault, the card rules note,
+ * the inbox and rule suggestions, and the Anki text exports, default to a
+ * folder of Recall's own.
  *
  * Pure: no `obsidian` import (test/paths.test.mjs bundles it standalone).
  */

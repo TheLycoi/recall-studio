@@ -3,14 +3,17 @@
  * file beside it.
  *
  * WikiLM's prompts are the plugin's; this file is the reader's. Its sections
- * are read before each model call and injected as house rules, so a rule the
- * reader writes here ("answers in German", "never cloze a date") reaches the
- * model without anyone editing `src/llm.ts`. Deleting a rule from the note is
- * how it stops applying — there is no second copy of it anywhere.
+ * are read before each card it writes and injected as house rules, so a rule
+ * the reader writes here ("answers in German", "never cloze a date") reaches
+ * the model without anyone editing `src/llm.ts`. Deleting a rule from the
+ * note is how it stops applying — there is no second copy of it anywhere.
  *
  * Pure on purpose, like `src/examples.ts`: no `obsidian` import, so
  * `test/schemaNote.test.mjs` can bundle it standalone with esbuild. Another
  * module does the reading and writing of the file.
+ *
+ * Modelled on gd4ai/obsidian-llm-wiki's wiki/schema/config.md (Apache-2.0):
+ * the idea of a reader-owned config note. The text here is our own.
  */
 
 export interface SchemaSection {
@@ -47,7 +50,7 @@ learned_count: 0
 
 # WikiLM Schema Configuration
 
-These are your rules for the cards Recall writes. Recall reads this note before every card it writes. Every section below is read before each model call and handed to the model as your house rules, so a rule you write here applies from the next run onward — no setting to find, no code to edit. Delete a rule and it stops applying; delete a whole section and nothing from it is sent. The sections are yours to rewrite in your own words.
+These are your rules for the cards Recall writes. Recall reads this note before every card it writes. Every section below is read before each card it writes and handed to the model as your house rules, so a rule you write here applies from the next run onward — no setting to find, no code to edit. Delete a rule and it stops applying; delete a whole section and nothing from it is sent. The sections are yours to rewrite in your own words.
 
 ## Card Templates
 
@@ -227,7 +230,7 @@ export interface Proposal {
  * hardcoded path would send them to a file their vault does not have. The
  * default is the default setting's path, for a caller with nothing better.
  */
-export function renderEmptySuggestions(schemaPath = "schema/wikilm.md"): string {
+export function renderEmptySuggestions(schemaPath = "Recall/recall-rules.md"): string {
   return `# WikiLM Schema Suggestions
 
 > These are rules WikiLM noticed in your own edits to its cards. None of them is in force. Accept one by copying its rule into a section of \`${schemaPath}\`, or dismiss it; either way the entry stays here so the same observation is not proposed to you twice.

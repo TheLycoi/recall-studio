@@ -22,6 +22,8 @@ export interface WikiLmSettings {
   writerInstructions: string;
   concurrency: number;
   notifyWhenReady: boolean;
+  /** Recall's own folder: the card rules note, the inbox, and the rule suggestions note. Keep it outside the wiki folder. */
+  schemaFolder: string;
 
   // Capture
   /** Off by default: capture sends passages to the inbox without editing the note. */
@@ -50,8 +52,6 @@ export interface WikiLmSettings {
   // Quiz
   /** The wiki plugin's folder; the quiz reads the pages in it and Recall never changes them. */
   topicFolder: string;
-  /** Recall's own folder, for the card rules note. Keep it outside the wiki folder. */
-  schemaFolder: string;
   /**
    * A runaway guard, not a target: the quiz ends when it brackets the edge of
    * what the reader knows. This only stops a session that never gets there.
@@ -88,6 +88,7 @@ export const DEFAULT_SETTINGS: WikiLmSettings = {
   writerInstructions: "",
   concurrency: 2,
   notifyWhenReady: true,
+  schemaFolder: DEFAULT_RULES_FOLDER,
 
   markMode: "none",
   openInboxOnCapture: false,
@@ -109,7 +110,6 @@ export const DEFAULT_SETTINGS: WikiLmSettings = {
   exportFolder: DEFAULT_EXPORT_FOLDER,
 
   topicFolder: DEFAULT_WIKI_FOLDER,
-  schemaFolder: DEFAULT_RULES_FOLDER,
   quizCap: 30,
   quizPoolSize: 20,
   quizInstructions: "",
@@ -285,6 +285,18 @@ export class WikiLmSettingTab extends PluginSettingTab {
         });
       });
 
+    new Setting(containerEl)
+      .setName("Recall folder")
+      .setDesc(
+        "Where Recall keeps its own files: the card rules note, your inbox, and the rule suggestions. Keep it outside the wiki folder. Reload Recall after you change it.",
+      )
+      .addText((t) =>
+        t.setValue(s.schemaFolder).onChange((v) => {
+          s.schemaFolder = v.trim() || DEFAULT_SETTINGS.schemaFolder;
+          save();
+        }),
+      );
+
     new Setting(containerEl).setName("Card quality").setHeading();
 
     new Setting(containerEl)
@@ -426,16 +438,6 @@ export class WikiLmSettingTab extends PluginSettingTab {
         t.setValue(s.topicFolder).onChange((v) => {
           s.topicFolder = v.trim() || DEFAULT_SETTINGS.topicFolder;
           void this.plugin.saveSettings();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Card rules folder")
-      .setDesc("Where Recall keeps the note that holds your card rules. Keep it outside the wiki folder.")
-      .addText((t) =>
-        t.setValue(s.schemaFolder).onChange((v) => {
-          s.schemaFolder = v.trim() || DEFAULT_SETTINGS.schemaFolder;
-          save();
         }),
       );
 

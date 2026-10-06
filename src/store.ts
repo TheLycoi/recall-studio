@@ -12,11 +12,11 @@ function timestamp(d: Date): string {
 type Listener = () => void;
 
 /**
- * Persistent inbox. Lives in the wiki's schema folder as inbox.json, beside
- * the house rules, so everything the plugin keeps for the reader sits in one
- * vault folder (by design) and syncs with it. Earlier versions kept it in
- * the plugin folder; that file is moved in on first load. Writes are
- * debounced.
+ * Persistent inbox. Lives in the Recall folder (the card rules folder
+ * setting) as inbox.json, beside the house rules, so everything the plugin
+ * keeps for the reader sits in one vault folder (by design) and syncs with
+ * it. Earlier versions kept it in the plugin folder; that file is moved in
+ * on first load. Writes are debounced.
  */
 export class InboxStore {
   private data: InboxData = emptyInbox();
