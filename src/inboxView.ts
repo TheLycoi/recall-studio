@@ -1,20 +1,20 @@
 import { ItemView, MarkdownView, Menu, Notice, TFile, WorkspaceLeaf, setIcon } from "obsidian";
-import type WikiLmPlugin from "./main";
+import type RecallPlugin from "./main";
 import {
-  WIKILM_ADD_ICON,
-  WIKILM_CHEVRON_DOWN_ICON,
-  WIKILM_CHEVRON_RIGHT_ICON,
-  WIKILM_CLOZE_ICON,
-  WIKILM_DISCARD_ICON,
-  WIKILM_EDIT_ICON,
-  WIKILM_FILE_ICON,
-  WIKILM_ICON,
-  WIKILM_MORE_ICON,
-  WIKILM_QA_ICON,
-  WIKILM_RETRY_ICON,
-  WIKILM_SEND_ICON,
-  WIKILM_SPARK_ICON,
-  WIKILM_STACK_ICON,
+  RECALL_ADD_ICON,
+  RECALL_CHEVRON_DOWN_ICON,
+  RECALL_CHEVRON_RIGHT_ICON,
+  RECALL_CLOZE_ICON,
+  RECALL_DISCARD_ICON,
+  RECALL_EDIT_ICON,
+  RECALL_FILE_ICON,
+  RECALL_ICON,
+  RECALL_MORE_ICON,
+  RECALL_QA_ICON,
+  RECALL_RETRY_ICON,
+  RECALL_SEND_ICON,
+  RECALL_SPARK_ICON,
+  RECALL_STACK_ICON,
 } from "./icon";
 import { isPdfHighlight, liveCards, makeCard, pendingCards, type Card, type CardSnapshot, type Highlight } from "./model";
 import { askInstruction, SchemaSuggestionsModal } from "./modals";
@@ -24,7 +24,7 @@ import { findCrossInterference, lintCard, LINT_FIX_INSTRUCTIONS, LINT_LABELS, wr
 import { DEFAULT_SETTINGS } from "./settings";
 import { QuizPanel } from "./quizPanel";
 
-export const VIEW_TYPE_INBOX = "wikilm-notebook";
+export const VIEW_TYPE_INBOX = "recall-inbox";
 
 type Filter = "review" | "all" | "exported";
 
@@ -73,7 +73,7 @@ export class InboxView extends ItemView {
 
   constructor(
     leaf: WorkspaceLeaf,
-    private plugin: WikiLmPlugin,
+    private plugin: RecallPlugin,
   ) {
     super(leaf);
   }
@@ -82,10 +82,10 @@ export class InboxView extends ItemView {
     return VIEW_TYPE_INBOX;
   }
   getDisplayText(): string {
-    return "WikiLM inbox";
+    return "Recall inbox";
   }
   getIcon(): string {
-    return WIKILM_ICON;
+    return RECALL_ICON;
   }
 
   async onOpen(): Promise<void> {
@@ -198,7 +198,7 @@ export class InboxView extends ItemView {
       empty.createEl("p", { text: this.filter === "review" ? "Nothing to review." : "Nothing here." });
       empty.createEl("p", {
                 cls: "wikilm-muted",
-        text: "Turn on highlighter mode (ribbon pen) and drag across a passage in a note or PDF, or select text and run “WikiLM: Send selection to inbox”. Cards are written in the background and show up here.",
+        text: "Turn on highlighter mode (ribbon pen) and drag across a passage in a note or PDF, or select text and run “Recall: Send selection to inbox”. Cards are written in the background and show up here.",
       });
       return;
     }
@@ -304,7 +304,7 @@ export class InboxView extends ItemView {
     });
 
     const deckBtn = right.createEl("button", { cls: "wikilm-deck-btn" });
-    setIcon(deckBtn.createSpan(), WIKILM_STACK_ICON);
+    setIcon(deckBtn.createSpan(), RECALL_STACK_ICON);
     // "Default" is the settings fallback, not a deck the reader picked, so it
     // reads as though a choice has been made when none has. Naming the action
     // instead makes the button say what it does until there is a real deck to
@@ -328,7 +328,7 @@ export class InboxView extends ItemView {
         cls: "wikilm-schema-chip",
         text: `${suggestions} schema suggestion${suggestions === 1 ? "" : "s"}`,
       });
-      chip.title = "Rules WikiLM noticed in your own edits, waiting for your decision";
+      chip.title = "Rules Recall noticed in your own edits, waiting for your decision";
       chip.addEventListener("click", () => {
         new SchemaSuggestionsModal(this.plugin.app, this.plugin.schema, () => this.scheduleRender()).open();
       });
@@ -339,28 +339,28 @@ export class InboxView extends ItemView {
     exportAll.addEventListener("click", () => void this.exportHighlights(this.visibleHighlights()));
 
     const more = right.createEl("button", { cls: "clickable-icon wikilm-icon-btn" });
-    setIcon(more, WIKILM_MORE_ICON);
+    setIcon(more, RECALL_MORE_ICON);
     more.addEventListener("click", (evt) => {
       const menu = new Menu();
       menu.addItem((i) =>
         i
           .setTitle("Retry failed highlights")
-          .setIcon(WIKILM_RETRY_ICON)
+          .setIcon(RECALL_RETRY_ICON)
           .onClick(() => this.retryFailedHighlights()),
       );
       menu.addItem((i) =>
         i
           .setTitle("Export reviewed as Anki text file")
-          .setIcon(WIKILM_FILE_ICON)
+          .setIcon(RECALL_FILE_ICON)
           .onClick(() => void this.plugin.exportAsTextFile(this.visibleHighlights())),
       );
       menu.addItem((i) =>
         i
           .setTitle("Clear exported and dismissed")
-          .setIcon(WIKILM_DISCARD_ICON)
+          .setIcon(RECALL_DISCARD_ICON)
           .onClick(() => {
             const n = this.plugin.store.clearExported();
-            new Notice(`WikiLM: cleared ${n}.`);
+            new Notice(`Recall: cleared ${n}.`);
           }),
       );
       menu.addItem((i) =>
@@ -382,7 +382,7 @@ export class InboxView extends ItemView {
     const section = root.createDiv({ cls: "wikilm-source" });
     const head = section.createDiv({ cls: "wikilm-source-head" });
     const toggle = head.createSpan({ cls: "wikilm-collapse" });
-    setIcon(toggle, this.collapsed.has(path) ? WIKILM_CHEVRON_RIGHT_ICON : WIKILM_CHEVRON_DOWN_ICON);
+    setIcon(toggle, this.collapsed.has(path) ? RECALL_CHEVRON_RIGHT_ICON : RECALL_CHEVRON_DOWN_ICON);
     toggle.addEventListener("click", () => {
       if (this.collapsed.has(path)) this.collapsed.delete(path);
       else this.collapsed.add(path);
@@ -475,11 +475,11 @@ export class InboxView extends ItemView {
       return b;
     };
     if (h.status === "ready" && pendingCards(h).length) {
-      iconBtn(WIKILM_SEND_ICON, "Export this highlight's cards to Anki (Enter)", () => void this.exportHighlights([h]));
+      iconBtn(RECALL_SEND_ICON, "Export this highlight's cards to Anki (Enter)", () => void this.exportHighlights([h]));
     }
-    if (h.status === "error") iconBtn(WIKILM_RETRY_ICON, "Retry", () => this.plugin.generator.enqueue(h));
+    if (h.status === "error") iconBtn(RECALL_RETRY_ICON, "Retry", () => this.plugin.generator.enqueue(h));
     if (h.status === "ready" || h.status === "exported") {
-      iconBtn(WIKILM_SPARK_ICON, "Write more cards for this highlight", async () => {
+      iconBtn(RECALL_SPARK_ICON, "Write more cards for this highlight", async () => {
         const inst = await askInstruction(this.plugin.app, "More cards", "Optional: what should the extra cards cover?");
         if (inst === null) return;
         // For this run only: h.instruction keeps the Ask or quiz-miss
@@ -487,7 +487,7 @@ export class InboxView extends ItemView {
         this.plugin.generator.more(h, inst);
       });
     }
-    iconBtn(WIKILM_ADD_ICON, "Add a card by hand", () => {
+    iconBtn(RECALL_ADD_ICON, "Add a card by hand", () => {
       const c = makeCard(h.id, { kind: "qa", front: "", back: "" });
       h.cards.push(c);
       if (h.status === "exported") h.status = "ready";
@@ -495,12 +495,12 @@ export class InboxView extends ItemView {
       this.plugin.store.touch();
     });
     if (h.status !== "dismissed") {
-      iconBtn(WIKILM_DISCARD_ICON, "Dismiss highlight and its cards", () => {
+      iconBtn(RECALL_DISCARD_ICON, "Dismiss highlight and its cards", () => {
         h.status = "dismissed";
         this.plugin.store.touch();
       });
     } else {
-      iconBtn(WIKILM_DISCARD_ICON, "Delete permanently", () => this.plugin.store.remove(h.id));
+      iconBtn(RECALL_DISCARD_ICON, "Delete permanently", () => this.plugin.store.remove(h.id));
     }
 
     // Right column: the cards.
@@ -521,7 +521,7 @@ export class InboxView extends ItemView {
       const flagged = cards.filter((c) => c.status === "flagged");
       const expanded = this.expandedFlagged.has(h.id);
       const toggle = right.createEl("button", { cls: "wikilm-flagged-toggle" });
-      setIcon(toggle.createSpan(), expanded ? WIKILM_CHEVRON_DOWN_ICON : WIKILM_CHEVRON_RIGHT_ICON);
+      setIcon(toggle.createSpan(), expanded ? RECALL_CHEVRON_DOWN_ICON : RECALL_CHEVRON_RIGHT_ICON);
       toggle.createSpan({ text: `${flagged.length} flagged` });
       toggle.title = expanded ? "Hide the flagged cards" : "Show the cards the linter or critique flagged";
       toggle.addEventListener("click", () => {
@@ -605,7 +605,7 @@ export class InboxView extends ItemView {
     // able to edit or bin a card the critique objected to, not just re-run the
     // fix. Only the export path treats flagged differently (main.ts pendingItems).
     if (c.status === "pending" || c.status === "flagged") {
-      btn(WIKILM_EDIT_ICON, "Edit (e)", () => {
+      btn(RECALL_EDIT_ICON, "Edit (e)", () => {
         this.editing = this.editing === c.id ? null : c.id;
         this.render();
       });
@@ -615,19 +615,19 @@ export class InboxView extends ItemView {
       // critique. Typing your own instruction is still available on a card
       // with notes, one icon along, and is the star's only job without them.
       if (this.lintNotes(c)) {
-        btn(WIKILM_SPARK_ICON, this.fixTooltip(c), () => void this.rewrite(h, c, this.lintInstruction(c)));
+        btn(RECALL_SPARK_ICON, this.fixTooltip(c), () => void this.rewrite(h, c, this.lintInstruction(c)));
         // Retry, not the check: the check reads as "accept", which is the one
         // thing this button does not do.
-        btn(WIKILM_RETRY_ICON, "Rewrite with your own instruction", () => void this.rewrite(h, c));
+        btn(RECALL_RETRY_ICON, "Rewrite with your own instruction", () => void this.rewrite(h, c));
       } else {
-        btn(WIKILM_SPARK_ICON, "Rewrite with an instruction", () => void this.rewrite(h, c));
+        btn(RECALL_SPARK_ICON, "Rewrite with an instruction", () => void this.rewrite(h, c));
       }
-      btn(c.kind === "qa" ? WIKILM_CLOZE_ICON : WIKILM_QA_ICON, c.kind === "qa" ? "Convert to cloze" : "Convert to Q&A", () =>
+      btn(c.kind === "qa" ? RECALL_CLOZE_ICON : RECALL_QA_ICON, c.kind === "qa" ? "Convert to cloze" : "Convert to Q&A", () =>
         void this.rewrite(h, c, c.kind === "qa" ? "Convert this Q&A card into a cloze card." : "Convert this cloze card into a question and answer card."),
       );
-      btn(WIKILM_DISCARD_ICON, "Delete (x)", () => this.deleteCard(h, c));
+      btn(RECALL_DISCARD_ICON, "Delete (x)", () => this.deleteCard(h, c));
     } else if (c.status === "duplicate") {
-      btn(WIKILM_DISCARD_ICON, "Remove", () => this.deleteCard(h, c));
+      btn(RECALL_DISCARD_ICON, "Remove", () => this.deleteCard(h, c));
     }
 
     if (this.editing === c.id) {
@@ -722,7 +722,7 @@ export class InboxView extends ItemView {
     const check = async (btn: HTMLButtonElement) => {
       const d = draft();
       if (d.kind === "qa" ? !d.front || !d.back : !d.text) {
-        new Notice("WikiLM: nothing to check yet.");
+        new Notice("Recall: nothing to check yet.");
         return;
       }
       const siblings = h.cards.filter((x) => x.id !== c.id && x.status !== "deleted");
@@ -788,7 +788,7 @@ export class InboxView extends ItemView {
       c.extra = extra.value.trim();
       const empty = c.kind === "qa" ? !c.front || !c.back : !c.text;
       if (empty) {
-        new Notice("WikiLM: empty card discarded.");
+        new Notice("Recall: empty card discarded.");
         c.status = "deleted";
       } else if (JSON.stringify([c.kind, c.front, c.back, c.text, c.extra]) !== before) {
         c.edited = true;
@@ -922,7 +922,7 @@ export class InboxView extends ItemView {
   private async rewrite(h: Highlight, c: Card, preset?: string): Promise<void> {
     const instruction = preset ?? (await askInstruction(this.plugin.app, "Rewrite card", "e.g. make the answer shorter, ask about the date instead"));
     if (!instruction) return;
-    const notice = new Notice("WikiLM: rewriting…", 0);
+    const notice = new Notice("Recall: rewriting…", 0);
     const was = snapshot(c);
     try {
       const d = await this.plugin.llm.rewriteCard({ ...h, text: plainText(h.text) }, c, instruction);
@@ -958,7 +958,7 @@ export class InboxView extends ItemView {
         await this.learnFromEdits();
       }
     } catch (e) {
-      new Notice(`WikiLM: ${describeError(e)}`);
+      new Notice(`Recall: ${describeError(e)}`);
     } finally {
       notice.hide();
     }
@@ -976,13 +976,13 @@ export class InboxView extends ItemView {
     try {
       const n = await this.plugin.schema.learn(new Date().toISOString().slice(0, 10));
       if (n > 0) {
-        new Notice(`WikiLM: ${n} new schema suggestion${n === 1 ? "" : "s"} — see the inbox header.`);
+        new Notice(`Recall: ${n} new schema suggestion${n === 1 ? "" : "s"} — see the inbox header.`);
         this.render();
       }
     } catch (e) {
       // Learning is a nicety on top of an edit that already succeeded; a
       // failure here must not look to the reader like the edit failed.
-      console.error("WikiLM: could not write a schema suggestion", e);
+      console.error("Recall: could not write a schema suggestion", e);
     }
   }
 
@@ -1022,7 +1022,7 @@ export class InboxView extends ItemView {
           return;
         }
       } catch (e) {
-        console.error("WikiLM: could not re-locate the highlight", e);
+        console.error("Recall: could not re-locate the highlight", e);
       }
     }
     const line = Math.min(h.line, editor.lineCount() - 1);

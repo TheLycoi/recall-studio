@@ -18,7 +18,7 @@
  */
 
 import { TFile, TFolder, normalizePath } from "obsidian";
-import type WikiLmPlugin from "./main";
+import type RecallPlugin from "./main";
 import { observe } from "./preferences";
 import {
   appendLearnedRule,
@@ -54,14 +54,14 @@ export class SchemaFile {
   /** Set once the folder has proved uncreatable, so the console gets one line rather than one per call. */
   private folderFailed = false;
 
-  constructor(private plugin: WikiLmPlugin) {}
+  constructor(private plugin: RecallPlugin) {}
 
   schemaPath(): string {
     return normalizePath(`${this.plugin.settings.schemaFolder}/recall-rules.md`);
   }
 
   suggestionsPath(): string {
-    return normalizePath(`${this.plugin.settings.schemaFolder}/wikilm-suggestions.md`);
+    return normalizePath(`${this.plugin.settings.schemaFolder}/recall-suggestions.md`);
   }
 
   /**
@@ -108,7 +108,7 @@ export class SchemaFile {
       // on the next highlight and the one after that.
       if (!this.folderFailed) {
         this.folderFailed = true;
-        console.error("WikiLM: could not read the schema note; house rules are not being applied", e);
+        console.error("Recall: could not read the schema note; house rules are not being applied", e);
       }
       return null;
     }
@@ -124,7 +124,7 @@ export class SchemaFile {
     try {
       this.lastProposals = parseProposals(await this.plugin.app.vault.cachedRead(file));
     } catch (e) {
-      console.error("WikiLM: could not read the schema suggestions", e);
+      console.error("Recall: could not read the schema suggestions", e);
       this.lastProposals = [];
     }
     return this.lastProposals;

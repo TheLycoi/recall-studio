@@ -5,7 +5,6 @@
  * `safeParse` a pasted JSON object can bundle a file with no backend and no
  * class to construct. This file imports nothing but zod, so
  * `test/prompt.test.mjs` bundles it the same way it bundles `src/prompt.ts`.
- * llm.ts re-exports both schemas, so callers keep importing them from there.
  *
  * Serialized strictly (`z.toJSONSchema` in src/codex.ts:150), which means
  * every field is required: no `.optional()`, no `.default()`, no `z.record`,

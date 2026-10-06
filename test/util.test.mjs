@@ -289,7 +289,7 @@ test("transcriptRecord normalizes, cuts to the limit, and records where the guid
 });
 
 // Review High 3: two spans on one line used to come out as
-// "==Alpha beta== gamma delta epsilon zeta. ^wikilm-id2eta. ^wikilm-id1".
+// "==Alpha beta== gamma delta epsilon zeta. ^recall-id2eta. ^recall-id1".
 test("markSpans: two spans on one line share one block id, placed once at the line's end", () => {
   const body = "Alpha beta gamma delta epsilon zeta.";
   const a = body.indexOf("Alpha beta");
@@ -302,11 +302,11 @@ test("markSpans: two spans on one line share one block id, placed once at the li
     ],
     "highlight+block",
   );
-  assert.match(text, /^==Alpha beta== gamma ==delta== epsilon zeta\. \^wikilm-[a-z0-9]+$/);
-  const id = text.match(/\^(wikilm-[a-z0-9]+)$/)[1];
+  assert.match(text, /^==Alpha beta== gamma ==delta== epsilon zeta\. \^recall-[a-z0-9]+$/);
+  const id = text.match(/\^(recall-[a-z0-9]+)$/)[1];
   assert.equal(blockIds.get(0), id);
   assert.equal(blockIds.get(1), id);
-  assert.equal(text.match(/\^wikilm-/g).length, 1);
+  assert.equal(text.match(/\^recall-/g).length, 1);
 });
 
 test("markSpans: a line that already ends in a block id gets no second id", () => {
@@ -326,7 +326,7 @@ test("markSpans: spans on two lines get two ids, and highlight mode adds none", 
     { start: f, end: f + 5 },
   ];
   const { text, blockIds } = u.markSpans(body, spans, "highlight+block");
-  const m = /^==First== line here\. \^(wikilm-[a-z0-9]+)\n==Second== line here\. \^(wikilm-[a-z0-9]+)$/.exec(text);
+  const m = /^==First== line here\. \^(recall-[a-z0-9]+)\n==Second== line here\. \^(recall-[a-z0-9]+)$/.exec(text);
   assert.ok(m, text);
   assert.notEqual(m[1], m[2]);
   assert.equal(blockIds.get(1), m[1]);
@@ -347,6 +347,6 @@ test("markQuotes: a quote missing from the live text leaves the text unchanged",
 test("markQuotes: a quote that moved in the live text is found and marked where it now is", () => {
   const live = "---\ntags: [x]\n---\nA new first line typed meanwhile.\nAlpha beta gamma.";
   const { text, blockIds } = u.markQuotes(live, [{ text: "Alpha beta", start: 0, end: 10 }], "highlight+block");
-  assert.match(text, /^---\ntags: \[x\]\n---\nA new first line typed meanwhile\.\n==Alpha beta== gamma\. \^wikilm-[a-z0-9]+$/);
-  assert.equal(blockIds.get(0), text.match(/\^(wikilm-[a-z0-9]+)$/)[1]);
+  assert.match(text, /^---\ntags: \[x\]\n---\nA new first line typed meanwhile\.\n==Alpha beta== gamma\. \^recall-[a-z0-9]+$/);
+  assert.equal(blockIds.get(0), text.match(/\^(recall-[a-z0-9]+)$/)[1]);
 });

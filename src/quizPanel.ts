@@ -1,10 +1,10 @@
 import { ItemView, MarkdownRenderer, Notice, parseFrontMatterAliases, TAbstractFile, TFile } from "obsidian";
-import type WikiLmPlugin from "./main";
+import type RecallPlugin from "./main";
 import { describeError } from "./llm";
 import { indexPage, questionScorer, type EvidenceUnit } from "./pageIndex";
 import { isQuizPage, noteSource } from "./quizPages";
 import { matchIntent, renderHelp, type Intent, type IntentContext, type IntentPage, type Target } from "./chatCommands";
-import { WIKILM_COMMANDS, type WikiLmCommand } from "./commands";
+import { RECALL_COMMANDS, type RecallCommand } from "./commands";
 import { captureQuizMisses } from "./capture";
 import { isDontKnow, parseQuizCommand, type QuizMiss, type QuizScope, type Verdict } from "./quiz";
 import {
@@ -121,7 +121,7 @@ export class QuizPanel {
   private pageMeta: IntentPage[] = [];
 
   constructor(
-    private plugin: WikiLmPlugin,
+    private plugin: RecallPlugin,
     private view: ItemView,
   ) {}
 
@@ -188,7 +188,7 @@ export class QuizPanel {
   }
 
   private intentContext(): IntentContext {
-    return { pages: this.pageMeta, commands: WIKILM_COMMANDS };
+    return { pages: this.pageMeta, commands: RECALL_COMMANDS };
   }
 
   /** Keep the log bounded: the newest `MAX_TURNS` turns. */
@@ -386,7 +386,7 @@ export class QuizPanel {
    * not fill the log with pairs.
    */
   private async runCommand(id: string): Promise<void> {
-    const command: WikiLmCommand | undefined = WIKILM_COMMANDS.find((c) => c.id === id);
+    const command: RecallCommand | undefined = RECALL_COMMANDS.find((c) => c.id === id);
     if (!command) {
       this.pushSystem(`No command matches “${id}”. Say help.`);
       return;
@@ -539,7 +539,7 @@ export class QuizPanel {
             failure,
           });
         } catch (e) {
-          console.debug("[wikilm] quiz question failed, using the heading question:", e);
+          console.debug("[recall] quiz question failed, using the heading question:", e);
           break;
         }
         const check = checkQuestion(draft, item);

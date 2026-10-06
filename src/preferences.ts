@@ -84,7 +84,7 @@ function renderEdit(r: CardRevision): string {
  * person and applied by a model exactly as written, and both of them count
  * "words" the way anyone counts words: split on whitespace, nothing dropped.
  * A count that stemmed and dropped stopwords and short words, as
- * `significantTokens` (src/retrieval.ts:354) does for scoring evidence,
+ * `significantTokens` (src/pageIndex.ts) does for scoring evidence,
  * would silently disagree with that reading. "in the cell membrane" is four
  * words to a reader and to a model; counted as significant tokens it is two
  * ("cell", "membrane"), so the rule would say "at most 2 words" and push the

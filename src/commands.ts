@@ -11,20 +11,20 @@
 // main.ts only leaves them out of the palette.
 
 import { Notice } from "obsidian";
-import type WikiLmPlugin from "./main";
+import type RecallPlugin from "./main";
 import { COMMAND_TABLE, type CommandSpec } from "./commandTable";
 import { captureMarkdownHighlights, capturePdfSelection, captureReadingSelection, captureSelection } from "./capture";
 import { isPdfFile, readPdfSelection } from "./pdf";
 import { askInstruction, SchemaSuggestionsModal } from "./modals";
 
-export interface WikiLmCommand extends CommandSpec {
+export interface RecallCommand extends CommandSpec {
   /** True when the command can run right now; the palette hides it otherwise. */
-  available(plugin: WikiLmPlugin): boolean;
+  available(plugin: RecallPlugin): boolean;
   /** Performs the command. Callers use `void` or `await`; errors surface as Notices. */
-  run(plugin: WikiLmPlugin): Promise<void> | void;
+  run(plugin: RecallPlugin): Promise<void> | void;
 }
 
-type Implementation = Pick<WikiLmCommand, "available" | "run">;
+type Implementation = Pick<RecallCommand, "available" | "run">;
 
 const INSTRUCTION_TITLE = "Instructions for this highlight";
 const INSTRUCTION_PLACEHOLDER = "e.g. one cloze on the number; cards in Dutch; focus on the mechanism";
@@ -39,7 +39,7 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
       const file = p.app.workspace.getActiveFile();
       if (isPdfFile(file)) {
         const sel = readPdfSelection(activeWindow);
-        if (!sel) new Notice("WikiLM: select text inside a PDF page first.");
+        if (!sel) new Notice("Recall: select text inside a PDF page first.");
         else capturePdfSelection(p, file, sel);
         return;
       }
@@ -60,7 +60,7 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
       if (isPdfFile(file)) {
         const sel = readPdfSelection(activeWindow);
         if (!sel) {
-          new Notice("WikiLM: select text inside a PDF page first.");
+          new Notice("Recall: select text inside a PDF page first.");
           return;
         }
         const inst = await askInstruction(p.app, INSTRUCTION_TITLE, INSTRUCTION_PLACEHOLDER);
@@ -72,7 +72,7 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
       if (view.getMode() === "preview") {
         const text = activeWindow.getSelection()?.toString().trim() ?? "";
         if (!text) {
-          new Notice("WikiLM: select text in the note first.");
+          new Notice("Recall: select text in the note first.");
           return;
         }
         const inst = await askInstruction(p.app, INSTRUCTION_TITLE, INSTRUCTION_PLACEHOLDER);
@@ -112,7 +112,7 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
     run: (p) => {
       let n = 0;
       for (const h of p.store.all()) if (h.status === "error") (p.generator.enqueue(h), n++);
-      new Notice(`WikiLM: retrying ${n}.`);
+      new Notice(`Recall: retrying ${n}.`);
     },
   },
   "open-schema": {
@@ -137,10 +137,10 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
 // command that throws when run; an implementation with no spec would never be
 // registered at all. Both are programming errors, so fail loudly at import.
 for (const spec of COMMAND_TABLE) {
-  if (!IMPLEMENTATIONS[spec.id]) throw new Error(`WikiLM: command "${spec.id}" has no implementation.`);
+  if (!IMPLEMENTATIONS[spec.id]) throw new Error(`Recall: command "${spec.id}" has no implementation.`);
 }
 for (const id of Object.keys(IMPLEMENTATIONS)) {
-  if (!COMMAND_TABLE.some((spec) => spec.id === id)) throw new Error(`WikiLM: implementation "${id}" has no command spec.`);
+  if (!COMMAND_TABLE.some((spec) => spec.id === id)) throw new Error(`Recall: implementation "${id}" has no command spec.`);
 }
 
-export const WIKILM_COMMANDS: WikiLmCommand[] = COMMAND_TABLE.map((spec) => ({ ...spec, ...IMPLEMENTATIONS[spec.id] }));
+export const RECALL_COMMANDS: RecallCommand[] = COMMAND_TABLE.map((spec) => ({ ...spec, ...IMPLEMENTATIONS[spec.id] }));

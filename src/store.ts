@@ -63,14 +63,14 @@ export class InboxStore {
     if (dir && !(await adapter.exists(dir))) await adapter.mkdir(dir);
     if (!this.legacyPath || (await adapter.exists(this.path)) || !(await adapter.exists(this.legacyPath))) return;
     await adapter.rename(this.legacyPath, this.path);
-    console.debug(`WikiLM: inbox moved from the plugin folder to ${this.path}`);
+    console.debug(`Recall: inbox moved from the plugin folder to ${this.path}`);
   }
 
   async load(): Promise<void> {
     try {
       await this.migrate();
     } catch (e) {
-      console.error("WikiLM: could not move the inbox into the schema folder", e);
+      console.error("Recall: could not move the inbox into the schema folder", e);
     }
     try {
       if (await this.app.vault.adapter.exists(this.path)) {
@@ -85,17 +85,17 @@ export class InboxStore {
           const moved = `${this.path}.corrupt-${timestamp(new Date())}`;
           try {
             await this.app.vault.adapter.rename(this.path, moved);
-            console.error(`WikiLM: inbox.json could not be read; moved to ${moved}`, parsed.detail);
+            console.error(`Recall: inbox.json could not be read; moved to ${moved}`, parsed.detail);
             const basename = moved.split("/").pop() ?? moved;
             new Notice(
-              `WikiLM: inbox.json was unreadable and has been moved to ${basename}. The inbox starts empty; the old file is kept.`,
+              `Recall: inbox.json was unreadable and has been moved to ${basename}. The inbox starts empty; the old file is kept.`,
               0,
             );
           } catch (renameError) {
             // Couldn't even move it aside — leave it in place, untouched,
             // and never schedule a write, or the next save would clobber
             // the one copy of the reader's inbox that still exists on disk.
-            console.error("WikiLM: inbox.json is unreadable and could not be moved aside", renameError);
+            console.error("Recall: inbox.json is unreadable and could not be moved aside", renameError);
             this.readOnly = true;
           }
         }
@@ -104,9 +104,9 @@ export class InboxStore {
       // The file may be there and simply unreadable right now (evicted by
       // iCloud, locked by a sync). Writing would put an empty inbox over it,
       // so nothing is saved until the plugin is loaded again.
-      console.error("WikiLM: failed to read inbox.json", e);
+      console.error("Recall: failed to read inbox.json", e);
       this.readOnly = true;
-      new Notice("WikiLM: inbox.json could not be read; the inbox is read-only until Obsidian is restarted.");
+      new Notice("Recall: inbox.json could not be read; the inbox is read-only until Obsidian is restarted.");
     }
     // Anything interrupted mid-generation goes back to the queue.
     for (const h of this.data.highlights) if (h.status === "generating") h.status = "queued";
@@ -129,7 +129,7 @@ export class InboxStore {
       try {
         await this.app.vault.adapter.write(this.path, snapshot);
       } catch (e) {
-        console.error("WikiLM: failed to write inbox.json", e);
+        console.error("Recall: failed to write inbox.json", e);
       }
     });
     await this.flushing;

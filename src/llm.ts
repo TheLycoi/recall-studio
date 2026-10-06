@@ -6,7 +6,7 @@ import type { QuizQuestionMessageArgs, QuizRecallGradeMessageArgs } from "./prom
 import { buildQuizQuestionMessage, buildQuizRecallGradeMessage } from "./prompt";
 import { QuizQuestionOut as QuizQuestionOutSchema, QuizRecallGradeOut as QuizRecallGradeOutSchema } from "./schemas";
 import type { QuizQuestionDraft, QuizRecallGradeDraft } from "./schemas";
-import type { WikiLmSettings } from "./settings";
+import type { RecallSettings } from "./settings";
 
 const CardOut = z.object({
   kind: z.enum(["qa", "cloze"]).describe("qa for a question with a short answer; cloze for one sentence with hidden spans"),
@@ -26,9 +26,10 @@ export type CardDraft = z.infer<typeof CardOut>;
  * One verdict per drafted card, from the critique pass.
  *
  * Flat and strict on purpose: the Codex backend writes this schema to
- * `--output-schema` (src/codex.ts:366), which runs strict and rejects unions
- * and optional fields, so `front`/`back`/`text` are sentinel empty strings
- * rather than optionals, exactly as `CardOut` above does it.
+ * `--output-schema` (`toStrictSchema` in src/codex.ts), which runs strict
+ * and rejects unions and optional fields, so `front`/`back`/`text` are
+ * sentinel empty strings rather than optionals, exactly as `CardOut` above
+ * does it.
  *
  * The `bloom` members must stay identical to `BloomLevel` in src/model.ts;
  * `bloomLevelsInSync` below is the compile-time guard on that.
@@ -199,7 +200,7 @@ Before returning, run both litmus tests on each card and check it against the hi
  * all of them in a single call so sibling interference is visible.
  *
  * Adapted from an earlier version of this plugin's prompts/critique-v1.md,
- * which is cloze-only and assumes a Back Extra field WikiLM does not have.
+ * which is cloze-only and assumes a Back Extra field Recall does not have.
  * Carried over from it:
  * the rule that a revision may only use facts the passage states, and the
  * preference for dropping over a fix that stretches past the text. New here:
@@ -302,7 +303,7 @@ export class LlmClient {
    * one-argument construction, and the tests, keep working.
    */
   constructor(
-    private getSettings: () => WikiLmSettings,
+    private getSettings: () => RecallSettings,
     private getHighlights: () => Highlight[] = () => [],
     private getSchema: () => Promise<{ cards: string } | null> = async () => null,
   ) {
@@ -521,7 +522,7 @@ export function describeError(e: unknown): string {
  * remember" cue with this on 2026-10-03.
  *
  * The design follows ideas from amosblomqvist/learn's teaching skill, in
- * WikiLM's own words and with none of its text: every question has a definite
+ * Recall's own words and with none of its text: every question has a definite
  * answer; the ground is asked before what is built on it; a fact is held in
  * place by its reason, so the harder levels ask why and how things connect;
  * and the level follows the reader, which src/recall.ts computes and this
@@ -675,8 +676,3 @@ You are a grader, not a teacher. You mark what was produced and point at what wa
 </example>
 
 Before you return, check that every numbered point has one mark, that every said is copied from the answer exactly, that no hint states its point, and that your feedback says nothing the points do not.`;
-
-/** The quiz schemas are defined in schemas.ts so tests can bundle them without obsidian; re-exported here so callers have one import. */
-export { QuizQuestionOut, QuizRecallGradeOut } from "./schemas";
-export type { QuizQuestionDraft, QuizRecallGradeDraft } from "./schemas";
-export type { QuizQuestionMessageArgs, QuizRecallGradeMessageArgs } from "./prompt";

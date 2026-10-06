@@ -282,7 +282,7 @@ export function markSpans(
       let id = TRAILING_BLOCK_ID.exec(lineText)?.[1];
       if (!id) {
         if (!group.some((g) => g.wrapped)) continue;
-        id = group.find((g) => g.blockId)?.blockId ?? `wikilm-${newId()}`;
+        id = group.find((g) => g.blockId)?.blockId ?? `recall-${newId()}`;
         inserts.push({ at: eol, rank: 2, text: ` ^${id}` });
       }
       for (const g of group) blockIds.set(g.i, id);

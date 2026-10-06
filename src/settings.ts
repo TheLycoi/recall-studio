@@ -1,13 +1,13 @@
 import { CODEX_FALLBACK_MODELS, modelOptions } from "./modelRoles";
 import { App, Notice, PluginSettingTab, Setting, ButtonComponent } from "obsidian";
-import type WikiLmPlugin from "./main";
+import type RecallPlugin from "./main";
 import { DEFAULT_EXPORT_FOLDER, DEFAULT_RULES_FOLDER, DEFAULT_WIKI_FOLDER } from "./paths";
 
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 export type MarkMode = "none" | "highlight" | "highlight+block";
 export type LintMode = "badge" | "hide" | "drop";
 
-export interface WikiLmSettings {
+export interface RecallSettings {
   // LLM
   /** Absolute path to the codex binary; empty = auto-detect (PATH, then the ChatGPT app bundle). */
   codexPath: string;
@@ -77,7 +77,7 @@ export interface WikiLmSettings {
 
 const CUSTOM_MODEL = "__custom__";
 
-export const DEFAULT_SETTINGS: WikiLmSettings = {
+export const DEFAULT_SETTINGS: RecallSettings = {
   codexPath: "",
   codexModel: "gpt-5.5",
   knownModels: [],
@@ -104,7 +104,7 @@ export const DEFAULT_SETTINGS: WikiLmSettings = {
   clozeModel: "Cloze",
   clozeTextField: "Text",
   clozeExtraField: "Back Extra",
-  extraTags: "wikilm",
+  extraTags: "recall",
   includeSourceTag: true,
   includeExtra: true,
   exportFolder: DEFAULT_EXPORT_FOLDER,
@@ -122,10 +122,10 @@ export const DEFAULT_SETTINGS: WikiLmSettings = {
   schemaLearning: true,
 };
 
-export class WikiLmSettingTab extends PluginSettingTab {
+export class RecallSettingTab extends PluginSettingTab {
   constructor(
     app: App,
-    private plugin: WikiLmPlugin,
+    private plugin: RecallPlugin,
   ) {
     super(app, plugin);
   }
@@ -150,9 +150,9 @@ export class WikiLmSettingTab extends PluginSettingTab {
       } catch (e) {
         listed = ` Could not list models: ${(e as Error).message}`;
       }
-      new Notice(`WikiLM: ${r.model} answered (${r.via}).${listed}`, 8000);
+      new Notice(`Recall: ${r.model} answered (${r.via}).${listed}`, 8000);
     } catch (e) {
-      new Notice(`WikiLM: ${(e as Error).message}`, 8000);
+      new Notice(`Recall: ${(e as Error).message}`, 8000);
     } finally {
       b.setDisabled(false);
     }
@@ -188,34 +188,32 @@ export class WikiLmSettingTab extends PluginSettingTab {
     // A model dropdown: what the last Test found, the value in use, and the
     // known names, plus "Other…" for an id the list lacks.
     {
-      const name = "Codex model";
-      const desc = "Model slug passed to codex exec. gpt-5.5 is the lightest on your usage limit; gpt-5.6-luna and gpt-5.6-terra are newer and heavier.";
-      const get = () => s.codexModel;
-      const set = (v: string) => (s.codexModel = v || DEFAULT_SETTINGS.codexModel);
-      const options = modelOptions(s.knownModels, get(), CODEX_FALLBACK_MODELS);
-      const known = s.knownModels?.length ?? 0;
+      const options = modelOptions(s.knownModels, s.codexModel, CODEX_FALLBACK_MODELS);
+      const known = s.knownModels.length;
       const custom = new Setting(containerEl)
-        .setName(`${name}: type an id`)
+        .setName("Codex model: type an id")
         .setDesc("For a model the list does not show.")
         .addText((t) =>
           t.setPlaceholder("model id").onChange((v) => {
             if (!v.trim()) return;
-            set(v.trim());
+            s.codexModel = v.trim() || DEFAULT_SETTINGS.codexModel;
             save();
           }),
         );
       const row = new Setting(containerEl)
-        .setName(name)
-        .setDesc(`${desc} ${known > 0 ? `${known} model${known === 1 ? "" : "s"} listed by the last Test.` : "Click Test to load the list."}`)
+        .setName("Codex model")
+        .setDesc(
+          `Model slug passed to codex exec. gpt-5.5 is the lightest on your usage limit; gpt-5.6-luna and gpt-5.6-terra are newer and heavier. ${known > 0 ? `${known} model${known === 1 ? "" : "s"} listed by the last Test.` : "Click Test to load the list."}`,
+        )
         .addDropdown((d) => {
           for (const m of options) d.addOption(m, m);
           d.addOption(CUSTOM_MODEL, "Other…");
-          d.setValue(get()).onChange((v) => {
+          d.setValue(s.codexModel).onChange((v) => {
             if (v === CUSTOM_MODEL) {
               custom.settingEl.show();
               return;
             }
-            set(v);
+            s.codexModel = v || DEFAULT_SETTINGS.codexModel;
             save();
           });
         });
@@ -345,7 +343,7 @@ export class WikiLmSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Propose schema rules from my edits")
       .setDesc(
-        "When the same correction shows up in three or four of your card edits, WikiLM writes a proposed rule to `wikilm-suggestions.md` and shows a chip in the inbox. Nothing enters the schema until you accept it.",
+        "When the same correction shows up in three or four of your card edits, Recall writes a proposed rule to `recall-suggestions.md` and shows a chip in the inbox. Nothing enters the schema until you accept it.",
       )
       .addToggle((t) =>
         t.setValue(s.schemaLearning).onChange((v) => {
@@ -407,7 +405,7 @@ export class WikiLmSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Mark captured text in the note")
       .setDesc(
-        "Off by default — WikiLM sends passages to the inbox without editing your notes. Marking wraps the passage in ==…==, which can break headings and list formatting when a passage spans more than one line. Leave this off when you capture from wiki pages, so Recall does not edit them.",
+        "Off by default — Recall sends passages to the inbox without editing your notes. Marking wraps the passage in ==…==, which can break headings and list formatting when a passage spans more than one line. Leave this off when you capture from wiki pages, so Recall does not edit them.",
       )
       .addDropdown((d) =>
         d
@@ -522,14 +520,14 @@ export class WikiLmSettingTab extends PluginSettingTab {
           try {
             await this.plugin.detectNoteTypes();
             this.display();
-            new Notice("WikiLM: note types detected.");
+            new Notice("Recall: note types detected.");
           } catch (e) {
-            new Notice(`WikiLM: ${(e as Error).message}`);
+            new Notice(`Recall: ${(e as Error).message}`);
           }
         }),
       );
 
-    const field = (name: string, key: keyof WikiLmSettings, desc = "") =>
+    const field = (name: string, key: keyof RecallSettings, desc = "") =>
       new Setting(containerEl)
         .setName(name)
         .setDesc(desc)

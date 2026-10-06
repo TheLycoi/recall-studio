@@ -1,9 +1,9 @@
 import { FileView, MarkdownView, Notice, WorkspaceWindow } from "obsidian";
-import type WikiLmPlugin from "./main";
+import type RecallPlugin from "./main";
 import { captureReadingSelection, capturePdfSelection, captureSelection } from "./capture";
 import { isPdfFile, readPdfSelection } from "./pdf";
 import { normalizeWs } from "./util";
-import { WIKILM_HIGHLIGHT_ICON } from "./icon";
+import { RECALL_HIGHLIGHT_ICON } from "./icon";
 
 /**
  * Highlighter mode: pick up the pen, drag across a passage, and it is
@@ -30,11 +30,11 @@ export class Highlighter {
   private last: { path: string; text: string } | null = null;
   private busy = false;
 
-  constructor(private plugin: WikiLmPlugin) {}
+  constructor(private plugin: RecallPlugin) {}
 
   install(): void {
     const p = this.plugin;
-    this.ribbon = p.addRibbonIcon(WIKILM_HIGHLIGHT_ICON, "WikiLM highlighter mode", () => void this.toggle());
+    this.ribbon = p.addRibbonIcon(RECALL_HIGHLIGHT_ICON, "Recall highlighter mode", () => void this.toggle());
     this.reflect();
     p.addCommand({ id: "toggle-highlighter", name: "Toggle highlighter mode", callback: () => void this.toggle() });
 
@@ -50,12 +50,12 @@ export class Highlighter {
     this.plugin.settings.highlighterMode = on;
     await this.plugin.saveSettings();
     this.reflect();
-    new Notice(`WikiLM: highlighter ${on ? "on. Drag across a passage to send it to the inbox." : "off."}`);
+    new Notice(`Recall: highlighter ${on ? "on. Drag across a passage to send it to the inbox." : "off."}`);
   }
 
   reflect(): void {
     this.ribbon?.toggleClass("wikilm-highlighter-on", this.enabled);
-    this.ribbon?.setAttribute("aria-label", `WikiLM highlighter mode (${this.enabled ? "on" : "off"})`);
+    this.ribbon?.setAttribute("aria-label", `Recall highlighter mode (${this.enabled ? "on" : "off"})`);
     document.body.toggleClass("wikilm-highlighter-active", this.enabled);
     this.plugin.refreshStatusBar();
   }
@@ -108,7 +108,7 @@ export class Highlighter {
         win.getSelection()?.removeAllRanges();
       }
     } catch (e) {
-      console.error("WikiLM: highlighter capture failed", e);
+      console.error("Recall: highlighter capture failed", e);
     } finally {
       this.busy = false;
     }

@@ -9,9 +9,9 @@
 // <example> out of the writer prompt, and runs each card through lintCard
 // with its siblings, expecting no failures and no warnings.
 //
-// llm.ts is read as text rather than imported because it pulls in the
-// Anthropic SDK and the backends, which reach `obsidian`; lint.ts is bundled
-// standalone the same way test/lint.test.mjs does it.
+// llm.ts is read as text rather than imported because it pulls in the Codex
+// backend, which spawns a child process; lint.ts is bundled standalone the
+// same way test/lint.test.mjs does it.
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";

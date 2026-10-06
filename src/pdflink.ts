@@ -24,8 +24,7 @@ export interface PdfReference {
    * callout): the rest of the link's line, then every line beneath it up to
    * the next heading or the next line holding a PDF++ link, blank lines
    * dropped, markup kept. Null for a callout reference and when nothing is
-   * there. This is what a class note holds under each slide link, and it is
-   * what the digest reads alongside the highlight itself.
+   * there. This is what a class note holds under each slide link.
    */
   notes: string | null;
   /** The nearest heading at or above a bare link, as it reads; null for a callout reference. */

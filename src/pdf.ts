@@ -6,7 +6,7 @@ import type { App, TFile } from "obsidian";
  * every page as div.page[data-page-number] with a .textLayer of spans, so a
  * DOM selection inside it already carries the text, the page, and the whole
  * page's text for context. No PDF parsing library is needed, which is why
- * WikiLM can read PDFs without the load-time hazards an earlier version of
+ * Recall can read PDFs without the load-time hazards an earlier version of
  * this plugin had to dodge.
  */
 export interface PdfSelection {
@@ -55,9 +55,9 @@ export function pdfsLinkedFrom(app: App, note: TFile): TFile[] {
  * `Vault.readBinary` gives the bytes (obsidian.d.ts:7426).
  *
  * The returned document holds a worker and page caches, so **callers must
- * call `doc.destroy()` in a `finally`** — see collectPdfHighlights in
- * src/pdfHighlights.ts. Typed `any` because pdf.js ships no types here; keep
- * the untyped surface as small as possible around the call site.
+ * call `doc.destroy()` in a `finally`**. Typed `any` because pdf.js ships no
+ * types here; keep the untyped surface as small as possible around the call
+ * site.
  */
 export async function loadPdfDocument(app: App, file: TFile): Promise<any> {
   const pdfjs = await loadPdfJs();

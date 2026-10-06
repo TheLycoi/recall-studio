@@ -1,6 +1,6 @@
 import { Notice } from "obsidian";
 import { plainText } from "./util";
-import type WikiLmPlugin from "./main";
+import type RecallPlugin from "./main";
 import { makeCard, type Card, type Highlight } from "./model";
 import { describeError } from "./llm";
 import { lintCard, type LintResult, demoteSingleCloze } from "./lint";
@@ -17,7 +17,7 @@ export class Generator {
   /** Highlight id -> the extra instruction its next run reads, set by `more()`. Never stored on the highlight. */
   private extra = new Map<string, string>();
 
-  constructor(private plugin: WikiLmPlugin) {}
+  constructor(private plugin: RecallPlugin) {}
 
   start(): void {
     this.stopped = false;
@@ -129,7 +129,7 @@ export class Generator {
           // The critique is an enhancement, never a new failure mode. The
           // drafted cards survive exactly as written, still get linted below,
           // and critiqueRan stays unset so nothing implies they were checked.
-          console.error("WikiLM: critique pass failed, keeping the drafted cards", e);
+          console.error("Recall: critique pass failed, keeping the drafted cards", e);
         }
       }
 
@@ -159,7 +159,7 @@ export class Generator {
       if (this.plugin.settings.notifyWhenReady) {
         const label = h.title || h.text.slice(0, 40);
         const flaggedNote = flagged ? ` (${flagged} flagged)` : "";
-        new Notice(`WikiLM: ${cards.length} card${cards.length === 1 ? "" : "s"} ready${flaggedNote} for “${label}”.`);
+        new Notice(`Recall: ${cards.length} card${cards.length === 1 ? "" : "s"} ready${flaggedNote} for “${label}”.`);
       }
     } catch (e) {
       if (this.stopped) {
@@ -169,7 +169,7 @@ export class Generator {
       } else {
         h.status = "error";
         h.error = describeError(e);
-        console.error("WikiLM: card writing failed", e);
+        console.error("Recall: card writing failed", e);
       }
     }
     this.plugin.store.touch();

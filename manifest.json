@@ -1,9 +1,9 @@
 {
-  "id": "wikilm",
-  "name": "WikiLM",
-  "version": "0.17.0",
+  "id": "recall",
+  "name": "Recall",
+  "version": "0.1.0",
   "minAppVersion": "1.7.2",
-  "description": "Turn your sources into a wiki you can question: highlight-grounded concept and entity pages, a chat that answers only from them, and flashcards pushed to Anki for long-term retention.",
+  "description": "Flashcards from what you highlight, an inbox to review them, export to Anki, and a free-response quiz on your wiki pages. Runs on the Codex CLI with your ChatGPT sign-in.",
   "author": "Conrad Kelonu",
   "authorUrl": "https://github.com/TheLycoi",
   "isDesktopOnly": true

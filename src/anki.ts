@@ -1,6 +1,6 @@
 import { requestUrl } from "obsidian";
 import type { Card, Highlight } from "./model";
-import type { WikiLmSettings } from "./settings";
+import type { RecallSettings } from "./settings";
 import { ankiTag, basenameNoExt, escapeHtml, inlineMarkdownToHtml, slugify, plainText } from "./util";
 
 export interface AnkiNote {
@@ -61,7 +61,7 @@ export class AnkiClient {
 }
 
 export interface ExportContext {
-  settings: WikiLmSettings;
+  settings: RecallSettings;
   vaultName: string;
   deck: string;
 }
@@ -73,7 +73,7 @@ export function buildExtra(h: Highlight, ctx: ExportContext): string {
   const uri = `obsidian://open?vault=${encodeURIComponent(ctx.vaultName)}&file=${encodeURIComponent(target)}`;
   const where = h.page ? ` › p. ${h.page}` : h.heading ? ` › ${escapeHtml(h.heading)}` : "";
   // An atomic card with only a source link is disconnected trivia; when the
-  // highlight was digested into a topic note, link the card at its concept too.
+  // highlight is linked to a topic note, link the card at its concept too.
   let topic = "";
   if (h.topicPath) {
     const topicNoExt = h.topicPath.replace(/\.md$/i, "");
