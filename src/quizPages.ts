@@ -18,6 +18,7 @@ export function isQuizPage(path: string, wikiFolder: string): boolean {
   const base = (rest.split("/").pop() ?? "").replace(/\.md$/i, "").toLowerCase();
   if (base === "index" || base === "log") return false;
   if (base.startsWith("welcome to ")) return false;
+  if (!rest.includes("/") && base.includes("karpathy llm wiki")) return false;
   return true;
 }
 

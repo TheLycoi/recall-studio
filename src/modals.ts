@@ -133,7 +133,7 @@ export class SchemaSuggestionsModal extends Modal {
   onOpen(): void {
     const { contentEl } = this;
     contentEl.addClass("wikilm-modal");
-    contentEl.createEl("h3", { text: "Schema suggestions" });
+    contentEl.createEl("h3", { text: "Card rule suggestions" });
     void this.renderList();
   }
 
@@ -148,7 +148,7 @@ export class SchemaSuggestionsModal extends Modal {
     this.onChange?.();
 
     const link = list.createEl("p", { cls: "wikilm-muted" });
-    const a = link.createEl("a", { text: "Open schema note", href: "#" });
+    const a = link.createEl("a", { text: "Open the card rules note", href: "#" });
     a.addEventListener("click", (e) => {
       e.preventDefault();
       this.close();
@@ -169,7 +169,7 @@ export class SchemaSuggestionsModal extends Modal {
 
       const input = box.createEl("input", { type: "text", cls: "wikilm-schema-rule" });
       input.value = p.rule;
-      input.placeholder = "The rule as it will be written into the schema";
+      input.placeholder = "The rule as it will be written into the card rules note";
 
       if (p.evidence.length) {
         box.createEl("p", { cls: "wikilm-muted", text: `From ${p.count} edit${p.count === 1 ? "" : "s"}:` });
@@ -184,7 +184,7 @@ export class SchemaSuggestionsModal extends Modal {
         return b
           .setCta()
           .setButtonText("Accept")
-          .setTooltip("Write this rule into the schema note's Learned section")
+          .setTooltip("Write this rule into the card rules note's Learned section")
           .onClick(() => {
             b.setDisabled(true);
             void this.schema.accept(p.id, input.value.trim(), today).then(() => this.renderList());

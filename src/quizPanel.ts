@@ -40,7 +40,7 @@ const NOT_A_QUIZ =
   "This panel runs quizzes. Say **quiz me** for the open note, **quiz me on** a page or a subject, or **quiz me on everything**. To ask the wiki a question, use the wiki plugin's own query.";
 
 /** The most turns the log keeps. Older ones scroll away. */
-const MAX_TURNS = 40;
+const MAX_TURNS = 300;
 
 /**
  * One turn in the quiz log.
@@ -355,7 +355,7 @@ export class QuizPanel {
         const active = this.plugin.app.workspace.getActiveFile();
         if (active && active.extension === "md") await this.startQuiz("this", "", active.path);
         else {
-          this.pushSystem("No note is open, so this quiz covers every page in the wiki folder.");
+          this.pushSystem("No markdown note is open, so this quiz covers every page in the wiki folder.");
           await this.startQuiz("all", "");
         }
         return;

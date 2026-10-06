@@ -12,4 +12,11 @@ export const DEFAULT_WIKI_FOLDER = "wiki";
 export const DEFAULT_RULES_FOLDER = "Recall";
 export const DEFAULT_EXPORT_FOLDER = "Recall/exports";
 
-export { isUnderFolder } from "./util";
+import { isUnderFolder } from "./util";
+
+export { isUnderFolder };
+
+/** May capture write a mark into this file? Never into a page under the wiki folder, whatever the mark mode. */
+export function mayMark(path: string, wikiFolder: string): boolean {
+  return !isUnderFolder(path, wikiFolder);
+}

@@ -326,7 +326,7 @@ export class InboxView extends ItemView {
     if (suggestions > 0) {
       const chip = right.createEl("button", {
         cls: "wikilm-schema-chip",
-        text: `${suggestions} schema suggestion${suggestions === 1 ? "" : "s"}`,
+        text: `${suggestions} card rule suggestion${suggestions === 1 ? "" : "s"}`,
       });
       chip.title = "Rules Recall noticed in your own edits, waiting for your decision";
       chip.addEventListener("click", () => {
@@ -455,8 +455,8 @@ export class InboxView extends ItemView {
     where.setText(
       [
         isPdfHighlight(h) ? "PDF" : h.heading ? `§ ${h.heading}` : null,
-        // An answer carded from Ask sits on no line of its note, so "line 1" would point nowhere.
-        h.page ? `page ${h.page}` : h.origin === "ask" ? null : `line ${h.line + 1}`,
+        // A quiz miss, or an answer carded from Ask in an older row, sits on no line of its note, so "line 1" would point nowhere.
+        h.page ? `page ${h.page}` : h.origin === "ask" || h.origin === "quiz" ? null : `line ${h.line + 1}`,
         ORIGIN_LABELS[h.origin] ?? null,
         fmtDate(h.createdAt),
       ]
@@ -976,7 +976,7 @@ export class InboxView extends ItemView {
     try {
       const n = await this.plugin.schema.learn(new Date().toISOString().slice(0, 10));
       if (n > 0) {
-        new Notice(`Recall: ${n} new schema suggestion${n === 1 ? "" : "s"} — see the inbox header.`);
+        new Notice(`Recall: ${n} new card rule suggestion${n === 1 ? "" : "s"}. See the inbox header.`);
         this.render();
       }
     } catch (e) {

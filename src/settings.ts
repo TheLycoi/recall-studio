@@ -286,7 +286,7 @@ export class RecallSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Recall folder")
       .setDesc(
-        "Where Recall keeps its own files: the card rules note, your inbox, and the rule suggestions. Keep it outside the wiki folder. Reload Recall after you change it.",
+        "Where Recall keeps its own files: the card rules note, your inbox, and the rule suggestions. Keep it outside the wiki folder. Reload Recall after you change it. Files already in the old folder stay there. Move them by hand if you want to keep them.",
       )
       .addText((t) =>
         t.setValue(s.schemaFolder).onChange((v) => {
@@ -341,9 +341,9 @@ export class RecallSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Propose schema rules from my edits")
+      .setName("Propose card rules from my edits")
       .setDesc(
-        "When the same correction shows up in three or four of your card edits, Recall writes a proposed rule to `recall-suggestions.md` and shows a chip in the inbox. Nothing enters the schema until you accept it.",
+        "When the same correction shows up in three or four of your card edits, Recall writes a proposed rule to `recall-suggestions.md` and shows a chip in the inbox. Nothing enters the card rules note until you accept it.",
       )
       .addToggle((t) =>
         t.setValue(s.schemaLearning).onChange((v) => {
@@ -405,7 +405,7 @@ export class RecallSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Mark captured text in the note")
       .setDesc(
-        "Off by default — Recall sends passages to the inbox without editing your notes. Marking wraps the passage in ==…==, which can break headings and list formatting when a passage spans more than one line. Leave this off when you capture from wiki pages, so Recall does not edit them.",
+        "Off by default — Recall sends passages to the inbox without editing your notes. Marking wraps the passage in ==…==, which can break headings and list formatting when a passage spans more than one line. Pages under the wiki folder are never marked.",
       )
       .addDropdown((d) =>
         d
@@ -457,7 +457,7 @@ export class RecallSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Sections per quiz")
-      .setDesc("How many sections a quiz on a class, a subject or everything asks. A single note is always asked whole.")
+      .setDesc("How many sections a quiz on a subject or on everything asks. A single note is always asked whole.")
       .addSlider((sl) =>
         sl
           .setLimits(5, 60, 5)

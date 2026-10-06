@@ -31,3 +31,10 @@ test("isUnderFolder matches whole path segments", () => {
   assert.equal(p.isUnderFolder("wikipedia/x.md", "wiki"), false);
   assert.equal(p.isUnderFolder("Recall/x.md", "wiki/"), false);
 });
+
+test("capture never marks a page under the wiki folder", () => {
+  assert.equal(p.mayMark("wiki/concepts/free-recall.md", "wiki"), false);
+  assert.equal(p.mayMark("wiki/sources/paper.md", "wiki/"), false);
+  assert.equal(p.mayMark("Lectures/week 3.md", "wiki"), true);
+  assert.equal(p.mayMark("wikipedia/x.md", "wiki"), true);
+});

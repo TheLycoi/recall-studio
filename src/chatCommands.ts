@@ -158,7 +158,7 @@ export function renderHelp(): string {
     "- **quiz me**: one question on each section of the open note, answered in a few sentences. **quiz me on Receptors** names a wiki page. **quiz me on everything** covers the whole wiki folder.",
     "- while a quiz runs: **hint**, **skip**, **stop**",
     "- **send to inbox**: after a quiz, turn what you missed into cards. Also **card it**.",
-    "- **export**: send every reviewed card to Anki",
+    "- **export**: send every card in the inbox to Anki, except flagged and discarded ones",
     "- **inbox**: open the inbox",
     chatOnlyLine(),
   ].join("\n");

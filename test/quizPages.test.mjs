@@ -42,3 +42,8 @@ test("quiz me on one open note: where its units come from", () => {
   assert.equal(q.noteSource("wiki/log.md", "wiki"), "none");
   assert.equal(q.noteSource("wiki/schema/config.md", "wiki"), "none");
 });
+
+test("the wiki plugin's welcome note is skipped in any language", () => {
+  assert.equal(q.isQuizPage("wiki/Willkommen bei Karpathy LLM Wiki.md", "wiki"), false);
+  assert.equal(q.isQuizPage("wiki/concepts/Karpathy LLM Wiki.md", "wiki"), true);
+});

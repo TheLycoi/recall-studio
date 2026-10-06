@@ -18,6 +18,7 @@ import {
 import { missTitle, renderMissInstruction, type QuizMiss } from "./quiz";
 import { resolveUnitSource, type UnitSource } from "./unitSource";
 import type { EvidenceUnit } from "./pageIndex";
+import { mayMark } from "./paths";
 
 function stripMarks(s: string): string {
   return s.replace(/==/g, "");
@@ -103,7 +104,7 @@ export async function captureSelection(
   // Mark the span in the note so the reader can see what has been sent.
   // Already-marked spans are left alone: re-dragging one must never produce ====text====.
   const mode = plugin.settings.markMode;
-  if (mode !== "none" && canWrapAsHighlight(sel)) {
+  if (mode !== "none" && mayMark(file.path, plugin.settings.topicFolder) && canWrapAsHighlight(sel)) {
     let replacement = `==${sel}==`;
     if (mode === "highlight+block") {
       const lastLine = editor.getLine(to.line);
@@ -213,7 +214,7 @@ async function captureSpans(
   // read survives. Each quote is found again in that text; one no longer there
   // stays unmarked.
   const mode = plugin.settings.markMode;
-  if (mode !== "none" && created.length) {
+  if (mode !== "none" && mayMark(file.path, plugin.settings.topicFolder) && created.length) {
     const quotes = created.map(({ span: l }) => ({ text: body.slice(l.start, l.end), start: l.start, end: l.end }));
     let blockIds = new Map<number, string>();
     await plugin.app.vault.process(file, (data) => {

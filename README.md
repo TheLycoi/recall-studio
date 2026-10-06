@@ -25,6 +25,7 @@ Run these from the command palette. Each one also runs from the quiz panel's box
 | --- | --- | --- |
 | Send selection to inbox | `capture`, `send`, `pdf` | Queues the selected text for card writing. On a PDF it keeps the page number. |
 | Send selection to inbox with instructions… | `capture-instruct`, `pdf-instruct` | The same, with a one-line instruction for the card writer first. |
+| Toggle highlighter mode |  | Turns highlighter mode on or off. While it is on, drag across a passage in a note or PDF to send it to the inbox. |
 | Open quiz | `quiz-panel` | Opens the quiz panel. |
 | Open inbox | `inbox` | Opens the flashcard inbox. |
 | Export all reviewed cards to Anki | `export` | Sends every card in the inbox to Anki, except flagged and discarded ones. |
@@ -46,7 +47,7 @@ Recall reads markdown pages under the wiki folder. It skips the `schema` folder,
 ## Settings
 
 - **Card writer**: how cards are written, and the model they are written with.
-- **Recall folder**: where Recall keeps the card rules note, the inbox, and the rule suggestions. Default `Recall/`.
+- **Recall folder** (under Card writer): where Recall keeps the card rules note, the inbox, and the rule suggestions. Default `Recall/`.
 - **Card quality**: the rules the card writer and the critique pass follow.
 - **Capture**: how a selection or a highlight is queued for a card.
 - **Quiz**: how many questions a session asks and where it draws them from.

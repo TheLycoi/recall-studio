@@ -12,7 +12,7 @@ function timestamp(d: Date): string {
 type Listener = () => void;
 
 /**
- * Persistent inbox. Lives in the Recall folder (the card rules folder
+ * Persistent inbox. Lives in the Recall folder (the Recall folder
  * setting) as inbox.json, beside the house rules, so everything the plugin
  * keeps for the reader sits in one vault folder (by design) and syncs with
  * it. Earlier versions kept it in the plugin folder; that file is moved in
@@ -56,7 +56,7 @@ export class InboxStore {
     return this.path;
   }
 
-  /** Move a plugin-folder inbox.json into the schema folder, once, when no inbox is there yet. */
+  /** Move a plugin-folder inbox.json into the Recall folder, once, when no inbox is there yet. */
   private async migrate(): Promise<void> {
     const adapter = this.app.vault.adapter;
     const dir = this.path.slice(0, this.path.lastIndexOf("/"));
@@ -70,7 +70,7 @@ export class InboxStore {
     try {
       await this.migrate();
     } catch (e) {
-      console.error("Recall: could not move the inbox into the schema folder", e);
+      console.error("Recall: could not move the inbox into the Recall folder", e);
     }
     try {
       if (await this.app.vault.adapter.exists(this.path)) {
