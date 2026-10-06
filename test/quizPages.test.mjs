@@ -34,3 +34,11 @@ test("files outside the wiki folder, and files that are not markdown, are not qu
   assert.equal(q.isQuizPage("wiki/sources/paper.pdf", "wiki"), false);
   assert.equal(q.isQuizPage("wiki/concepts/x.md", ""), false);
 });
+
+test("quiz me on one open note: where its units come from", () => {
+  assert.equal(q.noteSource("wiki/concepts/free-recall.md", "wiki"), "wiki-index");
+  assert.equal(q.noteSource("Lectures/week 3.md", "wiki"), "single-file");
+  assert.equal(q.noteSource("wiki/index.md", "wiki"), "none");
+  assert.equal(q.noteSource("wiki/log.md", "wiki"), "none");
+  assert.equal(q.noteSource("wiki/schema/config.md", "wiki"), "none");
+});

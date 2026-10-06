@@ -1,6 +1,6 @@
 /**
- * The Obsidian half of the schema note: where `schema/wikilm.md` lives, when it
- * is created, and how a proposal becomes a rule inside it.
+ * The Obsidian half of the schema note: where `Recall/recall-rules.md` lives,
+ * when it is created, and how a proposal becomes a rule inside it.
  *
  * `src/schemaNote.ts` is pure and does all the rendering and parsing; this file
  * is the part that touches the vault, and it holds one rule above the others:
@@ -57,7 +57,7 @@ export class SchemaFile {
   constructor(private plugin: WikiLmPlugin) {}
 
   schemaPath(): string {
-    return normalizePath(`${this.plugin.settings.schemaFolder}/wikilm.md`);
+    return normalizePath(`${this.plugin.settings.schemaFolder}/recall-rules.md`);
   }
 
   suggestionsPath(): string {
@@ -75,12 +75,7 @@ export class SchemaFile {
     const existing = this.plugin.app.vault.getAbstractFileByPath(path);
     if (existing instanceof TFile) return existing;
     await this.ensureFolder();
-    const s = this.plugin.settings;
-    const md = renderDefaultSchema({
-      topicFolder: s.topicFolder,
-      schemaPath: path,
-      today: new Date().toISOString().slice(0, 10),
-    });
+    const md = renderDefaultSchema({ today: new Date().toISOString().slice(0, 10) });
     return await this.plugin.app.vault.create(path, md); // obsidian.d.ts:7386
   }
 

@@ -30,8 +30,8 @@ const EXPECTED = [
   ["open-quiz", "Open quiz"],
   ["open-inbox", "Open inbox"],
   ["export-reviewed", "Export all reviewed cards to Anki"],
-  ["open-schema", "Open the schema note"],
-  ["review-schema-suggestions", "Review schema suggestions"],
+  ["open-schema", "Open the card rules note"],
+  ["review-schema-suggestions", "Review card rule suggestions"],
   ["capture-markdown-highlights", "Send all ==highlights== in this note to inbox"],
   ["retry-failed", "Retry failed highlights"],
 ];

@@ -1,12 +1,11 @@
 import { CODEX_FALLBACK_MODELS, modelOptions } from "./modelRoles";
 import { App, Notice, PluginSettingTab, Setting, ButtonComponent } from "obsidian";
 import type WikiLmPlugin from "./main";
+import { DEFAULT_EXPORT_FOLDER, DEFAULT_RULES_FOLDER, DEFAULT_WIKI_FOLDER } from "./paths";
 
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 export type MarkMode = "none" | "highlight" | "highlight+block";
 export type LintMode = "badge" | "hide" | "drop";
-export type SuggestGranularity = "minimal" | "standard" | "detailed";
-export const SUGGEST_PER_PAGE: Record<SuggestGranularity, number> = { minimal: 1, standard: 2, detailed: 4 };
 
 export interface WikiLmSettings {
   // LLM
@@ -21,19 +20,12 @@ export interface WikiLmSettings {
   contextChars: number;
   language: string;
   writerInstructions: string;
-  highlighterInstructions: string;
-  maxAiHighlights: number;
-  transcriptMaxChars: number;
-  /** Where lecture notes and transcripts (Wispr Flow exports) live; the transcript picker lists this folder first. */
-  transcriptFolder: string;
   concurrency: number;
   notifyWhenReady: boolean;
 
   // Capture
   /** Off by default: capture sends passages to the inbox without editing the note. */
   markMode: MarkMode;
-  /** Set once the 0.9.2 migration has forced markMode off for an install that predates it. */
-  markModeMigrated: boolean;
   openInboxOnCapture: boolean;
   /** Drag-to-capture. Off by default: with it on, every drag-selection is a capture. */
   highlighterMode: boolean;
@@ -55,51 +47,11 @@ export interface WikiLmSettings {
   includeExtra: boolean;
   exportFolder: string;
 
-  // PDF digest
+  // Quiz
+  /** The wiki plugin's folder; the quiz reads the pages in it and Recall never changes them. */
   topicFolder: string;
-  /** Vault folder holding `wikilm.md`, the reader's house rules, and `wikilm-suggestions.md`. */
+  /** Recall's own folder, for the card rules note. Keep it outside the wiki folder. */
   schemaFolder: string;
-  digestMaxNotes: number;
-  digestInstructions: string;
-  paperTextMaxChars: number;
-
-  // AI highlights for PDFs
-  /** How many spans per page the model may pick when suggesting highlights. */
-  suggestGranularity: SuggestGranularity;
-  /** Upper bound on suggestions accepted across the whole PDF. */
-  suggestMaxPerPdf: number;
-  /** Pages sent to the model per batch request. */
-  suggestPagesPerBatch: number;
-  /** Folder for new concept notes created from suggested highlights. */
-  wikiConceptsFolder: string;
-  /** Folder for new entity notes created from suggested highlights. */
-  wikiEntitiesFolder: string;
-  /** Page format this vault's wiki uses: karpathy `type:` pages, or `class:` pages. */
-  wikiSchema: "karpathy" | "class";
-  suggestInstructions: string;
-
-  // Lint wiki
-  /** After the instant scan, the model reads the pages with findings and proposes rows; off, Lint wiki makes no model call. */
-  lintModelReview: boolean;
-
-  // Ask
-  /** Passages the answer is written from; with the relevance filter on, the pool is three times this (at most 30) and the judge keeps up to this many. */
-  askEvidenceCount: number;
-  /** Entries of conversation sent to the model with a question (a question and its answer are two); the log keeps twice as many. */
-  askMaxTurns: number;
-  askInstructions: string;
-  /** When the question's words match weakly and find fewer passages than `askEvidenceCount`, ask the model for the terms the notes would use. */
-  askKeywordExpansion: boolean;
-  /** Retrieve three times as many passages (at most 30), then spend one model call keeping only the ones that bear on the question. */
-  askRelevanceFilter: boolean;
-  /** Match each sentence of the answer against the cited notes locally, and list the ones no passage states. Marks, never deletes. */
-  askClaimCheck: boolean;
-  /** When the notes do not cover a question, let the model answer from general knowledge behind a warning. */
-  askGeneralKnowledge: boolean;
-  /** Show the line under an answer: how well the notes covered it, the retrieval route, and the class scope. */
-  askShowGrounding: boolean;
-  /** List the sentences that matched no passage under the answer; the count on the grounding line stays either way. */
-  askShowUnmatched: boolean;
   /**
    * A runaway guard, not a target: the quiz ends when it brackets the edge of
    * what the reader knows. This only stops a session that never gets there.
@@ -134,15 +86,10 @@ export const DEFAULT_SETTINGS: WikiLmSettings = {
   contextChars: 700,
   language: "",
   writerInstructions: "",
-  highlighterInstructions: "",
-  maxAiHighlights: 12,
-  transcriptMaxChars: 150000,
-  transcriptFolder: "wiki/sources/wispr",
   concurrency: 2,
   notifyWhenReady: true,
 
   markMode: "none",
-  markModeMigrated: true,
   openInboxOnCapture: false,
   highlighterMode: false,
   highlighterMinChars: 12,
@@ -159,33 +106,10 @@ export const DEFAULT_SETTINGS: WikiLmSettings = {
   extraTags: "wikilm",
   includeSourceTag: true,
   includeExtra: true,
-  exportFolder: "wiki/schema/exports",
+  exportFolder: DEFAULT_EXPORT_FOLDER,
 
-  topicFolder: "wiki",
-  schemaFolder: "wiki/schema",
-  digestMaxNotes: 6,
-  digestInstructions: "",
-  paperTextMaxChars: 60000,
-
-  suggestGranularity: "standard",
-  suggestMaxPerPdf: 40,
-  suggestPagesPerBatch: 8,
-  wikiConceptsFolder: "wiki/concepts",
-  wikiEntitiesFolder: "wiki/entities",
-  wikiSchema: "class",
-  suggestInstructions: "",
-
-  lintModelReview: true,
-
-  askEvidenceCount: 6,
-  askMaxTurns: 10,
-  askInstructions: "",
-  askKeywordExpansion: true,
-  askRelevanceFilter: true,
-  askClaimCheck: true,
-  askGeneralKnowledge: false,
-  askShowGrounding: true,
-  askShowUnmatched: true,
+  topicFolder: DEFAULT_WIKI_FOLDER,
+  schemaFolder: DEFAULT_RULES_FOLDER,
   quizCap: 30,
   quizPoolSize: 20,
   quizInstructions: "",
@@ -361,18 +285,6 @@ export class WikiLmSettingTab extends PluginSettingTab {
         });
       });
 
-    new Setting(containerEl)
-      .setName("Standing instructions for the AI highlighter")
-      .setDesc("Used by 'AI highlight…' on a note, e.g. 'Only pick definitions and numbers.'")
-      .addTextArea((t) => {
-        t.inputEl.rows = 3;
-        t.inputEl.cols = 50;
-        t.setValue(s.highlighterInstructions).onChange((v) => {
-          s.highlighterInstructions = v;
-          save();
-        });
-      });
-
     new Setting(containerEl).setName("Card quality").setHeading();
 
     new Setting(containerEl)
@@ -431,32 +343,6 @@ export class WikiLmSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Max AI highlights per note")
-      .addSlider((sl) =>
-        sl
-          .setLimits(3, 40, 1)
-          .setValue(s.maxAiHighlights)
-          .setDynamicTooltip()
-          .onChange((v) => {
-            s.maxAiHighlights = v;
-            save();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Transcript size limit")
-      .setDesc(
-        "Characters of an attached lecture transcript sent to the highlighter; longer transcripts are cut at a sentence boundary.",
-      )
-      .addText((t) =>
-        t.setValue(String(s.transcriptMaxChars)).onChange((v) => {
-          const n = Number(v);
-          s.transcriptMaxChars = Number.isInteger(n) && n > 0 ? n : DEFAULT_SETTINGS.transcriptMaxChars;
-          save();
-        }),
-      );
-
-    new Setting(containerEl)
       .setName("Parallel requests")
       .setDesc("How many highlights are written at once in the background. With Codex, drop to 1 if you ever see refresh_token_failed.")
       .addSlider((sl) =>
@@ -509,7 +395,7 @@ export class WikiLmSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Mark captured text in the note")
       .setDesc(
-        "Off by default — WikiLM sends passages to the inbox without editing your notes. Marking wraps the passage in ==…==, which can break headings and list formatting when a passage spans more than one line.",
+        "Off by default — WikiLM sends passages to the inbox without editing your notes. Marking wraps the passage in ==…==, which can break headings and list formatting when a passage spans more than one line. Leave this off when you capture from wiki pages, so Recall does not edit them.",
       )
       .addDropdown((d) =>
         d
@@ -531,284 +417,24 @@ export class WikiLmSettingTab extends PluginSettingTab {
         }),
       );
 
-    new Setting(containerEl).setName("PDF digest").setHeading();
+    new Setting(containerEl).setName("Quiz").setHeading();
 
     new Setting(containerEl)
-      .setName("Topic notes folder")
-      .setDesc(
-        "Topic notes are written to <folder>/<class code>/<title>.md; the class code comes from sources/class notes/<code>/ or is asked for.",
-      )
+      .setName("Wiki folder")
+      .setDesc("The folder your wiki plugin writes its pages to. The quiz reads the pages in it. Recall never changes them.")
       .addText((t) =>
         t.setValue(s.topicFolder).onChange((v) => {
           s.topicFolder = v.trim() || DEFAULT_SETTINGS.topicFolder;
-          save();
+          void this.plugin.saveSettings();
         }),
       );
 
     new Setting(containerEl)
-      .setName("Schema folder")
-      .setDesc(
-        "The plugin's own folder inside the wiki: `wikilm.md` (your house rules for pages and cards), `wikilm-suggestions.md`, and `inbox.json`, the inbox itself. Not indexed, linted or graphed as pages. Reload the plugin after changing it.",
-      )
+      .setName("Card rules folder")
+      .setDesc("Where Recall keeps the note that holds your card rules. Keep it outside the wiki folder.")
       .addText((t) =>
         t.setValue(s.schemaFolder).onChange((v) => {
           s.schemaFolder = v.trim() || DEFAULT_SETTINGS.schemaFolder;
-          save();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Transcript folder")
-      .setDesc(
-        "Where your lecture notes and transcripts live (Wispr Flow exports, for instance). The transcript picker lists this folder first, newest note on top.",
-      )
-      .addText((t) =>
-        t.setValue(s.transcriptFolder).onChange((v) => {
-          s.transcriptFolder = v.trim() || DEFAULT_SETTINGS.transcriptFolder;
-          save();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Max topic notes per PDF")
-      .addSlider((sl) =>
-        sl
-          .setLimits(1, 12, 1)
-          .setValue(s.digestMaxNotes)
-          .setDynamicTooltip()
-          .onChange((v) => {
-            s.digestMaxNotes = v;
-            save();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Paper text limit")
-      .setDesc(
-        "Characters of the PDF's text sent with the highlights when writing summaries; longer papers are cut at a sentence boundary.",
-      )
-      .addText((t) =>
-        t.setValue(String(s.paperTextMaxChars)).onChange((v) => {
-          const n = Number(v);
-          s.paperTextMaxChars = Number.isInteger(n) && n > 0 ? n : DEFAULT_SETTINGS.paperTextMaxChars;
-          save();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Standing instructions for the digest")
-      .addTextArea((t) => {
-        t.inputEl.rows = 3;
-        t.inputEl.cols = 50;
-        t.setValue(s.digestInstructions).onChange((v) => {
-          s.digestInstructions = v;
-          save();
-        });
-      });
-
-    new Setting(containerEl).setName("AI highlights for PDFs").setHeading();
-
-    new Setting(containerEl)
-      .setName("Granularity")
-      .setDesc("How many spans the model may pick on each page when suggesting highlights in a PDF.")
-      .addDropdown((d) =>
-        d
-          .addOptions({ minimal: "Minimal (1 per page)", standard: "Standard (2 per page)", detailed: "Detailed (4 per page)" })
-          .setValue(s.suggestGranularity)
-          .onChange((v) => {
-            s.suggestGranularity = v as SuggestGranularity;
-            save();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Max suggestions per PDF")
-      .addSlider((sl) =>
-        sl
-          .setLimits(5, 100, 1)
-          .setValue(s.suggestMaxPerPdf)
-          .setDynamicTooltip()
-          .onChange((v) => {
-            s.suggestMaxPerPdf = v;
-            save();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Pages per batch")
-      .setDesc("Pages sent to the model per request; long decks are processed in batches.")
-      .addText((t) =>
-        t.setValue(String(s.suggestPagesPerBatch)).onChange((v) => {
-          const n = Number(v);
-          s.suggestPagesPerBatch = Number.isInteger(n) && n > 0 ? n : DEFAULT_SETTINGS.suggestPagesPerBatch;
-          save();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Wiki concepts folder")
-      .setDesc(
-        "Notes whose `class` frontmatter matches the PDF's class are offered to the model as targets; new concept notes are created here.",
-      )
-      .addText((t) =>
-        t.setValue(s.wikiConceptsFolder).onChange((v) => {
-          s.wikiConceptsFolder = v.trim() || DEFAULT_SETTINGS.wikiConceptsFolder;
-          save();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Wiki entities folder")
-      .setDesc(
-        "Notes whose `class` frontmatter matches the PDF's class are offered to the model as targets; new entity notes are created here.",
-      )
-      .addText((t) =>
-        t.setValue(s.wikiEntitiesFolder).onChange((v) => {
-          s.wikiEntitiesFolder = v.trim() || DEFAULT_SETTINGS.wikiEntitiesFolder;
-          save();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Standing instructions for PDF suggestions")
-      .addTextArea((t) => {
-        t.inputEl.rows = 3;
-        t.inputEl.cols = 50;
-        t.setValue(s.suggestInstructions).onChange((v) => {
-          s.suggestInstructions = v;
-          save();
-        });
-      });
-
-    new Setting(containerEl).setName("Lint wiki").setHeading();
-
-    new Setting(containerEl)
-      .setName("Model reviews pages on lint")
-      .setDesc(
-        "After the instant scan, the model reads the pages with findings, judges unsupported sentences, nominates links and checks each page's kind. One request per five pages; nothing is written until you tick a row.",
-      )
-      .addToggle((t) =>
-        t.setValue(s.lintModelReview).onChange((v) => {
-          s.lintModelReview = v;
-          save();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Ask")
-      .setDesc(
-        "A question costs one model call for the answer, one more when the evidence filter is on, and sometimes one to find other wording: one to three calls.",
-      )
-      .setHeading();
-
-    new Setting(containerEl)
-      .setName("Evidence per question")
-      .setDesc(
-        "How many passages the answer is written from. With “Filter evidence with the model” on, three times as many (at most 30) are retrieved and the filter keeps up to this many. No model call. More passages make each answer call longer.",
-      )
-      .addSlider((sl) =>
-        sl
-          .setLimits(4, 30, 1)
-          .setValue(s.askEvidenceCount)
-          .setDynamicTooltip()
-          .onChange((v) => {
-            s.askEvidenceCount = v;
-            save();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Conversation turns kept")
-      .setDesc(
-        "Entries of the conversation sent to the model with each question; a question and its answer are two. The log keeps twice that many. No model call. A longer history makes every answer call longer.",
-      )
-      .addSlider((sl) =>
-        sl
-          .setLimits(2, 30, 1)
-          .setValue(s.askMaxTurns)
-          .setDynamicTooltip()
-          .onChange((v) => {
-            s.askMaxTurns = v;
-            save();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Standing instructions for Ask")
-      .setDesc("Added to every answer call. No model call.")
-      .addTextArea((t) => {
-        t.inputEl.rows = 3;
-        t.inputEl.cols = 50;
-        t.setValue(s.askInstructions).onChange((v) => {
-          s.askInstructions = v;
-          save();
-        });
-      });
-
-    new Setting(containerEl)
-      .setName("Find other wording when a question comes up short")
-      .setDesc(
-        "When your question's words match your notes only weakly and find fewer passages than the evidence count, the model turns the question into the terms your notes would use and they are searched for locally. One extra model call, only on those questions.",
-      )
-      .addToggle((t) =>
-        t.setValue(s.askKeywordExpansion).onChange((v) => {
-          s.askKeywordExpansion = v;
-          save();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Filter evidence with the model")
-      .setDesc(
-        "Retrieve three times as many passages (at most 30), then keep only the ones a model judges to bear on the question. One extra model call per question. When it keeps none, the reply says so and no answer call is made.",
-      )
-      .addToggle((t) =>
-        t.setValue(s.askRelevanceFilter).onChange((v) => {
-          s.askRelevanceFilter = v;
-          save();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Check the answer's sentences")
-      .setDesc(
-        "Match each sentence of the answer against the cited notes. No model call. Sentences that match no passage are listed under the answer; they are not deleted.",
-      )
-      .addToggle((t) =>
-        t.setValue(s.askClaimCheck).onChange((v) => {
-          s.askClaimCheck = v;
-          save();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Answer from general knowledge when your notes do not")
-      .setDesc(
-        "Off, a question your notes do not cover is answered with that fact and nothing else, and an answer the model drew from general knowledge is replaced by that refusal. On, the model may answer from what it knows, with a warning above the answer; it can be sent to the inbox marked unverified. Costs one answer call on questions that would otherwise be refused without one.",
-      )
-      .addToggle((t) =>
-        t.setValue(s.askGeneralKnowledge).onChange((v) => {
-          s.askGeneralKnowledge = v;
-          save();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Show the grounding line under answers")
-      .setDesc("The line under an answer: how well your notes covered it, the route that found the evidence, and the class it was searched in. No model call.")
-      .addToggle((t) =>
-        t.setValue(s.askShowGrounding).onChange((v) => {
-          s.askShowGrounding = v;
-          save();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("List unmatched sentences")
-      .setDesc("List the sentences that matched no passage under the answer. The count on the grounding line stays.")
-      .addToggle((t) =>
-        t.setValue(s.askShowUnmatched).onChange((v) => {
-          s.askShowUnmatched = v;
           save();
         }),
       );
@@ -951,7 +577,7 @@ export class WikiLmSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Text export folder")
-      .setDesc("Vault folder for Anki text-import files when AnkiConnect is unavailable.")
+      .setDesc("Vault folder for Anki text-import files when AnkiConnect is unavailable. Keep it outside the wiki folder.")
       .addText((t) =>
         t.setValue(s.exportFolder).onChange((v) => {
           s.exportFolder = v.trim() || DEFAULT_SETTINGS.exportFolder;

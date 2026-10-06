@@ -81,8 +81,8 @@ Type `help` in the chat to see them all.
 - **Open inbox** (`inbox`): opens the flashcard inbox.
 - **Export all reviewed cards to Anki** (`export`): sends every card you approved to Anki.
 - **Cancel the running AI highlight, digest or ingest** (`cancel`, `stop-run`): stops a long run at its next step.
-- **Open the schema note** (`schema`): opens your house rules for the model, and creates the note if needed.
-- **Review schema suggestions** (`suggestions`): rules WikiLM proposes from the edits you keep making. Accept, edit or dismiss each one.
+- **Open the card rules note** (`rules`, `schema`): opens your house rules for the model, and creates the note if needed.
+- **Review card rule suggestions** (`suggestions`): rules WikiLM proposes from the edits you keep making. Accept, edit or dismiss each one.
 
 These run from the chat box only:
 

@@ -59,13 +59,13 @@ export const COMMAND_TABLE: CommandSpec[] = [
   },
   {
     id: "open-schema",
-    name: "Open the schema note",
-    aliases: ["schema"],
+    name: "Open the card rules note",
+    aliases: ["rules", "schema"],
     hint: "always",
   },
   {
     id: "review-schema-suggestions",
-    name: "Review schema suggestions",
+    name: "Review card rule suggestions",
     aliases: ["suggestions"],
     hint: "always",
   },

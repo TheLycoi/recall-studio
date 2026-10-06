@@ -1,6 +1,6 @@
 /**
- * The reader's own schema note: `schema/wikilm.md`, and the suggestions file
- * beside it.
+ * The reader's own schema note: `Recall/recall-rules.md`, and the suggestions
+ * file beside it.
  *
  * WikiLM's prompts are the plugin's; this file is the reader's. Its sections
  * are read before each model call and injected as house rules, so a rule the
@@ -8,13 +8,9 @@
  * model without anyone editing `src/llm.ts`. Deleting a rule from the note is
  * how it stops applying — there is no second copy of it anywhere.
  *
- * Pure on purpose, like `src/examples.ts` and `src/topicNote.ts`: no
- * `obsidian` import, so `test/schemaNote.test.mjs` can bundle it standalone
- * with esbuild. Another module does the reading and writing of the file.
- *
- * Modelled on the shape of gd4ai/obsidian-llm-wiki's `wiki/schema/config.md`
- * (Apache-2.0) — the idea of a reader-owned config note with page templates
- * and naming conventions. The text here is WikiLM's own.
+ * Pure on purpose, like `src/examples.ts`: no `obsidian` import, so
+ * `test/schemaNote.test.mjs` can bundle it standalone with esbuild. Another
+ * module does the reading and writing of the file.
  */
 
 export interface SchemaSection {
@@ -36,39 +32,12 @@ const LEARNED_PLACEHOLDER =
   "_Rules promoted from your own edits appear here, each with its date and the evidence that earned it. Delete one to unlearn it._";
 
 export interface DefaultSchemaOptions {
-  topicFolder: string;
-  schemaPath: string;
   today: string;
 }
 
-/**
- * The note a reader is given on the first run.
- *
- * The page templates are not decoration: they state the frontmatter fields and
- * section headings `renderTopicNote` (src/topicNote.ts:171) actually writes, so
- * a reader editing this file is editing a description of the real output rather
- * than an idealised one. A field invented here would be a rule the plugin could
- * never honour.
- */
+/** The note a reader is given on the first run. */
 export function renderDefaultSchema(opts: DefaultSchemaOptions): string {
-  const { topicFolder, schemaPath, today } = opts;
-  const pageSections = [
-    "1. **## Summary** — three to five sentences on the topic, in your language, close to the source's wording.",
-    "2. **## <Subtopic>** sections — each a branch of the page, read as a mind map: one lead line that says what the branch is, then a bullet list, never a paragraph, one claim per bullet with its term in bold at the front, nested two levels at most, every bullet cited. A bullet that names another page names it as {{Its Title}} and the plugin writes the link. Inside a page that already nests its branches as `###`, new branches are `###` under the page's own `##`.",
-    "3. A highlight is said once: cited by the bullet that paraphrases it, or quoted beneath the bullets as a PDF++ callout when its exact wording matters (a stated definition, a formula, a list of criteria, a long passage). Never both.",
-    "4. **## Related topics** — `- [[Title]]` links to other pages, written by the plugin and never by the model.",
-    "5. **## Flashcard Seeds** — left empty for you; the card writer works from the highlights, not from this section.",
-  ].join("\n");
-
-  const frontmatterFields = (kind: "concept" | "entity", tags: string) =>
-    [
-      `- \`type: ${kind}\``,
-      "- `class:` — the class code, or `[CODE, CODE]` when the page belongs to more than one.",
-      "- `created:` — the date the page was written; never rewritten.",
-      "- `source_file:` — `\"[[Name.pdf]]\"`, the PDF the page came from.",
-      `- \`tags:\` — exactly one, from ${tags}.`,
-      "- `aliases:` — other names you would search the page under; omitted when there are none.",
-    ].join("\n");
+  const { today } = opts;
 
   return `---
 version: 1
@@ -78,40 +47,7 @@ learned_count: 0
 
 # WikiLM Schema Configuration
 
-This note governs how WikiLM writes your wiki pages and your flashcards. Every section below is read before each model call and handed to the model as your house rules, so a rule you write here applies from the next run onward — no setting to find, no code to edit. Delete a rule and it stops applying; delete a whole section and nothing from it is sent. The sections are yours to rewrite in your own words; the headings are how WikiLM decides which call each rule belongs to.
-
-## Wiki Structure
-
-- Topic pages live under \`${topicFolder}/<CLASS>/\`, one folder per class code.
-- This file is \`${schemaPath}\`, and proposed rules wait in \`${schemaPath.replace(/\.md$/, "")}-suggestions.md\`.
-- One concept gets one page. A page met in a second class gains that class code rather than being copied.
-
-## Concept Page Template
-
-A concept is a mechanism, method, theory, classification, phenomenon, or any term that explains how something works.
-
-**Frontmatter fields:**
-${frontmatterFields("concept", "`method`, `theory`, `term`, `phenomenon`, `standard`, `field`, `other`")}
-
-**Sections:**
-${pageSections}
-
-## Entity Page Template
-
-An entity is a named person, organisation, product, drug, project, place or event that is itself what you would look up.
-
-**Frontmatter fields:**
-${frontmatterFields("entity", "`product`, `person`, `organization`, `project`, `event`, `place`, `other`")}
-
-**Sections:**
-${pageSections}
-
-## Naming Conventions
-
-- A page's title is its filename: \`${topicFolder}/<CLASS>/<Title>.md\`. Characters a vault cannot hold (\`\\ / : * ? " < > | # ^ [ ]\`) are stripped and runs of whitespace collapse to one space.
-- Titles are short noun phrases in Title Case, the way an index entry reads: "Receptor Binding", not "How receptors bind".
-- Two titles that differ only in case or a plural are the same title; one of the two pages would be lost.
-- Links are \`[[Title]]\` — the page's own name, no path and no alias.
+These are your rules for the cards Recall writes. Recall reads this note before every card it writes. Every section below is read before each model call and handed to the model as your house rules, so a rule you write here applies from the next run onward — no setting to find, no code to edit. Delete a rule and it stops applying; delete a whole section and nothing from it is sent. The sections are yours to rewrite in your own words.
 
 ## Card Templates
 
@@ -188,25 +124,6 @@ export function parseSchema(md: string): ParsedSchema {
   };
 }
 
-/**
- * Which model call a section's rules are sent to, decided by its heading alone.
- *
- * The heading is the only handle there is: the reader renames and adds sections
- * freely, so nothing else about a section says what it is about. A heading
- * naming cards goes to the card writer, one naming pages goes to the wiki call,
- * and — this is the load-bearing choice — a heading matching neither list goes
- * to *both*. The reader wrote it; sending their rule to one call too many
- * costs a few tokens, while sending it to one too few silently drops a rule
- * they believe is in force. `## Learned` rides with the cards because that is
- * where card edits are promoted from.
- */
-function routeOf(heading: string): { cards: boolean; wiki: boolean } {
-  const h = heading.toLowerCase();
-  const cards = /card|learned/.test(h);
-  const wiki = /wiki|page|naming|structure/.test(h);
-  return cards || wiki ? { cards, wiki } : { cards: true, wiki: true };
-}
-
 /** The body as the model should see it: nothing, when all it holds is the placeholder. */
 function liveBody(section: SchemaSection): string {
   const kept = section.body
@@ -225,19 +142,15 @@ function wrap(parts: string[]): string {
   return `<house_rules>\n${HOUSE_RULES_INTRO}\n\n${parts.join("\n\n")}\n</house_rules>`;
 }
 
-/** The two blocks the prompts inject, each "" when no section applies. */
-export function schemaBlocks(parsed: ParsedSchema): { cards: string; wiki: string } {
+/** The block the card writer is shown, "" when no section applies. */
+export function schemaBlocks(parsed: ParsedSchema): { cards: string } {
   const cards: string[] = [];
-  const wiki: string[] = [];
   for (const section of parsed.sections ?? []) {
     const body = liveBody(section);
     if (!body) continue;
-    const block = `## ${section.heading}\n${body}`;
-    const route = routeOf(section.heading);
-    if (route.cards) cards.push(block);
-    if (route.wiki) wiki.push(block);
+    cards.push(`## ${section.heading}\n${body}`);
   }
-  return { cards: wrap(cards), wiki: wrap(wiki) };
+  return { cards: wrap(cards) };
 }
 
 /**

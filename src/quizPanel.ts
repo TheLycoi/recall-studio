@@ -2,7 +2,7 @@ import { ItemView, MarkdownRenderer, Notice, parseFrontMatterAliases, TAbstractF
 import type WikiLmPlugin from "./main";
 import { describeError } from "./llm";
 import { indexPage, questionScorer, type EvidenceUnit } from "./pageIndex";
-import { isQuizPage } from "./quizPages";
+import { isQuizPage, noteSource } from "./quizPages";
 import { matchIntent, renderHelp, type Intent, type IntentContext, type IntentPage, type Target } from "./chatCommands";
 import { WIKILM_COMMANDS, type WikiLmCommand } from "./commands";
 import { captureQuizMisses } from "./capture";
@@ -39,13 +39,16 @@ import type { CueShape } from "./schemas";
 const NOT_A_QUIZ =
   "This panel runs quizzes. Say **quiz me** for the open note, **quiz me on** a page or a subject, or **quiz me on everything**. To ask the wiki a question, use the wiki plugin's own query.";
 
+/** The most turns the log keeps. Older ones scroll away. */
+const MAX_TURNS = 40;
+
 /**
  * One turn in the quiz log.
  *
- * A user turn is a line the reader typed: a quiz phrase or command
- * (`command`), or an answer to a question. A system turn is the panel talking
- * about itself: a command running, a quiz starting, `help`. An assistant turn
- * is a quiz turn or an error.
+ * A user turn is a line the reader typed: a quiz phrase or command, or an
+ * answer to a question. A system turn is the panel talking about itself: a
+ * command running, a quiz starting, `help`. An assistant turn is a quiz turn
+ * or an error.
  *
  * `quiz` marks the shapes a quiz puts in the log: the question, the grade, the
  * cued retry, the closing summary. `renderTurn` styles on it, and it carries
@@ -57,8 +60,8 @@ interface QuizTurn {
   role: "user" | "assistant" | "system";
   text: string;
   error?: string;
-  /** A typed line that ran an action ("send to inbox", "quiz me") rather than answering a question. */
-  command?: boolean;
+  /** A system turn whose text is markdown rather than a plain line. */
+  markdown?: boolean;
   /** Set once this quiz summary's misses are in the inbox (added now or already there), so they are not sent twice. */
   sentToInbox?: boolean;
   quiz?: {
@@ -188,10 +191,9 @@ export class QuizPanel {
     return { pages: this.pageMeta, commands: WIKILM_COMMANDS };
   }
 
-  /** Keep the log bounded: the newest `askMaxTurns * 2` turns. */
+  /** Keep the log bounded: the newest `MAX_TURNS` turns. */
   private trim(): void {
-    const cap = Math.max(2, this.plugin.settings.askMaxTurns * 2);
-    if (this.turns.length > cap) this.turns = this.turns.slice(-cap);
+    if (this.turns.length > MAX_TURNS) this.turns = this.turns.slice(-MAX_TURNS);
   }
 
   // --------------------------------------------------------------- routing
@@ -281,7 +283,7 @@ export class QuizPanel {
     }
     const intent = matchIntent(q, this.intentContext());
     this.draft = "";
-    this.turns.push({ role: "user", text: q, command: true });
+    this.turns.push({ role: "user", text: q });
     await this.runIntent(intent);
   }
 
@@ -289,7 +291,7 @@ export class QuizPanel {
   private async runIntent(intent: Intent): Promise<void> {
     switch (intent.kind) {
       case "help":
-        this.pushSystem(renderHelp());
+        this.pushSystem(renderHelp(), true);
         return;
       case "export":
         await this.runCommand("export-reviewed");
@@ -308,7 +310,7 @@ export class QuizPanel {
         return;
       case "unknown":
         this.restartArmed = false;
-        this.pushSystem(NOT_A_QUIZ);
+        this.pushSystem(NOT_A_QUIZ, true);
         return;
     }
   }
@@ -368,8 +370,8 @@ export class QuizPanel {
   }
 
   /** Push a system turn and redraw. System turns are the panel's own voice. */
-  private pushSystem(text: string): void {
-    this.turns.push({ role: "system", text });
+  private pushSystem(text: string, markdown = false): void {
+    this.turns.push({ role: "system", text, markdown });
     this.trim();
     this.rerender();
   }
@@ -437,10 +439,17 @@ export class QuizPanel {
       const activePath = notePath ?? this.plugin.app.workspace.getActiveFile()?.path ?? null;
       let units = all;
       // The index holds only wiki pages. A note outside the wiki folder can
-      // still be quizzed with "quiz me": that one file is read, never written.
-      if (scope === "this" && notePath && !this.isWikiPage(notePath)) {
-        const file = this.plugin.app.vault.getFileByPath(notePath);
-        units = file ? indexPage(file.path, await this.plugin.app.vault.cachedRead(file)) : [];
+      // still be quizzed with "quiz me": that one file is read, never
+      // written. A wiki file `isQuizPage` rejects (index, log, schema/…) has
+      // no units at all: it is the wiki plugin's own file, not knowledge.
+      if (scope === "this" && notePath) {
+        const source = noteSource(notePath, this.plugin.settings.topicFolder);
+        if (source === "single-file") {
+          const file = this.plugin.app.vault.getFileByPath(notePath);
+          units = file ? indexPage(file.path, await this.plugin.app.vault.cachedRead(file)) : [];
+        } else if (source === "none") {
+          units = [];
+        }
       }
       const resolved = resolveRecallPool(
         scope,
@@ -904,7 +913,7 @@ export class QuizPanel {
       // `help` and the line for an unknown phrase are markdown. Everything
       // else is one plain line, set as text so a command name containing `*`
       // or `_` cannot be read as markup.
-      if (turn.text.startsWith("- ") || turn.text === NOT_A_QUIZ) void MarkdownRenderer.render(this.plugin.app, turn.text, el.createDiv(), "", this.view);
+      if (turn.text.startsWith("- ") || turn.markdown) void MarkdownRenderer.render(this.plugin.app, turn.text, el.createDiv(), "", this.view);
       else el.setText(turn.text);
       return;
     }

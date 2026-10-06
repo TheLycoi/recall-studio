@@ -15,54 +15,27 @@ before(async () => {
   s = await import(pathToFileURL(out).href);
 });
 
-const opts = { topicFolder: "classes", schemaPath: "schema/wikilm.md", today: "2026-09-19" };
+const opts = { today: "2026-09-19" };
 
-const HEADINGS = [
-  "Wiki Structure",
-  "Concept Page Template",
-  "Entity Page Template",
-  "Naming Conventions",
-  "Card Templates",
-  "Card Rules",
-  "Content Rules",
-  "Learned",
-];
+const HEADINGS = ["Card Templates", "Card Rules", "Content Rules", "Learned"];
 
-test("the default schema carries the reader's folders and today's date", () => {
+test("the default schema carries today's date", () => {
   const md = s.renderDefaultSchema(opts);
   assert.match(md, /^---\nversion: 1\nupdated: 2026-09-19\nlearned_count: 0\n---\n/);
   assert.match(md, /^# WikiLM Schema Configuration$/m);
-  assert.ok(md.includes("classes/"), "names the topic folder");
-  assert.ok(md.includes("schema/wikilm.md"), "names its own path");
+});
+
+test("the rules note has no wiki sections", () => {
+  const md = s.renderDefaultSchema(opts);
+  for (const gone of ["Wiki Structure", "Concept Page Template", "Entity Page Template", "Naming Conventions"]) {
+    assert.equal(md.includes(gone), false, gone);
+  }
 });
 
 test("the default schema has every section, in order", () => {
   const md = s.renderDefaultSchema(opts);
   const found = [...md.matchAll(/^## (.+)$/gm)].map((m) => m[1]);
   assert.deepEqual(found, HEADINGS);
-});
-
-test("the default templates state the frontmatter renderTopicNote actually writes", () => {
-  const md = s.renderDefaultSchema(opts);
-  const concept = s.parseSchema(md).sections.find((x) => x.heading === "Concept Page Template").body;
-  for (const field of ["type:", "class:", "created:", "source_file:", "tags:", "aliases:"]) {
-    assert.ok(concept.includes(field), `concept template names ${field}`);
-  }
-  for (const heading of ["## Summary", "PDF++ callout", "## Related topics", "## Flashcard Seeds"]) {
-    assert.ok(concept.includes(heading), `concept template names ${heading}`);
-  }
-  const entity = s.parseSchema(md).sections.find((x) => x.heading === "Entity Page Template").body;
-  assert.ok(entity.includes("type: entity"), "entity template names its own type");
-});
-
-test("the default templates describe the section shape digest writes: a lead line, then bullets a mind map can draw", () => {
-  const md = s.renderDefaultSchema(opts);
-  for (const kind of ["Concept Page Template", "Entity Page Template"]) {
-    const body = s.parseSchema(md).sections.find((x) => x.heading === kind).body;
-    for (const needle of ["lead line", "one claim per bullet", "mind map"]) {
-      assert.ok(body.includes(needle), `${kind} says ${needle}`);
-    }
-  }
 });
 
 test("parseSchema round-trips the default schema's frontmatter and headings", () => {
@@ -89,62 +62,41 @@ test("parseSchema never throws on garbage", () => {
 });
 
 test("parseSchema is CRLF-safe", () => {
-  const md = "---\r\nversion: 2\r\nupdated: 2026-01-02\r\nlearned_count: 3\r\n---\r\n\r\nintro\r\n\r\n## Card Rules\r\n- keep it short\r\n\r\n## Wiki Structure\r\n- pages live under classes/\r\n";
+  const md = "---\r\nversion: 2\r\nupdated: 2026-01-02\r\nlearned_count: 3\r\n---\r\n\r\nintro\r\n\r\n## Card Rules\r\n- keep it short\r\n\r\n## Content Rules\r\n- quotes verbatim\r\n";
   const parsed = s.parseSchema(md);
   assert.equal(parsed.version, 2);
   assert.equal(parsed.updated, "2026-01-02");
   assert.equal(parsed.learnedCount, 3);
   assert.deepEqual(parsed.sections, [
     { heading: "Card Rules", body: "- keep it short" },
-    { heading: "Wiki Structure", body: "- pages live under classes/" },
+    { heading: "Content Rules", body: "- quotes verbatim" },
   ]);
 });
 
-test("a card section routes to cards alone", () => {
-  const { cards, wiki } = s.schemaBlocks(s.parseSchema("## Card Rules\n- one fact per card\n"));
-  assert.equal(wiki, "");
+test("a card section's rules reach the cards block", () => {
+  const { cards } = s.schemaBlocks(s.parseSchema("## Card Rules\n- one fact per card\n"));
   assert.match(cards, /^<house_rules>\n/);
   assert.ok(cards.includes("## Card Rules"));
   assert.ok(cards.includes("- one fact per card"));
   assert.match(cards, /<\/house_rules>$/);
 });
 
-test("a wiki section routes to wiki alone", () => {
-  const { cards, wiki } = s.schemaBlocks(s.parseSchema("## Wiki Structure\n- pages under classes/\n"));
-  assert.equal(cards, "");
-  assert.ok(wiki.includes("## Wiki Structure"));
-  for (const h of ["Naming Conventions", "Concept Page Template"]) {
-    const only = s.schemaBlocks(s.parseSchema(`## ${h}\n- a rule\n`));
-    assert.equal(only.cards, "", `${h} is wiki-only`);
-    assert.ok(only.wiki.includes(h));
-  }
-});
-
-test("Content Rules and an unknown heading reach both calls", () => {
-  const both = s.schemaBlocks(s.parseSchema("## Content Rules\n- quotes verbatim\n"));
-  assert.ok(both.cards.includes("- quotes verbatim"));
-  assert.ok(both.wiki.includes("- quotes verbatim"));
+test("an unknown heading reaches the cards block too — the reader wrote it", () => {
   const mine = s.schemaBlocks(s.parseSchema("## My Own Rules\n- write in German\n"));
   assert.ok(mine.cards.includes("- write in German"));
-  assert.ok(mine.wiki.includes("- write in German"));
 });
 
 test("an empty body and the untouched Learned placeholder contribute nothing", () => {
-  assert.deepEqual(s.schemaBlocks(s.parseSchema("## Card Rules\n\n## Wiki Structure\n")), { cards: "", wiki: "" });
+  assert.deepEqual(s.schemaBlocks(s.parseSchema("## Card Rules\n")), { cards: "" });
   const learnedOnly = s.parseSchema(s.renderDefaultSchema(opts)).sections.filter((x) => x.heading === "Learned");
-  assert.deepEqual(s.schemaBlocks({ version: 1, updated: "", learnedCount: 0, sections: learnedOnly }), { cards: "", wiki: "" });
+  assert.deepEqual(s.schemaBlocks({ version: 1, updated: "", learnedCount: 0, sections: learnedOnly }), { cards: "" });
 });
 
-test("the default schema's cards block carries the card rules and not the page templates", () => {
-  const { cards, wiki } = s.schemaBlocks(s.parseSchema(s.renderDefaultSchema(opts)));
+test("the default schema's cards block carries the card rules and the content rules", () => {
+  const { cards } = s.schemaBlocks(s.parseSchema(s.renderDefaultSchema(opts)));
   assert.ok(cards.includes("## Card Rules"));
   assert.ok(cards.includes("## Card Templates"));
-  assert.ok(!cards.includes("## Concept Page Template"), "a card call is not shown the page template");
-  assert.ok(!cards.includes("## Wiki Structure"));
-  assert.ok(wiki.includes("## Concept Page Template"));
-  assert.ok(!wiki.includes("## Card Rules"));
-  // Content Rules is the reader's, so both calls see it.
-  assert.ok(cards.includes("## Content Rules") && wiki.includes("## Content Rules"));
+  assert.ok(cards.includes("## Content Rules"));
 });
 
 test("appendLearnedRule adds the rule, bumps the count, and moves updated", () => {

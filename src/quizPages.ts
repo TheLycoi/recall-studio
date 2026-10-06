@@ -1,3 +1,5 @@
+import { isUnderFolder } from "./paths";
+
 /**
  * Which files the quiz may ask about.
  *
@@ -17,4 +19,12 @@ export function isQuizPage(path: string, wikiFolder: string): boolean {
   if (base === "index" || base === "log") return false;
   if (base.startsWith("welcome to ")) return false;
   return true;
+}
+
+/** Where the units for "quiz me" on one open note come from. */
+export type NoteSource = "wiki-index" | "single-file" | "none";
+
+export function noteSource(path: string, wikiFolder: string): NoteSource {
+  if (isQuizPage(path, wikiFolder)) return "wiki-index";
+  return isUnderFolder(path, wikiFolder) ? "none" : "single-file";
 }

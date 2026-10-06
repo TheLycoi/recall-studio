@@ -110,25 +110,6 @@ export default class WikiLmPlugin extends Plugin {
   async loadSettings(): Promise<void> {
     const saved = (await this.loadData()) as Partial<WikiLmSettings> | null;
     this.settings = Object.assign({}, DEFAULT_SETTINGS, saved);
-    if ((this.settings.sidebarMode as string) === "chat") this.settings.sidebarMode = "quiz";
-    // 0.9.2: capture no longer edits notes by default. An install that predates
-    // the change has markMode saved, so the new default alone would not reach it.
-    if (saved && !saved.markModeMigrated) {
-      this.settings.markMode = "none";
-      this.settings.markModeMigrated = true;
-      await this.saveData(this.settings);
-    }
-    // 0.11.0: a quiz runs until it brackets the edge, so `quizQuestions` (a
-    // target, default 5) became `quizCap` (a runaway guard). The old number is
-    // not carried over — it would cap every quiz at five and defeat the change —
-    // and `quizCap` is not reset either: `Object.assign` above already gave it
-    // the default, and an install that has both keys (downgraded and back) has
-    // a cap the reader chose. Only the stale key is dropped.
-    type LegacySettings = Partial<WikiLmSettings> & { quizQuestions?: number };
-    if ((saved as LegacySettings | null)?.quizQuestions !== undefined) {
-      delete (this.settings as LegacySettings).quizQuestions;
-      await this.saveData(this.settings);
-    }
   }
 
   async saveSettings(): Promise<void> {
