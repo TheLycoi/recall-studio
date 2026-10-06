@@ -482,7 +482,7 @@ export class InboxView extends ItemView {
       iconBtn(RECALL_SPARK_ICON, "Write more cards for this highlight", async () => {
         const inst = await askInstruction(this.plugin.app, "More cards", "Optional: what should the extra cards cover?");
         if (inst === null) return;
-        // For this run only: h.instruction keeps the Ask or quiz-miss
+        // For this run only: h.instruction keeps the quiz-miss
         // instruction the highlight was captured with.
         this.plugin.generator.more(h, inst);
       });

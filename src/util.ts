@@ -438,9 +438,9 @@ export function transcriptRecord(
 }
 
 /**
- * FNV-1a over the text, 32 bits, as eight hex characters. Enough to tell
- * "this note changed since we read it" from "it did not", which is all the
- * folder ingest needs; not a cryptographic digest and not meant as one.
+ * FNV-1a over the text, 32 bits, as eight hex characters. A stable hash of a
+ * note's content, enough to tell "this note changed since we read it" from
+ * "it did not"; not a cryptographic digest and not meant as one.
  */
 export function contentHash(text: string): string {
   let h = 0x811c9dc5;

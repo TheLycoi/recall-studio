@@ -239,9 +239,9 @@ export function resolvePool(
     const step = units.length / poolSize;
     const pool: EvidenceUnit[] = [];
     for (let i = 0; i < poolSize; i++) pool.push(units[Math.floor(i * step)]);
-    return { pool, label: "all topic notes" };
+    return { pool, label: "all wiki pages" };
   }
-  return { pool: units.slice(), label: "all topic notes" };
+  return { pool: units.slice(), label: "all wiki pages" };
 }
 
 /**
@@ -253,8 +253,7 @@ export function resolvePool(
  * provenance line a digest leaves at the top — and each of those cost the
  * quiz two model calls and a "Skipped a passage" line before it was set
  * aside. A statement is at least a short sentence: five words, three of which
- * mean something, and not a table row or a provenance note. Ask keeps
- * indexing everything; only the quiz pool is narrowed.
+ * mean something, and not a table row or a provenance note.
  */
 export function quizzable(unit: Pick<EvidenceUnit, "text">): boolean {
   const text = unit.text.trim();

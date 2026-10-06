@@ -74,7 +74,7 @@ function wordScorer(query) {
 }
 
 function session(cap = 30, pool = units()) {
-  return q.startSession({ kind: "all", label: "all topic notes" }, "", pool, cap);
+  return q.startSession({ kind: "all", label: "all wiki pages" }, "", pool, cap);
 }
 
 function draft(over = {}) {
@@ -145,7 +145,7 @@ test("an empty or whitespace answer is a pass", () => {
 test("resolvePool: all takes every unit", () => {
   const r = q.resolvePool("all", "", units(), RECEPTORS, wordScorer(""), 20);
   assert.equal(r.pool.length, 6);
-  assert.equal(r.label, "all topic notes");
+  assert.equal(r.label, "all wiki pages");
 });
 
 test("resolvePool: this takes the active note and names it", () => {
