@@ -293,7 +293,8 @@ Return exactly one verdict for every card you were given, and no verdict for a c
 Before you answer, check that every fact in every revision appears in the highlight, that you returned one verdict per card, and that each index matches the number printed beside its card.`;
 
 /**
- * Prompts and schemas live here. The Codex CLI does the call.
+ * Prompts and schemas live here. The backend for the chosen provider — the
+ * Codex CLI or the DeepSeek API — does the call.
  */
 export class LlmClient {
   private codex: CodexBackend;
