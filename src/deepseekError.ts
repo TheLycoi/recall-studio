@@ -17,6 +17,7 @@ export type DeepSeekErrorKind =
   | "timeout"
   | "truncated"
   | "empty"
+  | "unparseable"
   | "failed"
   | "aborted";
 
@@ -31,6 +32,31 @@ export class DeepSeekError extends Error {
 }
 
 /**
+ * How much of a server-supplied detail reaches a message. The detail ends up in
+ * a Notice and, via Highlight.error, in inbox.json — a vault file that syncs
+ * through iCloud — so a huge body must not be able to flood it.
+ */
+const MAX_DETAIL_LENGTH = 200;
+
+/**
+ * Strip credential-shaped text from a server-supplied detail and cap its
+ * length. The detail is whatever came back in the response body, and the
+ * message built from it is shown to the reader and persisted as a highlight's
+ * error. If a proxy or the API ever reflected the Authorization header into
+ * that body, the raw text would carry the key straight to disk. Only the
+ * detail passes through here; the advice the caller adds around it does not.
+ */
+export function redactDetail(detail: string | null): string | null {
+  if (!detail) return null;
+  const stripped = detail
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "[redacted]")
+    .replace(/sk-[A-Za-z0-9_-]+/gi, "[redacted]")
+    .trim();
+  if (!stripped) return null;
+  return stripped.length > MAX_DETAIL_LENGTH ? `${stripped.slice(0, MAX_DETAIL_LENGTH)}…` : stripped;
+}
+
+/**
  * Turn an HTTP status into a typed error the reader can act on. Each message
  * says what to do about it, because "DeepSeek error 402" is not something a
  * reader can respond to and "top up at platform.deepseek.com" is.
@@ -40,7 +66,8 @@ export class DeepSeekError extends Error {
  * id the API does not serve is what almost always produces them here.
  */
 export function classifyStatus(status: number, detail: string | null): DeepSeekError {
-  const tail = detail ? `: ${detail}` : "";
+  const safe = redactDetail(detail);
+  const tail = safe ? `: ${safe}` : "";
   if (status === 401 || status === 403) {
     return new DeepSeekError("auth", `DeepSeek rejected the API key${tail}. Check the key in Recall settings.`);
   }

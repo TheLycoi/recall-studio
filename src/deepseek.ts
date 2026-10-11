@@ -223,14 +223,14 @@ export class DeepSeekBackend implements LlmBackend {
       if (stop === "length") {
         throw new DeepSeekError(
           "truncated",
-          `DeepSeek ran out of output tokens partway through the ${label}. Lower “Max cards per highlight” so one call has less to write.`,
+          `DeepSeek ran out of output tokens partway through the ${label}. Try again, or give that call less to write.`,
         );
       }
       if (!content.trim()) throw new DeepSeekError("empty", `DeepSeek returned an empty answer for the ${label}.`);
       try {
         JSON.parse(extractJson(content));
       } catch {
-        throw new DeepSeekError("empty", `DeepSeek's answer for the ${label} was not JSON.`);
+        throw new DeepSeekError("unparseable", `DeepSeek's answer for the ${label} was not JSON.`);
       }
       return content;
     };
@@ -238,8 +238,9 @@ export class DeepSeekBackend implements LlmBackend {
       return await attempt();
     } catch (e) {
       // A bad key, a refused request or a timeout will fail again identically,
-      // so only the empty answer is worth a second call.
-      if (!(e instanceof DeepSeekError) || e.kind !== "empty" || req.signal?.aborted) throw e;
+      // so only the empty and unparseable answers are worth a second call: a
+      // second identical request is the cheap fix for a model slip.
+      if (!(e instanceof DeepSeekError) || (e.kind !== "empty" && e.kind !== "unparseable") || req.signal?.aborted) throw e;
       return attempt();
     }
   }
@@ -249,6 +250,12 @@ export class DeepSeekBackend implements LlmBackend {
     const system = [TEXT_PREAMBLE, req.system].join("\n\n");
     const attempt = async (): Promise<{ content: string; stop: TextStop }> => {
       const out = await this.chat(req, system, req.user, label, false);
+      if (out.stop === "length") {
+        throw new DeepSeekError(
+          "truncated",
+          `DeepSeek ran out of output tokens partway through the ${label}. Try again, or give that call less to write.`,
+        );
+      }
       if (!out.content.trim()) throw new DeepSeekError("empty", `DeepSeek returned an empty answer for the ${label}.`);
       return out;
     };

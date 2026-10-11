@@ -118,7 +118,11 @@ test("jsonPreamble says json, and carries the schema", () => {
 
 test("jsonPreamble embeds a parseable JSON Schema", () => {
   const schema = z.object({ ready: z.boolean() });
-  const block = wire.jsonPreamble(schema).split("\n").slice(3).join("\n");
+  const preamble = wire.jsonPreamble(schema);
+  // Locate the JSON value by its first bracket, not by a hardcoded line count:
+  // a header line added to jsonPreamble must not silently change what parses.
+  const start = preamble.search(/[[{]/);
+  const block = preamble.slice(start);
   const parsed = JSON.parse(block);
   assert.equal(parsed.type, "object");
   assert.deepEqual(parsed.required, ["ready"]);
@@ -224,10 +228,25 @@ test("every classified message says what the reader can do about it", () => {
 });
 
 test("a classified error never echoes key material", () => {
-  // The detail comes from the response body, which never carries the key; this
-  // pins that nothing in the message-building path introduces one.
-  const e = errors.classifyStatus(401, "invalid api key");
+  // A proxy or the API could in principle reflect the Authorization header
+  // into the error body, and this message is shown in a Notice and persisted
+  // as a highlight's error in inbox.json. The detail must be redacted.
+  const e = errors.classifyStatus(401, "Invalid key: sk-abc123XYZ for this request");
   assert.equal(/sk-|Bearer/.test(e.message), false, e.message);
+  // The useful part of the detail still survives the redaction.
+  assert.match(e.message, /Invalid key/);
+  assert.match(e.message, /for this request/);
+  // The advice the reader needs is untouched.
+  assert.match(e.message, /Check the key in Recall settings/);
+});
+
+test("redactDetail strips credential shapes and caps the length", () => {
+  assert.equal(errors.redactDetail("Bearer sk-live-THING"), "[redacted]");
+  assert.equal(errors.redactDetail("weird sk-abc123XYZ"), "weird [redacted]");
+  assert.equal(errors.redactDetail(null), null);
+  assert.equal(errors.redactDetail("   "), null);
+  const long = errors.redactDetail("x".repeat(500));
+  assert.ok(long.length <= 201, long.length);
 });
 
 test("DeepSeekError is an Error with a name, so describeError can match it", () => {
