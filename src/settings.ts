@@ -1,4 +1,6 @@
 import { CODEX_FALLBACK_MODELS, modelOptions } from "./modelRoles";
+import { DEEPSEEK_FALLBACK_MODELS } from "./deepseekModels";
+import { forgetCachedKey } from "./deepseekKey";
 import { App, Notice, PluginSettingTab, Setting, ButtonComponent } from "obsidian";
 import type RecallPlugin from "./main";
 import { DEFAULT_EXPORT_FOLDER, DEFAULT_RULES_FOLDER, DEFAULT_WIKI_FOLDER } from "./paths";
@@ -6,15 +8,23 @@ import { DEFAULT_EXPORT_FOLDER, DEFAULT_RULES_FOLDER, DEFAULT_WIKI_FOLDER } from
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 export type MarkMode = "none" | "highlight" | "highlight+block";
 export type LintMode = "badge" | "hide" | "drop";
+/** "codex": OpenAI's Codex CLI on your ChatGPT sign-in. "deepseek": the DeepSeek API with a key. */
+export type Provider = "codex" | "deepseek";
 
 export interface RecallSettings {
   // LLM
+  /** Which provider writes the cards and grades the quiz. */
+  provider: Provider;
   /** Absolute path to the codex binary; empty = auto-detect (PATH, then the ChatGPT app bundle). */
   codexPath: string;
   /** Codex model slug, e.g. gpt-5.5. */
   codexModel: string;
-  /** What the last Test found Codex offering; the model dropdown is built from it. */
+  /** What the last Test found the active provider offering; the model dropdown is built from it. */
   knownModels: string[];
+  /** DeepSeek API key. Empty = read DEEPSEEK_API_KEY from the environment or the macOS keychain. */
+  deepseekApiKey: string;
+  /** DeepSeek model id, e.g. deepseek-v4-pro. */
+  deepseekModel: string;
   effort: Effort;
   maxCardsPerHighlight: number;
   contextChars: number;
@@ -78,9 +88,12 @@ export interface RecallSettings {
 const CUSTOM_MODEL = "__custom__";
 
 export const DEFAULT_SETTINGS: RecallSettings = {
+  provider: "codex",
   codexPath: "",
   codexModel: "gpt-5.5",
   knownModels: [],
+  deepseekApiKey: "",
+  deepseekModel: "deepseek-v4-pro",
   effort: "high",
   maxCardsPerHighlight: 5,
   contextChars: 700,
@@ -131,15 +144,15 @@ export class RecallSettingTab extends PluginSettingTab {
   }
 
   /**
-   * Test: one tiny request on Codex, then Codex's model list into the
-   * dropdown. The probe is the answer; a list that cannot be fetched is said
-   * and does not fail the test.
+   * Test: one tiny request on the active provider, then that provider's model
+   * list into the dropdown. The probe is the answer; a list that cannot be
+   * fetched is said and does not fail the test.
    */
   private async testProvider(b: ButtonComponent): Promise<void> {
     const s = this.plugin.settings;
     b.setDisabled(true);
     try {
-      const r = await this.plugin.llm.probe(s.codexModel);
+      const r = await this.plugin.llm.probe();
       let listed = "";
       try {
         const list = await this.plugin.llm.listModels();
@@ -167,27 +180,90 @@ export class RecallSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("Card writer").setHeading();
 
     new Setting(containerEl)
-      .setName("Model")
+      .setName("Provider")
       .setDesc(
-        "Recall runs on OpenAI's Codex CLI, signed in with your ChatGPT account. No API key is needed. Sign in through the ChatGPT app or with `codex login`. Test sends one small request and loads the model list.",
+        "Codex runs OpenAI's CLI on your ChatGPT sign-in and needs no key. DeepSeek calls the DeepSeek API with an API key. Test sends one small request and loads the model list.",
+      )
+      .addDropdown((d) =>
+        d
+          .addOptions({ codex: "Codex (ChatGPT sign-in)", deepseek: "DeepSeek (API key)" })
+          .setValue(s.provider)
+          .onChange((v) => {
+            s.provider = v as Provider;
+            // The list belongs to the provider that was just tested, so it
+            // must not carry over to the other one's dropdown.
+            s.knownModels = [];
+            save();
+            this.display();
+          }),
       )
       .addButton((b) => b.setButtonText("Test").onClick(() => void this.testProvider(b)));
 
-    new Setting(containerEl)
-      .setName("Codex CLI path")
-      .setDesc(
-        "Leave empty to auto-detect: `codex` on the PATH, then the copy bundled in the ChatGPT app (/Applications/ChatGPT.app/Contents/Resources/codex). Otherwise paste the output of `which codex`. Sign in through the ChatGPT app or `codex login`.",
-      )
-      .addText((t) =>
-        t.setPlaceholder("auto-detect").setValue(s.codexPath).onChange((v) => {
-          s.codexPath = v.trim();
-          save();
-        }),
-      );
+    if (s.provider === "deepseek") {
+      new Setting(containerEl)
+        .setName("DeepSeek API key")
+        .setDesc(
+          "Leave empty to read DEEPSEEK_API_KEY from the environment or the macOS keychain (service “DEEPSEEK_API_KEY” or “Recall DeepSeek API key”). A key typed here is stored in data.json, which this vault syncs through iCloud in plaintext, so the keychain is the safer place for it.",
+        )
+        .addText((t) => {
+          t.inputEl.type = "password";
+          t.setPlaceholder("sk-… or leave empty for keychain")
+            .setValue(s.deepseekApiKey)
+            .onChange((v) => {
+              s.deepseekApiKey = v.trim();
+              forgetCachedKey();
+              save();
+            });
+        });
 
-    // A model dropdown: what the last Test found, the value in use, and the
-    // known names, plus "Other…" for an id the list lacks.
-    {
+      // A model dropdown: what the last Test found, the value in use, and the
+      // known names, plus "Other…" for an id the list lacks.
+      const options = modelOptions(s.knownModels, s.deepseekModel, DEEPSEEK_FALLBACK_MODELS);
+      const known = s.knownModels.length;
+      const custom = new Setting(containerEl)
+        .setName("DeepSeek model: type an id")
+        .setDesc("For a model the list does not show.")
+        .addText((t) =>
+          t.setPlaceholder("model id").onChange((v) => {
+            if (!v.trim()) return;
+            s.deepseekModel = v.trim() || DEFAULT_SETTINGS.deepseekModel;
+            save();
+          }),
+        );
+      const row = new Setting(containerEl)
+        .setName("DeepSeek model")
+        .setDesc(
+          `Model id sent to api.deepseek.com. deepseek-v4-pro reasons harder and costs more; deepseek-flash is the cheap one. ${known > 0 ? `${known} model${known === 1 ? "" : "s"} listed by the last Test.` : "Click Test to load the list."}`,
+        )
+        .addDropdown((d) => {
+          for (const m of options) d.addOption(m, m);
+          d.addOption(CUSTOM_MODEL, "Other…");
+          d.setValue(s.deepseekModel).onChange((v) => {
+            if (v === CUSTOM_MODEL) {
+              custom.settingEl.show();
+              return;
+            }
+            s.deepseekModel = v || DEFAULT_SETTINGS.deepseekModel;
+            save();
+          });
+        });
+      containerEl.insertBefore(row.settingEl, custom.settingEl);
+      custom.settingEl.hide();
+    } else {
+      new Setting(containerEl)
+        .setName("Codex CLI path")
+        .setDesc(
+          "Leave empty to auto-detect: `codex` on the PATH, then the copy bundled in the ChatGPT app (/Applications/ChatGPT.app/Contents/Resources/codex). Otherwise paste the output of `which codex`. Sign in through the ChatGPT app or `codex login`.",
+        )
+        .addText((t) =>
+          t.setPlaceholder("auto-detect").setValue(s.codexPath).onChange((v) => {
+            s.codexPath = v.trim();
+            save();
+          }),
+        );
+
+      // A model dropdown: what the last Test found, the value in use, and the
+      // known names, plus "Other…" for an id the list lacks.
       const options = modelOptions(s.knownModels, s.codexModel, CODEX_FALLBACK_MODELS);
       const known = s.knownModels.length;
       const custom = new Setting(containerEl)
@@ -223,7 +299,11 @@ export class RecallSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Effort")
-      .setDesc("Reasoning effort passed to Codex. Levels the chosen model does not support (gpt-5.5 stops at xhigh) are rounded down automatically.")
+      .setDesc(
+        s.provider === "deepseek"
+          ? "How much reasoning DeepSeek spends per call. It accepts low, high and max; medium and xhigh both land on high, which is the level the API maps them to. Thinking is always on."
+          : "Reasoning effort passed to Codex. Levels the chosen model does not support (gpt-5.5 stops at xhigh) are rounded down automatically.",
+      )
       .addDropdown((d) =>
         d
           .addOptions({ low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" })

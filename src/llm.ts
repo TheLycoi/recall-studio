@@ -1,5 +1,8 @@
 import { z } from "zod";
+import type { LlmBackend } from "./backend";
 import { CodexBackend, CodexError } from "./codex";
+import { DeepSeekBackend } from "./deepseek";
+import { DeepSeekError } from "./deepseekError";
 import { buildExamplesBlock } from "./examples";
 import type { BloomLevel, Card, Highlight } from "./model";
 import type { QuizQuestionMessageArgs, QuizRecallGradeMessageArgs } from "./prompt";
@@ -294,6 +297,7 @@ Before you answer, check that every fact in every revision appears in the highli
  */
 export class LlmClient {
   private codex: CodexBackend;
+  private deepseek: DeepSeekBackend;
 
   /**
    * `getHighlights` mirrors the `getSettings` callback rather than importing
@@ -308,6 +312,15 @@ export class LlmClient {
     private getSchema: () => Promise<{ cards: string } | null> = async () => null,
   ) {
     this.codex = new CodexBackend(getSettings);
+    this.deepseek = new DeepSeekBackend(getSettings);
+  }
+
+  /**
+   * The provider chosen in settings, read per request so switching providers
+   * in the settings tab takes effect immediately, with no reload.
+   */
+  private backend(): LlmBackend {
+    return this.getSettings().provider === "deepseek" ? this.deepseek : this.codex;
   }
 
   /**
@@ -335,19 +348,21 @@ export class LlmClient {
     }
   }
 
-  /** One tiny request, so the settings tab can say whether Codex works. */
+  /** One tiny request, so the settings tab can say whether the provider works. */
   probe(model?: string): Promise<{ model: string; via: string }> {
-    return this.codex.probe(model);
+    return this.backend().probe(model);
   }
 
-  /** The models Codex offers, for the settings dropdown. */
+  /** The models the active provider offers, for the settings dropdown. */
   listModels(): Promise<string[]> {
-    return this.codex.listModels();
+    return this.backend().listModels();
   }
 
   /** Cancel in-flight work (plugin unload). */
   async abort(): Promise<void> {
-    await this.codex.abort();
+    // Both, not just the active one: the provider may have been switched while
+    // a request was in flight, and the Codex backend has child processes to kill.
+    await Promise.all([this.codex.abort(), this.deepseek.abort()]);
   }
 
   /** "write cards": one highlight (plus context) in, a handful of cards out. */
@@ -376,7 +391,7 @@ export class LlmClient {
           existing.map((c) => `- ${c.kind === "qa" ? `${c.front} -> ${c.back}` : c.text}`).join("\n"),
       );
     }
-    const parsed = await this.codex.complete({
+    const parsed = await this.backend().complete({
       system: WRITER_SYSTEM,
       user: parts.join("\n\n"),
       schema: CardsOut,
@@ -428,7 +443,7 @@ export class LlmClient {
       );
     }
     parts.push(`Return exactly one verdict for each of the ${cards.length} cards above.`);
-    const parsed = await this.codex.complete({
+    const parsed = await this.backend().complete({
       system: CRITIC_SYSTEM,
       user: parts.join("\n\n"),
       schema: VerdictsOut,
@@ -472,7 +487,7 @@ export class LlmClient {
     const rewriteRules = await this.rulesBlock();
     if (rewriteRules) parts.push(rewriteRules);
     if (h.instruction.trim()) parts.push(`Instructions for this highlight: ${h.instruction.trim()}`);
-    return this.codex.complete({ system: WRITER_SYSTEM, user: parts.join("\n\n"), schema: CardOut, label: "card", maxTokens: 4000 });
+    return this.backend().complete({ system: WRITER_SYSTEM, user: parts.join("\n\n"), schema: CardOut, label: "card", maxTokens: 4000 });
   }
 
   /**
@@ -481,7 +496,7 @@ export class LlmClient {
    * section's points and asks again with the failure named.
    */
   async quizQuestion(args: QuizQuestionMessageArgs): Promise<QuizQuestionDraft> {
-    return this.codex.complete({
+    return this.backend().complete({
       system: QUIZ_QUESTION_SYSTEM,
       user: buildQuizQuestionMessage(args),
       schema: QuizQuestionOutSchema,
@@ -496,7 +511,7 @@ export class LlmClient {
    * against the answer and each cue against its point.
    */
   async quizRecallGrade(args: QuizRecallGradeMessageArgs): Promise<QuizRecallGradeDraft> {
-    return this.codex.complete({
+    return this.backend().complete({
       system: QUIZ_RECALL_GRADE_SYSTEM,
       user: buildQuizRecallGradeMessage(args),
       schema: QuizRecallGradeOutSchema,
@@ -508,6 +523,7 @@ export class LlmClient {
 
 export function describeError(e: unknown): string {
   if (e instanceof CodexError) return e.message;
+  if (e instanceof DeepSeekError) return e.message;
   if (e instanceof Error) return e.message;
   return String(e);
 }

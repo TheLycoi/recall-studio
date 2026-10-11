@@ -15,7 +15,7 @@ before(async () => {
   js = readFileSync(out, "utf8");
 });
 
-test("the bundle talks to no model API", () => {
+test("the bundle talks to no model API but the ones it offers", () => {
   for (const gone of ["api.anthropic.com", "generativelanguage.googleapis.com", "@anthropic-ai", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"]) {
     assert.equal(js.includes(gone), false, gone);
   }
@@ -32,8 +32,17 @@ test("the bundle still runs Codex", () => {
   assert.ok(js.includes("--output-schema"));
 });
 
-test("only the Codex backend is left in src", () => {
+test("the bundle reaches DeepSeek over its own API", () => {
+  assert.ok(js.includes("api.deepseek.com"));
+  assert.ok(js.includes("json_object"));
+  // The Anthropic-shaped DeepSeek endpoint is deliberately unused: JSON mode on
+  // the OpenAI-shaped one is what the backend validates against.
+  assert.equal(js.includes("api.deepseek.com/anthropic"), false);
+});
+
+test("both backends are in src, and the dead ones stay out", () => {
   const files = readdirSync("src");
   for (const gone of ["anthropic.ts", "gemini.ts", "claudeCli.ts", "keys.ts"]) assert.equal(files.includes(gone), false, gone);
   assert.ok(files.includes("codex.ts"));
+  assert.ok(files.includes("deepseek.ts"));
 });

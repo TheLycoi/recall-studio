@@ -5,7 +5,15 @@ import { homedir, tmpdir } from "os";
 import { delimiter, join } from "path";
 import { z } from "zod";
 import type { CompletionRequest, LlmBackend, TextRequest } from "./backend";
+import { extractJson, schemaJson } from "./jsonOut";
 import type { RecallSettings } from "./settings";
+
+/**
+ * `extractJson` and `toStrictSchema` live in src/jsonOut.ts, shared with the
+ * DeepSeek backend, and are re-exported here because test/codex.test.mjs
+ * exercises them through this module.
+ */
+export { extractJson, schemaJson as toStrictSchema } from "./jsonOut";
 
 /**
  * Codex backend: shells out to OpenAI's Codex CLI (`codex exec`), which is
@@ -136,23 +144,6 @@ export function parseCodexEvents(stdout: string): { text: string | null; error: 
 }
 
 /** Strip ``` fences and any prose around the outermost JSON value. */
-export function extractJson(text: string): string {
-  let t = text.trim();
-  const fence = /^```[a-zA-Z0-9_-]*\s*\n([\s\S]*?)\n?```\s*$/.exec(t);
-  if (fence) t = fence[1].trim();
-  if (t.startsWith("{") || t.startsWith("[")) return t;
-  const open = t.search(/[[{]/);
-  const close = Math.max(t.lastIndexOf("}"), t.lastIndexOf("]"));
-  if (open >= 0 && close > open) return t.slice(open, close + 1);
-  return t;
-}
-
-/** JSON Schema for `--output-schema`: zod's output minus the `$schema` keyword, which strict mode rejects. */
-export function toStrictSchema(schema: z.ZodType): Record<string, unknown> {
-  const js = z.toJSONSchema(schema) as Record<string, unknown>;
-  delete js.$schema;
-  return js;
-}
 
 /** Binary locations to try, in order. A configured path is authoritative. */
 export function codexCandidates(configured: string, env: NodeJS.ProcessEnv, home: string): string[] {
@@ -416,7 +407,7 @@ export class CodexBackend implements LlmBackend {
     const dir = mkdtempSync(join(tmpdir(), "wikilm-codex-"));
     try {
       const schemaPath = join(dir, "schema.json");
-      if (schema) writeFileSync(schemaPath, JSON.stringify(toStrictSchema(schema)));
+      if (schema) writeFileSync(schemaPath, JSON.stringify(schemaJson(schema)));
       const args = [
         "exec",
         "--json",

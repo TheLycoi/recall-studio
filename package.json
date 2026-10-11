@@ -1,7 +1,7 @@
 {
   "name": "obsidian-recall",
-  "version": "0.1.0",
-  "description": "Flashcards from what you highlight, an inbox to review them, export to Anki, and a free-response quiz on your wiki pages. Runs on the Codex CLI with your ChatGPT sign-in.",
+  "version": "0.2.0",
+  "description": "Flashcards from what you highlight, an inbox to review them, export to Anki, and a free-response quiz on your wiki pages. Runs on the Codex CLI with your ChatGPT sign-in, or on the DeepSeek API with a key.",
   "main": "main.js",
   "private": true,
   "scripts": {

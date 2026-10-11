@@ -13,7 +13,9 @@ A question you miss can become a card of its own, so the next thing you study is
 ## Requirements
 
 - Obsidian 1.7.2 or later, on desktop.
-- The Codex CLI, signed in with a ChatGPT account. The ChatGPT app bundles the CLI, so signing in to the app is enough.
+- One model provider:
+  - **Codex**: the Codex CLI, signed in with a ChatGPT account. The ChatGPT app bundles the CLI, so signing in to the app is enough. No API key.
+  - **DeepSeek**: a DeepSeek API key from platform.deepseek.com.
 - Anki with the AnkiConnect add-on, for export. Optional.
 - A folder of wiki pages, for the quiz. Optional.
 
@@ -46,17 +48,30 @@ Recall reads markdown pages under the wiki folder. It skips the `schema` folder,
 
 ## Settings
 
-- **Card writer**: how cards are written, and the model they are written with.
+- **Card writer**: which provider writes the cards, its key or CLI path, and the model. Test sends one small request and loads that provider's model list.
 - **Recall folder** (under Card writer): where Recall keeps the card rules note, the inbox, and the rule suggestions. Default `Recall/`.
 - **Card quality**: the rules the card writer and the critique pass follow.
 - **Capture**: how a selection or a highlight is queued for a card.
 - **Quiz**: how many questions a session asks and where it draws them from.
 - **Anki**: the deck, note types, and tags used on export.
 
+### The DeepSeek key
+
+Leave the key field empty and Recall looks for `DEEPSEEK_API_KEY` in the environment, then in the macOS keychain under `DEEPSEEK_API_KEY` or `Recall DeepSeek API key`. A key typed into the settings field is stored in the plugin's `data.json`, which in a synced vault is replicated in plaintext to every device and backup, so the keychain is the better place for it:
+
+```
+security add-generic-password -s "DEEPSEEK_API_KEY" -a deepseek -w '<your key>'
+```
+
 ## Network and data
 
-Recall starts the Codex CLI on your machine, and Codex sends the passage and the prompt to OpenAI under your ChatGPT account.
-Recall talks to AnkiConnect on `http://127.0.0.1:8765`. It makes no other network request.
+Recall sends the passage and the prompt to whichever provider you picked, and nothing else leaves the machine.
+
+- **Codex** (default): Recall starts the Codex CLI, and Codex sends the request to OpenAI under your ChatGPT account.
+- **DeepSeek**: Recall posts to `https://api.deepseek.com` with your API key.
+
+Recall also talks to AnkiConnect on `http://127.0.0.1:8765`. It makes no other network request.
+
 The inbox, the card rules note, and the rule suggestions file are stored in the Recall folder, default `Recall/`.
 Text exports go to the Text export folder setting, default `Recall/exports`.
 

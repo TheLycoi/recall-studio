@@ -1,6 +1,6 @@
 import type { z } from "zod";
 
-export type ProviderName = "codex";
+export type ProviderName = "codex" | "deepseek";
 
 /** One structured-output request: a system prompt, a user message, and the zod schema the answer must satisfy. */
 export interface CompletionRequest<T> {
@@ -18,7 +18,7 @@ export interface CompletionRequest<T> {
    * but it does wait for it.
    */
   effort?: "low" | "medium" | "high";
-  /** The model for this one call, else the configured Codex model. */
+  /** The model for this one call, else the configured model. */
   model?: string;
 }
 
