@@ -11,6 +11,8 @@
 export const DEFAULT_WIKI_FOLDER = "wiki";
 export const DEFAULT_RULES_FOLDER = "Recall";
 export const DEFAULT_EXPORT_FOLDER = "Recall/exports";
+/** Notes the Spaced Repetition plugin indexes. Recall's own folder, never the wiki. */
+export const DEFAULT_SPACED_FOLDER = "Recall/spaced";
 
 import { isUnderFolder } from "./util";
 

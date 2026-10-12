@@ -12,8 +12,9 @@ import { askInstruction, pickDeck } from "./modals";
 import type { Card, Highlight } from "./model";
 import { DEFAULT_SETTINGS, RecallSettingTab, type RecallSettings } from "./settings";
 import { SchemaFile } from "./schemaFile";
+import { buildNoteBody, notePath, serializeCard, spacedSettings, type SpacedSettings } from "./spaced";
 import { InboxStore } from "./store";
-import { buildAnkiTextImport } from "./util";
+import { buildAnkiTextImport, isUnderFolder } from "./util";
 
 export default class RecallPlugin extends Plugin {
   settings: RecallSettings = { ...DEFAULT_SETTINGS };
@@ -258,6 +259,84 @@ export default class RecallPlugin extends Plugin {
     finalizeHighlights(items.map((i) => i.highlight));
     this.store.touch();
     new Notice(`Recall: wrote ${files.map(([p]) => p).join(" and ")}. In Anki: File → Import.`, 8000);
+  }
+
+  /**
+   * Write every pending card of the given highlights into the vault as
+   * Spaced Repetition notes.
+   *
+   * The target plugin exposes no API: it indexes markdown files. So this is an
+   * export target beside Anki, not a call. A card goes to one destination or
+   * the other, never both, which is why this reads the same pending allowlist
+   * that `exportHighlights` does.
+   *
+   * Idempotency: a note is written once and never rewritten. Re-sending a
+   * highlight whose note exists writes a suffixed note holding only the cards
+   * that have not gone anywhere yet. That is what keeps this safe — at 1.15.4
+   * the plugin stores review history in `<!--SR:...-->` comments inside these
+   * very files, so rewriting one would reset a reader's schedule.
+   */
+  async exportToSpacedRepetition(list: Highlight[]): Promise<void> {
+    const items = this.pendingItems(list);
+    if (items.length === 0) {
+      new Notice("Recall: nothing to send.");
+      return;
+    }
+    const settings: SpacedSettings = spacedSettings(this.settings);
+    const folder = normalizePath(settings.folder);
+    if (isUnderFolder(folder, this.settings.topicFolder)) {
+      new Notice(
+        `Recall: the Spaced Repetition folder is inside the wiki folder (${this.settings.topicFolder}). Choose a folder outside it; the wiki is read-only for Recall.`,
+        10000,
+      );
+      return;
+    }
+    const notice = new Notice(`Recall: writing ${items.length} card${items.length === 1 ? "" : "s"}…`, 0);
+    let written = 0;
+    let skipped = 0;
+    let files = 0;
+    const failed: Array<{ card: Card; error: string }> = [];
+    const byHighlight = new Map<Highlight, Card[]>();
+    for (const { card, highlight } of items) {
+      const group = byHighlight.get(highlight) ?? [];
+      group.push(card);
+      byHighlight.set(highlight, group);
+    }
+    try {
+      if (!(await this.app.vault.adapter.exists(folder))) await this.app.vault.createFolder(folder);
+      for (const [highlight, cards] of byHighlight) {
+        const lines: Array<{ card: Card; text: string }> = [];
+        for (const card of cards) {
+          const s = serializeCard(card, settings);
+          if (s.ok) lines.push({ card, text: s.text });
+          else failed.push({ card, error: s.reason });
+        }
+        if (lines.length === 0) continue;
+        // First free name: the note for this highlight if it is not there yet,
+        // otherwise a suffixed one. An existing note is never touched.
+        let index = 0;
+        while (index < 100 && (await this.app.vault.adapter.exists(notePath(settings, highlight, index)))) index++;
+        const path = normalizePath(notePath(settings, highlight, index));
+        await this.app.vault.create(path, buildNoteBody(highlight, lines.map((l) => l.text), settings));
+        files++;
+        written += lines.length;
+        skipped += cards.length - lines.length;
+        for (const l of lines) l.card.srNote = path;
+      }
+      finalizeHighlights(items.map((i) => i.highlight));
+      this.store.touch();
+      const bits = [`${written} card${written === 1 ? "" : "s"} in ${files} note${files === 1 ? "" : "s"}`];
+      if (skipped) bits.push(`${skipped} skipped`);
+      if (failed.length) bits.push(`${failed.length} could not be written`);
+      new Notice(`Recall: ${bits.join(", ")}. Open the Spaced Repetition plugin to review them.`, failed.length ? 10000 : 6000);
+      for (const f of failed) console.warn("Recall: Spaced Repetition export skipped a card", f.error, f.card);
+      if (failed.length) new Notice(`Recall: first skipped card — ${failed[0].error}.`, 10000);
+    } catch (e) {
+      new Notice(`Recall: could not write the Spaced Repetition notes. ${(e as Error).message}`, 10000);
+      this.store.touch();
+    } finally {
+      notice.hide();
+    }
   }
 
   /** Used by the settings tab and tests; resolves a TFile from a path. */

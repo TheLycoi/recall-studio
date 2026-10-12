@@ -107,6 +107,10 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
     available: () => true,
     run: (p) => void p.exportHighlights(p.store.all().filter((h) => h.status === "ready")),
   },
+  "export-spaced": {
+    available: () => true,
+    run: (p) => void p.exportToSpacedRepetition(p.store.all().filter((h) => h.status === "ready")),
+  },
   "retry-failed": {
     available: () => true,
     run: (p) => {

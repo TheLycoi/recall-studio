@@ -356,6 +356,12 @@ export class InboxView extends ItemView {
       );
       menu.addItem((i) =>
         i
+          .setTitle("Send reviewed cards to Spaced Repetition")
+          .setIcon(RECALL_STACK_ICON)
+          .onClick(() => void this.sendToSpacedRepetition(this.visibleHighlights())),
+      );
+      menu.addItem((i) =>
+        i
           .setTitle("Clear exported and dismissed")
           .setIcon(RECALL_DISCARD_ICON)
           .onClick(() => {
@@ -476,6 +482,9 @@ export class InboxView extends ItemView {
     };
     if (h.status === "ready" && pendingCards(h).length) {
       iconBtn(RECALL_SEND_ICON, "Export this highlight's cards to Anki (Enter)", () => void this.exportHighlights([h]));
+      iconBtn(RECALL_STACK_ICON, "Send this highlight's cards to Spaced Repetition", () =>
+        void this.sendToSpacedRepetition([h]),
+      );
     }
     if (h.status === "error") iconBtn(RECALL_RETRY_ICON, "Retry", () => this.plugin.generator.enqueue(h));
     if (h.status === "ready" || h.status === "exported") {
@@ -988,6 +997,10 @@ export class InboxView extends ItemView {
 
   private async exportHighlights(list: Highlight[]): Promise<void> {
     await this.plugin.exportHighlights(list);
+  }
+
+  private async sendToSpacedRepetition(list: Highlight[]): Promise<void> {
+    await this.plugin.exportToSpacedRepetition(list);
   }
 
   private async openSource(h: Highlight): Promise<void> {

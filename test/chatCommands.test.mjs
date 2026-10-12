@@ -24,12 +24,15 @@ before(async () => {
 // The ids and names in the table, in order. An id change orphans a user's
 // hotkey, a name change moves the entry in the palette. The Recall carve-out
 // (2026-10-05) removed the wiki commands and turned open-chat into open-quiz.
+// export-spaced (2026-10-11) added the Spaced Repetition export target beside
+// the Anki one.
 const EXPECTED = [
   ["capture-selection", "Send selection to inbox"],
   ["capture-selection-with-instruction", "Send selection to inbox with instructions…"],
   ["open-quiz", "Open quiz"],
   ["open-inbox", "Open inbox"],
   ["export-reviewed", "Export all reviewed cards to Anki"],
+  ["export-spaced", "Send reviewed cards to Spaced Repetition"],
   ["open-schema", "Open the card rules note"],
   ["review-schema-suggestions", "Review card rule suggestions"],
   ["capture-markdown-highlights", "Send all ==highlights== in this note to inbox"],
@@ -54,8 +57,8 @@ const REMOVED = [
   "ingest-folder",
 ];
 
-test("COMMAND_TABLE holds the nine (id, name) pairs verbatim and in order", () => {
-  assert.equal(table.COMMAND_TABLE.length, 9);
+test("COMMAND_TABLE holds the ten (id, name) pairs verbatim and in order", () => {
+  assert.equal(table.COMMAND_TABLE.length, 10);
   assert.deepEqual(
     table.COMMAND_TABLE.map((c) => [c.id, c.name]),
     EXPECTED,
@@ -70,12 +73,12 @@ test("exactly the two quiz-panel-only commands are hidden, and the removed ones 
   for (const id of REMOVED) assert.ok(!table.COMMAND_TABLE.some((c) => c.id === id), `${id} should be removed`);
 });
 
-test("the palette gets the seven visible commands and none of the hidden ones", () => {
+test("the palette gets the eight visible commands and none of the hidden ones", () => {
   const palette = table.paletteCommands(table.COMMAND_TABLE);
-  assert.equal(palette.length, 7);
+  assert.equal(palette.length, 8);
   assert.deepEqual(
     palette.map((c) => c.id),
-    EXPECTED.slice(0, 7).map(([id]) => id),
+    EXPECTED.slice(0, 8).map(([id]) => id),
   );
   for (const id of HIDDEN) assert.ok(!palette.some((c) => c.id === id), `${id} must not reach the palette`);
 });

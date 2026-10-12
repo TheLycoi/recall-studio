@@ -58,6 +58,12 @@ export const COMMAND_TABLE: CommandSpec[] = [
     hint: "always",
   },
   {
+    id: "export-spaced",
+    name: "Send reviewed cards to Spaced Repetition",
+    aliases: ["spaced"],
+    hint: "always",
+  },
+  {
     id: "open-schema",
     name: "Open the card rules note",
     aliases: ["rules", "schema"],

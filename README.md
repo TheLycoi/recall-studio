@@ -31,6 +31,7 @@ Run these from the command palette. Each one also runs from the quiz panel's box
 | Open quiz | `quiz-panel` | Opens the quiz panel. |
 | Open inbox | `inbox` | Opens the flashcard inbox. |
 | Export all reviewed cards to Anki | `export` | Sends every card in the inbox to Anki, except flagged and discarded ones. |
+| Send reviewed cards to Spaced Repetition | `spaced` | Writes every card in the inbox to the vault as markdown the Spaced Repetition plugin indexes, except flagged and discarded ones. |
 | Open the card rules note | `rules`, `schema` | Opens your house rules for the card writer, and creates the note if needed. |
 | Review card rule suggestions | `suggestions` | Rules Recall proposes from the edits you keep making. Accept, edit, or dismiss each one. |
 | Send all ==highlights== in this note to inbox | `highlights`, `sweep` | Quiz panel only. Queues every `==highlight==` in the open note that is not in the inbox yet. |
@@ -54,6 +55,7 @@ Recall reads markdown pages under the wiki folder. It skips the `schema` folder,
 - **Capture**: how a selection or a highlight is queued for a card.
 - **Quiz**: how many questions a session asks and where it draws them from.
 - **Anki**: the deck, note types, and tags used on export.
+- **Spaced Repetition**: the folder, deck tag, and separators used when cards are written into the vault for the [Spaced Repetition plugin](https://github.com/st3v3nmw/obsidian-spaced-repetition).
 
 ### The DeepSeek key
 
@@ -74,6 +76,15 @@ Recall also talks to AnkiConnect on `http://127.0.0.1:8765`. It makes no other n
 
 The inbox, the card rules note, and the rule suggestions file are stored in the Recall folder, default `Recall/`.
 Text exports go to the Text export folder setting, default `Recall/exports`.
+Spaced Repetition notes go to the Spaced Repetition folder setting, default `Recall/spaced`.
+
+### Sending cards to Spaced Repetition
+
+The Spaced Repetition plugin has no API for other plugins: it reads markdown files in the vault. So Recall's other export target writes a note per highlight, tagged as a deck, and the plugin indexes it on its next scan. Reviewing then happens in Obsidian, next to the note the card came from.
+
+- A card goes to one destination, never both: sending a card to Spaced Repetition leaves it out of Anki, and the other way round.
+- A note is written once and never rewritten. Sending the same highlight again writes a second, suffixed note with only the cards that have not been sent, because the plugin keeps its review history in the notes themselves.
+- Each card becomes one line, so a blank line or a bare `?` inside card text cannot end a card early. A card that would be misread by the plugin is reported instead of written, and stays in the inbox.
 
 ## Install
 

@@ -45,6 +45,11 @@ export interface Card {
   status: CardStatus;
   edited: boolean;
   ankiNoteId?: number;
+  /**
+   * Vault path this card was written to as a Spaced Repetition note. Set only
+   * by that export, so it also records which destination the card left to.
+   */
+  srNote?: string;
   createdAt: string;
   /** Deterministic lint failures recorded when the card was generated. */
   lintFailures?: LintFailureId[];

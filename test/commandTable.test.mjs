@@ -24,6 +24,7 @@ test("the command table holds Recall's commands and nothing else", () => {
       "open-quiz",
       "open-inbox",
       "export-reviewed",
+      "export-spaced",
       "open-schema",
       "review-schema-suggestions",
       "capture-markdown-highlights",
@@ -32,8 +33,8 @@ test("the command table holds Recall's commands and nothing else", () => {
   );
 });
 
-test("the palette shows seven commands", () => {
-  assert.equal(t.paletteCommands(t.COMMAND_TABLE).length, 7);
+test("the palette shows eight commands", () => {
+  assert.equal(t.paletteCommands(t.COMMAND_TABLE).length, 8);
 });
 
 test("no command name or alias is a wiki verb", () => {

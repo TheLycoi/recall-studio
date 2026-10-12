@@ -3,7 +3,7 @@ import { DEEPSEEK_FALLBACK_MODELS } from "./deepseekModels";
 import { forgetCachedKey } from "./deepseekKey";
 import { App, Notice, PluginSettingTab, Setting, ButtonComponent } from "obsidian";
 import type RecallPlugin from "./main";
-import { DEFAULT_EXPORT_FOLDER, DEFAULT_RULES_FOLDER, DEFAULT_WIKI_FOLDER } from "./paths";
+import { DEFAULT_EXPORT_FOLDER, DEFAULT_RULES_FOLDER, DEFAULT_SPACED_FOLDER, DEFAULT_WIKI_FOLDER } from "./paths";
 
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 export type MarkMode = "none" | "highlight" | "highlight+block";
@@ -58,6 +58,20 @@ export interface RecallSettings {
   includeSourceTag: boolean;
   includeExtra: boolean;
   exportFolder: string;
+
+  // Spaced Repetition
+  /** Vault folder the Spaced Repetition notes are written to. Keep it out of the wiki folder. */
+  srFolder: string;
+  /** The plugin's flashcard tag, without a leading `#`. Default `flashcards`. */
+  srTag: string;
+  /** Sub-deck under the tag. Empty writes the bare tag. */
+  srDeck: string;
+  /** The target plugin's single-line separator. Only used to detect and escape it. */
+  srBasicSeparator: string;
+  /** The target plugin's reversed-card separator. */
+  srReversedSeparator: string;
+  /** A line holding only this splits a multi-line card. Used to escape it. */
+  srMultilineSeparator: string;
 
   // Quiz
   /** The wiki plugin's folder; the quiz reads the pages in it and Recall never changes them. */
@@ -121,6 +135,13 @@ export const DEFAULT_SETTINGS: RecallSettings = {
   includeSourceTag: true,
   includeExtra: true,
   exportFolder: DEFAULT_EXPORT_FOLDER,
+
+  srFolder: DEFAULT_SPACED_FOLDER,
+  srTag: "flashcards",
+  srDeck: "recall",
+  srBasicSeparator: "::",
+  srReversedSeparator: ":::",
+  srMultilineSeparator: "?",
 
   topicFolder: DEFAULT_WIKI_FOLDER,
   quizCap: 30,
@@ -664,5 +685,50 @@ export class RecallSettingTab extends PluginSettingTab {
           save();
         }),
       );
+
+    new Setting(containerEl).setName("Spaced Repetition").setHeading();
+
+    new Setting(containerEl)
+      .setName("Spaced Repetition folder")
+      .setDesc(
+        "Vault folder the cards are written to as markdown notes, for the Spaced Repetition plugin to index. It has no API for other plugins, so a note is the only way to hand it a card. Keep it outside the wiki folder.",
+      )
+      .addText((t) =>
+        t.setValue(s.srFolder).onChange((v) => {
+          s.srFolder = v.trim() || DEFAULT_SETTINGS.srFolder;
+          save();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Flashcard tag")
+      .setDesc(
+        "The tag the target plugin treats as a deck, without the `#`. It must match that plugin's flashcard tag setting, which is `flashcards` by default. A tag outside that set is ignored and the cards are never indexed.",
+      )
+      .addText((t) =>
+        t.setValue(s.srTag).onChange((v) => {
+          s.srTag = v.trim() || DEFAULT_SETTINGS.srTag;
+          save();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Deck")
+      .setDesc(
+        "Sub-deck under the tag, written as `#<tag>/<deck>`. Leave empty to write the bare tag. Recall's cards land in one deck of their own so they can be reviewed beside your own.",
+      )
+      .addText((t) =>
+        t.setValue(s.srDeck).onChange((v) => {
+          s.srDeck = v.trim();
+          save();
+        }),
+      );
+
+    // Read from the target plugin's settings, never assumed: a note written
+    // against the wrong separator is a card that asks a different question.
+    // These are only used to detect and neutralise a separator inside a card.
+    field("Card separator", "srBasicSeparator", "The target plugin's single-line separator. Default `::`.");
+    field("Reversed separator", "srReversedSeparator", "Its reversed-card separator. Default `:::`.");
+    field("Multi-line separator", "srMultilineSeparator", "A line holding only this splits a multi-line card. Default `?`.");
   }
 }
