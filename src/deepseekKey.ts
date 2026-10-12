@@ -14,7 +14,7 @@ import { execFileSync } from "child_process";
  * Pure enough to unit-test: `readKeychain` is injected, so the test never
  * touches `security` (test/deepseek.test.mjs bundles this file standalone).
  */
-export const KEYCHAIN_SERVICES = ["Recall DeepSeek API key", "DEEPSEEK_API_KEY"];
+export const KEYCHAIN_SERVICES = ["Review Inbox DeepSeek API key", "Recall DeepSeek API key", "DEEPSEEK_API_KEY"];
 
 export type KeySource = "settings" | "environment" | "keychain" | "none";
 

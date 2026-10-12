@@ -20,6 +20,15 @@
   outline: none;
   container-type: inline-size;
 }
+/* The container is focusable — inboxView.onOpen sets tabIndex = 0 so the j/k
+   keys reach it — but `outline: none` above would leave keyboard focus
+   invisible. Restore a ring for keyboard focus only, so a Tab into the inbox is
+   visible while a mouse click keeps the quiet look. The negative offset keeps
+   the ring inside the pane's clip rather than off its edge. */
+.wikilm-notebook:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: -2px;
+}
 /* Obsidian sets `.mod-right-split .view-content { overflow-x: auto }` at three
    classes of specificity, which silently beats a one-class rule here and turns
    any overflow into a sideways scroll. This selector matches that weight and

@@ -108,7 +108,7 @@ export class SchemaFile {
       // on the next highlight and the one after that.
       if (!this.folderFailed) {
         this.folderFailed = true;
-        console.error("Recall: could not read the schema note; house rules are not being applied", e);
+        console.error("Review Inbox: could not read the schema note; house rules are not being applied", e);
       }
       return null;
     }
@@ -124,7 +124,7 @@ export class SchemaFile {
     try {
       this.lastProposals = parseProposals(await this.plugin.app.vault.cachedRead(file));
     } catch (e) {
-      console.error("Recall: could not read the schema suggestions", e);
+      console.error("Review Inbox: could not read the schema suggestions", e);
       this.lastProposals = [];
     }
     return this.lastProposals;

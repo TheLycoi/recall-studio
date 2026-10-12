@@ -208,10 +208,12 @@ export function buildNote(card: Card, h: Highlight, ctx: ExportContext): AnkiNot
     modelName,
     fields,
     tags: buildTags(h, ctx),
-    // Content duplicates stay out of the deck the reader is writing to; an
-    // identity hit (our own card, already sent) is handled by the lookup, not
-    // by this flag.
-    options: { allowDuplicate: false, duplicateScope: "deck" },
+    // A content duplicate is refused collection-wide, not deck-wide: an
+    // unrelated note holding the same text in *another* deck is still the same
+    // content, and the README promises it is reported rather than added. The
+    // identity tag is what keeps a re-send idempotent (the lookup above finds
+    // our own note wherever it lives), so this only governs *other* notes' text.
+    options: { allowDuplicate: false, duplicateScope: "collection" },
   };
 }
 

@@ -61,3 +61,75 @@ test("Review Inbox has no quiz, dashboard, statistics or scheduler surface", () 
     assert.equal(existsSync(gone), false, gone);
   }
 });
+
+/**
+ * Every string literal in a source file, so a comment never counts as
+ * user-facing text. Handles `//` and block comments and escaped quotes; regex
+ * literals are not modelled, which is fine because the strings they hold are
+ * not messages the reader reads.
+ */
+function stringLiterals(src) {
+  const out = [];
+  const n = src.length;
+  let i = 0;
+  while (i < n) {
+    const c = src[i];
+    const next = src[i + 1];
+    if (c === "/" && next === "/") {
+      while (i < n && src[i] !== "\n") i++;
+      continue;
+    }
+    if (c === "/" && next === "*") {
+      i += 2;
+      while (i < n && !(src[i] === "*" && src[i + 1] === "/")) i++;
+      i += 2;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") {
+      let j = i + 1;
+      let buf = "";
+      while (j < n && src[j] !== c) {
+        if (src[j] === "\\") {
+          buf += src[j + 1] ?? "";
+          j += 2;
+          continue;
+        }
+        buf += src[j];
+        j++;
+      }
+      out.push(buf);
+      i = j + 1;
+      continue;
+    }
+    i++;
+  }
+  return out;
+}
+
+test("no string the reader can see still calls the plugin Recall", () => {
+  // Internal names (RecallPlugin, RECALL_COMMANDS), the opencode agent id and
+  // comments keep their legacy names on purpose. What must say Review Inbox is a
+  // string literal the reader reads: a Notice, a ribbon tooltip, a settings
+  // description, an error. The one compatibility exception is the legacy
+  // keychain service name, which must keep working for a key already saved
+  // under it, so that exact phrase is excused.
+  const offenders = [];
+  for (const f of readdirSync("src").filter((n) => n.endsWith(".ts"))) {
+    for (const lit of stringLiterals(readFileSync(`src/${f}`, "utf8"))) {
+      if (/\bRecall\b/.test(lit.replaceAll("Recall DeepSeek API key", ""))) {
+        offenders.push(`${f}: ${JSON.stringify(lit)}`);
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], `user-facing strings still say Recall:\n${offenders.join("\n")}`);
+});
+
+test("the focusable inbox container keeps a visible keyboard focus ring", () => {
+  // inboxView.onOpen sets tabIndex = 0 so the j/k keys reach the container; its
+  // `outline: none` must be paired with a :focus-visible ring or keyboard focus
+  // on the inbox is invisible.
+  const rule = /\.wikilm-notebook:focus-visible\s*\{([^}]*)\}/.exec(readFileSync("styles.css", "utf8"));
+  assert.ok(rule, "the focusable inbox container has no :focus-visible ring");
+  assert.match(rule[1], /outline:\s*[^;]*var\(/, "the ring must draw a visible outline");
+  assert.match(rule[1], /--interactive-accent/, "the ring should use the theme's accent colour");
+});

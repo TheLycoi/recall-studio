@@ -152,7 +152,7 @@ test("resolveDeepSeekKey prefers the setting, then the environment, then the key
   assert.deepEqual(keys.resolveDeepSeekKey("", { DEEPSEEK_API_KEY: "sk-env" }, none), { key: "sk-env", source: "environment" });
   keys.forgetCachedKey();
   assert.deepEqual(
-    keys.resolveDeepSeekKey("", {}, (s) => (s === "Recall DeepSeek API key" ? "sk-keychain" : undefined)),
+    keys.resolveDeepSeekKey("", {}, (s) => (s === "Review Inbox DeepSeek API key" ? "sk-keychain" : undefined)),
     { key: "sk-keychain", source: "keychain" },
   );
   keys.forgetCachedKey();
@@ -168,14 +168,14 @@ test("resolveDeepSeekKey ignores blank values at every level", () => {
   assert.deepEqual(keys.resolveDeepSeekKey("", {}, () => "  "), { key: "", source: "none" });
 });
 
-test("resolveDeepSeekKey tries both keychain service names, in order", () => {
+test("resolveDeepSeekKey tries the keychain service names, in order", () => {
   keys.forgetCachedKey();
   const asked = [];
   keys.resolveDeepSeekKey("", {}, (s) => {
     asked.push(s);
     return s === "DEEPSEEK_API_KEY" ? "sk-second" : undefined;
   });
-  assert.deepEqual(asked, ["Recall DeepSeek API key", "DEEPSEEK_API_KEY"]);
+  assert.deepEqual(asked, ["Review Inbox DeepSeek API key", "Recall DeepSeek API key", "DEEPSEEK_API_KEY"]);
 });
 
 test("forgetCachedKey drops the cached keychain value", () => {
@@ -237,7 +237,7 @@ test("a classified error never echoes key material", () => {
   assert.match(e.message, /Invalid key/);
   assert.match(e.message, /for this request/);
   // The advice the reader needs is untouched.
-  assert.match(e.message, /Check the key in Recall settings/);
+  assert.match(e.message, /Check the key in Review Inbox settings/);
 });
 
 test("redactDetail strips credential shapes and caps the length", () => {

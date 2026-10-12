@@ -259,11 +259,16 @@ export default class RecallPlugin extends Plugin {
     if (!(await this.app.vault.adapter.exists(folder))) await this.app.vault.createFolder(folder);
     const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 16);
     const path = normalizePath(`${folder}/review-inbox-${stamp}.txt`);
-    const qa = rows.filter((r) => r.fields.length !== 2 || r.notetype !== this.settings.clozeModel);
-    const cloze = rows.filter((r) => !qa.includes(r));
-    // Anki's importer needs a consistent column count per file, so split by note type when the field counts differ.
+    // Group by note type, not by column count. A cloze model with no Extra
+    // field writes ONE column while a Q&A row writes two, so classifying by
+    // `fields.length !== 2` misfiled that cloze row as Q&A and put both shapes
+    // in one file. Every row of a note type shares its field order, so one file
+    // per note type always has a consistent column count. approvedItems above
+    // is the only funnel, so only approved cards reach this split.
+    const cloze = rows.filter((r) => r.notetype === this.settings.clozeModel);
+    const qa = rows.filter((r) => r.notetype !== this.settings.clozeModel);
     const files: Array<[string, typeof rows]> = [];
-    if (qa.length && cloze.length && qa[0].fields.length !== cloze[0].fields.length) {
+    if (qa.length && cloze.length) {
       files.push([path.replace(/\.txt$/, "-qa.txt"), qa], [path.replace(/\.txt$/, "-cloze.txt"), cloze]);
     } else files.push([path, rows]);
     for (const [p, rs] of files) await this.app.vault.create(p, buildAnkiTextImport(rs));

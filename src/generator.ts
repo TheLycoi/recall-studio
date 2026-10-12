@@ -129,7 +129,7 @@ export class Generator {
           // The critique is an enhancement, never a new failure mode. The
           // drafted cards survive exactly as written, still get linted below,
           // and critiqueRan stays unset so nothing implies they were checked.
-          console.error("Recall: critique pass failed, keeping the drafted cards", e);
+          console.error("Review Inbox: critique pass failed, keeping the drafted cards", e);
         }
       }
 
@@ -160,7 +160,7 @@ export class Generator {
       if (this.plugin.settings.notifyWhenReady) {
         const label = h.title || h.text.slice(0, 40);
         const flaggedNote = flagged ? ` (${flagged} flagged)` : "";
-        new Notice(`Recall: ${cards.length} card${cards.length === 1 ? "" : "s"} ready${flaggedNote} for “${label}”.`);
+        new Notice(`Review Inbox: ${cards.length} card${cards.length === 1 ? "" : "s"} ready${flaggedNote} for “${label}”.`);
       }
     } catch (e) {
       if ((h.status as Highlight["status"]) === "dismissed") return;
@@ -171,7 +171,7 @@ export class Generator {
       } else {
         h.status = "error";
         h.error = describeError(e);
-        console.error("Recall: card writing failed", e);
+        console.error("Review Inbox: card writing failed", e);
       }
     }
     this.plugin.store.touch();

@@ -89,3 +89,66 @@ test('dismissal during background generation is not undone by its response', asy
   assert.equal(h.status,'dismissed');
   assert.equal(h.cards.length,0);
 });
+
+test('a captured PDF answer reuses the existing highlight and still queues drafts', async () => {
+  const passage = 'Albumin binds drugs but does not transduce a signal.';
+  const existing = {
+    id: 'h-pdf', sourcePath: 'p.pdf', sourceTitle: 'Paper', text: passage,
+    page: 3, line: 1, status: 'exported', instruction: 'from the original capture', origin: 'pdf',
+    cards: [{ id: 'c-old', highlightId: 'h-pdf', kind: 'qa', front: 'old q', back: 'old a', status: 'exported' }],
+  };
+  const added = [];
+  const moreCalls = [];
+  const enqueued = [];
+  // hasDuplicate true models the store knowing the passage is already captured;
+  // the view must still be able to produce drafts from it.
+  const store = { all: () => [existing], add: (h) => { added.push(h); return h; }, hasDuplicate: () => true };
+  const generator = { enqueue: (h) => enqueued.push(h), more: (h, inst) => moreCalls.push([h, inst]) };
+  const v = new View({}, { store, generator, app: {}, openInbox() {} });
+  v.render = () => {};
+  v.selectedSourcePaths = () => ['p.pdf'];
+  const turn = {
+    role: 'assistant',
+    text: `${passage} [1]`,
+    evidence: [{ n: 1, path: 'p.pdf', title: 'Paper', page: 3, line: 1, text: passage }],
+    report: { coverage: 'full', kept: 1, removed: 0, quotesVerified: 1, quotesRejected: 0, cited: [1], refused: false },
+    selectedPaths: ['p.pdf'],
+  };
+  v.turns = [{ role: 'user', text: 'What binds drugs?' }, turn];
+  await v.sendToInbox(turn);
+
+  assert.equal(added.length, 0, 'the existing capture must not be duplicated');
+  assert.equal(enqueued.length, 0, 'no new highlight is queued when one already exists');
+  assert.equal(moreCalls.length, 1, 'the captured evidence must still produce drafts');
+  assert.equal(moreCalls[0][0], existing, 'drafts are written on the existing highlight');
+  assert.match(moreCalls[0][1], /What binds drugs\?/, 'the answer steers the run');
+  assert.equal(existing.cards.length, 1, 'the existing card list is untouched');
+  assert.equal(existing.cards[0].status, 'exported', 'an exported card is neither re-approved nor re-queued');
+  assert.equal(existing.instruction, 'from the original capture', 'the stored capture instruction is not overwritten');
+  assert.equal(turn.sentToInbox, true);
+});
+
+test('an uncaptured answer still adds a new highlight tagged origin ask', async () => {
+  const passage = 'The hippocampus consolidates memory.';
+  const added = [];
+  const enqueued = [];
+  const store = { all: () => [], add: (h) => { added.push(h); return h; } };
+  const generator = { enqueue: (h) => enqueued.push(h), more: () => { throw new Error('more must not be called for a new capture'); } };
+  const v = new View({}, { store, generator, app: {}, openInbox() {} });
+  v.render = () => {};
+  v.selectedSourcePaths = () => ['n.md'];
+  const turn = {
+    role: 'assistant',
+    text: `${passage} [1]`,
+    evidence: [{ n: 1, path: 'n.md', title: 'N', page: null, line: 1, text: passage }],
+    report: { coverage: 'full', kept: 1, removed: 0, quotesVerified: 1, quotesRejected: 0, cited: [1], refused: false },
+    selectedPaths: ['n.md'],
+  };
+  v.turns = [{ role: 'user', text: 'What consolidates memory?' }, turn];
+  await v.sendToInbox(turn);
+
+  assert.equal(added.length, 1, 'a new passage becomes a new highlight');
+  assert.equal(added[0].origin, 'ask', 'the row is tagged origin ask');
+  assert.equal(enqueued.length, 1);
+  assert.equal(enqueued[0], added[0]);
+});

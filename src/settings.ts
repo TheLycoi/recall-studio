@@ -154,9 +154,9 @@ export class RecallSettingTab extends PluginSettingTab {
       } catch (e) {
         listed = ` Could not list models: ${(e as Error).message}`;
       }
-      new Notice(`Recall: ${r.model} answered (${r.via}).${listed}`, 8000);
+      new Notice(`Review Inbox: ${r.model} answered (${r.via}).${listed}`, 8000);
     } catch (e) {
-      new Notice(`Recall: ${(e as Error).message}`, 8000);
+      new Notice(`Review Inbox: ${(e as Error).message}`, 8000);
     } finally {
       b.setDisabled(false);
     }
@@ -173,7 +173,7 @@ export class RecallSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Provider")
       .setDesc(
-        "Codex runs OpenAI's CLI on your ChatGPT sign-in and needs no key. DeepSeek calls the DeepSeek API with an API key. OpenCode runs the opencode CLI, which owns its own credentials, so Recall holds no key for it. Test sends one small request and loads the model list.",
+        "Codex runs OpenAI's CLI on your ChatGPT sign-in and needs no key. DeepSeek calls the DeepSeek API with an API key. OpenCode runs the opencode CLI, which owns its own credentials, so Review Inbox holds no key for it. Test sends one small request and loads the model list.",
       )
       .addDropdown((d) =>
         d
@@ -198,7 +198,7 @@ export class RecallSettingTab extends PluginSettingTab {
       new Setting(containerEl)
         .setName("DeepSeek API key")
         .setDesc(
-          "Leave empty to read DEEPSEEK_API_KEY from the environment or the macOS keychain (service “DEEPSEEK_API_KEY” or “Recall DeepSeek API key”). A key typed here is stored in data.json, which this vault syncs through iCloud in plaintext, so the keychain is the safer place for it.",
+          "Leave empty to read DEEPSEEK_API_KEY from the environment or the macOS keychain, under “DEEPSEEK_API_KEY”, “Review Inbox DeepSeek API key”, or the earlier “Recall DeepSeek API key”. A key typed here is stored in data.json, which this vault syncs through iCloud in plaintext, so the keychain is the safer place for it.",
         )
         .addText((t) => {
           t.inputEl.type = "password";
@@ -248,7 +248,7 @@ export class RecallSettingTab extends PluginSettingTab {
       new Setting(containerEl)
         .setName("OpenCode CLI path")
         .setDesc(
-          "Leave empty to auto-detect: `opencode` on the PATH, then ~/.opencode/bin/opencode. Sign in with `opencode auth login`; add a provider key with `opencode service set env`. OpenCode owns its credentials, so Recall stores none for it.",
+          "Leave empty to auto-detect: `opencode` on the PATH, then ~/.opencode/bin/opencode. Sign in with `opencode auth login`; add a provider key with `opencode service set env`. OpenCode owns its credentials, so Review Inbox stores none for it.",
         )
         .addText((t) =>
           t.setPlaceholder("auto-detect").setValue(s.opencodePath).onChange((v) => {
@@ -344,7 +344,7 @@ export class RecallSettingTab extends PluginSettingTab {
         s.provider === "deepseek"
           ? "How much reasoning DeepSeek spends per call. It accepts low, high and max; medium and xhigh both land on high, which is the level the API maps them to. Thinking is always on."
           : s.provider === "opencode"
-            ? "Unused by OpenCode, which carries a model's reasoning level in the model id itself: append #low, #high or #max to an id whose model offers that variant, e.g. deepseek/deepseek-flash#high. Recall passes the id through unchanged rather than guessing a variant, because naming one the model does not offer fails the call."
+            ? "Unused by OpenCode, which carries a model's reasoning level in the model id itself: append #low, #high or #max to an id whose model offers that variant, e.g. deepseek/deepseek-flash#high. Review Inbox passes the id through unchanged rather than guessing a variant, because naming one the model does not offer fails the call."
             : "Reasoning effort passed to Codex. Levels the chosen model does not support (gpt-5.5 stops at xhigh) are rounded down automatically.",
       )
       .addDropdown((d) =>
@@ -407,9 +407,9 @@ export class RecallSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
-      .setName("Recall folder")
+      .setName("Review Inbox folder")
       .setDesc(
-        "Where Recall keeps its own files: the card rules note, your inbox, and the rule suggestions. Keep it outside the wiki folder. Reload Recall after you change it. Files already in the old folder stay there. Move them by hand if you want to keep them.",
+        "Where Review Inbox keeps its own files: the card rules note, your inbox, and the rule suggestions. Keep it outside the wiki folder. Reload Review Inbox after you change it. Files already in the old folder stay there. Move them by hand if you want to keep them.",
       )
       .addText((t) =>
         t.setValue(s.schemaFolder).onChange((v) => {
@@ -466,7 +466,7 @@ export class RecallSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Propose card rules from my edits")
       .setDesc(
-        "When the same correction shows up in three or four of your card edits, Recall writes a proposed rule to `recall-suggestions.md` and shows a chip in the inbox. Nothing enters the card rules note until you accept it.",
+        "When the same correction shows up in three or four of your card edits, Review Inbox writes a proposed rule to `recall-suggestions.md` and shows a chip in the inbox. Nothing enters the card rules note until you accept it.",
       )
       .addToggle((t) =>
         t.setValue(s.schemaLearning).onChange((v) => {
@@ -528,7 +528,7 @@ export class RecallSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Mark captured text in the note")
       .setDesc(
-        "Off by default — Recall sends passages to the inbox without editing your notes. Marking wraps the passage in ==…==, which can break headings and list formatting when a passage spans more than one line. Pages under the wiki folder are never marked.",
+        "Off by default — Review Inbox sends passages to the inbox without editing your notes. Marking wraps the passage in ==…==, which can break headings and list formatting when a passage spans more than one line. Pages under the wiki folder are never marked.",
       )
       .addDropdown((d) =>
         d

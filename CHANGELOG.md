@@ -1,5 +1,33 @@
 # Changelog
 
+## Review Inbox 0.1.0
+
+The first stage of the Review product, carved out of Obsidian Recall (MIT). It
+turns a highlighted passage into draft flashcards in a source-linked inbox, lets
+a grounded chat over explicitly selected sources send its answers back to the
+inbox as drafts, and exports approved cards to Anki. No quiz, dashboard,
+statistics or scheduler.
+
+- Distinct plugin identity `review-inbox` (display name `Review Inbox`), so its
+  settings and data never collide with an installed Recall plugin.
+- Capture and generation keep the existing Markdown/PDF selection path, the
+  Codex, DeepSeek and OpenCode providers, and the quality checks. The card rules
+  note, the inbox and the rule suggestions live under the `Review Inbox/` folder.
+- Inbox groups passages by source with inline editing, regeneration, individual
+  and bulk approval/dismissal. Generated cards stay drafts until approved, and
+  only approved cards export.
+- Chat answers only from the sources you explicitly select, verifies every quote
+  literally, refuses an answer the evidence does not support, keeps excluded
+  sources out of the prompt, and can send a grounded answer's cited passages to
+  the inbox as drafts.
+- Anki export uses the existing AnkiConnect path: stable per-vault identities for
+  repeat-send and retry idempotency, content duplicate detection across the whole
+  collection, and source backlinks. Nothing is scheduled.
+
+The history below — 0.1.0 through 0.3.1 — is Obsidian Recall's, the project
+Review Inbox was carved out of. Those entries describe Recall at those versions,
+not Review Inbox; the two share a version history but are distinct plugins.
+
 ## 0.3.1
 
 Fixes the Spaced Repetition export, which wrote its note but never marked the

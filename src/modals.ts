@@ -157,7 +157,7 @@ export class SchemaSuggestionsModal extends Modal {
 
     if (open.length === 0) {
       list.createEl("p", {
-        text: "No suggestions yet. Recall proposes a rule once it sees the same correction three or four times.",
+        text: "No suggestions yet. Review Inbox proposes a rule once it sees the same correction three or four times.",
       });
       return;
     }
@@ -193,7 +193,7 @@ export class SchemaSuggestionsModal extends Modal {
       row.addButton((b) =>
         b
           .setButtonText("Dismiss")
-          .setTooltip("Not a rule you want. Recall stays quiet about this pattern for a month.")
+          .setTooltip("Not a rule you want. Review Inbox stays quiet about this pattern for a month.")
           .onClick(() => {
             b.setDisabled(true);
             void this.schema.dismiss(p.id, today).then(() => this.renderList());
@@ -212,7 +212,7 @@ export class SchemaSuggestionsModal extends Modal {
       const file = await this.schema.ensure();
       await this.app.workspace.getLeaf(false).openFile(file);
     } catch (e) {
-      new Notice(`Recall: ${describeError(e)}`);
+      new Notice(`Review Inbox: ${describeError(e)}`);
     }
   }
 }

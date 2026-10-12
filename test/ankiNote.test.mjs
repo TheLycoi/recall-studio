@@ -137,3 +137,11 @@ test("buildNote refuses nothing but always tags the source when asked", () => {
   const n = a.buildNote(qaCard(), hl(), { settings: settings(), vaultName: "V", deck: "D" });
   assert.ok(n.tags.includes("source::spacing"));
 });
+
+test("buildNote checks content duplicates across the whole collection, not just the deck", () => {
+  // A card whose text already exists as an unrelated note in ANOTHER deck is
+  // still a duplicate; deck scope would only look in the target deck and add it.
+  const n = a.buildNote(qaCard(), hl(), { settings: settings(), vaultName: "V", deck: "D" });
+  assert.equal(n.options.allowDuplicate, false);
+  assert.equal(n.options.duplicateScope, "collection");
+});

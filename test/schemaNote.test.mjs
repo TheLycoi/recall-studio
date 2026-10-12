@@ -22,9 +22,9 @@ const HEADINGS = ["Card Templates", "Card Rules", "Content Rules", "Learned"];
 test("the default schema carries today's date", () => {
   const md = s.renderDefaultSchema(opts);
   assert.match(md, /^---\nversion: 1\nupdated: 2026-09-19\nlearned_count: 0\n---\n/);
-  assert.match(md, /^# Recall Card Rules$/m);
-  assert.ok(!md.includes("Recall reads this note before every card it writes."), "the intro says it once");
-  assert.ok(md.includes("These are your rules for the cards Recall writes."));
+  assert.match(md, /^# Review Inbox Card Rules$/m);
+  assert.ok(!md.includes("Review Inbox reads this note before every card it writes."), "the intro says it once");
+  assert.ok(md.includes("These are your rules for the cards Review Inbox writes."));
 });
 
 test("the rules note has no wiki sections", () => {
@@ -139,9 +139,9 @@ test("appendLearnedRule creates the section and the frontmatter when they are mi
 test("the empty suggestions file explains itself", () => {
   const md = s.renderEmptySuggestions();
   assert.ok(!md.startsWith("---\n"), "no frontmatter");
-  assert.match(md, /^# Recall Card Rule Suggestions$/m);
+  assert.match(md, /^# Review Inbox Card Rule Suggestions$/m);
   assert.match(md, /^> .+$/m);
-  assert.ok(md.includes("Recall/recall-rules.md"));
+  assert.ok(md.includes("Review Inbox/recall-rules.md"));
   assert.deepEqual(s.parseProposals(md), []);
 });
 
@@ -150,7 +150,7 @@ test("the suggestions file points at the reader's own schema path", () => {
   // accept a rule by hand has to name the file they actually have.
   const md = s.renderEmptySuggestions("study/rules/wikilm.md");
   assert.ok(md.includes("`study/rules/wikilm.md`"), "names the configured schema note");
-  assert.ok(!md.includes("Recall/recall-rules.md"), "and does not also name the default one");
+  assert.ok(!md.includes("Review Inbox/recall-rules.md"), "and does not also name the default one");
 });
 
 const p1 = {

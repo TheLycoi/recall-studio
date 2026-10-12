@@ -49,13 +49,18 @@ export interface ChatLlm {
 export interface ChatStore {
   all(): Highlight[];
   add(h: Highlight): Highlight;
-  /** True when this text from this path is already in the inbox (not dismissed). Optional. */
-  hasDuplicate?(sourcePath: string, normalizedText: string): boolean;
 }
 
 /** The part of the generator the view uses. */
 export interface ChatGenerator {
   enqueue(h: Highlight): void;
+  /**
+   * Ask for more cards on a highlight that already has some, steered for this
+   * run only. Used when a cited passage is already captured: the existing
+   * highlight is reused so its cards are never duplicated, and this run's
+   * instruction never overwrites the one the capture stored.
+   */
+  more?(h: Highlight, instruction: string): void;
 }
 
 /**
@@ -173,7 +178,7 @@ export class ChatView extends ItemView {
       try {
         text = await this.host.app.vault.cachedRead(f);
       } catch (e) {
-        new Notice(`Recall: could not read ${f.path} — ${errorText(e)}`);
+        new Notice(`Review Inbox: could not read ${f.path} — ${errorText(e)}`);
       }
       options.push({ id: f.path, path: f.path, title: f.basename, page: null, line: 1, kind: "note", text });
     }
@@ -289,15 +294,30 @@ export class ChatView extends ItemView {
   // ---- answer to inbox ------------------------------------------------------
 
   /**
+   * The captured highlight this passage already is, or undefined. A dismissed
+   * highlight is ignored, so a passage the reader binned can be captured again.
+   * The predicate matches the store's own duplicate rule (same path, same text
+   * after whitespace collapse, not dismissed), so the view and the store agree
+   * on what "already captured" means.
+   */
+  private existingCapture(sourcePath: string, normalized: string): Highlight | undefined {
+    return this.host.store.all().find(
+      (h) => h.sourcePath === sourcePath && h.status !== "dismissed" && h.text.replace(/\s+/g, " ").trim() === normalized,
+    );
+  }
+
+  /**
    * Send the evidence behind an answer to the Inbox: one row per cited passage,
    * each carrying the passage itself and an instruction built from the question
-   * and the answer. Rows are queued through the store and the generator, never
-   * inserted as approved cards — the core marks approved ones.
+   * and the answer. A passage not captured yet is added as a new highlight; a
+   * passage that is already captured reuses that highlight and asks for more
+   * drafts on it, so its cards are never duplicated. Rows are queued through the
+   * store and the generator, never inserted as approved cards — the core marks
+   * approved ones.
    *
    * Refused when the selection changed since the answer was made (the answer
-   * may no longer be grounded in what the reader can see), and each row is
-   * skipped when the same passage is already in the inbox or was already sent
-   * from this turn.
+   * may no longer be grounded in what the reader can see), and a row already
+   * queued from this turn is skipped so one send never queues it twice.
    */
   private async sendToInbox(turn: ChatTurn): Promise<void> {
     if (turn.sentToInbox || !turn.evidence || !turn.report || turn.report.refused) return;
@@ -322,12 +342,19 @@ export class ChatView extends ItemView {
         skipped++;
         continue;
       }
-      const normalized = unit.text.replace(/\s+/g, " ").trim();
-      if (this.host.store.hasDuplicate?.(row.sourcePath, normalized)) {
-        skipped++;
+      seen.add(key);
+      const normalized = row.text.replace(/\s+/g, " ").trim();
+      // The cited passage may already be captured. Reuse that highlight rather
+      // than add a second copy of it: queue more drafts on it, steered by this
+      // answer. Its existing cards (approved, exported or otherwise) are left
+      // exactly as they are, and nothing is scheduled.
+      const existing = this.existingCapture(row.sourcePath, normalized);
+      if (existing) {
+        if (this.host.generator.more) this.host.generator.more(existing, row.instruction);
+        else this.host.generator.enqueue(existing);
+        added++;
         continue;
       }
-      seen.add(key);
       const h = makeHighlight({
         sourcePath: row.sourcePath,
         sourceTitle: row.sourceTitle,

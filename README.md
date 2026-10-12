@@ -80,16 +80,17 @@ provider request; it does not interrupt background card generation.
 - **Review Inbox folder** (under Card writer): where Review Inbox keeps the card rules note, the inbox, and the rule suggestions. Default `Review Inbox/`.
 - **Card quality**: the rules the card writer and the critique pass follow.
 - **Capture**: how a selection or a highlight is queued for a card.
-- **Sources in Chat**: select the individual notes or captured PDF passages to read.
+- **Sources**: the wiki or sources folder. Chat reads only the pages you select from it out of this folder; nothing under it is ever marked or changed. The chat's own source picker (notes and captured PDF passages) is in the Chat view, not here.
 - **Anki**: the deck, note types, and tags used on export.
 
 ### The DeepSeek key
 
 Leave the key field empty and Review Inbox looks for `DEEPSEEK_API_KEY` in the
 environment, then in the macOS keychain under `DEEPSEEK_API_KEY` or
-`Review Inbox DeepSeek API key`. A key typed into the settings field is stored in
-the plugin's `data.json`, which in a synced vault is replicated in plaintext to
-every device and backup, so the keychain is the better place for it:
+`Review Inbox DeepSeek API key` (a keychain item named `Recall DeepSeek API key`,
+from before the rename, is still read). A key typed into the settings field is
+stored in the plugin's `data.json`, which in a synced vault is replicated in
+plaintext to every device and backup, so the keychain is the better place for it:
 
 ```
 security add-generic-password -s "DEEPSEEK_API_KEY" -a deepseek -w '<your key>'
@@ -135,10 +136,14 @@ its release tag. BRAT needs authorized access to the repository. Do not copy the
 build over an existing Recall installation. This source uses the distinct plugin
 ID `review-inbox`; its folder and settings are separate.
 
-The integrated build has not yet passed real Obsidian/Anki acceptance. The target
-repository must be reconciled before publishing: another actor renamed the original
-Recall repository to `review-inbox` during this build. No release was published by
-this implementation worker.
+The integrated build has not yet passed real Obsidian/Anki acceptance: it has not
+been installed or driven in Obsidian, and no card has been exported to a
+disposable Anki deck. A private `0.1.0` prerelease was published to
+`TheLycoi/review-inbox` — the original Recall repository, kept under that name
+with the maintainer's approval — and its release assets were read back and
+verified against the tested build. BRAT installation, a real-provider
+capture/Chat run, and a repeat export against unchanged study records are still
+outstanding.
 
 ## Where it came from
 

@@ -42,11 +42,17 @@ function makeAnki() {
   let mode = "up";
   let died = false;
 
+  // Anki's duplicate rule: with allowDuplicate off, a note whose first field
+  // matches an existing note's first field (same model) is refused. The scope
+  // decides where it looks: "collection" searches every deck, "deck" only the
+  // target deck. The default, like Anki's, is collection.
   function isDuplicate(note) {
+    const scope = note.options?.duplicateScope ?? "collection";
     const firstKey = Object.keys(note.fields)[0];
     const firstVal = note.fields[firstKey];
     for (const n of notes.values()) {
       if (n.modelName !== note.modelName) continue;
+      if (scope === "deck" && n.deck !== note.deckName) continue;
       const nFirst = n.fields[Object.keys(n.fields)[0]];
       if (nFirst === firstVal) return true;
     }
@@ -118,9 +124,9 @@ function makeAnki() {
       mode = m;
       died = false;
     },
-    addSeedNote(modelName, fields, tags = []) {
+    addSeedNote(modelName, fields, tags = [], deck = "Seeded") {
       const id = nextId++;
-      notes.set(id, { modelName, fields, tags, deck: "Seeded" });
+      notes.set(id, { modelName, fields, tags, deck });
       return id;
     },
   };
@@ -226,6 +232,7 @@ function makeApp() {
     async remove(p) { files.delete(p); },
   };
   return {
+    __files: files,
     vault: {
       adapter,
       configDir: ".obsidian",
@@ -234,6 +241,9 @@ function makeApp() {
       getMarkdownFiles: () => [],
       on: () => ({}),
       readBinary: async (file) => MEDIA_FILES[file.path] ?? new Uint8Array([]).buffer,
+      // Used by exportAsTextFile's fallback path.
+      async create(p, data) { files.set(p, data); return { path: p, stat: {} }; },
+      async createFolder(p) { files.set(`${p}/`, ""); return { path: p }; },
     },
     metadataCache: {
       on: () => ({}),
@@ -295,14 +305,17 @@ const settings = (over = {}) => ({
 });
 
 const qa = (over = {}) => ({ id: "c1", highlightId: "h1", kind: "qa", front: "What is the interval?", back: "the gap between reviews", text: "", extra: "", status: "approved", edited: false, createdAt: "2026-01-01T00:00:00.000Z", ...over });
+const cloze = (over = {}) => ({ id: "c2", highlightId: "h2", kind: "cloze", front: "", back: "", text: "The gap is the {{c1::interval}}.", extra: "", status: "approved", edited: false, createdAt: "2026-01-01T00:00:00.000Z", ...over });
 const highlight = (cards, over = {}) => ({ id: "h1", status: "ready", title: "Interval", heading: "Spacing", sourceTitle: "Spacing", sourcePath: "wiki/Spacing.md", page: null, text: "The gap between reviews is the interval.", before: "", after: "", instruction: "", error: null, exportedAt: null, cards, ...over });
 
 /** A loaded plugin with the fake Anki behind requestUrl and the given settings. */
 async function loadedPlugin(over = {}) {
-  const plugin = new PluginClass(makeApp(), { id: "review-inbox", name: "Review Inbox", dir: PLUGIN_DIR, version: "0.1.0" });
+  const app = makeApp();
+  const plugin = new PluginClass(app, { id: "review-inbox", name: "Review Inbox", dir: PLUGIN_DIR, version: "0.1.0" });
   await plugin.onload();
   plugin.settings = settings(over);
   plugin.store = { all: () => [], touch() {} };
+  plugin.__app = app;
   return plugin;
 }
 
@@ -434,4 +447,48 @@ test("exporting with nothing approved is a no-op that reaches no Anki endpoint",
   await plugin.exportHighlights([highlight([qa({ id: "c1", status: "pending" })])]);
   assert.equal(fake.actions.length, 0, "no request should be made");
   assert.ok(notices.some((n) => /nothing approved/i.test(n)), `expected a nothing-approved notice, got ${JSON.stringify(notices)}`);
+});
+
+test("a content duplicate sitting in a DIFFERENT deck is reported, not added (collection scope)", async () => {
+  fake = freshFake();
+  // The same question already exists as an unrelated note in another deck. A
+  // deck-scoped duplicate check would not see it and would add a second note.
+  fake.addSeedNote("Basic", { Front: "What is the interval?", Back: "an unrelated note in another deck" }, [], "Other Deck");
+  const plugin = await loadedPlugin({ defaultDeck: "Deck A" });
+  const card = qa({ id: "c1", front: "What is the interval?", back: "the gap between reviews" });
+  notices.length = 0;
+  await plugin.exportHighlights([highlight([card])]);
+
+  assert.equal(fake.notes.size, 1, "a cross-deck content duplicate must not be added");
+  assert.equal(card.status, "approved", "the card stays approved for correction");
+  assert.equal(fake.notes.get([...fake.notes.keys()][0]).fields.Back, "an unrelated note in another deck", "the existing note was overwritten");
+});
+
+test("a text export splits a one-field cloze model from Q&A rows by note type", async () => {
+  fake = freshFake();
+  // The reader's Cloze model has no Extra field, so a cloze row carries one
+  // column while a Q&A row carries two. Anki's importer needs one shape per
+  // file, so they must not be written to the same one.
+  const plugin = await loadedPlugin({ basicExtraField: "", clozeExtraField: "" });
+  const qaCard = qa({ id: "c-qa" });
+  const clozeCard = cloze({ id: "c-cloze", highlightId: "h2" });
+  const draft = qa({ id: "c-draft", highlightId: "h1", status: "pending", front: "Draft question?" });
+  const files = plugin.__app.__files;
+  await plugin.exportAsTextFile([highlight([qaCard, draft]), highlight([clozeCard], { id: "h2", sourcePath: "wiki/Spacing2.md" })]);
+
+  const created = [...files.keys()].filter((p) => p.startsWith("Review Inbox/exports/") && p.endsWith(".txt"));
+  const qaFile = created.find((p) => p.endsWith("-qa.txt"));
+  const clozeFile = created.find((p) => p.endsWith("-cloze.txt"));
+  assert.ok(qaFile, `expected a Q&A text file, got ${JSON.stringify(created)}`);
+  assert.ok(clozeFile, `expected a cloze text file, got ${JSON.stringify(created)}`);
+  assert.match(files.get(qaFile), /^Basic\t/m, "the Q&A file carries the Basic note type");
+  assert.match(files.get(clozeFile), /^Cloze\t/m, "the cloze file carries the Cloze note type");
+  assert.equal(/\{\{c1::interval\}\}/.test(files.get(qaFile)), false, "the one-field cloze row landed in the Q&A file");
+  assert.ok(files.get(clozeFile).includes("{{c1::interval}}"), "the cloze row must be in the cloze file");
+  // Approved-only is retained: the draft is written nowhere.
+  assert.equal(files.get(qaFile).includes("Draft question?"), false, "a draft must not be exported");
+  assert.equal(files.get(clozeFile).includes("Draft question?"), false);
+  assert.equal(qaCard.status, "exported");
+  assert.equal(clozeCard.status, "exported");
+  assert.equal(draft.status, "pending");
 });
