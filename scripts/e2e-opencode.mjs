@@ -3,13 +3,16 @@
 // provider, and network); run it by hand from the repo root with `node`.
 import { build } from "esbuild";
 import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
+import { execFileSync } from "node:child_process";
 
 const require = createRequire(import.meta.url);
 const z = require("zod");
+
+const BIN = path.join(homedir(), ".opencode", "bin", "opencode");
 
 const dir = mkdtempSync(path.join(tmpdir(), "oc-e2e-"));
 const out = path.join(dir, "opencode.mjs");
