@@ -2,11 +2,19 @@ import { newId } from "./util";
 
 export type HighlightStatus = "queued" | "generating" | "ready" | "exported" | "error" | "dismissed";
 /**
- * "flagged" is a card the critique or the linter rejected. It stays in the
- * inbox with its reasons attached so the reviewer decides. It is not pending,
- * so `pendingItems` in main.ts keeps it out of Anki with no extra check.
+ * A card's lifecycle. Generated cards are `pending` (shown as "Draft") until
+ * the reviewer approves them, which is the only thing that makes a card
+ * exportable. `approved` is written only by an explicit approve action
+ * (src/inboxView.ts); editing or regenerating an approved card returns it to
+ * `pending`, because the approved wording is no longer the stored one.
+ * `flagged` is a card the critique or the linter rejected; it keeps its
+ * reasons, stays visible in the inbox so the reviewer decides, and is never
+ * approved implicitly or exported. `duplicate` and `deleted` are terminal
+ * states for a card that already left or was removed. Only `approved` exports
+ * (main.ts approvedItems) — the strict allowlist that keeps every other status
+ * out of Anki.
  */
-export type CardStatus = "pending" | "exported" | "duplicate" | "deleted" | "flagged";
+export type CardStatus = "pending" | "approved" | "exported" | "duplicate" | "deleted" | "flagged";
 export type CardKind = "qa" | "cloze";
 
 /**
@@ -193,4 +201,14 @@ export function liveCards(h: Highlight): Card[] {
 
 export function pendingCards(h: Highlight): Card[] {
   return h.cards.filter((c) => c.status === "pending");
+}
+
+/** Cards the reviewer has approved and that have not left the inbox yet. The only exportable set. */
+export function approvedCards(h: Highlight): Card[] {
+  return h.cards.filter((c) => c.status === "approved");
+}
+
+/** Every card still awaiting a decision: a draft, or one the critique flagged. */
+export function undecidedCards(h: Highlight): Card[] {
+  return h.cards.filter((c) => c.status === "pending" || c.status === "flagged");
 }

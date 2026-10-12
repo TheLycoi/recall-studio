@@ -1,6 +1,6 @@
 import { MarkdownView, Notice, Plugin, TFile, normalizePath } from "obsidian";
 import { RECALL_ICON, RECALL_SPARK_ICON, registerRecallIcon } from "./icon";
-import { AnkiClient, exportToAnki, finalizeHighlights, buildNote } from "./anki";
+import { AnkiClient, exportToAnki, finalizeHighlights, buildNote, type ExportResult } from "./anki";
 import { captureSelection } from "./capture";
 import { RECALL_COMMANDS } from "./commands";
 import { paletteCommands } from "./commandTable";
@@ -12,9 +12,8 @@ import { askInstruction, pickDeck } from "./modals";
 import type { Card, Highlight } from "./model";
 import { DEFAULT_SETTINGS, RecallSettingTab, type RecallSettings } from "./settings";
 import { SchemaFile } from "./schemaFile";
-import { buildNoteBody, notePath, serializeCard, spacedSettings, type SpacedSettings } from "./spaced";
 import { InboxStore } from "./store";
-import { buildAnkiTextImport, isUnderFolder } from "./util";
+import { buildAnkiTextImport } from "./util";
 
 export default class RecallPlugin extends Plugin {
   settings: RecallSettings = { ...DEFAULT_SETTINGS };
@@ -29,7 +28,7 @@ export default class RecallPlugin extends Plugin {
   async onload(): Promise<void> {
     await this.loadSettings();
     registerRecallIcon();
-    this.store = new InboxStore(this.app, this.settings.schemaFolder, this.manifest.dir ?? `${this.app.vault.configDir}/plugins/recall`);
+    this.store = new InboxStore(this.app, this.settings.schemaFolder, this.manifest.dir ?? `${this.app.vault.configDir}/plugins/review-inbox`);
     await this.store.load();
     // Before the client, which holds a callback into it: the reader's house
     // rules are read on the way to every model call (src/schemaFile.ts).
@@ -48,7 +47,7 @@ export default class RecallPlugin extends Plugin {
     this.registerView(VIEW_TYPE_INBOX, (leaf) => new InboxView(leaf, this));
     this.addSettingTab(new RecallSettingTab(this.app, this));
 
-    this.addRibbonIcon(RECALL_ICON, "Recall inbox", () => void this.openInbox());
+    this.addRibbonIcon(RECALL_ICON, "Review Inbox inbox", () => void this.openInbox());
     this.statusBar = this.addStatusBarItem();
     this.statusBar.addClass("wikilm-statusbar");
     this.statusBar.addEventListener("click", () => void this.openInbox());
@@ -58,8 +57,8 @@ export default class RecallPlugin extends Plugin {
     this.refreshStatusBar();
 
     // ---- commands -------------------------------------------------------
-    // Hidden commands stay in RECALL_COMMANDS for the quiz panel to run by alias,
-    // but are not registered: no palette entry, no hotkey.
+    // Hidden commands stay in the table but are not registered: no palette
+    // entry, no hotkey.
     for (const c of paletteCommands(RECALL_COMMANDS))
       this.addCommand({
         id: c.id,
@@ -78,16 +77,16 @@ export default class RecallPlugin extends Plugin {
         if (!file) return;
         menu.addItem((item) =>
           item
-            .setTitle(editor.getSelection().trim() ? "Recall: send selection to inbox" : "Recall: send paragraph to inbox")
+            .setTitle(editor.getSelection().trim() ? "Review Inbox: send selection to inbox" : "Review Inbox: send paragraph to inbox")
             .setIcon(RECALL_ICON)
-            .setSection("recall")
+            .setSection("review-inbox")
             .onClick(() => void captureSelection(this, editor, file)),
         );
         menu.addItem((item) =>
           item
-            .setTitle("Recall: send with instructions…")
+            .setTitle("Review Inbox: send with instructions…")
             .setIcon(RECALL_SPARK_ICON)
-            .setSection("recall")
+            .setSection("review-inbox")
             .onClick(async () => {
               const inst = await askInstruction(this.app, "Instructions for this highlight", "e.g. one cloze on the number");
               if (inst !== null) await captureSelection(this, editor, file, inst);
@@ -127,9 +126,9 @@ export default class RecallPlugin extends Plugin {
     if (c.toReview) parts.push(`⧉ ${c.toReview}`);
     if (c.flagged) parts.push(`⚑ ${c.flagged}`);
     if (c.errors) parts.push(`⚠ ${c.errors}`);
-    this.statusBar.setText(parts.length ? `Recall ${parts.join(" · ")}` : "Recall");
+    this.statusBar.setText(parts.length ? `Review Inbox ${parts.join(" · ")}` : "Review Inbox");
     this.statusBar.toggleClass("wikilm-statusbar-highlighter", !!this.highlighter?.enabled);
-    this.statusBar.title = `Recall: ${this.highlighter?.enabled ? "highlighter mode on, " : ""}${c.queued + c.generating} writing, ${c.toReview} cards to review${c.flagged ? `, ${c.flagged} flagged` : ""}${c.errors ? `, ${c.errors} failed` : ""}. Click to open the inbox.`;
+    this.statusBar.title = `Review Inbox: ${this.highlighter?.enabled ? "highlighter mode on, " : ""}${c.queued + c.generating} writing, ${c.toReview} cards to review${c.flagged ? `, ${c.flagged} flagged` : ""}${c.errors ? `, ${c.errors} failed` : ""}. Click to open the inbox.`;
   }
 
   async openInbox(): Promise<void> {
@@ -140,12 +139,9 @@ export default class RecallPlugin extends Plugin {
     await this.app.workspace.revealLeaf(leaf);
   }
 
-  /** The inbox, switched to its quiz half. */
-  async openQuiz(): Promise<void> {
-    await this.openInbox();
-    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_INBOX)) {
-      if (leaf.view instanceof InboxView) await leaf.view.setMode("quiz");
-    }
+  /** The chat view, opened beside the inbox. */
+  async openChat(): Promise<void> {
+    // Wired to src/reviewChatView.ts in the chat-integration commit.
   }
 
   async chooseDeck(): Promise<string | null> {
@@ -153,7 +149,7 @@ export default class RecallPlugin extends Plugin {
     try {
       decks = await this.anki.deckNames();
     } catch {
-      new Notice("Recall: Anki not reachable; type a deck name.");
+      new Notice("Review Inbox: Anki not reachable; type a deck name.");
     }
     return pickDeck(this.app, decks);
   }
@@ -184,43 +180,53 @@ export default class RecallPlugin extends Plugin {
     await this.saveSettings();
   }
 
-  // The `c.status === "pending"` strict-equality allowlist below is the only
-  // thing keeping flagged cards out of Anki: this is the single funnel into
-  // both exportHighlights and exportAsTextFile. Widening it into a denylist
-  // (e.g. `!== "exported"`) would export cards the critique rejected.
-  private pendingItems(list: Highlight[]): Array<{ card: Card; highlight: Highlight }> {
+  /**
+   * The exportable set: approved cards under a ready highlight. A strict
+   * equality allowlist on `approved` and nothing else — it is the single funnel
+   * into both exportHighlights and exportAsTextFile. Widening it into a
+   * denylist (e.g. `!== "exported"`) would export drafts and cards the critique
+   * flagged. Approved cards are the only cards a human has explicitly accepted.
+   */
+  private approvedItems(list: Highlight[]): Array<{ card: Card; highlight: Highlight }> {
     const items: Array<{ card: Card; highlight: Highlight }> = [];
     for (const h of list) {
       if (h.status !== "ready") continue;
-      for (const c of h.cards) if (c.status === "pending") items.push({ card: c, highlight: h });
+      for (const c of h.cards) if (c.status === "approved") items.push({ card: c, highlight: h });
     }
     return items;
   }
 
-  /** Push every pending card of the given highlights to Anki via AnkiConnect. */
+  /** Push every approved card of the given highlights to Anki via AnkiConnect. */
   async exportHighlights(list: Highlight[]): Promise<void> {
-    const items = this.pendingItems(list);
+    const items = this.approvedItems(list);
     if (items.length === 0) {
-      new Notice("Recall: nothing to export.");
+      new Notice("Review Inbox: nothing approved to export.");
       return;
     }
-    const notice = new Notice(`Recall: exporting ${items.length} card${items.length === 1 ? "" : "s"} to “${this.settings.defaultDeck}”…`, 0);
+    const notice = new Notice(`Review Inbox: exporting ${items.length} card${items.length === 1 ? "" : "s"} to “${this.settings.defaultDeck}”…`, 0);
     try {
-      const res = await exportToAnki(this.anki, items, {
+      const res: ExportResult = await exportToAnki(this.anki, items, {
         settings: this.settings,
         vaultName: this.app.vault.getName(),
         deck: this.settings.defaultDeck,
+        resolveMedia: async (link: string) => {
+          const dest = this.app.metadataCache.getFirstLinkpathDest(link, "");
+          if (!dest) return null;
+          const data = await this.app.vault.readBinary(dest);
+          return { path: dest.path, data };
+        },
       });
       this.store.touch();
       const bits = [`${res.added} added`];
-      if (res.duplicates) bits.push(`${res.duplicates} already in Anki`);
+      if (res.alreadyExported) bits.push(`${res.alreadyExported} already sent`);
+      if (res.duplicates) bits.push(`${res.duplicates} duplicate content`);
       if (res.failed.length) bits.push(`${res.failed.length} failed`);
-      new Notice(`Recall: ${bits.join(", ")}.`, res.failed.length ? 8000 : 4000);
-      for (const f of res.failed) console.warn("Recall: export failed", f.error, f.card);
-      if (res.failed.length) new Notice(`Recall: ${res.failed[0].error}`, 8000);
+      new Notice(`Review Inbox: ${bits.join(", ")}.`, res.failed.length ? 8000 : 4000);
+      for (const f of res.failed) console.warn("Review Inbox: export failed", f.error, f.card);
+      if (res.failed.length) new Notice(`Review Inbox: ${res.failed[0].error}`, 8000);
     } catch (e) {
       const msg = (e as Error).message;
-      new Notice(`Recall: export failed. ${msg}\nUse “Export reviewed as Anki text file” from the inbox menu if Anki is closed.`, 10000);
+      new Notice(`Review Inbox: export failed. ${msg}\nUse “Export approved as Anki text file” from the inbox menu if Anki is closed.`, 10000);
       this.store.touch();
     } finally {
       notice.hide();
@@ -229,9 +235,9 @@ export default class RecallPlugin extends Plugin {
 
   /** Fallback when Anki is not running: write a text file Anki can import. */
   async exportAsTextFile(list: Highlight[]): Promise<void> {
-    const items = this.pendingItems(list);
+    const items = this.approvedItems(list);
     if (items.length === 0) {
-      new Notice("Recall: nothing to export.");
+      new Notice("Review Inbox: nothing approved to export.");
       return;
     }
     const ctx = { settings: this.settings, vaultName: this.app.vault.getName(), deck: this.settings.defaultDeck };
@@ -246,7 +252,7 @@ export default class RecallPlugin extends Plugin {
     const folder = normalizePath(this.settings.exportFolder);
     if (!(await this.app.vault.adapter.exists(folder))) await this.app.vault.createFolder(folder);
     const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 16);
-    const path = normalizePath(`${folder}/recall-${stamp}.txt`);
+    const path = normalizePath(`${folder}/review-inbox-${stamp}.txt`);
     const qa = rows.filter((r) => r.fields.length !== 2 || r.notetype !== this.settings.clozeModel);
     const cloze = rows.filter((r) => !qa.includes(r));
     // Anki's importer needs a consistent column count per file, so split by note type when the field counts differ.
@@ -258,93 +264,7 @@ export default class RecallPlugin extends Plugin {
     for (const { card } of items) card.status = "exported";
     finalizeHighlights(items.map((i) => i.highlight));
     this.store.touch();
-    new Notice(`Recall: wrote ${files.map(([p]) => p).join(" and ")}. In Anki: File → Import.`, 8000);
-  }
-
-  /**
-   * Write every pending card of the given highlights into the vault as
-   * Spaced Repetition notes.
-   *
-   * The target plugin exposes no API: it indexes markdown files. So this is an
-   * export target beside Anki, not a call. A card goes to one destination or
-   * the other, never both, which is why this reads the same pending allowlist
-   * that `exportHighlights` does.
-   *
-   * Idempotency: a note is written once and never rewritten. Re-sending a
-   * highlight whose note exists writes a suffixed note holding only the cards
-   * that have not gone anywhere yet. That is what keeps this safe — at 1.15.4
-   * the plugin stores review history in `<!--SR:...-->` comments inside these
-   * very files, so rewriting one would reset a reader's schedule.
-   */
-  async exportToSpacedRepetition(list: Highlight[]): Promise<void> {
-    const items = this.pendingItems(list);
-    if (items.length === 0) {
-      new Notice("Recall: nothing to send.");
-      return;
-    }
-    const settings: SpacedSettings = spacedSettings(this.settings);
-    const folder = normalizePath(settings.folder);
-    if (isUnderFolder(folder, this.settings.topicFolder)) {
-      new Notice(
-        `Recall: the Spaced Repetition folder is inside the wiki folder (${this.settings.topicFolder}). Choose a folder outside it; the wiki is read-only for Recall.`,
-        10000,
-      );
-      return;
-    }
-    const notice = new Notice(`Recall: writing ${items.length} card${items.length === 1 ? "" : "s"}…`, 0);
-    let written = 0;
-    let skipped = 0;
-    let files = 0;
-    const failed: Array<{ card: Card; error: string }> = [];
-    const byHighlight = new Map<Highlight, Card[]>();
-    for (const { card, highlight } of items) {
-      const group = byHighlight.get(highlight) ?? [];
-      group.push(card);
-      byHighlight.set(highlight, group);
-    }
-    try {
-      if (!(await this.app.vault.adapter.exists(folder))) await this.app.vault.createFolder(folder);
-      for (const [highlight, cards] of byHighlight) {
-        const lines: Array<{ card: Card; text: string }> = [];
-        for (const card of cards) {
-          const s = serializeCard(card, settings);
-          if (s.ok) lines.push({ card, text: s.text });
-          else failed.push({ card, error: s.reason });
-        }
-        if (lines.length === 0) continue;
-        // First free name: the note for this highlight if it is not there yet,
-        // otherwise a suffixed one. An existing note is never touched.
-        let index = 0;
-        while (index < 100 && (await this.app.vault.adapter.exists(notePath(settings, highlight, index)))) index++;
-        const path = normalizePath(notePath(settings, highlight, index));
-        await this.app.vault.create(path, buildNoteBody(highlight, lines.map((l) => l.text), settings));
-        files++;
-        written += lines.length;
-        skipped += cards.length - lines.length;
-        for (const l of lines) {
-          l.card.srNote = path;
-          // One destination per card (DECISIONS.md): a card written into a note
-          // leaves the pending allowlist exactly as an Anki export does. Without
-          // this the card stays pending, finalizeHighlights leaves the highlight
-          // "ready" because it still sees a pending card, and pressing the
-          // command again writes a second note holding the same cards.
-          l.card.status = "exported";
-        }
-      }
-      finalizeHighlights(items.map((i) => i.highlight));
-      this.store.touch();
-      const bits = [`${written} card${written === 1 ? "" : "s"} in ${files} note${files === 1 ? "" : "s"}`];
-      if (skipped) bits.push(`${skipped} skipped`);
-      if (failed.length) bits.push(`${failed.length} could not be written`);
-      new Notice(`Recall: ${bits.join(", ")}. Open the Spaced Repetition plugin to review them.`, failed.length ? 10000 : 6000);
-      for (const f of failed) console.warn("Recall: Spaced Repetition export skipped a card", f.error, f.card);
-      if (failed.length) new Notice(`Recall: first skipped card — ${failed[0].error}.`, 10000);
-    } catch (e) {
-      new Notice(`Recall: could not write the Spaced Repetition notes. ${(e as Error).message}`, 10000);
-      this.store.touch();
-    } finally {
-      notice.hide();
-    }
+    new Notice(`Review Inbox: wrote ${files.map(([p]) => p).join(" and ")}. In Anki: File → Import.`, 8000);
   }
 
   /** Used by the settings tab and tests; resolves a TFile from a path. */

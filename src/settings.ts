@@ -4,7 +4,7 @@ import { OPENCODE_FALLBACK_MODELS } from "./opencode";
 import { forgetCachedKey } from "./deepseekKey";
 import { App, Notice, PluginSettingTab, Setting, ButtonComponent } from "obsidian";
 import type RecallPlugin from "./main";
-import { DEFAULT_EXPORT_FOLDER, DEFAULT_RULES_FOLDER, DEFAULT_SPACED_FOLDER, DEFAULT_WIKI_FOLDER } from "./paths";
+import { DEFAULT_EXPORT_FOLDER, DEFAULT_RULES_FOLDER, DEFAULT_WIKI_FOLDER } from "./paths";
 
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 export type MarkMode = "none" | "highlight" | "highlight+block";
@@ -37,7 +37,7 @@ export interface RecallSettings {
   writerInstructions: string;
   concurrency: number;
   notifyWhenReady: boolean;
-  /** Recall's own folder: the card rules note, the inbox, and the rule suggestions note. Keep it outside the wiki folder. */
+  /** Review Inbox's own folder: the card rules note, the inbox, and the rule suggestions note. Keep it outside the wiki folder. */
   schemaFolder: string;
 
   // Capture
@@ -64,34 +64,9 @@ export interface RecallSettings {
   includeExtra: boolean;
   exportFolder: string;
 
-  // Spaced Repetition
-  /** Vault folder the Spaced Repetition notes are written to. Keep it out of the wiki folder. */
-  srFolder: string;
-  /** The plugin's flashcard tag, without a leading `#`. Default `flashcards`. */
-  srTag: string;
-  /** Sub-deck under the tag. Empty writes the bare tag. */
-  srDeck: string;
-  /** The target plugin's single-line separator. Only used to detect and escape it. */
-  srBasicSeparator: string;
-  /** The target plugin's reversed-card separator. */
-  srReversedSeparator: string;
-  /** A line holding only this splits a multi-line card. Used to escape it. */
-  srMultilineSeparator: string;
-
-  // Quiz
-  /** The wiki plugin's folder; the quiz reads the pages in it and Recall never changes them. */
+  // Sources
+  /** The folder other notes live in (a wiki plugin, a sources folder). Review Inbox reads the pages you select from it for chat and never changes it. */
   topicFolder: string;
-  /**
-   * A runaway guard, not a target: the quiz ends when it brackets the edge of
-   * what the reader knows. This only stops a session that never gets there.
-   */
-  quizCap: number;
-  quizPoolSize: number;
-  quizInstructions: string;
-
-  // Sidebar
-  /** Persisted by the view; no setting UI. */
-  sidebarMode: "inbox" | "quiz";
 
   // Card quality
   /** Second model call per highlight that checks grounding, sibling interference, and Bloom fit before the card is stored. */
@@ -138,24 +113,12 @@ export const DEFAULT_SETTINGS: RecallSettings = {
   clozeModel: "Cloze",
   clozeTextField: "Text",
   clozeExtraField: "Back Extra",
-  extraTags: "recall",
+  extraTags: "review-inbox",
   includeSourceTag: true,
   includeExtra: true,
   exportFolder: DEFAULT_EXPORT_FOLDER,
 
-  srFolder: DEFAULT_SPACED_FOLDER,
-  srTag: "flashcards",
-  srDeck: "recall",
-  srBasicSeparator: "::",
-  srReversedSeparator: ":::",
-  srMultilineSeparator: "?",
-
   topicFolder: DEFAULT_WIKI_FOLDER,
-  quizCap: 30,
-  quizPoolSize: 20,
-  quizInstructions: "",
-
-  sidebarMode: "inbox",
 
   critiquePass: true,
   lintMode: "badge",
@@ -587,58 +550,17 @@ export class RecallSettingTab extends PluginSettingTab {
         }),
       );
 
-    new Setting(containerEl).setName("Quiz").setHeading();
+    new Setting(containerEl).setName("Sources").setHeading();
 
     new Setting(containerEl)
       .setName("Wiki folder")
-      .setDesc("The folder your wiki plugin writes its pages to. The quiz reads the pages in it. Recall never changes them.")
+      .setDesc("The folder your wiki or sources live in. Chat reads the pages you select from it and capture never marks them. Review Inbox never changes them.")
       .addText((t) =>
         t.setValue(s.topicFolder).onChange((v) => {
           s.topicFolder = v.trim() || DEFAULT_SETTINGS.topicFolder;
           void this.plugin.saveSettings();
         }),
       );
-
-    new Setting(containerEl)
-      .setName("Question cap per quiz")
-      .setDesc(
-        "A safety limit, not a target. A quiz asks every section in its pool once; this only cuts short a pool longer than one sitting.",
-      )
-      .addSlider((sl) =>
-        sl
-          .setLimits(5, 60, 5)
-          .setValue(s.quizCap)
-          .setDynamicTooltip()
-          .onChange((v) => {
-            s.quizCap = v;
-            save();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Sections per quiz")
-      .setDesc("How many sections a quiz on a subject or on everything asks. A single note is always asked whole.")
-      .addSlider((sl) =>
-        sl
-          .setLimits(5, 60, 5)
-          .setValue(s.quizPoolSize)
-          .setDynamicTooltip()
-          .onChange((v) => {
-            s.quizPoolSize = v;
-            save();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Standing instructions for quizzes")
-      .addTextArea((t) => {
-        t.inputEl.rows = 3;
-        t.inputEl.cols = 50;
-        t.setValue(s.quizInstructions).onChange((v) => {
-          s.quizInstructions = v;
-          save();
-        });
-      });
 
     new Setting(containerEl).setName("Anki").setHeading();
 
@@ -680,9 +602,9 @@ export class RecallSettingTab extends PluginSettingTab {
           try {
             await this.plugin.detectNoteTypes();
             this.display();
-            new Notice("Recall: note types detected.");
+            new Notice("Review Inbox: note types detected.");
           } catch (e) {
-            new Notice(`Recall: ${(e as Error).message}`);
+            new Notice(`Review Inbox: ${(e as Error).message}`);
           }
         }),
       );
@@ -745,49 +667,5 @@ export class RecallSettingTab extends PluginSettingTab {
         }),
       );
 
-    new Setting(containerEl).setName("Spaced Repetition").setHeading();
-
-    new Setting(containerEl)
-      .setName("Spaced Repetition folder")
-      .setDesc(
-        "Vault folder the cards are written to as markdown notes, for the Spaced Repetition plugin to index. It has no API for other plugins, so a note is the only way to hand it a card. Keep it outside the wiki folder.",
-      )
-      .addText((t) =>
-        t.setValue(s.srFolder).onChange((v) => {
-          s.srFolder = v.trim() || DEFAULT_SETTINGS.srFolder;
-          save();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Flashcard tag")
-      .setDesc(
-        "The tag the target plugin treats as a deck, without the `#`. It must match that plugin's flashcard tag setting, which is `flashcards` by default. A tag outside that set is ignored and the cards are never indexed.",
-      )
-      .addText((t) =>
-        t.setValue(s.srTag).onChange((v) => {
-          s.srTag = v.trim() || DEFAULT_SETTINGS.srTag;
-          save();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Deck")
-      .setDesc(
-        "Sub-deck under the tag, written as `#<tag>/<deck>`. Leave empty to write the bare tag. Recall's cards land in one deck of their own so they can be reviewed beside your own.",
-      )
-      .addText((t) =>
-        t.setValue(s.srDeck).onChange((v) => {
-          s.srDeck = v.trim();
-          save();
-        }),
-      );
-
-    // Read from the target plugin's settings, never assumed: a note written
-    // against the wrong separator is a card that asks a different question.
-    // These are only used to detect and neutralise a separator inside a card.
-    field("Card separator", "srBasicSeparator", "The target plugin's single-line separator. Default `::`.");
-    field("Reversed separator", "srReversedSeparator", "Its reversed-card separator. Default `:::`.");
-    field("Multi-line separator", "srMultilineSeparator", "A line holding only this splits a multi-line card. Default `?`.");
   }
 }

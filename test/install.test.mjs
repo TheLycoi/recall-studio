@@ -16,7 +16,7 @@ function tmp(prefix) {
 }
 
 function sourceTree() {
-  const src = tmp("recall-install-src-");
+  const src = tmp("review-inbox-install-src-");
   const files = {
     "main.js": "main",
     "manifest.json": "{}",
@@ -31,9 +31,9 @@ function sourceTree() {
 
 test("install copies main.js, manifest.json and styles.css into the plugin folder", () => {
   const src = sourceTree();
-  const vault = tmp("recall-install-vault-");
+  const vault = tmp("review-inbox-install-vault-");
   const dest = install(vault, src);
-  assert.equal(dest, path.join(vault, ".obsidian", "plugins", "recall"));
+  assert.equal(dest, path.join(vault, ".obsidian", "plugins", "review-inbox"));
   const read = (name) => fs.readFileSync(path.join(dest, name), "utf8");
   assert.equal(read("main.js"), "main");
   assert.equal(read("manifest.json"), "{}");
@@ -44,8 +44,8 @@ test("install copies main.js, manifest.json and styles.css into the plugin folde
 
 test("install leaves everything else in the plugin folder untouched", () => {
   const src = sourceTree();
-  const vault = tmp("recall-install-vault-");
-  const dest = path.join(vault, ".obsidian", "plugins", "recall");
+  const vault = tmp("review-inbox-install-vault-");
+  const dest = path.join(vault, ".obsidian", "plugins", "review-inbox");
   fs.mkdirSync(path.join(dest, "cache"), { recursive: true });
   fs.writeFileSync(path.join(dest, "data.json"), '{"apiKey":"secret"}');
   fs.writeFileSync(path.join(dest, "cache", "x.json"), "keep");
@@ -57,24 +57,24 @@ test("install leaves everything else in the plugin folder untouched", () => {
 test("install copies nothing when a source file is missing", () => {
   const src = sourceTree();
   fs.rmSync(path.join(src, "styles.css"));
-  const vault = tmp("recall-install-vault-");
+  const vault = tmp("review-inbox-install-vault-");
   assert.throws(() => install(vault, src), /styles\.css/);
-  assert.ok(!fs.existsSync(path.join(vault, ".obsidian", "plugins", "recall", "main.js")));
+  assert.ok(!fs.existsSync(path.join(vault, ".obsidian", "plugins", "review-inbox", "main.js")));
 });
 
-test("running the script with no vault argument and no RECALL_VAULT exits 2 and prints Usage", () => {
+test("running the script with no vault argument and no REVIEW_INBOX_VAULT exits 2 and prints Usage", () => {
   const env = { ...process.env };
-  delete env.RECALL_VAULT;
+  delete env.REVIEW_INBOX_VAULT;
   const result = spawnSync(process.execPath, ["scripts/install.mjs"], { encoding: "utf8", env });
   assert.equal(result.status, 2);
   assert.match(result.stderr, /Usage:/);
 });
 
-test("install copies into the recall plugin folder", () => {
-  const vault = mkdtempSync(path.join(tmpdir(), "recall-vault-"));
-  const src = mkdtempSync(path.join(tmpdir(), "recall-src-"));
+test("install copies into the review-inbox plugin folder", () => {
+  const vault = mkdtempSync(path.join(tmpdir(), "review-inbox-vault-"));
+  const src = mkdtempSync(path.join(tmpdir(), "review-inbox-src-"));
   for (const f of ["main.js", "manifest.json", "styles.css"]) writeFileSync(path.join(src, f), f);
   const dest = install(vault, src);
-  assert.equal(dest, path.join(vault, ".obsidian", "plugins", "recall"));
+  assert.equal(dest, path.join(vault, ".obsidian", "plugins", "review-inbox"));
   assert.deepEqual(readdirSync(dest).sort(), ["main.js", "manifest.json", "styles.css"]);
 });

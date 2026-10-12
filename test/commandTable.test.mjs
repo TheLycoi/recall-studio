@@ -9,22 +9,20 @@ import { pathToFileURL } from "node:url";
 
 let t;
 before(async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "recall-test-"));
+  const dir = mkdtempSync(path.join(tmpdir(), "review-inbox-test-"));
   const out = path.join(dir, "commandTable.mjs");
   await build({ entryPoints: ["src/commandTable.ts"], bundle: true, format: "esm", platform: "node", outfile: out, logLevel: "silent" });
   t = await import(pathToFileURL(out).href);
 });
 
-test("the command table holds Recall's commands and nothing else", () => {
+test("the command table holds Review Inbox's commands and nothing else", () => {
   assert.deepEqual(
     t.COMMAND_TABLE.map((c) => c.id),
     [
       "capture-selection",
       "capture-selection-with-instruction",
-      "open-quiz",
       "open-inbox",
       "export-reviewed",
-      "export-spaced",
       "open-schema",
       "review-schema-suggestions",
       "capture-markdown-highlights",
@@ -33,14 +31,22 @@ test("the command table holds Recall's commands and nothing else", () => {
   );
 });
 
-test("the palette shows eight commands", () => {
-  assert.equal(t.paletteCommands(t.COMMAND_TABLE).length, 8);
+test("the palette shows six commands", () => {
+  assert.equal(t.paletteCommands(t.COMMAND_TABLE).length, 6);
 });
 
 test("no command name or alias is a wiki verb", () => {
   for (const c of t.COMMAND_TABLE) {
     const words = [c.name, ...c.aliases].join(" ").toLowerCase();
     assert.doesNotMatch(words, /digest|lint|ingest|ai highlight|wiki/, c.id);
+  }
+});
+
+test("there is no quiz or spaced-repetition command", () => {
+  // The Review Inbox identity keeps capture, inbox, chat and Anki export. The
+  // quiz product and the Spaced Repetition export target are gone.
+  for (const gone of ["open-quiz", "export-spaced", "open-dashboard", "open-review", "statistics"]) {
+    assert.ok(!t.COMMAND_TABLE.some((c) => c.id === gone), `${gone} should not exist`);
   }
 });
 

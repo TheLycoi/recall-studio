@@ -936,6 +936,56 @@ body.wikilm-highlighter-active .textLayer ::selection {
   font-size: var(--font-ui-smaller);
 }
 
+/* Approval and status ---------------------------------------------------
+   Draft / Approved / Exported is the three-step the reviewer moves a card
+   through, so each carries a colour of its own. All values come from
+   Obsidian's own theme variables, so the labels follow the active theme. */
+.wikilm-status-pending {
+  background: var(--background-modifier-border);
+  color: var(--text-muted);
+}
+.wikilm-status-approved {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+.wikilm-status-exported {
+  background: var(--background-modifier-success);
+  color: var(--text-normal);
+}
+.wikilm-approve-btn {
+  font-size: var(--font-ui-smaller);
+  padding: 0 var(--size-4-2);
+  height: var(--input-height, 26px);
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border: none;
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+.wikilm-approve-btn:hover {
+  background: var(--interactive-accent-hover);
+}
+.wikilm-unapprove-btn {
+  font-size: var(--font-ui-smaller);
+  padding: 0 var(--size-4-2);
+  height: var(--input-height, 26px);
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+.wikilm-unapprove-btn:hover {
+  color: var(--text-normal);
+  border-color: var(--interactive-accent);
+}
+.wikilm-approve-all {
+  font-size: var(--font-ui-smaller);
+}
+.wikilm-stat.is-approved .wikilm-stat-n {
+  color: var(--interactive-accent);
+}
+
 /* Narrow-pane overrides -------------------------------------------------
    These must stay at the END of the file. An @container block adds no
    specificity, so a `.wikilm-hl { grid-template-columns }` written later in

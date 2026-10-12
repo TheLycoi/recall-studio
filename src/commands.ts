@@ -1,14 +1,7 @@
 // The command registry's behaviour half. Each entry in COMMAND_TABLE gets an
 // `available` predicate and a `run` action here. `src/main.ts` registers the
-// merged list with a single `addCommand` loop, and the quiz panel runs the same
-// objects directly. There is no `app.commands` in the public Obsidian typings,
-// so the plugin owning the registry is the only way the panel can run a command.
-//
-// Most bodies began as the addCommand blocks of 0.5.0: `available` is the
-// checkCallback's availability test, `run` its `!checking` branch. The two
-// selection commands dispatch on what is open. Hidden commands keep an
-// implementation here because the quiz panel still runs them by alias.
-// main.ts only leaves them out of the palette.
+// merged list with a single `addCommand` loop, so the plugin owning the
+// registry is the only way a command runs.
 
 import { Notice } from "obsidian";
 import type RecallPlugin from "./main";
@@ -31,15 +24,14 @@ const INSTRUCTION_PLACEHOLDER = "e.g. one cloze on the number; cards in Dutch; f
 
 const IMPLEMENTATIONS: Record<string, Implementation> = {
   // One command for every place a selection can live: a PDF page, a note in
-  // reading view, a note in the editor. It absorbed "Send PDF selection to
-  // inbox", which was the same gesture under a second name.
+  // reading view, a note in the editor.
   "capture-selection": {
     available: (p) => isPdfFile(p.app.workspace.getActiveFile()) || !!p.activeMarkdown()?.file,
     run: (p) => {
       const file = p.app.workspace.getActiveFile();
       if (isPdfFile(file)) {
         const sel = readPdfSelection(activeWindow);
-        if (!sel) new Notice("Recall: select text inside a PDF page first.");
+        if (!sel) new Notice("Review Inbox: select text inside a PDF page first.");
         else capturePdfSelection(p, file, sel);
         return;
       }
@@ -60,7 +52,7 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
       if (isPdfFile(file)) {
         const sel = readPdfSelection(activeWindow);
         if (!sel) {
-          new Notice("Recall: select text inside a PDF page first.");
+          new Notice("Review Inbox: select text inside a PDF page first.");
           return;
         }
         const inst = await askInstruction(p.app, INSTRUCTION_TITLE, INSTRUCTION_PLACEHOLDER);
@@ -72,7 +64,7 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
       if (view.getMode() === "preview") {
         const text = activeWindow.getSelection()?.toString().trim() ?? "";
         if (!text) {
-          new Notice("Recall: select text in the note first.");
+          new Notice("Review Inbox: select text in the note first.");
           return;
         }
         const inst = await askInstruction(p.app, INSTRUCTION_TITLE, INSTRUCTION_PLACEHOLDER);
@@ -95,10 +87,6 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
       void captureMarkdownHighlights(p, file);
     },
   },
-  "open-quiz": {
-    available: () => true,
-    run: (p) => void p.openQuiz(),
-  },
   "open-inbox": {
     available: () => true,
     run: (p) => void p.openInbox(),
@@ -107,16 +95,12 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
     available: () => true,
     run: (p) => void p.exportHighlights(p.store.all().filter((h) => h.status === "ready")),
   },
-  "export-spaced": {
-    available: () => true,
-    run: (p) => void p.exportToSpacedRepetition(p.store.all().filter((h) => h.status === "ready")),
-  },
   "retry-failed": {
     available: () => true,
     run: (p) => {
       let n = 0;
       for (const h of p.store.all()) if (h.status === "error") (p.generator.enqueue(h), n++);
-      new Notice(`Recall: retrying ${n}.`);
+      new Notice(`Review Inbox: retrying ${n}.`);
     },
   },
   "open-schema": {
@@ -141,10 +125,10 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
 // command that throws when run; an implementation with no spec would never be
 // registered at all. Both are programming errors, so fail loudly at import.
 for (const spec of COMMAND_TABLE) {
-  if (!IMPLEMENTATIONS[spec.id]) throw new Error(`Recall: command "${spec.id}" has no implementation.`);
+  if (!IMPLEMENTATIONS[spec.id]) throw new Error(`Review Inbox: command "${spec.id}" has no implementation.`);
 }
 for (const id of Object.keys(IMPLEMENTATIONS)) {
-  if (!COMMAND_TABLE.some((spec) => spec.id === id)) throw new Error(`Recall: implementation "${id}" has no command spec.`);
+  if (!COMMAND_TABLE.some((spec) => spec.id === id)) throw new Error(`Review Inbox: implementation "${id}" has no command spec.`);
 }
 
 export const RECALL_COMMANDS: RecallCommand[] = COMMAND_TABLE.map((spec) => ({ ...spec, ...IMPLEMENTATIONS[spec.id] }));
