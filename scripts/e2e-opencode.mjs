@@ -65,15 +65,39 @@ console.log("--- a missing model must fail with a named fix, not a crash ---");
 // leak: `exec` classified and threw before the cleanup ran, so a failed run
 // left the row its own event stream had already named. A failing call is
 // therefore the case worth asserting, not a succeeding one.
-const sessionCount = () => {
+let failures = 0;
+
+// A failed measurement is its own outcome, never a sentinel. An earlier version
+// returned -1 here and compared `after > before`, which is false for two
+// sentinels, so an unmeasurable check printed "(no leak)" while measuring
+// nothing: a green verdict for exactly the bug this exists to catch.
+function sessionCount(label) {
   try {
     const raw = execFileSync(BIN, ["session", "list"], { cwd: mod.scratchDir(), encoding: "utf8", timeout: 30000 });
     return raw.trim().split("\n").filter(Boolean).length;
-  } catch {
-    return -1;
+  } catch (e) {
+    console.log(`  ${label}: UNMEASURED (${String(e.message).split("\n")[0]})`);
+    failures++;
+    return null;
   }
-};
-const sessionsBefore = sessionCount();
+}
+
+// forgetSession is fire-and-forget with unref(), so the delete may not have
+// landed yet. Poll until the count holds still rather than sleeping a fixed
+// guess: a real leak persists and is still caught, while a slow delete settles.
+async function settledSessionCount(label) {
+  let last = null;
+  for (let i = 0; i < 15; i++) {
+    const n = sessionCount(label);
+    if (n === null) return null;
+    if (n === last) return n;
+    last = n;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  return last;
+}
+
+const sessionsBefore = sessionCount("before");
 try {
   await backend.complete({
     system: "x",
@@ -83,10 +107,20 @@ try {
     maxTokens: 50,
     model: "nope/nope",
   });
-  console.log("  UNEXPECTED: no error");
+  console.log("  UNEXPECTED: the bad-model call did not throw");
+  failures++;
 } catch (e) {
   console.log("  kind:", e.kind, "| message:", e.message.slice(0, 160));
 }
-await new Promise((r) => setTimeout(r, 5000));
-const sessionsAfter = sessionCount();
-console.log("  sessions:", sessionsBefore, "->", sessionsAfter, sessionsAfter > sessionsBefore ? "<-- LEAKED" : "(no leak)");
+const sessionsAfter = await settledSessionCount("after");
+if (sessionsBefore === null || sessionsAfter === null) {
+  console.log("  sessions: UNMEASURED -> cannot say whether the failed run leaked");
+} else if (sessionsAfter > sessionsBefore) {
+  console.log(`  sessions: ${sessionsBefore} -> ${sessionsAfter}  <-- LEAKED`);
+  failures++;
+} else {
+  console.log(`  sessions: ${sessionsBefore} -> ${sessionsAfter}  (no leak)`);
+}
+
+console.log(failures === 0 ? "\nE2E PASS" : `\nE2E FAIL: ${failures} check(s) did not pass`);
+process.exit(failures === 0 ? 0 : 1);
