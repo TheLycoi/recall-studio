@@ -1,7 +1,7 @@
 {
   "id": "recall",
   "name": "Recall",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "minAppVersion": "1.7.2",
   "description": "Flashcards from what you highlight, an inbox to review them, export to Anki, and a free-response quiz on your wiki pages. Runs on the Codex CLI with your ChatGPT sign-in, the DeepSeek API with a key, or the opencode CLI.",
   "author": "Conrad Kelonu",

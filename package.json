@@ -1,6 +1,6 @@
 {
   "name": "obsidian-recall",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Flashcards from what you highlight, an inbox to review them, export to Anki, and a free-response quiz on your wiki pages. Runs on the Codex CLI, the DeepSeek API, or the opencode CLI.",
   "main": "main.js",
   "private": true,

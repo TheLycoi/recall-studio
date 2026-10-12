@@ -334,7 +334,12 @@ export class InboxView extends ItemView {
       });
     }
 
-    const exportAll = right.createEl("button", { cls: "mod-cta", text: "Export all reviewed" });
+    // The label names its destination. Without "to Anki" the button reads as a
+    // generic export, and a reader who wants their cards in Spaced Repetition
+    // presses it, sees nothing arrive there, and reports the wrong thing broken.
+    // The command palette entry is "Export all reviewed cards to Anki"; the
+    // in-note action says the same. Only this button omitted it.
+    const exportAll = right.createEl("button", { cls: "mod-cta", text: "Export all reviewed to Anki" });
     exportAll.title = "Send every pending card in the inbox to Anki (⌘⏎)";
     exportAll.addEventListener("click", () => void this.exportHighlights(this.visibleHighlights()));
 

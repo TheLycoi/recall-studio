@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.3.1
+
+Fixes the Spaced Repetition export, which wrote its note but never marked the
+cards it had written.
+
+- **Cards now leave the inbox when they are sent to Spaced Repetition.** The
+  export wrote the note, recorded its path on each card, and stopped there, so
+  every card stayed `pending`. Two consequences, both visible in a vault: the
+  highlight stayed "ready" and never finished, and pressing the command again
+  wrote a second note holding the same cards. The Anki path had always flipped
+  `status` to `exported`; the Spaced Repetition path was missing it. This is the
+  one-destination-per-card rule the Anki export already followed.
+- The export is now covered by tests that run the real function, which is what
+  the earlier work lacked. Its serialization had been verified against the
+  target plugin's own parser, but the export itself was never executed, so the
+  missing status transition had no test at all. `test/spacedExport.test.mjs`
+  drives `exportToSpacedRepetition` against a stubbed vault and asserts the note
+  is written, the cards are marked, the highlight is finished, and a second send
+  writes no second note.
+- Nothing else changed. The serialization, the note format, the folder, the
+  deck tag, and the refusals are as they were.
+
 ## 0.3.0
 
 OpenCode joins Codex and DeepSeek as a provider. Pick one under Settings → Card writer.

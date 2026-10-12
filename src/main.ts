@@ -321,7 +321,15 @@ export default class RecallPlugin extends Plugin {
         files++;
         written += lines.length;
         skipped += cards.length - lines.length;
-        for (const l of lines) l.card.srNote = path;
+        for (const l of lines) {
+          l.card.srNote = path;
+          // One destination per card (DECISIONS.md): a card written into a note
+          // leaves the pending allowlist exactly as an Anki export does. Without
+          // this the card stays pending, finalizeHighlights leaves the highlight
+          // "ready" because it still sees a pending card, and pressing the
+          // command again writes a second note holding the same cards.
+          l.card.status = "exported";
+        }
       }
       finalizeHighlights(items.map((i) => i.highlight));
       this.store.touch();
