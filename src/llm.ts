@@ -11,7 +11,21 @@ import { buildQuizQuestionMessage, buildQuizRecallGradeMessage } from "./prompt"
 import { QuizQuestionOut as QuizQuestionOutSchema, QuizRecallGradeOut as QuizRecallGradeOutSchema } from "./schemas";
 import type { QuizQuestionDraft, QuizRecallGradeDraft } from "./schemas";
 import type { RecallSettings } from "./settings";
-import { CHAT_ANSWER_SYSTEM, ChatAskOut, buildChatAnswerMessage, type ChatAnswerArgs, type ChatAskDraft } from "./reviewChat";
+import {
+  CHAT_ANSWER_SYSTEM,
+  ChatAskOut,
+  buildChatAnswerMessage,
+  CHAT_VERIFY_SYSTEM,
+  ChatVerificationOut,
+  buildChatVerifyMessage,
+  CHAT_EXPAND_SYSTEM,
+  ChatExpandOut,
+  buildChatExpandMessage,
+  boundChatQueries,
+  type ChatAnswerArgs,
+  type ChatAskDraft,
+  type ChatVerification,
+} from "./reviewChat";
 
 const CardOut = z.object({
   kind: z.enum(["qa", "cloze"]).describe("qa for a question with a short answer; cloze for one sentence with hidden spans"),
@@ -520,6 +534,48 @@ export class LlmClient {
       maxTokens: 2000,
       effort: "low",
     });
+  }
+
+  /**
+   * "verify a draft": a second, evidence-only read of the same passages, which
+   * decides whether each drafted sentence is what the evidence states (a
+   * paraphrase is fine) or not. It is a separate call from `answerSelected` on
+   * purpose: the writer never grades its own paraphrase. The verdict only
+   * unlocks the paraphrase path in `checkChatAnswer`; a quote is still checked
+   * character for character and a citation still has to name real evidence, so
+   * nothing here is trusted on its own. `checkChatAnswer` does that checking;
+   * this method only drops a verdict that points at a sentence the draft does
+   * not have, the way `critiqueCards` drops a stray verdict index.
+   */
+  async verifySelected(args: ChatAnswerArgs, draft: ChatAskDraft): Promise<ChatVerification> {
+    const parsed = await this.backend().complete({
+      system: CHAT_VERIFY_SYSTEM,
+      user: buildChatVerifyMessage(args, draft),
+      schema: ChatVerificationOut,
+      label: "verification",
+      maxTokens: 1500,
+      effort: "low",
+    });
+    return { claims: parsed.claims.filter((c) => Number.isInteger(c.index) && c.index >= 0 && c.index < draft.sentences.length) };
+  }
+
+  /**
+   * "expand the query": up to five short alternate search phrases for the same
+   * question, for the local ranker (src/reviewChat.ts `selectChatPassages`).
+   * They steer retrieval and are never evidence, so only the question is sent
+   * here — no evidence, no history, no vault — and the phrases are bounded
+   * before they are returned.
+   */
+  async expandChatQuery(question: string): Promise<string[]> {
+    const parsed = await this.backend().complete({
+      system: CHAT_EXPAND_SYSTEM,
+      user: buildChatExpandMessage(question),
+      schema: ChatExpandOut,
+      label: "search phrases",
+      maxTokens: 400,
+      effort: "low",
+    });
+    return boundChatQueries(parsed.queries);
   }
 
   /**
