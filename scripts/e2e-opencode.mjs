@@ -58,6 +58,19 @@ await backend.abort();
 console.log("  ok");
 
 console.log("--- a missing model must fail with a named fix, not a crash ---");
+// Sessions must not accumulate, and the failure path is the one that used to
+// leak: `exec` classified and threw before the cleanup ran, so a failed run
+// left the row its own event stream had already named. A failing call is
+// therefore the case worth asserting, not a succeeding one.
+const sessionCount = () => {
+  try {
+    const raw = execFileSync(BIN, ["session", "list"], { cwd: mod.scratchDir(), encoding: "utf8", timeout: 30000 });
+    return raw.trim().split("\n").filter(Boolean).length;
+  } catch {
+    return -1;
+  }
+};
+const sessionsBefore = sessionCount();
 try {
   await backend.complete({
     system: "x",
@@ -71,3 +84,6 @@ try {
 } catch (e) {
   console.log("  kind:", e.kind, "| message:", e.message.slice(0, 160));
 }
+await new Promise((r) => setTimeout(r, 5000));
+const sessionsAfter = sessionCount();
+console.log("  sessions:", sessionsBefore, "->", sessionsAfter, sessionsAfter > sessionsBefore ? "<-- LEAKED" : "(no leak)");

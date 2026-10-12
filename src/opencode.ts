@@ -427,21 +427,30 @@ export class OpenCodeBackend implements LlmBackend {
    * One `opencode run`, returning the model's message. `cwd` is the scratch
    * directory, which is what makes `--agent recall` resolvable.
    *
-   * A run that produced no message is classified here rather than by the
-   * callers, because the process details that say why (a missing binary, a
-   * timeout, a provider refusal) are only in scope at this layer.
+   * This owns the run's whole lifecycle, the session it writes included, so the
+   * cleanup sits here rather than in the callers: a run that fails still wrote a
+   * session, and the failure paths are exactly the ones that would otherwise
+   * leave a row behind. The id is read from the event stream, which carries it
+   * whether or not the run produced an answer.
+   *
+   * A run that produced no message is classified here too, because the process
+   * details that say why (a missing binary, a timeout, a provider refusal) are
+   * only in scope at this layer.
    */
-  private async exec(req: TextRequest, prompt: string): Promise<{ text: string; sessionId: string | null; bin: string; cwd: string }> {
+  private async exec(req: TextRequest, prompt: string): Promise<string> {
     if (req.signal?.aborted) throw new OpenCodeError("aborted", "Cancelled.");
     const s = this.getSettings();
     const bin = resolveOpencodeBinary(s.opencodePath);
     const model = req.model ?? s.opencodeModel;
     const cwd = this.workspace();
     const r = await runOpencode(bin, opencodeArgs(model), cwd, prompt, req.signal);
-    if (r.aborted && req.signal?.aborted) throw new OpenCodeError("aborted", "Cancelled.");
     const events = parseOpencodeEvents(r.stdout);
+    // Before any throw, never after: cleanup is fire-and-forget, so it cannot
+    // turn a good answer into an error either way.
+    forgetSession(bin, cwd, events.sessionId);
+    if (r.aborted && req.signal?.aborted) throw new OpenCodeError("aborted", "Cancelled.");
     if (!events.text) throw classify(r, events, model);
-    return { text: events.text, sessionId: events.sessionId, bin, cwd };
+    return events.text;
   }
 
   async probe(model?: string): Promise<{ model: string; via: string }> {
@@ -469,8 +478,7 @@ export class OpenCodeBackend implements LlmBackend {
   }
 
   async complete<T>(req: CompletionRequest<T>): Promise<T> {
-    const { text, sessionId, bin, cwd } = await this.exec(req, [preamble(req.schema), req.system, req.user].join("\n\n"));
-    forgetSession(bin, cwd, sessionId);
+    const text = await this.exec(req, [preamble(req.schema), req.system, req.user].join("\n\n"));
     let value: unknown;
     try {
       value = JSON.parse(extractJson(text));
@@ -490,8 +498,7 @@ export class OpenCodeBackend implements LlmBackend {
    * turn's usage, and none of them says why the model stopped.
    */
   async completeText(req: TextRequest): Promise<string> {
-    const { text, sessionId, bin, cwd } = await this.exec(req, [TOOLS_BAN, req.system, req.user].filter(Boolean).join("\n\n"));
-    forgetSession(bin, cwd, sessionId);
+    const text = await this.exec(req, [TOOLS_BAN, req.system, req.user].filter(Boolean).join("\n\n"));
     req.onStop?.("unknown");
     return text;
   }
