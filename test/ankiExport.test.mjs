@@ -242,7 +242,7 @@ function makeApp() {
       on: () => ({}),
       readBinary: async (file) => MEDIA_FILES[file.path] ?? new Uint8Array([]).buffer,
       // Used by exportAsTextFile's fallback path.
-      async create(p, data) { files.set(p, data); return { path: p, stat: {} }; },
+      async create(p, data) { if (files.has(p)) throw new Error('File already exists'); files.set(p, data); return { path: p, stat: {} }; },
       async createFolder(p) { files.set(`${p}/`, ""); return { path: p }; },
     },
     metadataCache: {
@@ -258,6 +258,7 @@ function makeApp() {
     workspace: {
       on: () => ({}),
       onLayoutReady: (cb) => cb(),
+      iterateAllLeaves: () => {},
       getActiveViewOfType: () => null,
       getLeavesOfType: () => [],
       getRightLeaf: () => null,
@@ -326,7 +327,7 @@ function freshFake() {
 
 // ------------------------------------------------------------------- tests
 
-test("only approved cards are exported; a draft is bypassed and stays a draft", async () => {
+test("Export accepts drafts and legacy approved cards in the explicit scope", async () => {
   fake = freshFake();
   const plugin = await loadedPlugin();
   const draft = qa({ id: "c-draft", status: "pending", front: "Draft question?", back: "draft answer" });
@@ -334,10 +335,9 @@ test("only approved cards are exported; a draft is bypassed and stays a draft", 
   notices.length = 0;
   await plugin.exportHighlights([highlight([draft, ok])]);
 
-  assert.equal(fake.notes.size, 1, "exactly the approved card should reach Anki");
-  const note = [...fake.notes.values()][0];
-  assert.equal(note.fields.Front, "Approved question?");
-  assert.equal(draft.status, "pending", "the draft must not change status");
+  assert.equal(fake.notes.size, 2, "both accepted cards should reach Anki");
+  assert.deepEqual([...fake.notes.values()].map(n => n.fields.Front).sort(), ["Approved question?", "Draft question?"]);
+  assert.equal(draft.status, "exported", "Export accepts the draft");
   assert.equal(ok.status, "exported", "the approved card is now exported");
 });
 
@@ -440,13 +440,13 @@ test("the export makes no scheduling or destructive AnkiConnect call", async () 
   assert.ok(fake.actions.includes("addNotes"));
 });
 
-test("exporting with nothing approved is a no-op that reaches no Anki endpoint", async () => {
+test("exporting a dismissed passage is a no-op that reaches no Anki endpoint", async () => {
   fake = freshFake();
   const plugin = await loadedPlugin();
   notices.length = 0;
-  await plugin.exportHighlights([highlight([qa({ id: "c1", status: "pending" })])]);
+  await plugin.exportHighlights([highlight([qa({ id: "c1", status: "pending" })], { status: "dismissed" })]);
   assert.equal(fake.actions.length, 0, "no request should be made");
-  assert.ok(notices.some((n) => /nothing approved/i.test(n)), `expected a nothing-approved notice, got ${JSON.stringify(notices)}`);
+  assert.ok(notices.some((n) => /no visible drafts/i.test(n)), `expected a no-drafts notice, got ${JSON.stringify(notices)}`);
 });
 
 test("a content duplicate sitting in a DIFFERENT deck is reported, not added (collection scope)", async () => {
@@ -462,6 +462,23 @@ test("a content duplicate sitting in a DIFFERENT deck is reported, not added (co
   assert.equal(fake.notes.size, 1, "a cross-deck content duplicate must not be added");
   assert.equal(card.status, "approved", "the card stays approved for correction");
   assert.equal(fake.notes.get([...fake.notes.keys()][0]).fields.Back, "an unrelated note in another deck", "the existing note was overwritten");
+});
+
+test("text exports in the same instant use unique paths without overwriting", async (t) => {
+  t.mock.method(Date.prototype, 'toISOString', () => '2026-10-12T22:00:00.000Z');
+  fake = freshFake();
+  const plugin = await loadedPlugin();
+  const first = qa({ id: 'first', status: 'pending', front: 'First question?' });
+  const second = qa({ id: 'second', status: 'pending', front: 'Second question?' });
+  await plugin.exportAsTextFile([highlight([first])]);
+  const files = plugin.__app.__files;
+  const original = [...files.entries()].find(([p]) => p.endsWith('.txt'));
+  assert.ok(original);
+  await plugin.exportAsTextFile([highlight([second])]);
+  assert.equal(first.status, 'exported');
+  assert.equal(second.status, 'exported');
+  assert.equal([...files.keys()].filter(p => p.endsWith('.txt')).length, 2);
+  assert.equal(files.get(original[0]), original[1]);
 });
 
 test("a text export splits a one-field cloze model from Q&A rows by note type", async () => {
@@ -485,10 +502,10 @@ test("a text export splits a one-field cloze model from Q&A rows by note type", 
   assert.match(files.get(clozeFile), /^Cloze\t/m, "the cloze file carries the Cloze note type");
   assert.equal(/\{\{c1::interval\}\}/.test(files.get(qaFile)), false, "the one-field cloze row landed in the Q&A file");
   assert.ok(files.get(clozeFile).includes("{{c1::interval}}"), "the cloze row must be in the cloze file");
-  // Approved-only is retained: the draft is written nowhere.
-  assert.equal(files.get(qaFile).includes("Draft question?"), false, "a draft must not be exported");
+  // Text export also accepts drafts, with the correct note type.
+  assert.equal(files.get(qaFile).includes("Draft question?"), true, "Export accepts the draft");
   assert.equal(files.get(clozeFile).includes("Draft question?"), false);
   assert.equal(qaCard.status, "exported");
   assert.equal(clozeCard.status, "exported");
-  assert.equal(draft.status, "pending");
+  assert.equal(draft.status, "exported");
 });

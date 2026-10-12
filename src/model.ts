@@ -72,6 +72,8 @@ export interface Card {
    * pass was off, skipped, or failed — not that the card was approved.
    */
   critiqueRan?: boolean;
+  /** Present only after a user-requested check of this exact content. */
+  userCheck?: { content: string; at: string; issues: string[] };
 }
 
 export interface Highlight {

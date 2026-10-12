@@ -56,7 +56,7 @@ export const COMMAND_TABLE: CommandSpec[] = [
   },
   {
     id: "export-reviewed",
-    name: "Export approved cards to Anki",
+    name: "Export to Anki",
     aliases: ["export"],
     hint: "always",
   },

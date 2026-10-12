@@ -40,8 +40,8 @@ test('source change prevents old answers entering the next prompt', () => {
   v.selectedSourcePaths=()=>['a.md'];
   assert.ok(!JSON.stringify(v.history()).includes('EXCLUDED_SECRET'));
 });
-test('Chat view type cannot collide with Recall', () => {
-  const v=new View({},{}); assert.equal(v.getViewType(),'review-inbox-chat');
+test('embedded Chat no longer exposes a workspace view type', () => {
+  const v=new View({},{}); assert.equal(typeof v.getViewType,'undefined');
 });
 test('identity preserves distinctions lost by slugification', () => {
   assert.notEqual(anki.cardIdentityTag('A B','c_x'),anki.cardIdentityTag('A-B','c_x'));

@@ -15,16 +15,19 @@ import { readFileSync, readdirSync } from "node:fs";
 const srcFiles = readdirSync("src").filter((n) => n.endsWith(".ts"));
 const read = (f) => readFileSync(`src/${f}`, "utf8");
 
-test("only the inbox view writes the approved status", () => {
+test("only the explicit export acceptance helper writes approved", () => {
   const writers = srcFiles.filter((f) => /status\s*=\s*"approved"/.test(read(f)));
-  assert.deepEqual(writers, ["inboxView.ts"], `approved is written by ${writers.join(", ")}`);
+  assert.deepEqual(writers, ["cardActions.ts"], `approved is written by ${writers.join(", ")}`);
 });
 
-test("the export funnel is a strict allowlist on approved", () => {
+test("the export funnel requires explicit acceptance", () => {
   const main = read("main.ts");
-  assert.match(main, /c\.status === "approved"/, "main.ts does not gate export on approved");
-  assert.doesNotMatch(main, /c\.status === "pending"/, "main.ts still treats pending as exportable");
-  assert.doesNotMatch(main, /c\.status !== "exported"/, "main.ts widened the gate into a denylist");
+  assert.match(main, /exportCandidates\(list, ids\)/);
+  assert.match(main, /withExportAcceptance\(items/);
+  const view = read("inboxView.ts");
+  assert.doesNotMatch(view, /text: "(?:Approve|Unapprove)/);
+  assert.doesNotMatch(view, /case "a":/);
+  assert.doesNotMatch(view, /else if \(c\.critiqueRan\)/);
 });
 
 test("neither the generator nor the store ever approves a card", () => {

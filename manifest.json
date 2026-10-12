@@ -1,9 +1,9 @@
 {
   "id": "review-inbox",
   "name": "Review Inbox",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "minAppVersion": "1.7.2",
-  "description": "Flashcards from what you highlight, a source-linked inbox to review them, grounded chat over selected sources, and export to Anki. Runs on the Codex CLI with your ChatGPT sign-in, the DeepSeek API with a key, or the opencode CLI.",
+  "description": "Flashcards from what you highlight, a source-linked inbox to review them, grounded vault chat, and export to Anki. Runs on the Codex CLI with your ChatGPT sign-in, the DeepSeek API with a key, or the opencode CLI.",
   "author": "Conrad Kelonu",
   "authorUrl": "https://github.com/TheLycoi",
   "isDesktopOnly": true

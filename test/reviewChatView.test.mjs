@@ -1,10 +1,8 @@
 // Run with: npm test  (bundles src/reviewChatView.ts the way the plugin build
 // does, then reads the source and the bundle as text)
 //
-// The Chat view shares a vault with the Inbox view, so it has to be reachable
-// and self-contained: its own view type, its own nav, explicit source
-// selection, no vault-wide reads, no tools handed to the model, and no
-// general-knowledge fallback anywhere near it.
+// Chat is embedded inside Inbox, with vault retrieval, optional source narrowing,
+// no tools handed to the model and no general-knowledge fallback.
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
@@ -22,19 +20,21 @@ before(async () => {
   js = readFileSync(out, "utf8");
 });
 
-test("the chat view has its own type, distinct from the inbox", () => {
+test("the legacy chat view type is retained for workspace migration", () => {
   assert.match(SOURCE(), /VIEW_TYPE_CHAT\s*=\s*"review-inbox-chat"/);
 });
 
-test("the view is a ChatView extending ItemView and is exported", () => {
-  assert.match(SOURCE(), /export class ChatView extends ItemView/);
+test("ChatView is an embedded component, not an ItemView", () => {
+  assert.match(SOURCE(), /export class ChatView \{/);
+  assert.doesNotMatch(SOURCE(), /extends ItemView/);
   assert.match(SOURCE(), /export const VIEW_TYPE_CHAT/);
 });
 
-test("the view offers Inbox and Chat navigation", () => {
+test("Chat has a heading rather than a separate Inbox/Chat tab switch", () => {
   const s = SOURCE();
   assert.ok(/openInbox\(/.test(s), "no route back to the Inbox");
-  assert.ok(/text:\s*"Inbox"/.test(s) && /text:\s*"Chat"/.test(s), "nav labels missing");
+  assert.match(s, /text:\s*"Chat"/);
+  assert.doesNotMatch(s, /role:\s*"tablist"/);
 });
 
 test("the view is driven by a structural host, not by importing the plugin", () => {
@@ -43,7 +43,7 @@ test("the view is driven by a structural host, not by importing the plugin", () 
   assert.ok(/interface ChatHost/.test(s), "the host type must be structural");
 });
 
-test("source selection is explicit: markdown is listed, and only selected files are read", () => {
+test("optional source narrowing lists Markdown with accessible checkboxes", () => {
   const s = SOURCE();
   assert.ok(/getMarkdownFiles\(\)/.test(s), "markdown files are not listed");
   assert.ok(/cachedRead\(/.test(s), "selected files are not read");

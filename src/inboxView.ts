@@ -16,16 +16,18 @@ import {
   RECALL_SPARK_ICON,
   RECALL_STACK_ICON,
 } from "./icon";
-import { isPdfHighlight, liveCards, makeCard, pendingCards, approvedCards, undecidedCards, type Card, type CardSnapshot, type Highlight } from "./model";
+import { isPdfHighlight, liveCards, makeCard, pendingCards, type Card, type CardSnapshot, type Highlight } from "./model";
 import { askInstruction, SchemaSuggestionsModal } from "./modals";
 import { countClozes, fmtDate, locateQuote, splitFrontmatter, plainText } from "./util";
 import { describeError } from "./llm";
-import { findCrossInterference, lintCard, LINT_FIX_INSTRUCTIONS, LINT_LABELS, wrapCloze } from "./lint";
+import { findCrossInterference, LINT_LABELS, wrapCloze } from "./lint";
 import { DEFAULT_SETTINGS } from "./settings";
+import { cardContent, checkCard, currentCardCheck } from "./cardActions";
+import { ChatView } from "./reviewChatView";
 
 export const VIEW_TYPE_INBOX = "review-inbox";
 
-type Filter = "review" | "approved" | "exported" | "all";
+type Filter = "review" | "exported" | "all";
 
 /**
  * How each card status reads to the reviewer. "pending" is the internal name
@@ -34,7 +36,7 @@ type Filter = "review" | "approved" | "exported" | "all";
  */
 const STATUS_LABELS: Record<Card["status"], string> = {
   pending: "Draft",
-  approved: "Approved",
+  approved: "Draft",
   exported: "Exported",
   duplicate: "Duplicate",
   flagged: "Flagged",
@@ -56,13 +58,17 @@ const ORIGIN_LABELS: Partial<Record<Highlight["origin"], string>> = {
 /**
  * The inbox: every highlight grouped under its source note, the highlighted
  * passage on the left and its cards on the right, built for fast triage.
- * Cards are drafts until the reviewer approves them; approval is what makes a
- * card exportable (main.ts approvedItems). No quiz, dashboard or scheduler
- * lives here.
+ * Export accepts drafts. Chat stays inside this view. No quiz, dashboard or
+ * scheduler lives here.
  */
 export class InboxView extends ItemView {
+  private chat?: ChatView;
+  private headerEl!: HTMLElement;
+  private cardsEl!: HTMLElement;
   private unsubscribe: (() => void) | null = null;
   private filter: Filter = "review";
+  private checking = new Set<string>();
+  private closed = false;
   private collapsed = new Set<string>();
   private editing: string | null = null;
   private focusedCard: string | null = null;
@@ -102,7 +108,14 @@ export class InboxView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
+    this.closed = false;
+    this.contentEl.empty();
     this.contentEl.addClass("wikilm-notebook");
+    this.headerEl = this.contentEl.createDiv();
+    const chatEl = this.contentEl.createDiv({ cls: "review-inbox-chat" });
+    this.chat = new ChatView(chatEl, this.plugin);
+    await this.chat.onOpen();
+    this.cardsEl = this.contentEl.createDiv({ cls: "review-inbox-cards" });
     this.contentEl.tabIndex = 0;
     this.registerDomEvent(this.contentEl, "keydown", (e) => this.onKey(e));
     this.unsubscribe = this.plugin.store.onChange(() => this.scheduleRender());
@@ -110,7 +123,13 @@ export class InboxView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    this.closed = true;
     this.unsubscribe?.();
+    await this.chat?.onClose();
+  }
+
+  focusChat(): void {
+    this.contentEl.querySelector<HTMLTextAreaElement>(".review-chat textarea")?.focus();
   }
 
   /**
@@ -152,7 +171,6 @@ export class InboxView extends ItemView {
     return this.plugin.store.all().filter((h) => {
       if (h.status === "dismissed") return this.filter === "all";
       if (this.filter === "review") return h.status !== "exported";
-      if (this.filter === "approved") return approvedCards(h).length > 0;
       if (this.filter === "exported") return h.status === "exported";
       return true;
     });
@@ -172,12 +190,14 @@ export class InboxView extends ItemView {
   // ---------------------------------------------------------------- render
 
   private render(): void {
-    const root = this.contentEl;
-    const scrollTop = root.scrollTop;
+    if (this.closed) return;
+    const root = this.cardsEl;
+    const scrollTop = this.contentEl.scrollTop;
     this.dirty = false;
     root.empty();
 
-    this.renderHeader(root);
+    this.headerEl.empty();
+    this.renderHeader(this.headerEl);
     this.rebuildCrossInterference();
 
     const hs = this.visibleHighlights();
@@ -194,14 +214,14 @@ export class InboxView extends ItemView {
     const groups = this.groupBySource(hs);
     for (const [path, list] of groups) this.renderSource(root, path, list);
 
-    root.scrollTop = scrollTop;
+    this.contentEl.scrollTop = scrollTop;
   }
 
   /**
    * Recompute the cross-highlight collisions over the WHOLE store, not the
    * filtered view: a partner hidden by the current filter still collides in
-   * Anki. The population matches main.ts's approvedItems (ready highlights,
-   * approved cards) so the badge means exactly "this would collide on export".
+   * Anki. Include draft, flagged and legacy approved cards from ready passages,
+   * matching the statuses accepted by Export.
    * Derived, never stored, so it cannot go stale.
    */
   private rebuildCrossInterference(): void {
@@ -210,7 +230,7 @@ export class InboxView extends ItemView {
     for (const h of this.plugin.store.all()) {
       if (h.status !== "ready") continue;
       for (const c of h.cards) {
-        if (c.status !== "approved") continue;
+        if (!["pending", "flagged", "approved"].includes(c.status)) continue;
         items.push({ card: c, highlightId: h.id });
         this.cardOwner.set(c.id, h);
       }
@@ -230,13 +250,11 @@ export class InboxView extends ItemView {
       s.createSpan({ text: ` ${label}` });
       return s;
     };
-    let approved = 0;
     let flagged = 0;
     let withBloom = 0;
     let remember = 0;
     for (const h of this.plugin.store.all()) {
       if (h.status !== "ready") continue;
-      approved += approvedCards(h).length;
       for (const c of h.cards) {
         if (c.status === "flagged") flagged++;
         if (c.status !== "pending" || !c.bloom) continue;
@@ -245,7 +263,7 @@ export class InboxView extends ItemView {
       }
     }
     stat("to review", counts.toReview);
-    if (approved) stat("approved", approved, "is-approved");
+    // Legacy approved cards count as drafts; Export now accepts the card.
     if (withBloom > 0) {
       const s = stat("at remember", remember, remember === withBloom && withBloom >= 5 ? "is-flagged" : "");
       s.title = "Drafts the critique placed at Bloom 'remember'. When every judged card sits there, the set is testing labels, not understanding.";
@@ -266,7 +284,6 @@ export class InboxView extends ItemView {
     filter.setAttribute("aria-label", "Filter the inbox");
     for (const [v, label] of [
       ["review", "To review"],
-      ["approved", "Approved"],
       ["exported", "Exported"],
       ["all", "Everything"],
     ] as const) {
@@ -308,15 +325,9 @@ export class InboxView extends ItemView {
       });
     }
 
-    const approveAll = right.createEl("button", { cls: "wikilm-approve-all", text: "Approve all drafts" });
-    approveAll.title = "Approve every draft in view so it can be exported to Anki";
-    approveAll.setAttribute("aria-label", approveAll.title);
-    approveAll.addEventListener("click", () => this.approveAll(approveAll, this.visibleHighlights()));
-
-    // The label names its destination. Without "to Anki" the button reads as a
-    // generic export.
-    const exportAll = right.createEl("button", { cls: "mod-cta", text: "Export approved to Anki" });
-    exportAll.title = "Send every approved card in the inbox to Anki (⌘⏎)";
+    // The export action is the explicit acceptance of the visible batch.
+    const exportAll = right.createEl("button", { cls: "mod-cta", text: "Export" });
+    exportAll.title = "Accept and export visible draft cards to Anki (⌘⏎)";
     exportAll.setAttribute("aria-label", exportAll.title);
     exportAll.addEventListener("click", () => void this.exportHighlights(this.visibleHighlights()));
 
@@ -334,9 +345,9 @@ export class InboxView extends ItemView {
       );
       menu.addItem((i) =>
         i
-          .setTitle("Export approved as Anki text file")
+          .setTitle("Export as Anki text file")
           .setIcon(RECALL_FILE_ICON)
-          .onClick(() => void this.plugin.exportAsTextFile(this.visibleHighlights())),
+          .onClick(() => void this.plugin.exportAsTextFile(this.visibleHighlights(), new Set(this.cardIds()))),
       );
       menu.addItem((i) =>
         i
@@ -349,7 +360,7 @@ export class InboxView extends ItemView {
       );
       menu.addItem((i) =>
         i
-          .setTitle("Keyboard: j/k move · a approve · e edit · x delete · Enter export highlight")
+          .setTitle("Keyboard: j/k move · e edit · x delete · Enter export card")
           .setDisabled(true),
       );
       menu.showAtMouseEvent(evt);
@@ -360,24 +371,6 @@ export class InboxView extends ItemView {
   private retryFailedHighlights(): void {
     for (const h of this.plugin.store.all()) if (h.status === "error") this.plugin.generator.enqueue(h);
     this.scheduleRender();
-  }
-
-  /** Approve every draft or flagged card in the given highlights. */
-  private approveAll(btn: HTMLButtonElement | null, list: Highlight[]): void {
-    let n = 0;
-    for (const h of list) {
-      for (const c of h.cards) {
-        if (c.status === "pending" || c.status === "flagged") {
-          c.status = "approved";
-          n++;
-        }
-      }
-    }
-    if (btn && n === 0) {
-      btn.setAttribute("disabled", "true");
-      window.setTimeout(() => btn.removeAttribute("disabled"), 1200);
-    }
-    this.plugin.store.touch();
   }
 
   private renderSource(root: HTMLElement, path: string, list: Highlight[]): void {
@@ -393,21 +386,16 @@ export class InboxView extends ItemView {
     });
     const title = head.createEl("a", { cls: "wikilm-source-title", text: list[0].sourceTitle });
     title.addEventListener("click", () => void this.plugin.app.workspace.openLinkText(path, "", "tab"));
-    const draft = list.reduce((n, h) => n + pendingCards(h).length, 0);
-    const approved = list.reduce((n, h) => n + approvedCards(h).length, 0);
+    const draft = list.reduce((n, h) => n + h.cards.filter(c => ["pending", "flagged", "approved"].includes(c.status)).length, 0);
     head.createSpan({
       cls: "wikilm-muted",
-      text: `${list.length} highlight${list.length === 1 ? "" : "s"} · ${draft} draft${draft === 1 ? "" : "s"} · ${approved} approved`,
+      text: `${list.length} highlight${list.length === 1 ? "" : "s"} · ${draft} draft${draft === 1 ? "" : "s"}`,
     });
     const actions = head.createDiv({ cls: "wikilm-source-actions" });
-    if (undecidedCards(list[0]) && list.some((h) => undecidedCards(h).length)) {
-      const b = actions.createEl("button", { text: "Approve all" });
-      b.title = "Approve every draft in this note";
-      b.addEventListener("click", () => this.approveAll(null, list));
-    }
-    if (approved) {
-      const b = actions.createEl("button", { text: "Export note" });
-      b.title = "Send all approved cards from this note to Anki";
+    if (draft && !this.collapsed.has(path)) {
+      const b = actions.createEl("button", { text: "Export" });
+      b.title = "Accept and export visible draft cards from this note to Anki";
+      b.setAttribute("aria-label", b.title);
       b.addEventListener("click", () => void this.exportHighlights(list));
     }
     if (this.collapsed.has(path)) return;
@@ -451,7 +439,7 @@ export class InboxView extends ItemView {
               ? "exported"
               : h.status === "dismissed"
                 ? "dismissed"
-                : `${approvedCards(h).length > 0 ? `${approvedCards(h).length} approved · ` : ""}${pendingCards(h).length} draft${pendingCards(h).length === 1 ? "" : "s"}`,
+                : `${h.cards.filter(c => ["pending", "flagged", "approved"].includes(c.status)).length} drafts`,
     );
 
     const quote = left.createDiv({ cls: "wikilm-quote" });
@@ -483,21 +471,20 @@ export class InboxView extends ItemView {
       b.addEventListener("click", fn);
       return b;
     };
-    if (undecidedCards(h).length) {
-      const b = hlActions.createEl("button", { cls: "wikilm-approve-btn", text: "Approve all" });
-      b.title = "Approve every draft in this passage";
-      b.addEventListener("click", () => this.approveAll(null, [h]));
-    }
-    if (h.status === "ready" && approvedCards(h).length) {
-      iconBtn(RECALL_SEND_ICON, "Export this passage's approved cards to Anki (Enter)", () => void this.exportHighlights([h]));
+    if (h.status === "ready" && h.cards.some(c => ["pending", "flagged", "approved"].includes(c.status))) {
+      const b = hlActions.createEl("button", { text: "Export" });
+      b.title = "Accept and export visible draft cards from this passage to Anki";
+      b.setAttribute("aria-label", b.title);
+      b.addEventListener("click", () => void this.exportHighlights([h]));
     }
     if (h.status === "error") iconBtn(RECALL_RETRY_ICON, "Retry", () => this.plugin.generator.enqueue(h));
-    if (h.status === "ready" || h.status === "exported") {
-      iconBtn(RECALL_SPARK_ICON, "Write more cards for this passage", async () => {
-        const inst = await askInstruction(this.plugin.app, "More cards", "Optional: what should the extra cards cover?");
-        if (inst === null) return;
-        // For this run only: h.instruction keeps the capture instruction.
-        this.plugin.generator.more(h, inst);
+    if (h.status === "ready" && h.cards.some(c => ["pending", "flagged", "approved"].includes(c.status))) {
+      iconBtn(RECALL_SPARK_ICON, "Check cards against best practices", async () => {
+        for (const c of liveCards(h)) {
+          if (this.closed || h.status !== "ready") break;
+          if (!["pending", "flagged", "approved"].includes(c.status)) continue;
+          await this.checkAgainstPractices(h, c);
+        }
       });
     }
     iconBtn(RECALL_ADD_ICON, "Add a card by hand", () => {
@@ -598,33 +585,22 @@ export class InboxView extends ItemView {
       if (c.critiqueReason) {
         const b = meta.createSpan({ cls: "wikilm-badge wikilm-badge-critique", text: "critique" });
         b.title = c.critiqueReason;
-      } else if (c.critiqueRan) {
-        const b = meta.createSpan({ cls: "wikilm-badge wikilm-badge-checked", text: "checked" });
-        b.title = "The critique pass reviewed this card and kept it as written.";
+      }
+      const check = currentCardCheck(c, h);
+      if (check) {
+        const b = meta.createSpan({ cls: `wikilm-badge ${check.issues.length ? "wikilm-badge-warn" : "wikilm-badge-checked"}`, text: check.issues.length ? "checked · issues found" : "checked" });
+        b.title = check.issues.length ? check.issues.join("\n") : "User-requested check completed for this wording; no issues found.";
       }
     }
     const actions = top.createDiv({ cls: "wikilm-card-actions" });
 
-    // Approval is the reviewer's decision, so it is a labelled button rather
-    // than an icon. Approving makes the card exportable; unapproving returns it
-    // to Draft.
-    if (c.status === "pending" || c.status === "flagged") {
-      const ap = actions.createEl("button", { cls: "wikilm-approve-btn", text: "Approve" });
-      ap.title = "Approve this card so it can be exported to Anki (a)";
-      ap.setAttribute("aria-label", ap.title);
-      ap.addEventListener("click", (e) => {
+    if (["pending", "flagged", "approved"].includes(c.status)) {
+      const exportButton = actions.createEl("button", { cls: "mod-cta", text: "Export" });
+      exportButton.title = "Accept and export this card to Anki (Enter)";
+      exportButton.setAttribute("aria-label", exportButton.title);
+      exportButton.addEventListener("click", e => {
         e.stopPropagation();
-        c.status = "approved";
-        this.plugin.store.touch();
-      });
-    } else if (c.status === "approved") {
-      const un = actions.createEl("button", { cls: "wikilm-unapprove-btn", text: "Unapprove" });
-      un.title = "Send this card back to Draft (a)";
-      un.setAttribute("aria-label", un.title);
-      un.addEventListener("click", (e) => {
-        e.stopPropagation();
-        c.status = "pending";
-        this.plugin.store.touch();
+        void this.exportHighlights([h], new Set([c.id]));
       });
     }
     const btn = (icon: string, tip: string, fn: () => void) => {
@@ -649,12 +625,7 @@ export class InboxView extends ItemView {
       // the pipeline already recorded what is wrong it fixes the card on one
       // click instead of asking for an instruction that only restates the
       // critique.
-      if (this.lintNotes(c)) {
-        btn(RECALL_SPARK_ICON, this.fixTooltip(c), () => void this.rewrite(h, c, this.lintInstruction(c)));
-        btn(RECALL_RETRY_ICON, "Rewrite with your own instruction", () => void this.rewrite(h, c));
-      } else {
-        btn(RECALL_SPARK_ICON, "Rewrite with an instruction", () => void this.rewrite(h, c));
-      }
+      btn(RECALL_SPARK_ICON, this.checking.has(c.id) ? "Checking card…" : "Check card against best practices", () => void this.checkAgainstPractices(h, c));
       btn(c.kind === "qa" ? RECALL_CLOZE_ICON : RECALL_QA_ICON, c.kind === "qa" ? "Convert to cloze" : "Convert to Q&A", () =>
         void this.rewrite(h, c, c.kind === "qa" ? "Convert this Q&A card into a cloze card." : "Convert this cloze card into a question and answer card."),
       );
@@ -667,6 +638,9 @@ export class InboxView extends ItemView {
       this.renderEditor(el, h, c);
       return;
     }
+
+    const userCheck = currentCardCheck(c, h);
+    if (userCheck?.issues.length) el.createDiv({ cls: "wikilm-card-reason", text: userCheck.issues.join(" · ") });
 
     if (c.critiqueReason && (c.status === "pending" || c.status === "approved" || c.status === "flagged")) {
       el.createDiv({ cls: "wikilm-card-reason", text: c.critiqueReason });
@@ -748,62 +722,23 @@ export class InboxView extends ItemView {
       extra: extra.value.trim(),
     });
 
-    /**
-     * Run the card rules against the draft: the mechanical linter first, then
-     * the model critique. The linter is free and synchronous, so its verdict
-     * is on screen before the model call starts.
-     */
+    let checkedDraft: Card | undefined;
     const check = async (btn: HTMLButtonElement) => {
       const d = draft();
-      if (d.kind === "qa" ? !d.front || !d.back : !d.text) {
-        new Notice("Review Inbox: nothing to check yet.");
-        return;
-      }
-      const siblings = h.cards.filter((x) => x.id !== c.id && x.status !== "deleted");
-      const { failures, warnings } = lintCard(d, h, siblings);
-
+      checkedDraft = undefined;
       report.empty();
       report.show();
-      const list = report.createDiv({ cls: "wikilm-editor-report-list" });
-      for (const id of failures) list.createDiv({ cls: "wikilm-report-line wikilm-report-fail", text: `✗ ${LINT_LABELS[id]}` });
-      for (const id of warnings) list.createDiv({ cls: "wikilm-report-line wikilm-report-warn", text: `! ${LINT_LABELS[id]}` });
-      if (!failures.length && !warnings.length) list.createDiv({ cls: "wikilm-report-line wikilm-report-ok", text: "✓ passes every mechanical rule" });
-
-      const pending = report.createDiv({ cls: "wikilm-report-line wikilm-muted", text: "asking the critique…" });
+      report.setText("Checking card against best practices…");
       btn.disabled = true;
       try {
-        const [verdict] = await this.plugin.llm.critiqueCards(h, [d], siblings);
-        pending.remove();
-        if (!verdict) {
-          report.createDiv({ cls: "wikilm-report-line wikilm-muted", text: "the critique returned nothing for this card." });
-          return;
-        }
-        const line = report.createDiv({ cls: "wikilm-report-line" });
-        line.createSpan({ cls: `wikilm-badge wikilm-badge-bloom`, text: verdict.bloom });
-        const label = verdict.verdict === "keep" ? "keep" : verdict.verdict === "revise" ? "suggests a revision" : "would drop this";
-        line.createSpan({ text: ` ${label}` });
-        if (verdict.verdict !== "keep" && verdict.reason) {
-          report.createDiv({ cls: "wikilm-report-line wikilm-report-reason", text: verdict.reason });
-        }
-        // Check is the reader asking "is this OK?" mid-edit, not a background
-        // pass they might not be watching. Clicking Check already is the
-        // decision to hear the verdict out, so a revision drops straight into
-        // the fields: nothing reaches the card until Save is pressed, and the
-        // fields stay editable in case the revision needs a tweak first.
-        if (verdict.verdict === "revise") {
-          kindSel.value = verdict.kind;
-          if (verdict.kind === "qa") {
-            front.value = verdict.front.trim();
-            back.value = verdict.back.trim();
-          } else {
-            text.value = verdict.text.trim();
-          }
-          sync();
-          report.createDiv({ cls: "wikilm-report-line wikilm-report-ok", text: "✓ revision applied below — Save to keep it" });
-        }
+        await checkCard(d, h, (source, cards, siblings) => this.plugin.llm.critiqueCards(source, cards, siblings),
+          () => !this.closed && this.editing === c.id && cardContent(draft(), h) === cardContent(d, h));
+        const result = currentCardCheck(d, h);
+        if (!result) { report.setText("Draft changed or check cancelled. Check it again."); return; }
+        checkedDraft = d;
+        report.setText(result.issues.length ? result.issues.join(" · ") : "Check completed; no issues found.");
       } catch (e) {
-        pending.remove();
-        report.createDiv({ cls: "wikilm-report-line wikilm-report-fail", text: describeError(e) });
+        report.setText(describeError(e));
       } finally {
         btn.disabled = false;
       }
@@ -834,7 +769,9 @@ export class InboxView extends ItemView {
         delete c.lintFailures;
         delete c.lintWarnings;
         delete c.critiqueReason;
+        delete c.userCheck;
       }
+      if (checkedDraft && cardContent(c, h) === cardContent(checkedDraft, h)) c.userCheck = currentCardCheck(checkedDraft, h);
       this.editing = null;
       if (edited) {
         // What the reader typed, as one revision. Recorded before the
@@ -917,34 +854,21 @@ export class InboxView extends ItemView {
     this.plugin.store.touch();
   }
 
-  /** True when the pipeline recorded something for this card worth fixing. */
-  private lintNotes(c: Card): boolean {
-    return (c.lintFailures?.length ?? 0) > 0 || !!c.critiqueReason;
-  }
-
-  /**
-   * What the one-click fix button says it will do. The instruction itself is
-   * a paragraph now, which is right for the model and far too long for a
-   * tooltip, so this names the defects with the badge labels the reader is
-   * already looking at and lets the critique's own sentence speak for itself.
-   */
-  private fixTooltip(c: Card): string {
-    const labels = (c.lintFailures ?? []).map((id) => LINT_LABELS[id]);
-    const what = labels.length ? labels.join(", ") : "the critique's note";
-    return c.critiqueReason ? `Fix in one click — ${what}. ${c.critiqueReason.trim()}` : `Fix in one click — ${what}.`;
-  }
-
-  /**
-   * The instruction handed to the rewrite path. Each failure contributes the
-   * sentence from LINT_FIX_INSTRUCTIONS saying what would count as fixed, and
-   * the critique reason is appended last because it is already a full sentence
-   * about this card.
-   */
-  private lintInstruction(c: Card): string {
-    const parts = (c.lintFailures ?? []).map((id) => LINT_FIX_INSTRUCTIONS[id]);
-    if (c.critiqueReason) parts.push(c.critiqueReason.trim().replace(/\.$/, ""));
-    // "Keep what is right" matters because the failures name only the defect.
-    return `Fix these problems, changing nothing else that already works: ${parts.join("; ")}.`;
+  private async checkAgainstPractices(h: Highlight, c: Card): Promise<void> {
+    if (this.checking.has(c.id)) return;
+    this.checking.add(c.id);
+    const notice = new Notice("Review Inbox: checking card against best practices…", 0);
+    try {
+      const run = checkCard(c, h, (source, cards, siblings) => this.plugin.llm.critiqueCards(source, cards, siblings), () => !this.closed);
+      this.plugin.store.touch();
+      await run;
+    } catch (e) {
+      new Notice(`Review Inbox: check failed. ${describeError(e)}`);
+    } finally {
+      this.checking.delete(c.id);
+      this.plugin.store.touch();
+      notice.hide();
+    }
   }
 
   private async rewrite(h: Highlight, c: Card, preset?: string): Promise<void> {
@@ -968,6 +892,7 @@ export class InboxView extends ItemView {
       delete c.lintFailures;
       delete c.lintWarnings;
       delete c.critiqueReason;
+      delete c.userCheck;
       this.plugin.store.touch();
       // The reader asked for this rewrite from the open editor's own buttons,
       // so the fields are redrawn from the rewritten card rather than held.
@@ -1015,8 +940,8 @@ export class InboxView extends ItemView {
     }
   }
 
-  private async exportHighlights(list: Highlight[]): Promise<void> {
-    await this.plugin.exportHighlights(list);
+  private async exportHighlights(list: Highlight[], ids = new Set(this.cardIds())): Promise<void> {
+    await this.plugin.exportHighlights(list, ids);
   }
 
   private async openSource(h: Highlight): Promise<void> {
@@ -1089,15 +1014,6 @@ export class InboxView extends ItemView {
     }
   }
 
-  /** The action the Approve button would take for the focused card, for the "a" key. */
-  private toggleApproval(found: { highlight: Highlight; card: Card }): void {
-    const c = found.card;
-    if (c.status === "pending" || c.status === "flagged") c.status = "approved";
-    else if (c.status === "approved") c.status = "pending";
-    else return;
-    this.plugin.store.touch();
-  }
-
   private onKey(e: KeyboardEvent): void {
     if (this.editing) return;
     const target = e.target as HTMLElement | null;
@@ -1122,12 +1038,6 @@ export class InboxView extends ItemView {
         e.preventDefault();
         this.focusCard(ids[Math.max(0, i - 1)] ?? null);
         break;
-      case "a":
-        if (found && (found.card.status === "pending" || found.card.status === "flagged" || found.card.status === "approved")) {
-          e.preventDefault();
-          this.toggleApproval(found);
-        }
-        break;
       case "x":
       case "Delete":
       case "Backspace":
@@ -1148,7 +1058,7 @@ export class InboxView extends ItemView {
       case "Enter":
         if (found) {
           e.preventDefault();
-          void this.exportHighlights([found.highlight]);
+          void this.exportHighlights([found.highlight], new Set([found.card.id]));
         }
         break;
       case "o":

@@ -85,6 +85,7 @@ function makeApp(files) {
     workspace: {
       on: () => ({}),
       onLayoutReady: (cb) => cb(),
+      iterateAllLeaves: () => {},
       getActiveViewOfType: () => null,
       getLeavesOfType: () => [],
       getRightLeaf: () => null,

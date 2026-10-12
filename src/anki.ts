@@ -1,3 +1,4 @@
+import { cardContent } from "./cardActions";
 import { requestUrl } from "obsidian";
 import { createHash } from "crypto";
 import type { Card, Highlight } from "./model";
@@ -327,9 +328,11 @@ async function exportToAnkiInner(
 ): Promise<ExportResult> {
   const result: ExportResult = { added: 0, alreadyExported: 0, duplicates: 0, failed: [] };
   if (items.length === 0) return result;
+  const accepted = new Map(items.map(({ card, highlight }) => [card, cardContent(card, highlight)]));
+  const unchanged = (card: Card, highlight: Highlight) => card.status === "approved" && highlight.status === "ready" && accepted.get(card) === cardContent(card, highlight);
   await anki.createDeck(ctx.deck);
   for (const { card, highlight } of items) {
-    if (card.status !== "approved") {
+    if (!unchanged(card, highlight)) {
       // Defence in depth: the caller filters to approved cards, and the gate
       // is repeated here so no future caller can push a draft or flagged card
       // into Anki through this function.
@@ -340,8 +343,8 @@ async function exportToAnkiInner(
     // 1. Already sent by us? A tag hit means the note exists under this card's
     // identity, so a retry (or a re-send after the deck changed) is idempotent.
     const existing = await anki.findNotes(identityQuery(identity));
-    if (card.status !== "approved" || highlight.status !== "ready") {
-      result.failed.push({ card, error: "Approval changed during export; review this card again." });
+    if (!unchanged(card, highlight)) {
+      result.failed.push({ card, error: "Card changed during export; review this card again." });
       continue;
     }
     if (existing.length > 1) throw new Error("More than one Anki note has this card identity. Resolve the duplicate before retrying.");
@@ -357,7 +360,7 @@ async function exportToAnkiInner(
     try {
       const note = buildNote(card, highlight, ctx);
       await resolveMediaInFields(anki, note.fields, ctx, highlight.sourcePath);
-      if (card.status !== "approved" || highlight.status !== "ready") throw new Error("Approval changed during export.");
+      if (!unchanged(card, highlight)) throw new Error("Card changed during export.");
       note.tags = Array.from(new Set([...note.tags, identity]));
       const ids = await anki.addNotes([note]);
       addedId = ids && ids[0] ? ids[0] : null;
@@ -369,7 +372,7 @@ async function exportToAnkiInner(
 
     if (addedId) {
       // addNotes returning a note id IS Anki's verified result for this note.
-      card.status = "exported";
+      if (unchanged(card, highlight)) card.status = "exported";
       card.ankiNoteId = addedId;
       result.added++;
       continue;
@@ -382,7 +385,7 @@ async function exportToAnkiInner(
     try {
       const found = await anki.findNotes(identityQuery(identity));
       if (found.length > 0) {
-        card.status = "exported";
+        if (unchanged(card, highlight)) card.status = "exported";
         card.ankiNoteId = found[0];
         result.alreadyExported++;
         recovered = true;
@@ -402,7 +405,7 @@ async function exportToAnkiInner(
     } catch {
       contentHit = false;
     }
-    if (contentHit) {
+    if (contentHit && unchanged(card, highlight)) {
       result.duplicates++;
       result.failed.push({ card, error: "Similar content exists in Anki, but this card's identity was not found. The card remains approved for correction." });
     } else {

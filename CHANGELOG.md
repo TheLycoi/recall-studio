@@ -1,5 +1,23 @@
 # Changelog
 
+## Review Inbox 0.1.1
+
+- Chat searches eligible vault notes by default. Source selection is optional;
+  only bounded relevant passages reach the provider. Ignored files and plugin
+  data remain excluded, and answers still require verified citations.
+- Chat is embedded inside Inbox. Open chat focuses its question box instead of
+  opening another workspace tab.
+- Export accepts drafts directly; separate approval controls are removed. Inbox
+  buttons export visible cards in their stated scope, with failed sends retryable.
+- Passage stars and per-card check controls run explicit best-practices checks
+  without rewriting cards. Only these checks set the checked badge; edits invalidate it.
+- Captured PDF evidence can produce new drafts through Chat without changing
+  existing approved or exported cards.
+- Anki content duplicate checks cover all decks. Text export separates Q&A and
+  cloze note types, including cloze models without an extra field.
+- Notices use Review Inbox branding, and the keyboard-focused Inbox has a
+  visible focus ring.
+
 ## Review Inbox 0.1.0
 
 The first stage of the Review product, carved out of Obsidian Recall (MIT). It

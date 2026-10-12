@@ -1,8 +1,8 @@
 # Review Inbox
 
 Review Inbox turns the passages you highlight into flashcards. Cards land in a
-source-linked inbox as drafts, you approve the ones you want, and export sends
-the approved cards to Anki. A grounded chat over selected sources lets you ask
+source-linked inbox as drafts. Export accepts the cards you choose and sends
+them to Anki. A grounded chat inside Inbox searches your vault so you can ask
 questions and turn an answer into draft cards.
 
 This is the first stage of the Review product. There is no quiz, no dashboard,
@@ -13,8 +13,8 @@ no statistics and no review scheduler.
 You capture a passage from a note or a PDF. Review Inbox writes one or more
 cards from it and checks them before they land in your inbox as drafts.
 You review the cards in the inbox, beside the highlighted passage they came
-from: edit one, rewrite it, or bin it. Approve the cards you want.
-Export sends every approved card to Anki, with a backlink to its source.
+from: edit one, check it against best practices, or bin it.
+Export accepts the visible drafts in its scope and sends them to Anki with source backlinks.
 
 ## Requirements
 
@@ -32,8 +32,8 @@ Export sends every approved card to Anki, with a backlink to its source.
 | Send selection to inbox | `capture`, `send`, `pdf` | Queues the selected text for card writing. On a PDF it keeps the page number. |
 | Send selection to inbox with instructions… | `capture-instruct`, `pdf-instruct` | The same, with a one-line instruction for the card writer first. |
 | Open inbox | `inbox` | Opens the flashcard inbox. |
-| Open chat | `chat` | Opens grounded chat over the sources you select. |
-| Export approved cards to Anki | `export` | Sends every approved card to Anki. Drafts and flagged cards are never exported. |
+| Open chat | `chat` | Focuses Chat inside Inbox, with vault search and verified citations. |
+| Export to Anki | `export` | Accepts and exports all eligible drafts. Inbox Export buttons limit this to visible cards in their scope. |
 | Open the card rules note | `rules`, `schema` | Opens your house rules for the card writer, and creates the note if needed. |
 | Review card rule suggestions | `suggestions` | Rules Review Inbox proposes from the edits you keep making. Accept, edit, or dismiss each one. |
 | Send all ==highlights== in this note to inbox | `highlights`, `sweep` | Queues every `==highlight==` in the open note that is not in the inbox yet. |
@@ -42,33 +42,43 @@ Export sends every approved card to Anki, with a backlink to its source.
 Highlighter mode has no palette entry: it is the ribbon pen. While it is on,
 drag across a passage in a note or PDF and it is sent to the inbox.
 
-## Drafts, approval and export
+## Drafts, checks and export
 
-A card is a **Draft** until you approve it. Approving (**Approve**, or `a` on
-the focused card) makes it exportable; unapproving sends it back to Draft.
-Editing or rewriting an approved card returns it to Draft, because the wording
-you approved is no longer the stored one. Nothing is approved for you: a card
-the critique or the linter flagged stays flagged and is never exported.
+Export is the acceptance action. There is no separate Approve button. Export
+on a card sends that card; passage and source buttons send their visible drafts;
+the header sends the visible drafts across the Inbox. Hidden flagged groups and
+collapsed sources are excluded. The command palette exports all eligible drafts.
+Dismissed passages, deleted cards and already exported cards are excluded.
 
-Only **approved** cards are exported. **Approve all drafts** in the inbox header,
-or **Approve all** on a passage or a source, approves in bulk.
+The passage star checks its cards against best practices. The per-card check
+does the same for one card. Findings do not rewrite the card. A `checked` badge
+appears only after an explicit check completes for its current wording and source
+context; editing invalidates it. Automatic generation critique does not set this badge.
 
 Export goes through AnkiConnect. Each card carries a stable identity scoped to
 this plugin and this vault, so a repeated send, a retry after a lost reply, or a
 send to a different deck looks the note up instead of adding a duplicate. Notes
 are only ever added, never overwritten, so existing review history is safe. A
 card whose content already exists in Anki as an unrelated note is reported, not
-merged. If Anki is closed, the cards stay approved and nothing is lost.
+merged. If Anki is closed or an export fails, unsent cards keep their previous state.
 
 ## The chat
 
-Chat answers questions from the sources you explicitly select (markdown files or
-captured passages). It shows clickable citations back to the evidence, refuses an
-answer the evidence does not support, and keeps excluded sources out of the
-prompt. A grounded answer can be sent to the inbox as draft cards.
+Chat is embedded inside Inbox, not a separate tab. Ask a question without selecting notes. Chat searches Markdown notes and captured
+PDF passages locally and sends only the highest-ranked passages to your provider.
+The optional, collapsed Search scope control narrows the search to chosen sources.
+Hidden paths, Obsidian excluded files, and the configured plugin-data and export
+folders are never searched. Notes larger than 1 MB are skipped with a notice.
+
+Retrieval uses keyword matching, not embeddings. It retains at most 40 candidate
+passages, each up to 1,200 characters; source text sent to the model is capped at
+12,000 characters. It can miss synonyms or facts split across long passages.
+When no relevant evidence is found, Chat refuses instead of sending unrelated
+notes. Clickable citations open the source passage. A grounded answer can become
+draft cards in the Inbox, including when its PDF passage was captured earlier.
 
 Answers are extractive: each displayed claim must occur verbatim in a verified
-quote from a selected source. This deliberately rejects paraphrases rather than
+quote from a retrieved source. This deliberately rejects paraphrases rather than
 treating shared keywords as proof. Each question is independent; earlier answers
 are not sent back to the provider, so removing a source also excludes its old
 answers from subsequent prompts. Cancel discards the answer but may not stop the
@@ -80,7 +90,7 @@ provider request; it does not interrupt background card generation.
 - **Review Inbox folder** (under Card writer): where Review Inbox keeps the card rules note, the inbox, and the rule suggestions. Default `Review Inbox/`.
 - **Card quality**: the rules the card writer and the critique pass follow.
 - **Capture**: how a selection or a highlight is queued for a card.
-- **Sources**: the wiki or sources folder. Chat reads only the pages you select from it out of this folder; nothing under it is ever marked or changed. The chat's own source picker (notes and captured PDF passages) is in the Chat view, not here.
+- **Sources**: the wiki or sources folder protected from capture marking. Chat searches eligible notes throughout the vault; optional narrowing is in the Chat view.
 - **Anki**: the deck, note types, and tags used on export.
 
 ### The DeepSeek key
@@ -136,14 +146,13 @@ its release tag. BRAT needs authorized access to the repository. Do not copy the
 build over an existing Recall installation. This source uses the distinct plugin
 ID `review-inbox`; its folder and settings are separate.
 
-The integrated build has not yet passed real Obsidian/Anki acceptance: it has not
-been installed or driven in Obsidian, and no card has been exported to a
-disposable Anki deck. A private `0.1.0` prerelease was published to
-`TheLycoi/review-inbox` — the original Recall repository, kept under that name
-with the maintainer's approval — and its release assets were read back and
-verified against the tested build. BRAT installation, a real-provider
-capture/Chat run, and a repeat export against unchanged study records are still
-outstanding.
+Private beta `0.1.0` was published to `TheLycoi/review-inbox`, the original
+repository retained under its new name with the maintainer's approval. It loaded
+through BRAT in Obsidian with the existing settings and inbox preserved.
+
+The `0.1.1` changes add automatic retrieval and the concise Export label, plus
+acceptance-review fixes. Full provider and Anki acceptance remain separate from
+unit tests and build checks; see the project's host verification record.
 
 ## Where it came from
 

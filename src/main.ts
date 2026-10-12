@@ -1,3 +1,5 @@
+import { cardContent, exportCandidates, withExportAcceptance, type ExportItem } from "./cardActions";
+import { randomUUID } from "crypto";
 import { MarkdownView, Notice, Plugin, TFile, normalizePath } from "obsidian";
 import { RECALL_ICON, RECALL_SPARK_ICON, registerRecallIcon } from "./icon";
 import { AnkiClient, exportToAnki, finalizeHighlights, buildNote, type ExportResult } from "./anki";
@@ -7,7 +9,7 @@ import { paletteCommands } from "./commandTable";
 import { Generator } from "./generator";
 import { Highlighter } from "./highlighter";
 import { InboxView, VIEW_TYPE_INBOX } from "./inboxView";
-import { ChatView, VIEW_TYPE_CHAT } from "./reviewChatView";
+import { VIEW_TYPE_CHAT } from "./reviewChatView";
 import { LlmClient } from "./llm";
 import { askInstruction, pickDeck } from "./modals";
 import type { Card, Highlight } from "./model";
@@ -46,7 +48,7 @@ export default class RecallPlugin extends Plugin {
     this.generator = new Generator(this);
 
     this.registerView(VIEW_TYPE_INBOX, (leaf) => new InboxView(leaf, this));
-    this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(leaf, this));
+
     this.addSettingTab(new RecallSettingTab(this.app, this));
 
     this.addRibbonIcon(RECALL_ICON, "Review Inbox inbox", () => void this.openInbox());
@@ -97,7 +99,14 @@ export default class RecallPlugin extends Plugin {
       }),
     );
 
-    this.app.workspace.onLayoutReady(() => this.generator.start());
+    this.app.workspace.onLayoutReady(() => {
+      this.app.workspace.iterateAllLeaves(leaf => {
+        if (leaf.getViewState().type === VIEW_TYPE_CHAT) {
+          void leaf.setViewState({ type: VIEW_TYPE_INBOX }).catch(console.error);
+        }
+      });
+      this.generator.start();
+    });
   }
 
   async onunload(): Promise<void> {
@@ -141,13 +150,11 @@ export default class RecallPlugin extends Plugin {
     await this.app.workspace.revealLeaf(leaf);
   }
 
-  /** The chat view, opened beside the inbox. */
+  /** Focus Chat inside the existing Inbox. */
   async openChat(): Promise<void> {
-    const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT);
-    const leaf = existing[0] ?? this.app.workspace.getRightLeaf(false);
-    if (!leaf) return;
-    if (!existing[0]) await leaf.setViewState({ type: VIEW_TYPE_CHAT, active: true });
-    await this.app.workspace.revealLeaf(leaf);
+    await this.openInbox();
+    const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_INBOX)[0];
+    if (leaf?.view instanceof InboxView) leaf.view.focusChat();
   }
 
   async chooseDeck(): Promise<string | null> {
@@ -186,29 +193,33 @@ export default class RecallPlugin extends Plugin {
     await this.saveSettings();
   }
 
-  /**
-   * The exportable set: approved cards under a ready highlight. A strict
-   * equality allowlist on `approved` and nothing else — it is the single funnel
-   * into both exportHighlights and exportAsTextFile. Widening it into a
-   * denylist (e.g. `!== "exported"`) would export drafts and cards the critique
-   * flagged. Approved cards are the only cards a human has explicitly accepted.
-   */
-  private approvedItems(list: Highlight[]): Array<{ card: Card; highlight: Highlight }> {
-    const items: Array<{ card: Card; highlight: Highlight }> = [];
-    for (const h of list) {
-      if (h.status !== "ready") continue;
-      for (const c of h.cards) if (c.status === "approved") items.push({ card: c, highlight: h });
+  private exportBusy = false;
+
+  /** Export is the acceptance action; failed attempts restore draft state. */
+  private async acceptExport(list: Highlight[], ids: ReadonlySet<string> | undefined, send: (items: ExportItem[]) => Promise<void>): Promise<void> {
+    if (this.exportBusy) { new Notice("Review Inbox: an export is already running."); return; }
+    this.exportBusy = true;
+    try {
+      const items = exportCandidates(list, ids);
+      if (!items.length) { new Notice("Review Inbox: no visible drafts to export."); return; }
+      await withExportAcceptance(items, () => send(items));
+    } catch (e) {
+      new Notice(`Review Inbox: export failed. ${(e as Error).message}`, 8000);
+    } finally {
+      this.exportBusy = false;
+      this.store.touch();
     }
-    return items;
   }
 
-  /** Push every approved card of the given highlights to Anki via AnkiConnect. */
-  async exportHighlights(list: Highlight[]): Promise<void> {
-    const items = this.approvedItems(list);
-    if (items.length === 0) {
-      new Notice("Review Inbox: nothing approved to export.");
-      return;
-    }
+  async exportHighlights(list: Highlight[], ids?: ReadonlySet<string>): Promise<void> {
+    await this.acceptExport(list, ids, items => this.sendToAnki(items));
+  }
+
+  async exportAsTextFile(list: Highlight[], ids?: ReadonlySet<string>): Promise<void> {
+    await this.acceptExport(list, ids, items => this.writeTextFile(items));
+  }
+
+  private async sendToAnki(items: ExportItem[]): Promise<void> {
     const notice = new Notice(`Review Inbox: exporting ${items.length} card${items.length === 1 ? "" : "s"} to “${this.settings.defaultDeck}”…`, 0);
     try {
       const res: ExportResult = await exportToAnki(this.anki, items, {
@@ -232,7 +243,7 @@ export default class RecallPlugin extends Plugin {
       if (res.failed.length) new Notice(`Review Inbox: ${res.failed[0].error}`, 8000);
     } catch (e) {
       const msg = (e as Error).message;
-      new Notice(`Review Inbox: export failed. ${msg}\nUse “Export approved as Anki text file” from the inbox menu if Anki is closed.`, 10000);
+      new Notice(`Review Inbox: export failed. ${msg}\nUse “Export as Anki text file” from the inbox menu if Anki is closed.`, 10000);
       this.store.touch();
     } finally {
       notice.hide();
@@ -240,12 +251,8 @@ export default class RecallPlugin extends Plugin {
   }
 
   /** Fallback when Anki is not running: write a text file Anki can import. */
-  async exportAsTextFile(list: Highlight[]): Promise<void> {
-    const items = this.approvedItems(list);
-    if (items.length === 0) {
-      new Notice("Review Inbox: nothing approved to export.");
-      return;
-    }
+  private async writeTextFile(items: ExportItem[]): Promise<void> {
+    const contents = items.map(({ card, highlight }) => cardContent(card, highlight));
     const ctx = { settings: this.settings, vaultName: this.app.vault.getName(), deck: this.settings.defaultDeck };
     const rows = items.map(({ card, highlight }) => {
       const n = buildNote(card, highlight, ctx);
@@ -258,21 +265,25 @@ export default class RecallPlugin extends Plugin {
     const folder = normalizePath(this.settings.exportFolder);
     if (!(await this.app.vault.adapter.exists(folder))) await this.app.vault.createFolder(folder);
     const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 16);
-    const path = normalizePath(`${folder}/review-inbox-${stamp}.txt`);
+    const path = normalizePath(`${folder}/review-inbox-${stamp}-${randomUUID()}.txt`);
     // Group by note type, not by column count. A cloze model with no Extra
     // field writes ONE column while a Q&A row writes two, so classifying by
     // `fields.length !== 2` misfiled that cloze row as Q&A and put both shapes
     // in one file. Every row of a note type shares its field order, so one file
-    // per note type always has a consistent column count. approvedItems above
-    // is the only funnel, so only approved cards reach this split.
+    // per note type always has a consistent column count. The explicit export
+    // action supplies only the accepted batch.
     const cloze = rows.filter((r) => r.notetype === this.settings.clozeModel);
     const qa = rows.filter((r) => r.notetype !== this.settings.clozeModel);
     const files: Array<[string, typeof rows]> = [];
     if (qa.length && cloze.length) {
       files.push([path.replace(/\.txt$/, "-qa.txt"), qa], [path.replace(/\.txt$/, "-cloze.txt"), cloze]);
     } else files.push([path, rows]);
+    const unchanged = () => items.every(({ card, highlight }, i) => card.status === "approved" && highlight.status === "ready" && cardContent(card, highlight) === contents[i]);
+    if (!unchanged()) throw new Error("Cards changed during export. Review and export again.");
     for (const [p, rs] of files) await this.app.vault.create(p, buildAnkiTextImport(rs));
-    for (const { card } of items) card.status = "exported";
+    items.forEach(({ card, highlight }, i) => {
+      if (card.status === "approved" && highlight.status === "ready" && cardContent(card, highlight) === contents[i]) card.status = "exported";
+    });
     finalizeHighlights(items.map((i) => i.highlight));
     this.store.touch();
     new Notice(`Review Inbox: wrote ${files.map(([p]) => p).join(" and ")}. In Anki: File → Import.`, 8000);
