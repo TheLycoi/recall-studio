@@ -23,7 +23,7 @@ before(async () => {
 });
 
 test("the chat view has its own type, distinct from the inbox", () => {
-  assert.match(SOURCE(), /VIEW_TYPE_CHAT\s*=\s*"recall-chat"/);
+  assert.match(SOURCE(), /VIEW_TYPE_CHAT\s*=\s*"review-inbox-chat"/);
 });
 
 test("the view is a ChatView extending ItemView and is exported", () => {

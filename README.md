@@ -67,13 +67,20 @@ captured passages). It shows clickable citations back to the evidence, refuses a
 answer the evidence does not support, and keeps excluded sources out of the
 prompt. A grounded answer can be sent to the inbox as draft cards.
 
+Answers are extractive: each displayed claim must occur verbatim in a verified
+quote from a selected source. This deliberately rejects paraphrases rather than
+treating shared keywords as proof. Each question is independent; earlier answers
+are not sent back to the provider, so removing a source also excludes its old
+answers from subsequent prompts. Cancel discards the answer but may not stop the
+provider request; it does not interrupt background card generation.
+
 ## Settings
 
 - **Card writer**: which provider writes the cards, its key or CLI path, and the model. Test sends one small request and loads that provider's model list.
 - **Review Inbox folder** (under Card writer): where Review Inbox keeps the card rules note, the inbox, and the rule suggestions. Default `Review Inbox/`.
 - **Card quality**: the rules the card writer and the critique pass follow.
 - **Capture**: how a selection or a highlight is queued for a card.
-- **Sources**: the folder chat reads.
+- **Sources in Chat**: select the individual notes or captured PDF passages to read.
 - **Anki**: the deck, note types, and tags used on export.
 
 ### The DeepSeek key
@@ -115,15 +122,23 @@ Review Inbox folder, default `Review Inbox/`. Text exports go to the Text export
 folder setting, default `Review Inbox/exports`. No Anki media is fetched
 remotely: only files already in the vault are uploaded.
 
-## Install
+## Build and beta installation
 
 ```
 npm ci
 npm run build
-node scripts/install.mjs "<vault path>"
+npm test
 ```
 
-Then enable Review Inbox under Settings → Community plugins.
+Install beta releases through BRAT, using the confirmed private repository and
+its release tag. BRAT needs authorized access to the repository. Do not copy the
+build over an existing Recall installation. This source uses the distinct plugin
+ID `review-inbox`; its folder and settings are separate.
+
+The integrated build has not yet passed real Obsidian/Anki acceptance. The target
+repository must be reconciled before publishing: another actor renamed the original
+Recall repository to `review-inbox` during this build. No release was published by
+this implementation worker.
 
 ## Where it came from
 

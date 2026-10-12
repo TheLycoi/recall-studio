@@ -82,12 +82,13 @@ test("total context is bounded and the overflow is counted as omitted", () => {
 // --- checkChatAnswer: quotes -------------------------------------------------
 
 test("a fully supported draft keeps its claims and appends their citations", () => {
-  const sentences = [claim("Receptors bind ligands with high affinity.", [1]), claim("Albumin does not transduce a signal.", [2])];
-  const { answer, report } = rc.checkChatAnswer(draft("full", ONE_QUOTE, sentences), EVIDENCE);
-  assert.equal(answer, "Receptors bind ligands with high affinity. [1] Albumin does not transduce a signal. [2]");
+  const sentences = EVIDENCE.map(e => claim(e.text, [e.n]));
+  const quotes = EVIDENCE.map(e => ({n:e.n, quote:e.text}));
+  const { answer, report } = rc.checkChatAnswer(draft("full", quotes, sentences), EVIDENCE);
+  assert.equal(answer, "Receptors bind ligands with high affinity. [1] Albumin binds drugs but does not transduce a signal. [2]");
   assert.equal(report.kept, 2);
   assert.equal(report.removed, 0);
-  assert.equal(report.quotesVerified, 1);
+  assert.equal(report.quotesVerified, 2);
   assert.equal(report.quotesRejected, 0);
   assert.equal(report.refused, false);
 });
@@ -99,11 +100,12 @@ test("a quote that is not in its evidence is rejected", () => {
   assert.equal(report.quotesRejected, 1);
 });
 
-test("a quote is verified through case and punctuation differences", () => {
+test("a nonverbatim quote is rejected even with similar words", () => {
   const quotes = [{ n: 1, quote: "RECEPTORS, bind ligands — with high-affinity" }];
   const { report } = rc.checkChatAnswer(draft("full", quotes, [claim("Receptors bind ligands with high affinity.", [1])]), EVIDENCE);
-  assert.equal(report.quotesVerified, 1);
-  assert.equal(report.quotesRejected, 0);
+  assert.equal(report.quotesVerified, 0);
+  assert.equal(report.quotesRejected, 1);
+  assert.equal(report.refused, true);
 });
 
 // --- checkChatAnswer: citations and support ---------------------------------

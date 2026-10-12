@@ -64,7 +64,7 @@ const clozeCard = (over = {}) => ({ id: "c2", kind: "cloze", front: "", back: ""
 // ---- identity --------------------------------------------------------------
 
 test("cardIdentityTag is stable and scoped to plugin and vault", () => {
-  assert.equal(a.cardIdentityTag("Test Vault", "c-abc"), "review-inbox::test-vault::c-abc");
+  assert.match(a.cardIdentityTag("Test Vault", "c-abc"), /^review-inbox::[a-f0-9]{64}$/);
   assert.notEqual(a.cardIdentityTag("Vault A", "c-1"), a.cardIdentityTag("Vault B", "c-1"));
   assert.notEqual(a.cardIdentityTag("Vault A", "c-1"), a.cardIdentityTag("Vault A", "c-2"));
   // Same inputs, same tag: identity is what makes a retry idempotent.

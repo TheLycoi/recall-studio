@@ -36,7 +36,7 @@ import {
 } from "./reviewChat";
 
 /** The view's own type. Distinct from the Inbox's, so both can share a vault. */
-export const VIEW_TYPE_CHAT = "recall-chat";
+export const VIEW_TYPE_CHAT = "review-inbox-chat";
 
 /** The model client the view needs: the one chat method, and an optional cancel. */
 export interface ChatLlm {
@@ -121,7 +121,7 @@ export class ChatView extends ItemView {
     return VIEW_TYPE_CHAT;
   }
   getDisplayText(): string {
-    return "Recall chat";
+    return "Review Inbox Chat";
   }
   getIcon(): string {
     return "message-square";
@@ -133,7 +133,7 @@ export class ChatView extends ItemView {
   }
 
   async onClose(): Promise<void> {
-    // Nothing subscribed; the log and the draft live on the instance.
+    this.cancelled = true;
   }
 
   // ---- source selection -----------------------------------------------------
@@ -195,6 +195,7 @@ export class ChatView extends ItemView {
       return;
     }
 
+    const selectedPaths = this.selectedSourcePaths();
     this.busy = true;
     this.cancelled = false;
     this.status = "reading the selected sources…";
@@ -225,7 +226,7 @@ export class ChatView extends ItemView {
         standingInstructions: "",
       };
       const draft = await this.host.llm.answerSelected(args);
-      if (this.cancelled) {
+      if (this.cancelled || selectionChanged(selectedPaths, this.selectedSourcePaths())) {
         this.pushSystem("Ask cancelled.");
         return;
       }
@@ -236,7 +237,7 @@ export class ChatView extends ItemView {
         text: answer,
         evidence,
         report,
-        selectedPaths: this.selectedSourcePaths(),
+        selectedPaths,
       });
     } catch (e) {
       this.turns.push({ role: "assistant", text: "", error: errorText(e) });
@@ -261,14 +262,15 @@ export class ChatView extends ItemView {
     if (!this.busy) return;
     this.cancelled = true;
     this.status = "cancelling…";
-    void this.host.llm.abort?.();
+    // shortcut: discard this answer without aborting shared background generation.
+    // A request-scoped AbortSignal can stop network work in a future backend API.
     this.render();
   }
 
   private history(): ChatHistoryTurn[] {
-    return this.turns
-      .filter((t) => !t.system && !t.error && t.text)
-      .map((t) => ({ role: t.role, text: t.text }));
+    // Each request uses only its current selection. Old turns remain visible,
+    // but never re-enter the prompt after their sources have been excluded.
+    return [];
   }
 
   /** The question an answer replied to: the user turn just above it. */
@@ -390,6 +392,7 @@ export class ChatView extends ItemView {
       const label = details.createEl("label", { cls: "review-chat-source" });
       const box = label.createEl("input", { type: "checkbox" });
       box.checked = this.selected.has(f.path);
+      box.disabled = this.busy;
       box.setAttribute("aria-label", `Include ${f.basename}`);
       box.addEventListener("change", () => {
         if (box.checked) this.selected.add(f.path);
@@ -406,6 +409,7 @@ export class ChatView extends ItemView {
         const label = details.createEl("label", { cls: "review-chat-source" });
         const box = label.createEl("input", { type: "checkbox" });
         box.checked = this.selectedHighlights.has(h.id);
+        box.disabled = this.busy;
         box.setAttribute("aria-label", `Include ${h.sourceTitle}${h.page ? `, page ${h.page}` : ""}`);
         box.addEventListener("change", () => {
           if (box.checked) this.selectedHighlights.add(h.id);
@@ -460,9 +464,9 @@ export class ChatView extends ItemView {
   }
 
   /** Open the note (or the PDF at its page) a passage came from. */
-  private openPassage(unit: ChatEvidenceIn): void {
+  private async openPassage(unit: ChatEvidenceIn): Promise<void> {
     const link = unit.page !== null ? `${unit.path}#page=${unit.page}` : unit.path;
-    void this.host.app.workspace.openLinkText(link, "", false);
+    await this.host.app.workspace.openLinkText(link, "", false, { eState: { line: Math.max(0, unit.line - 1) } });
   }
 
   /**
@@ -518,6 +522,7 @@ export class ChatView extends ItemView {
       cls: "review-chat-question",
       attr: { rows: "2", placeholder: "Ask your selected sources a question", "aria-label": "Question" },
     });
+    box.maxLength = 4000;
     box.value = this.draftQuestion;
     box.disabled = this.busy;
     box.addEventListener("input", () => {

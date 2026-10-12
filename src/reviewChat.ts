@@ -21,15 +21,14 @@
  * Reused, with attribution:
  *  - `wikipedia-lm @ 13392ce` (src/askCheck.ts, src/schemas.ts) — the strong
  *    committed Ask assembly and quote validation: the structured draft
- *    (`coverage` / `quotes` / `sentences`), the normalised-substring quote
- *    check, the `[n]` marker strip, and the sentence renderer. The one change:
- *    a claim must be supported by the evidence it cites (token overlap, below),
- *    not merely cite a number that exists.
+ *    (`coverage` / `quotes` / `sentences`), the `[n]` marker strip, and the
+ *    sentence renderer. This derivative requires literal quote matches and
+ *    extractive claims; keyword overlap does not establish factual support.
  *  - `wikipedia-lm @ d18d76b` (src/retrieval.ts) — `significantTokens`, its
  *    stop-word list and stem, and the `coveredBy` bar (`SHORT_CLAIM`,
- *    `COVERED_SHARE`, `MIN_SHARED`), reused here to decide whether cited
- *    evidence states a claim.
- * Both are MIT (Copyright (c) 2026 Conrad Kelonu); see the repository NOTICE.
+ *    `COVERED_SHARE`, `MIN_SHARED`) informed the initial implementation.
+ *    Tokenization remains available for compatibility, not answer verification.
+ * Both are MIT (Copyright (c) 2026 Conrad Kelonu); see NOTICE.txt.
  */
 import { z } from "zod";
 import { normalizePlain } from "./util";
@@ -97,7 +96,7 @@ function splitPassages(text: string): Array<{ text: string; line: number }> {
     block = [];
   };
   lines.forEach((raw, i) => {
-    if (raw.trim() === "") {
+    if (raw.trim() === "" || HEADING_ONLY_RE.test(raw) || RULE_ONLY_RE.test(raw.trim())) {
       flush();
       blockStart = i + 1;
       return;
@@ -259,13 +258,8 @@ export interface ChatGroundingReport {
  * — there is no general-knowledge road here (see the header).
  */
 export const CHAT_REFUSAL =
-  "The sources you selected don't answer this. Nothing is shown rather than a guess — add or select a source that covers it, then ask again.";
+  "I could not verify an answer in the selected sources. Select a source that covers the question and ask again.";
 
-/** The number of significant words below which a claim is a fragment, not a checkable statement. */
-const SHORT_CLAIM = 5;
-/** A longer claim is supported when this share of its words is in the cited evidence, and at least `MIN_SHARED` of them. */
-const COVERED_SHARE = 0.6;
-const MIN_SHARED = 4;
 
 /**
  * Words that carry no checkable content: articles, prepositions, the question
@@ -290,26 +284,6 @@ export function significantTokens(text: string): string[] {
     .map(stem);
 }
 
-/**
- * Whether the cited evidence states the claim: the same token-overlap bar the
- * reference uses to decide a page already says something. A short claim must
- * have every significant word present; a longer one must reach `COVERED_SHARE`
- * with at least `MIN_SHARED` words, which tolerates word order and light
- * rewording but not a claim built from other material.
- */
-function claimSupported(claim: string, units: ChatEvidenceIn[]): boolean {
-  const tokens = [...new Set(significantTokens(claim))];
-  if (tokens.length === 0) return false;
-  let bestHits = 0;
-  for (const u of units) {
-    const have = new Set(significantTokens(u.text));
-    let hits = 0;
-    for (const w of tokens) if (have.has(w)) hits++;
-    if (hits > bestHits) bestHits = hits;
-  }
-  if (tokens.length <= SHORT_CLAIM) return bestHits === tokens.length;
-  return bestHits / tokens.length >= COVERED_SHARE && bestHits >= MIN_SHARED;
-}
 
 /** Evidence numbers that point at evidence that exists, each once, ascending. */
 function cleanCitations(cited: number[], max: number): number[] {
@@ -350,11 +324,9 @@ function refusal(removed: number, quotesVerified: number, quotesRejected: number
  * Check a draft against its evidence and assemble the answer.
  *
  * Three rules, all mechanical:
- *  1. a quote is kept only when its normalised text is a substring of the
- *     evidence it names — case, punctuation and accents are forgiven, wording
- *     is not, so a paraphrase cannot pass as a quote;
+ *  1. a quote is kept only when its literal text occurs in the named evidence;
  *  2. a claim is kept only when it cites at least one evidence number that
- *     exists *and* the cited evidence states it (`claimSupported`);
+ *     exists and its verified quote contains the literal claim;
  *  3. a `none` draft, or one whose every claim failed, is refused outright —
  *     the model's prose is not shown at all.
  *
@@ -367,12 +339,15 @@ export function checkChatAnswer(draft: ChatAskDraft, evidence: readonly ChatEvid
 
   let quotesVerified = 0;
   let quotesRejected = 0;
+  const verified = new Map<number, string[]>();
   for (const q of draft.quotes) {
     const inRange = Number.isInteger(q.n) && q.n >= 1 && q.n <= max;
-    const needle = normalizePlain(q.quote);
-    const ok = inRange && needle.length > 0 && normalizePlain(evidence[q.n - 1].text).includes(needle);
-    if (ok) quotesVerified++;
-    else quotesRejected++;
+    const needle = q.quote.trim();
+    const ok = inRange && needle.length > 0 && evidence[q.n - 1].text.includes(needle);
+    if (ok) {
+      quotesVerified++;
+      verified.set(q.n, [...(verified.get(q.n) ?? []), needle]);
+    } else quotesRejected++;
   }
 
   if (draft.coverage === "none") return refusal(0, quotesVerified, quotesRejected);
@@ -382,11 +357,15 @@ export function checkChatAnswer(draft: ChatAskDraft, evidence: readonly ChatEvid
   for (const s of draft.sentences) {
     const text = stripMarkers(s.text);
     if (s.kind === "gap") {
-      if (text) kept.push({ text, cited: [] });
+      // Model-labelled gaps are not evidence; never display arbitrary prose here.
+      if (text) kept.push({ text: "The selected evidence does not cover the rest of the question.", cited: [] });
       continue;
     }
-    const cited = cleanCitations(s.cited, max);
-    if (cited.length === 0 || !text || !claimSupported(text, cited.map((n) => evidence[n - 1]))) {
+    const cited = cleanCitations(s.cited, max).filter(n =>
+      (verified.get(n) ?? []).some(quote => quote.includes(text.replace(/^- /, "")))
+    );
+    // shortcut: extractive answers only; add a separate entailment verifier before accepting paraphrases.
+    if (cited.length === 0 || !text) {
       removed++;
       continue;
     }
@@ -399,7 +378,7 @@ export function checkChatAnswer(draft: ChatAskDraft, evidence: readonly ChatEvid
   const cited = [...new Set(claims.flatMap((c) => c.cited))].sort((a, b) => a - b);
   return {
     answer: renderAnswer(kept),
-    report: { coverage: draft.coverage, kept: kept.length, removed, quotesVerified, quotesRejected, cited, refused: false },
+    report: { coverage: removed > 0 ? "partial" : draft.coverage, kept: kept.length, removed, quotesVerified, quotesRejected, cited, refused: false },
   };
 }
 
@@ -437,7 +416,7 @@ Before writing, copy out the passages you will rely on, each with its evidence n
 </quotes>
 
 <sentences>
-Write the answer one sentence at a time, in the reader's plain words. Each claim carries, in cited, the numbers of the evidence that states it; a claim with no number is removed, and so is a claim the cited evidence does not state. Do not write [n] markers, links or ids inside a sentence — the software appends the citations. A list item starts with "- ". A gap carries no numbers, and is used only beside a real answer, not on its own.
+Write the answer using verbatim sentences from the quotes you extracted. Do not paraphrase: only exact quoted sentences can be verified. Choose sentences relevant to the question, not arbitrary text. Each claim carries, in cited, the numbers of the evidence that states it; a claim with no number is removed, and so is a claim the cited evidence does not state. Do not write [n] markers, links or ids inside a sentence — the software appends the citations. A list item starts with "- ". A gap carries no numbers, and is used only beside a real answer, not on its own.
 </sentences>
 
 Set coverage "full" when the evidence answers the question, "partial" when it answers part of it and a gap names the rest, and "none" when it does not touch the question.`;

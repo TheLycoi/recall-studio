@@ -143,6 +143,7 @@ export class Generator {
         if (failures.length && settings.lintMode !== "badge") c.status = "flagged";
       }
 
+      if ((h.status as Highlight["status"]) === "dismissed") return;
       for (const c of cards) h.cards.push(c);
       const flagged = cards.filter((c) => c.status === "flagged").length;
       // A re-request that arrived mid-run set the status back to "queued";
@@ -162,6 +163,7 @@ export class Generator {
         new Notice(`Recall: ${cards.length} card${cards.length === 1 ? "" : "s"} ready${flaggedNote} for “${label}”.`);
       }
     } catch (e) {
+      if ((h.status as Highlight["status"]) === "dismissed") return;
       if (this.stopped) {
         // Unloading: the request was aborted, so put the highlight back in the queue for next time.
         h.status = "queued";

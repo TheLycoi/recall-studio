@@ -2,7 +2,7 @@
 //
 // Drives the REAL export path (main.ts exportHighlights -> anki.ts exportToAnki)
 // against a fake AnkiConnect reached through the stubbed `obsidian.requestUrl`.
-// This is the runtime proof the unit stubs cannot give: the plugin is loaded the
+// This is a stubbed integration check, not actual Obsidian or Anki proof: the plugin is loaded the
 // way Obsidian loads it (onload against a stubbed obsidian), then the export
 // function is executed, and the fake collection is inspected afterwards.
 //
@@ -388,7 +388,7 @@ test("a content duplicate of an unrelated note is reported, not added or overwri
   await plugin.exportHighlights([highlight([card])]);
 
   assert.equal(fake.notes.size, 1, "our export must not have added a note");
-  assert.equal(card.status, "duplicate", "the card should be marked a content duplicate");
+  assert.equal(card.status, "approved", "an unrelated content match must not remove this card from the export queue");
   assert.equal(fake.notes.get(seededId).fields.Back, "a different answer already in Anki", "the existing note was overwritten");
 });
 
@@ -410,11 +410,10 @@ test("a local media file is uploaded through storeMediaFile; remote URLs and vau
   const card = qa({ id: "c1", extra: "![[img/pic.png]] ![remote](https://evil.example/x.png) ![[secret.png]]" });
   await plugin.exportHighlights([highlight([card])]);
 
-  assert.deepEqual(fake.media, ["pic.png"], "only the in-vault image should be uploaded");
-  const note = [...fake.notes.values()][0];
-  assert.match(note.fields.Extra, /<img src="pic\.png">/, "the uploaded image should be referenced");
-  assert.match(note.fields.Extra, /https:\/\/evil\.example\/x\.png/, "the remote URL should be left as-is, never fetched");
-  assert.doesNotMatch(note.fields.Extra, /\.\.\/secret\.png/, "a path outside the vault must never be resolved or uploaded");
+  assert.equal(fake.media.length, 1);
+  assert.match(fake.media[0], /^review-inbox-[a-f0-9]{64}\.png$/);
+  assert.equal(fake.notes.size, 0, "unsafe or missing media prevents incomplete export");
+  assert.equal(card.status, "approved", "retain the card for correction and retry");
 });
 
 test("the export makes no scheduling or destructive AnkiConnect call", async () => {

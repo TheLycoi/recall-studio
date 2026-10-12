@@ -215,8 +215,8 @@ export default class RecallPlugin extends Plugin {
         settings: this.settings,
         vaultName: this.app.vault.getName(),
         deck: this.settings.defaultDeck,
-        resolveMedia: async (link: string) => {
-          const dest = this.app.metadataCache.getFirstLinkpathDest(link, "");
+        resolveMedia: async (link: string, sourcePath: string) => {
+          const dest = this.app.metadataCache.getFirstLinkpathDest(link, sourcePath);
           if (!dest) return null;
           const data = await this.app.vault.readBinary(dest);
           return { path: dest.path, data };

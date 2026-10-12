@@ -1,4 +1,5 @@
 import { requestUrl } from "obsidian";
+import { createHash } from "crypto";
 import type { Card, Highlight } from "./model";
 import type { RecallSettings } from "./settings";
 import { ankiTag, basenameNoExt, escapeHtml, inlineMarkdownToHtml, slugify, plainText } from "./util";
@@ -37,7 +38,15 @@ export class AnkiClient {
     }
     if (res.status !== 200) throw new Error(`AnkiConnect returned HTTP ${res.status}.`);
     const json = res.json as { result: T; error: string | null };
+    if (!json || typeof json !== "object" || !("result" in json) || !("error" in json)) {
+      throw new Error("Invalid AnkiConnect response.");
+    }
     if (json.error) throw new Error(json.error);
+    if (action === "findNotes" || action === "addNotes") {
+      if (!Array.isArray(json.result) || !json.result.every(id =>
+        (action === "addNotes" && id === null) || (Number.isSafeInteger(id) && id > 0)
+      )) throw new Error(`Invalid note IDs returned by AnkiConnect ${action}.`);
+    }
     return json.result;
   }
 
@@ -89,7 +98,7 @@ export interface ExportContext {
    * is not a readable file in the vault — a missing file, a remote URL, a path
    * outside the vault. Export never fetches remotely.
    */
-  resolveMedia?: (link: string) => Promise<{ path: string; data: ArrayBuffer } | null>;
+  resolveMedia?: (link: string, sourcePath: string) => Promise<{ path: string; data: ArrayBuffer } | null>;
 }
 
 // ------------------------------------------------------------- identity
@@ -105,7 +114,7 @@ export interface ExportContext {
 export const IDENTITY_TAG_PREFIX = "review-inbox";
 
 export function cardIdentityTag(vaultName: string, cardId: string): string {
-  return `${IDENTITY_TAG_PREFIX}::${slugify(vaultName) || "vault"}::${slugify(cardId) || cardId}`;
+  return `${IDENTITY_TAG_PREFIX}::${createHash("sha256").update(JSON.stringify([vaultName, cardId])).digest("hex")}`;
 }
 
 /** Escape a string so Anki's search parser treats it as literal text, not syntax. */
@@ -244,14 +253,14 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 }
 
 /** Upload every local media embed in the note's fields, replacing each with an Anki media reference. */
-async function resolveMediaInFields(anki: AnkiClient, fields: Record<string, string>, ctx: ExportContext): Promise<void> {
+async function resolveMediaInFields(anki: AnkiClient, fields: Record<string, string>, ctx: ExportContext, sourcePath: string): Promise<void> {
   if (!ctx.resolveMedia) return;
   for (const key of Object.keys(fields)) {
-    fields[key] = await replaceMediaEmbeds(anki, fields[key], ctx);
+    fields[key] = await replaceMediaEmbeds(anki, fields[key], ctx, sourcePath);
   }
 }
 
-async function replaceMediaEmbeds(anki: AnkiClient, html: string, ctx: ExportContext): Promise<string> {
+async function replaceMediaEmbeds(anki: AnkiClient, html: string, ctx: ExportContext, sourcePath: string): Promise<string> {
   const matches = [...html.matchAll(MEDIA_EMBED)];
   if (matches.length === 0) return html;
   const replacements = new Map<string, string>();
@@ -259,15 +268,18 @@ async function replaceMediaEmbeds(anki: AnkiClient, html: string, ctx: ExportCon
     const link = (m[1] ?? m[2] ?? "").trim();
     if (!link || replacements.has(m[0])) continue;
     try {
-      const resolved = await ctx.resolveMedia!(link);
-      if (!resolved || !isSafeMediaPath(resolved.path)) continue;
-      const name = resolved.path.split("/").pop() ?? resolved.path;
-      await anki.storeMediaFile(name, arrayBufferToBase64(resolved.data));
+      if (!isSafeMediaPath(link)) throw new Error("Only local vault media can be exported.");
+      const resolved = await ctx.resolveMedia!(link, sourcePath);
+      if (!resolved || !isSafeMediaPath(resolved.path)) throw new Error(`Missing or unsafe media: ${link}`);
+      const ext = resolved.path.slice(resolved.path.lastIndexOf(".")).toLowerCase();
+      const digest = createHash("sha256").update(new Uint8Array(resolved.data)).digest("hex");
+      const name = `review-inbox-${digest}${ext}`;
+      const stored = await anki.storeMediaFile(name, arrayBufferToBase64(resolved.data));
+      if (stored !== name) throw new Error("Anki did not confirm the media upload.");
       replacements.set(m[0], mediaReference(name));
     } catch (e) {
-      // A single unreadable attachment must not fail the whole card; the raw
-      // link is left in place and the rest of the note still exports.
-      console.warn("Review Inbox: could not upload media", link, e);
+      // Keep the card approved for retry rather than exporting broken media.
+      throw e;
     }
   }
   let out = html;
@@ -326,6 +338,11 @@ async function exportToAnkiInner(
     // 1. Already sent by us? A tag hit means the note exists under this card's
     // identity, so a retry (or a re-send after the deck changed) is idempotent.
     const existing = await anki.findNotes(identityQuery(identity));
+    if (card.status !== "approved" || highlight.status !== "ready") {
+      result.failed.push({ card, error: "Approval changed during export; review this card again." });
+      continue;
+    }
+    if (existing.length > 1) throw new Error("More than one Anki note has this card identity. Resolve the duplicate before retrying.");
     if (existing.length > 0) {
       card.status = "exported";
       card.ankiNoteId = existing[0];
@@ -337,7 +354,8 @@ async function exportToAnkiInner(
     let lastError = "";
     try {
       const note = buildNote(card, highlight, ctx);
-      await resolveMediaInFields(anki, note.fields, ctx);
+      await resolveMediaInFields(anki, note.fields, ctx, highlight.sourcePath);
+      if (card.status !== "approved" || highlight.status !== "ready") throw new Error("Approval changed during export.");
       note.tags = Array.from(new Set([...note.tags, identity]));
       const ids = await anki.addNotes([note]);
       addedId = ids && ids[0] ? ids[0] : null;
@@ -383,8 +401,8 @@ async function exportToAnkiInner(
       contentHit = false;
     }
     if (contentHit) {
-      card.status = "duplicate";
       result.duplicates++;
+      result.failed.push({ card, error: "Similar content exists in Anki, but this card's identity was not found. The card remains approved for correction." });
     } else {
       result.failed.push({ card, error: lastError || "Anki did not add this note." });
     }
