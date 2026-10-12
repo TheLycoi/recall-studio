@@ -49,6 +49,12 @@ export const COMMAND_TABLE: CommandSpec[] = [
     hint: "always",
   },
   {
+    id: "open-chat",
+    name: "Open chat",
+    aliases: ["chat"],
+    hint: "always",
+  },
+  {
     id: "export-reviewed",
     name: "Export approved cards to Anki",
     aliases: ["export"],

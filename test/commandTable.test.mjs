@@ -22,6 +22,7 @@ test("the command table holds Review Inbox's commands and nothing else", () => {
       "capture-selection",
       "capture-selection-with-instruction",
       "open-inbox",
+      "open-chat",
       "export-reviewed",
       "open-schema",
       "review-schema-suggestions",
@@ -31,8 +32,8 @@ test("the command table holds Review Inbox's commands and nothing else", () => {
   );
 });
 
-test("the palette shows six commands", () => {
-  assert.equal(t.paletteCommands(t.COMMAND_TABLE).length, 6);
+test("the palette shows seven commands", () => {
+  assert.equal(t.paletteCommands(t.COMMAND_TABLE).length, 7);
 });
 
 test("no command name or alias is a wiki verb", () => {

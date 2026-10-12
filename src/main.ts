@@ -7,6 +7,7 @@ import { paletteCommands } from "./commandTable";
 import { Generator } from "./generator";
 import { Highlighter } from "./highlighter";
 import { InboxView, VIEW_TYPE_INBOX } from "./inboxView";
+import { ChatView, VIEW_TYPE_CHAT } from "./reviewChatView";
 import { LlmClient } from "./llm";
 import { askInstruction, pickDeck } from "./modals";
 import type { Card, Highlight } from "./model";
@@ -45,6 +46,7 @@ export default class RecallPlugin extends Plugin {
     this.generator = new Generator(this);
 
     this.registerView(VIEW_TYPE_INBOX, (leaf) => new InboxView(leaf, this));
+    this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(leaf, this));
     this.addSettingTab(new RecallSettingTab(this.app, this));
 
     this.addRibbonIcon(RECALL_ICON, "Review Inbox inbox", () => void this.openInbox());
@@ -141,7 +143,11 @@ export default class RecallPlugin extends Plugin {
 
   /** The chat view, opened beside the inbox. */
   async openChat(): Promise<void> {
-    // Wired to src/reviewChatView.ts in the chat-integration commit.
+    const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT);
+    const leaf = existing[0] ?? this.app.workspace.getRightLeaf(false);
+    if (!leaf) return;
+    if (!existing[0]) await leaf.setViewState({ type: VIEW_TYPE_CHAT, active: true });
+    await this.app.workspace.revealLeaf(leaf);
   }
 
   async chooseDeck(): Promise<string | null> {

@@ -91,6 +91,10 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
     available: () => true,
     run: (p) => void p.openInbox(),
   },
+  "open-chat": {
+    available: () => true,
+    run: (p) => void p.openChat(),
+  },
   "export-reviewed": {
     available: () => true,
     run: (p) => void p.exportHighlights(p.store.all().filter((h) => h.status === "ready")),
