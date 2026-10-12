@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { LlmBackend } from "./backend";
 import { CodexBackend, CodexError } from "./codex";
 import { DeepSeekBackend } from "./deepseek";
+import { OpenCodeBackend, OpenCodeError } from "./opencode";
 import { DeepSeekError } from "./deepseekError";
 import { buildExamplesBlock } from "./examples";
 import type { BloomLevel, Card, Highlight } from "./model";
@@ -294,11 +295,12 @@ Before you answer, check that every fact in every revision appears in the highli
 
 /**
  * Prompts and schemas live here. The backend for the chosen provider — the
- * Codex CLI or the DeepSeek API — does the call.
+ * Codex CLI, the DeepSeek API, or the opencode CLI — does the call.
  */
 export class LlmClient {
   private codex: CodexBackend;
   private deepseek: DeepSeekBackend;
+  private opencode: OpenCodeBackend;
 
   /**
    * `getHighlights` mirrors the `getSettings` callback rather than importing
@@ -314,6 +316,7 @@ export class LlmClient {
   ) {
     this.codex = new CodexBackend(getSettings);
     this.deepseek = new DeepSeekBackend(getSettings);
+    this.opencode = new OpenCodeBackend(getSettings);
   }
 
   /**
@@ -321,7 +324,10 @@ export class LlmClient {
    * in the settings tab takes effect immediately, with no reload.
    */
   private backend(): LlmBackend {
-    return this.getSettings().provider === "deepseek" ? this.deepseek : this.codex;
+    const provider = this.getSettings().provider;
+    if (provider === "deepseek") return this.deepseek;
+    if (provider === "opencode") return this.opencode;
+    return this.codex;
   }
 
   /**
@@ -361,9 +367,10 @@ export class LlmClient {
 
   /** Cancel in-flight work (plugin unload). */
   async abort(): Promise<void> {
-    // Both, not just the active one: the provider may have been switched while
-    // a request was in flight, and the Codex backend has child processes to kill.
-    await Promise.all([this.codex.abort(), this.deepseek.abort()]);
+    // All of them, not just the active one: the provider may have been switched
+    // while a request was in flight, and both CLI backends have child processes
+    // to kill.
+    await Promise.all([this.codex.abort(), this.deepseek.abort(), this.opencode.abort()]);
   }
 
   /** "write cards": one highlight (plus context) in, a handful of cards out. */
@@ -525,6 +532,7 @@ export class LlmClient {
 export function describeError(e: unknown): string {
   if (e instanceof CodexError) return e.message;
   if (e instanceof DeepSeekError) return e.message;
+  if (e instanceof OpenCodeError) return e.message;
   if (e instanceof Error) return e.message;
   return String(e);
 }

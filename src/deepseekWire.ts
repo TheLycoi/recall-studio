@@ -1,30 +1,17 @@
-import { z } from "zod";
 import type { TextStop } from "./backend";
-import { schemaJson } from "./jsonOut";
 
 /**
- * Reading a DeepSeek chat-completions response, and describing a zod schema to
- * a model that has no native structured-output support.
+ * Reading a DeepSeek chat-completions response.
  *
- * Pure: no `obsidian`, no network. test/deepseek.test.mjs bundles it
- * standalone, which is why these live apart from src/deepseek.ts (that file
- * imports `requestUrl` from obsidian and cannot be bundled for a node test).
+ * Pure: no `obsidian`, no network. test/deepseek.test.mjs bundles it standalone,
+ * which is why these live apart from src/deepseek.ts (that file imports
+ * `requestUrl` from obsidian and cannot be bundled for a node test).
+ *
+ * `jsonPreamble` is defined in src/jsonOut.ts alongside the other
+ * provider-neutral JSON helpers and re-exported here, because this is the
+ * module the DeepSeek tests read it from.
  */
-
-/**
- * JSON mode needs the word "json" somewhere in the prompt, and the shape has
- * to be spelled out because the API does not enforce one: it guarantees valid
- * JSON and nothing about its structure. Both requirements are met here, in the
- * preamble every schema call carries.
- */
-export function jsonPreamble(schema: z.ZodType): string {
-  return [
-    "Reply with one message containing only a JSON object, and nothing else: no prose, no explanation, no code fence.",
-    "The object must satisfy this JSON Schema exactly, with every required property present:",
-    "",
-    JSON.stringify(schemaJson(schema), null, 2),
-  ].join("\n");
-}
+export { jsonPreamble } from "./jsonOut";
 
 /** DeepSeek's `finish_reason` mapped onto Recall's vocabulary. */
 export function toStop(finishReason: unknown): TextStop {

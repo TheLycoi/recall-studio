@@ -16,6 +16,7 @@ A question you miss can become a card of its own, so the next thing you study is
 - One model provider:
   - **Codex**: the Codex CLI, signed in with a ChatGPT account. The ChatGPT app bundles the CLI, so signing in to the app is enough. No API key.
   - **DeepSeek**: a DeepSeek API key from platform.deepseek.com.
+  - **OpenCode**: the [opencode](https://opencode.ai) CLI, signed in to whichever provider you want to run (`opencode auth login`). Recall holds no key for this one: opencode owns its credentials. Any model that CLI can reach is available, so a local Ollama model works here too.
 - Anki with the AnkiConnect add-on, for export. Optional.
 - A folder of wiki pages, for the quiz. Optional.
 
@@ -65,12 +66,23 @@ Leave the key field empty and Recall looks for `DEEPSEEK_API_KEY` in the environ
 security add-generic-password -s "DEEPSEEK_API_KEY" -a deepseek -w '<your key>'
 ```
 
+### Running on opencode
+
+Pick **OpenCode** under Settings → Card writer to route card writing through the [opencode](https://opencode.ai) CLI. Recall runs `opencode run` and reads its JSON event stream, so the model is whatever that CLI is signed in to.
+
+- **No key.** opencode resolves its own credentials (`opencode auth login`, and `opencode service set env` for a provider key), so Recall stores none for this provider and nothing sensitive reaches `data.json`.
+- **Any model it serves.** The model id is the `provider/model` string `opencode models` prints, for example `deepseek/deepseek-flash` or `ollama/qwen2.5:7b`. A model from a keyed provider only appears once that provider has a key, so a missing entry usually means "not signed in" rather than "unsupported".
+- **The run has no tools.** opencode's default agent allows every action, and a model told to read a file really will read one. Recall therefore runs under an agent it defines as deny-everything, in a scratch directory outside the vault, so a card prompt cannot touch your notes. This is enforced at the tool layer, not asked for in the prompt.
+- **Sessions are cleaned up.** `opencode run` writes a session; Recall deletes it once the answer is read, because card writing fires per highlight and those would otherwise pile up in your opencode session list.
+- **Reasoning level lives in the model id.** Append opencode's variant suffix to an id whose model offers it, for example `deepseek/deepseek-flash#high` (`#low`, `#high`, `#max`). The Effort setting does not apply to this provider, because naming a variant a model does not offer fails the call outright.
+
 ## Network and data
 
 Recall sends the passage and the prompt to whichever provider you picked, and nothing else leaves the machine.
 
 - **Codex** (default): Recall starts the Codex CLI, and Codex sends the request to OpenAI under your ChatGPT account.
 - **DeepSeek**: Recall posts to `https://api.deepseek.com` with your API key.
+- **OpenCode**: Recall starts the opencode CLI, and opencode sends the request to whichever provider you signed it in to. Recall holds no key for this provider, and opencode decides where the request goes.
 
 Recall also talks to AnkiConnect on `http://127.0.0.1:8765`. It makes no other network request.
 
@@ -95,6 +107,22 @@ node scripts/install.mjs "<vault path>"
 ```
 
 Then enable Recall under Settings → Community plugins.
+
+## Checking a provider by hand
+
+`npm test` covers the pure parts and never spawns a process. To exercise a real
+backend against the real CLI (network, credentials and all):
+
+```
+node scripts/e2e-opencode.mjs
+```
+
+It runs a probe, lists models, generates cards through a real schema, reads
+plain text, and asserts a bad model id fails with a named fix rather than a
+crash. This is the check that caught the `PWD` bug the unit tests could not see:
+opencode resolves its project `opencode.json` (which defines the no-tools agent)
+from `PWD`, not from the process's working directory, and Node's `spawn` `cwd`
+option does not update it.
 
 ## Where it came from
 

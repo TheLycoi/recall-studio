@@ -45,4 +45,32 @@ test("both backends are in src, and the dead ones stay out", () => {
   for (const gone of ["anthropic.ts", "gemini.ts", "claudeCli.ts", "keys.ts"]) assert.equal(files.includes(gone), false, gone);
   assert.ok(files.includes("codex.ts"));
   assert.ok(files.includes("deepseek.ts"));
+  assert.ok(files.includes("opencode.ts"));
+});
+
+test("the bundle runs opencode, and locks it down", () => {
+  assert.ok(js.includes("opencode"));
+  assert.ok(js.includes("--format"));
+  // The two things that make the run safe and parseable: the agent name, and
+  // the deny-all permissions in the config the run works beside. A build that
+  // lost either would look fine and quietly allow tools.
+  assert.ok(js.includes("recall"), "the agent name is missing");
+  assert.ok(js.includes("opencode.json"), "the agent config is never written");
+  assert.ok(js.includes('"deny"'), "the deny-everything rule is missing");
+});
+
+test("opencode owns its credentials, so no key handling rode along", () => {
+  // The whole point of this provider: opencode resolves its own auth. A key
+  // field, a keychain lookup or an Authorization header here would be a second
+  // credential path nobody asked for.
+  assert.equal(js.includes("Recall OpenCode"), false);
+  assert.equal(js.includes("opencodeApiKey"), false);
+  assert.equal(js.includes("OpenCode API key"), false);
+});
+
+test("the bundle still posts to no model API itself on the OpenCode path", () => {
+  // OpenCode talks to its providers; Recall talks to OpenCode. The one HTTP
+  // endpoint in the bundle stays DeepSeek's.
+  assert.equal(js.includes("127.0.0.1:4096"), false);
+  assert.equal(js.includes("opencode.ai/zen"), false);
 });

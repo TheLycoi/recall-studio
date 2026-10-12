@@ -1,5 +1,6 @@
 import { CODEX_FALLBACK_MODELS, modelOptions } from "./modelRoles";
 import { DEEPSEEK_FALLBACK_MODELS } from "./deepseekModels";
+import { OPENCODE_FALLBACK_MODELS } from "./opencode";
 import { forgetCachedKey } from "./deepseekKey";
 import { App, Notice, PluginSettingTab, Setting, ButtonComponent } from "obsidian";
 import type RecallPlugin from "./main";
@@ -8,8 +9,8 @@ import { DEFAULT_EXPORT_FOLDER, DEFAULT_RULES_FOLDER, DEFAULT_SPACED_FOLDER, DEF
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 export type MarkMode = "none" | "highlight" | "highlight+block";
 export type LintMode = "badge" | "hide" | "drop";
-/** "codex": OpenAI's Codex CLI on your ChatGPT sign-in. "deepseek": the DeepSeek API with a key. */
-export type Provider = "codex" | "deepseek";
+/** "codex": OpenAI's Codex CLI on your ChatGPT sign-in. "deepseek": the DeepSeek API with a key. "opencode": the opencode CLI, which owns its own credentials. */
+export type Provider = "codex" | "deepseek" | "opencode";
 
 export interface RecallSettings {
   // LLM
@@ -25,6 +26,10 @@ export interface RecallSettings {
   deepseekApiKey: string;
   /** DeepSeek model id, e.g. deepseek-v4-pro. */
   deepseekModel: string;
+  /** Absolute path to the opencode binary; empty = auto-detect (PATH, then ~/.opencode/bin). */
+  opencodePath: string;
+  /** opencode model id, in the `provider/model` form `opencode models` prints, e.g. deepseek/deepseek-flash. */
+  opencodeModel: string;
   effort: Effort;
   maxCardsPerHighlight: number;
   contextChars: number;
@@ -108,6 +113,8 @@ export const DEFAULT_SETTINGS: RecallSettings = {
   knownModels: [],
   deepseekApiKey: "",
   deepseekModel: "deepseek-v4-pro",
+  opencodePath: "",
+  opencodeModel: "deepseek/deepseek-flash",
   effort: "high",
   maxCardsPerHighlight: 5,
   contextChars: 700,
@@ -203,11 +210,15 @@ export class RecallSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Provider")
       .setDesc(
-        "Codex runs OpenAI's CLI on your ChatGPT sign-in and needs no key. DeepSeek calls the DeepSeek API with an API key. Test sends one small request and loads the model list.",
+        "Codex runs OpenAI's CLI on your ChatGPT sign-in and needs no key. DeepSeek calls the DeepSeek API with an API key. OpenCode runs the opencode CLI, which owns its own credentials, so Recall holds no key for it. Test sends one small request and loads the model list.",
       )
       .addDropdown((d) =>
         d
-          .addOptions({ codex: "Codex (ChatGPT sign-in)", deepseek: "DeepSeek (API key)" })
+          .addOptions({
+            codex: "Codex (ChatGPT sign-in)",
+            deepseek: "DeepSeek (API key)",
+            opencode: "OpenCode (its own sign-in)",
+          })
           .setValue(s.provider)
           .onChange((v) => {
             s.provider = v as Provider;
@@ -270,6 +281,52 @@ export class RecallSettingTab extends PluginSettingTab {
         });
       containerEl.insertBefore(row.settingEl, custom.settingEl);
       custom.settingEl.hide();
+    } else if (s.provider === "opencode") {
+      new Setting(containerEl)
+        .setName("OpenCode CLI path")
+        .setDesc(
+          "Leave empty to auto-detect: `opencode` on the PATH, then ~/.opencode/bin/opencode. Sign in with `opencode auth login`; add a provider key with `opencode service set env`. OpenCode owns its credentials, so Recall stores none for it.",
+        )
+        .addText((t) =>
+          t.setPlaceholder("auto-detect").setValue(s.opencodePath).onChange((v) => {
+            s.opencodePath = v.trim();
+            save();
+          }),
+        );
+
+      // A model dropdown: what the last Test found, the value in use, and the
+      // known names, plus "Other…" for an id the list lacks.
+      const options = modelOptions(s.knownModels, s.opencodeModel, OPENCODE_FALLBACK_MODELS);
+      const known = s.knownModels.length;
+      const custom = new Setting(containerEl)
+        .setName("OpenCode model: type an id")
+        .setDesc("For a model the list does not show.")
+        .addText((t) =>
+          t.setPlaceholder("provider/model").onChange((v) => {
+            if (!v.trim()) return;
+            s.opencodeModel = v.trim() || DEFAULT_SETTINGS.opencodeModel;
+            save();
+          }),
+        );
+      const row = new Setting(containerEl)
+        .setName("OpenCode model")
+        .setDesc(
+          `Model id in the provider/model form \`opencode models\` prints, e.g. deepseek/deepseek-flash. A model from a keyed provider is listed only once that provider has a key, so it can be missing before you sign in. ${known > 0 ? `${known} model${known === 1 ? "" : "s"} listed by the last Test.` : "Click Test to load the list."}`,
+        )
+        .addDropdown((d) => {
+          for (const m of options) d.addOption(m, m);
+          d.addOption(CUSTOM_MODEL, "Other…");
+          d.setValue(s.opencodeModel).onChange((v) => {
+            if (v === CUSTOM_MODEL) {
+              custom.settingEl.show();
+              return;
+            }
+            s.opencodeModel = v || DEFAULT_SETTINGS.opencodeModel;
+            save();
+          });
+        });
+      containerEl.insertBefore(row.settingEl, custom.settingEl);
+      custom.settingEl.hide();
     } else {
       new Setting(containerEl)
         .setName("Codex CLI path")
@@ -323,7 +380,9 @@ export class RecallSettingTab extends PluginSettingTab {
       .setDesc(
         s.provider === "deepseek"
           ? "How much reasoning DeepSeek spends per call. It accepts low, high and max; medium and xhigh both land on high, which is the level the API maps them to. Thinking is always on."
-          : "Reasoning effort passed to Codex. Levels the chosen model does not support (gpt-5.5 stops at xhigh) are rounded down automatically.",
+          : s.provider === "opencode"
+            ? "Unused by OpenCode, which carries a model's reasoning level in the model id itself: append #low, #high or #max to an id whose model offers that variant, e.g. deepseek/deepseek-flash#high. Recall passes the id through unchanged rather than guessing a variant, because naming one the model does not offer fails the call."
+            : "Reasoning effort passed to Codex. Levels the chosen model does not support (gpt-5.5 stops at xhigh) are rounded down automatically.",
       )
       .addDropdown((d) =>
         d

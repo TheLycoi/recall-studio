@@ -1,6 +1,6 @@
 import type { z } from "zod";
 
-export type ProviderName = "codex" | "deepseek";
+export type ProviderName = "codex" | "deepseek" | "opencode";
 
 /** One structured-output request: a system prompt, a user message, and the zod schema the answer must satisfy. */
 export interface CompletionRequest<T> {
