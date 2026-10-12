@@ -64,7 +64,7 @@ merged. If Anki is closed or an export fails, unsent cards keep their previous s
 
 ## The chat
 
-Chat is embedded inside Inbox, not a separate tab. Ask a question without selecting notes. Chat searches Markdown notes and captured
+Use the Inbox/Chat toggle at the top of the panel. Both sections share one workspace view; switching preserves unfinished questions and card edits. The panel opens on Inbox. Ask a question without selecting notes. Chat searches Markdown notes and captured
 PDF passages locally and sends only the highest-ranked passages to your provider.
 The optional, collapsed Search scope control narrows the search to chosen sources.
 Hidden paths, Obsidian excluded files, and the configured plugin-data and export

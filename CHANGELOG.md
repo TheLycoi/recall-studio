@@ -1,5 +1,12 @@
 # Changelog
 
+## Review Inbox 0.1.2
+
+- Restore the Inbox/Chat toggle within one workspace panel. Inbox opens first.
+- Switching preserves conversation, unfinished questions, card edits and each panel's scroll position.
+- Keep toggle buttons mounted so keyboard focus survives switches and background updates.
+- Hide inactive controls and prevent button activation or Chat keystrokes from exporting hidden cards.
+
 ## Review Inbox 0.1.1
 
 - Chat searches eligible vault notes by default. Source selection is optional;

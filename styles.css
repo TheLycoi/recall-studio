@@ -716,6 +716,12 @@ body.wikilm-highlighter-active .textLayer ::selection {
   font-weight: 600;
 }
 
+/* Inbox/Chat toggle: one half on screen at a time. The hidden half stays in the
+   DOM so the mounted chat and an open card editor survive the switch. */
+.wikilm-notebook .review-inbox-hidden {
+  display: none;
+}
+
 /* Ask panel -------------------------------------------------------------- */
 /* Chat fills the leaf: the log scrolls, the input stays at the bottom.
    The height is what makes that true. Without it the flex column has no bound

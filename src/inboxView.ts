@@ -29,6 +29,9 @@ export const VIEW_TYPE_INBOX = "review-inbox";
 
 type Filter = "review" | "exported" | "all";
 
+/** Which half of the view is on screen. One at a time; Inbox is the default. */
+type Panel = "inbox" | "chat";
+
 /**
  * How each card status reads to the reviewer. "pending" is the internal name
  * for a card that has not been accepted; it is shown as "Draft" so the label
@@ -63,10 +66,18 @@ const ORIGIN_LABELS: Partial<Record<Highlight["origin"], string>> = {
  */
 export class InboxView extends ItemView {
   private chat?: ChatView;
+  private chatEl!: HTMLElement;
   private headerEl!: HTMLElement;
+  private inboxHeaderEl!: HTMLElement;
   private cardsEl!: HTMLElement;
   private unsubscribe: (() => void) | null = null;
   private filter: Filter = "review";
+  // shortcut: the selected panel is per-open state, always Inbox on the next
+  // open. Persisting it would need a settings field (as the old sidebarMode had).
+  private panel: Panel = "inbox";
+  private panelScroll: Record<Panel, number> = { inbox: 0, chat: 0 };
+  private tabInbox?: HTMLButtonElement;
+  private tabChat?: HTMLButtonElement;
   private checking = new Set<string>();
   private closed = false;
   private collapsed = new Set<string>();
@@ -109,11 +120,15 @@ export class InboxView extends ItemView {
 
   async onOpen(): Promise<void> {
     this.closed = false;
+    this.panel = "inbox";
+    this.panelScroll = { inbox: 0, chat: 0 };
     this.contentEl.empty();
     this.contentEl.addClass("wikilm-notebook");
     this.headerEl = this.contentEl.createDiv();
-    const chatEl = this.contentEl.createDiv({ cls: "review-inbox-chat" });
-    this.chat = new ChatView(chatEl, this.plugin);
+    this.renderTabs(this.headerEl);
+    this.inboxHeaderEl = this.headerEl.createDiv();
+    this.chatEl = this.contentEl.createDiv({ cls: "review-inbox-chat" });
+    this.chat = new ChatView(this.chatEl, this.plugin);
     await this.chat.onOpen();
     this.cardsEl = this.contentEl.createDiv({ cls: "review-inbox-cards" });
     this.contentEl.tabIndex = 0;
@@ -129,7 +144,27 @@ export class InboxView extends ItemView {
   }
 
   focusChat(): void {
+    // Select Chat first: the question box lives in the hidden half until then,
+    // and focusing a node inside a display:none element does nothing.
+    this.setPanel("chat");
     this.contentEl.querySelector<HTMLTextAreaElement>(".review-chat textarea")?.focus();
+  }
+
+  /**
+   * Switch which half is shown. Toggling only visibility, never a redraw, so
+   * the mounted chat and an open card editor are both left untouched. Coming
+   * back to the Inbox rebuilds the cards — a store change may have arrived
+   * while Chat was shown and its render was held — but an open editor is left
+   * alone, since a redraw would wipe the half-typed card.
+   */
+  private setPanel(panel: Panel): void {
+    if (this.panel === panel) return;
+    this.panelScroll[this.panel] = this.contentEl.scrollTop;
+    this.panel = panel;
+    this.applyPanel();
+    this.updateTabs();
+    if (panel === "inbox" && !this.editorOpen()) this.render();
+    this.contentEl.scrollTop = this.panelScroll[panel];
   }
 
   /**
@@ -191,13 +226,19 @@ export class InboxView extends ItemView {
 
   private render(): void {
     if (this.closed) return;
-    const root = this.cardsEl;
     const scrollTop = this.contentEl.scrollTop;
     this.dirty = false;
-    root.empty();
 
-    this.headerEl.empty();
-    this.renderHeader(this.headerEl);
+    this.applyPanel();
+    // Chat owns its own DOM and stays mounted while shown, so an unfinished
+    // question and an open card editor both survive the switch. The cards are
+    // only rebuilt while the Inbox half is selected.
+    if (this.panel === "chat") return;
+
+    const root = this.cardsEl;
+    root.empty();
+    this.inboxHeaderEl.empty();
+    this.renderHeader(this.inboxHeaderEl);
     this.rebuildCrossInterference();
 
     const hs = this.visibleHighlights();
@@ -215,6 +256,43 @@ export class InboxView extends ItemView {
     for (const [path, list] of groups) this.renderSource(root, path, list);
 
     this.contentEl.scrollTop = scrollTop;
+  }
+
+  /**
+   * The Inbox/Chat switch. Two native buttons, one pressed at a time, so a
+   * screen reader announces the state without a tab widget's arrow-key and
+   * panel wiring. `is-active` reuses the sidebar-tab styling already in
+   * styles.css.
+   */
+  private renderTabs(root: HTMLElement): void {
+    const row = root.createDiv({ cls: "wikilm-tabs-row" });
+    const tabs = row.createDiv({ cls: "wikilm-tabs" });
+    const tab = (panel: Panel, label: string): HTMLButtonElement => {
+      const b = tabs.createEl("button", { cls: "wikilm-tab", text: label, attr: { type: "button" } });
+      b.setAttribute("aria-label", `${label} panel`);
+      b.addEventListener("click", () => this.setPanel(panel));
+      return b;
+    };
+    this.tabInbox = tab("inbox", "Inbox");
+    this.tabChat = tab("chat", "Chat");
+    this.updateTabs();
+  }
+
+  private updateTabs(): void {
+    for (const [panel, b] of [["inbox", this.tabInbox], ["chat", this.tabChat]] as Array<[Panel, HTMLButtonElement | undefined]>) {
+      if (!b) continue;
+      const active = this.panel === panel;
+      b.setAttribute("aria-pressed", String(active));
+      b.toggleClass("is-active", active);
+    }
+  }
+
+  /** Show the selected half, hide the other. */
+  private applyPanel(): void {
+    const chat = this.panel === "chat";
+    this.chatEl.toggleClass("review-inbox-hidden", !chat);
+    this.cardsEl.toggleClass("review-inbox-hidden", chat);
+    this.inboxHeaderEl?.toggleClass("review-inbox-hidden", chat);
   }
 
   /**
@@ -1016,8 +1094,11 @@ export class InboxView extends ItemView {
 
   private onKey(e: KeyboardEvent): void {
     if (this.editing) return;
+    // The Inbox half's keys act on cards. While Chat is selected those cards
+    // are hidden, so the shortcuts must not reach them.
+    if (this.panel !== "inbox") return;
     const target = e.target as HTMLElement | null;
-    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT")) return;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.tagName === "BUTTON" || target.closest?.("button"))) return;
     const ids = this.cardIds();
     const i = this.focusedCard ? ids.indexOf(this.focusedCard) : -1;
     const found = this.focusedCard ? this.plugin.store.findCard(this.focusedCard) : undefined;
