@@ -11,6 +11,7 @@ import { buildQuizQuestionMessage, buildQuizRecallGradeMessage } from "./prompt"
 import { QuizQuestionOut as QuizQuestionOutSchema, QuizRecallGradeOut as QuizRecallGradeOutSchema } from "./schemas";
 import type { QuizQuestionDraft, QuizRecallGradeDraft } from "./schemas";
 import type { RecallSettings } from "./settings";
+import { CHAT_ANSWER_SYSTEM, ChatAskOut, buildChatAnswerMessage, type ChatAnswerArgs, type ChatAskDraft } from "./reviewChat";
 
 const CardOut = z.object({
   kind: z.enum(["qa", "cloze"]).describe("qa for a question with a short answer; cloze for one sentence with hidden spans"),
@@ -496,6 +497,29 @@ export class LlmClient {
     if (rewriteRules) parts.push(rewriteRules);
     if (h.instruction.trim()) parts.push(`Instructions for this highlight: ${h.instruction.trim()}`);
     return this.backend().complete({ system: WRITER_SYSTEM, user: parts.join("\n\n"), schema: CardOut, label: "card", maxTokens: 4000 });
+  }
+
+  /**
+   * "answer selected sources": one question against the numbered evidence built
+   * from the sources the reader explicitly selected (src/reviewChat.ts). The
+   * draft is structured, not prose — quotes, then one sentence at a time with
+   * its evidence numbers — so the caller assembles the answer, checks every
+   * quote against its evidence, drops a claim the cited evidence does not
+   * support, and refuses when nothing verified survives. Nothing is validated
+   * here, exactly as `writeCards` leaves card validation to its caller.
+   *
+   * Reading evidence and saying what it means is work the reader waits for, not
+   * work that extended thinking improves, so the effort is low.
+   */
+  async answerSelected(args: ChatAnswerArgs): Promise<ChatAskDraft> {
+    return this.backend().complete({
+      system: CHAT_ANSWER_SYSTEM,
+      user: buildChatAnswerMessage(args),
+      schema: ChatAskOut,
+      label: "answer",
+      maxTokens: 2000,
+      effort: "low",
+    });
   }
 
   /**
