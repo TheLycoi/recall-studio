@@ -175,9 +175,10 @@ export function buildChatEvidence(
 }
 
 /** Rank literal passage windows locally; only the bounded winners reach the model. */
-export function selectChatPassages(seeds: ChatSeed[], question: string, limit = 40): ChatSeed[] {
+export function selectChatPassages(seeds: ChatSeed[], question: string, limit = 40, alternatives: readonly string[] = []): ChatSeed[] {
   const terms = new Set(significantTokens(question));
-  if (!terms.size) return [];
+  const extra = new Set(significantTokens(boundChatQueries([...alternatives]).join(" ")).filter(t => !terms.has(t)));
+  if (!terms.size && !extra.size) return [];
   const ranked: Array<{ seed: ChatSeed; score: number }> = [];
   for (const seed of seeds) {
     const title = new Set(significantTokens(seed.title));
@@ -189,6 +190,8 @@ export function selectChatPassages(seeds: ChatSeed[], question: string, limit = 
         const words = new Set(significantTokens(text));
         let score = 0;
         for (const term of terms) score += (words.has(term) ? 3 : 0) + (title.has(term) ? 1 : 0);
+        // Expansion must never displace literal question matches.
+        for (const term of extra) score += (words.has(term) ? 0.5 : title.has(term) ? 0.1 : 0) / Math.max(1, extra.size);
         if (score) ranked.push({ score, seed: { ...seed, text, line: seed.line + passage.line - 1 + (passage.text.slice(0, offset).match(/\n/g)?.length ?? 0) } });
         if (offset + 1200 >= passage.text.length) break;
       }
@@ -434,7 +437,9 @@ export function checkChatAnswer(
   const verdicts = new Map<number, { supported: boolean; cited: number[] }>();
   for (const a of verification?.claims ?? []) {
     if (Number.isInteger(a.index) && a.index >= 0 && a.index < draft.sentences.length) {
-      verdicts.set(a.index, { supported: a.supported, cited: cleanCitations(a.cited, max) });
+      const cited = cleanCitations(a.cited, max);
+      const supported = a.supported && !verdicts.has(a.index) && a.cited.every(n => cited.includes(n));
+      verdicts.set(a.index, { supported, cited });
     }
   }
 
@@ -459,7 +464,7 @@ export function checkChatAnswer(
     let cited = exact;
     if (!cited.length) {
       const v = verdicts.get(i);
-      if (text && v?.supported) cited = valid.filter((n) => v.cited.includes(n) && hasQuotedEvidence(n));
+      if (text && v?.supported && v.cited.every(n => valid.includes(n) && hasQuotedEvidence(n))) cited = v.cited;
     }
     if (!text || cited.length === 0) {
       removed++;

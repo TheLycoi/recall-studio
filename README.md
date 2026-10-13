@@ -64,25 +64,17 @@ merged. If Anki is closed or an export fails, unsent cards keep their previous s
 
 ## The chat
 
-Use the Inbox/Chat toggle at the top of the panel. Both sections share one workspace view; switching preserves unfinished questions and card edits. The panel opens on Inbox. Ask a question without selecting notes. Chat searches Markdown notes and captured
-PDF passages locally and sends only the highest-ranked passages to your provider.
-The optional, collapsed Search scope control narrows the search to chosen sources.
-Hidden paths, Obsidian excluded files, and the configured plugin-data and export
-folders are never searched. Notes larger than 1 MB are skipped with a notice.
+Use the Inbox/Chat toggle at the top of the panel. Both sections share one workspace view; switching preserves unfinished questions and card edits. The panel opens on Inbox. Ask a question without selecting notes: Chat searches eligible Markdown files, PDF documents and captured passages locally, then sends only the highest-ranked passages to your provider.
 
-Retrieval uses keyword matching, not embeddings. It retains at most 40 candidate
-passages, each up to 1,200 characters; source text sent to the model is capped at
-12,000 characters. It can miss synonyms or facts split across long passages.
-When no relevant evidence is found, Chat refuses instead of sending unrelated
-notes. Clickable citations open the source passage. A grounded answer can become
-draft cards in the Inbox, including when its PDF passage was captured earlier.
+The optional Search scope picker restricts the sources. “Search whole wiki” clears those restrictions without clearing your conversation. Hidden paths, Obsidian excluded files, and the configured plugin-data and export folders stay excluded. Source permissions are checked again after reads and before sending evidence.
 
-Answers are extractive: each displayed claim must occur verbatim in a verified
-quote from a retrieved source. This deliberately rejects paraphrases rather than
-treating shared keywords as proof. Each question is independent; earlier answers
-are not sent back to the provider, so removing a source also excludes its old
-answers from subsequent prompts. Cancel discards the answer but may not stop the
-provider request; it does not interrupt background card generation.
+Retrieval uses keyword matching with up to five short model-generated search phrases, not embeddings. Original-question matches take priority. It keeps at most 40 candidates of up to 1,200 characters each and sends at most 12,000 source characters to the model. Extracted text is cached by file version, with a 12-million-character cache limit. The first PDF scan can take about a minute; later questions can reuse extracted text.
+
+Markdown files over 1 MB, PDFs over 40 MB or 500 pages, and sources with more than 1 million extracted characters are skipped with a notice. Image-only PDFs need OCR, which this version does not provide. Retrieval can still miss synonyms, image text or facts split across passages.
+
+Answers use retrieved evidence with clickable note-line or PDF-page citations. Quotes are checked against the source text. Paraphrases require a separate evidence-only model check; this is a probabilistic check, not a guarantee of correctness. A quote establishes provenance, not semantic entailment by itself. Unsupported answers are refused rather than filled from outside knowledge. A grounded answer can send its cited passages to the Inbox as draft cards.
+
+Each question is independent; previous answers do not enter later prompts. Removing a source therefore also excludes its old answers from future requests. Cancel discards the answer but may not stop the provider request; it does not interrupt background card generation.
 
 ## Settings
 

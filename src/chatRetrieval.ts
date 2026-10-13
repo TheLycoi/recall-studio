@@ -88,24 +88,28 @@ export class ChatRetriever {
 
     const all = this.app.vault.getFiles?.() ?? [];
     this.prune(all);
-    const wanted = options.paths === undefined ? all : all.filter((f) => new Set(options.paths).has(f.path));
+    const paths = options.paths === undefined ? undefined : new Set(options.paths);
+    const wanted = paths === undefined ? all : all.filter(f => paths.has(f.path));
     const scoped = wanted.filter((f) => this.retrievable(f));
 
     const skipped: string[] = [];
-    const pool: ChatSeed[] = [];
+    let pool: ChatSeed[] = [];
+    const terms = options.terms ?? [];
     let searched = 0;
     for (const f of scoped) {
       if (this.cancelled()) break;
       const seeds = await this.source(f, skipped);
       if (seeds) {
-        pool.push(...seeds);
+        pool = selectChatPassages([...pool, ...seeds], question, RESULT_LIMIT, terms);
         searched++;
       }
+      await yieldToUi();
     }
 
-    const terms = (options.terms ?? []).filter((t) => typeof t === "string" && t.trim() !== "");
-    const query = terms.length ? `${question} ${terms.join(" ")}` : question;
-    return { seeds: selectChatPassages(pool, query, RESULT_LIMIT), searched, skipped };
+    const current = this.app.vault.getFiles();
+    this.prune(current);
+    const present = new Set(current.map(f => f.path));
+    return { seeds: pool.filter(s => present.has(s.path) && this.allowedPath(s.path)), searched, skipped };
   }
 
   /** A file the retriever may index: Markdown or PDF, and allowed by the host. */
@@ -172,7 +176,11 @@ export class ChatRetriever {
     }
     // Cancelled mid-read: report nothing and cache nothing (a partial read must
     // not be stored under the file's real version).
-    if (seeds === null) return null;
+    const current = this.app.vault.getFiles().find(file => file.path === f.path);
+    if (seeds === null || this.cancelled() || !this.allowedPath(f.path) || !current || current.stat.mtime !== mtime || current.stat.size !== size) {
+      this.drop(f.path);
+      return null;
+    }
 
     const chars = seeds.reduce((n, s) => n + s.text.length, 0);
     if (chars === 0) {
@@ -186,6 +194,7 @@ export class ChatRetriever {
   /** The file's text and identity, as one candidate seed (`selectChatPassages` splits it). */
   private async readMarkdown(f: TFile): Promise<ChatSeed> {
     const text = await this.app.vault.cachedRead(f);
+    if (text.length > MD_MAX_CHARS) throw new Error("larger than the 1 MB search limit");
     return { path: f.path, title: f.basename, page: null, line: 1, kind: "note", text };
   }
 
@@ -200,6 +209,7 @@ export class ChatRetriever {
     try {
       if (doc.numPages > PDF_MAX_PAGES) throw new Error(`more than ${PDF_MAX_PAGES} pages`);
       const seeds: ChatSeed[] = [];
+      let chars = 0;
       for (let n = 1; n <= doc.numPages; n++) {
         if (this.cancelled()) return null;
         const page = await doc.getPage(n);
@@ -209,6 +219,8 @@ export class ChatRetriever {
           .join(" ")
           .replace(/\s+/g, " ")
           .trim();
+        chars += text.length;
+        if (chars > MD_MAX_CHARS) throw new Error("more than 1 MB of extracted text");
         if (text) seeds.push({ path: f.path, title: f.basename, page: n, line: 1, kind: "pdf", text });
         await yieldToUi();
       }

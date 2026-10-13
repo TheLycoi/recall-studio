@@ -27,7 +27,7 @@ function element(tag='div', options={}) {
 function descendants(e){return [e,...e.children.flatMap(descendants)];}
 function harness(){
   const root=element();
-  const host={app:{vault:{getMarkdownFiles:()=>[],configDir:'.obsidian'}},store:{all:()=>[],onChange:()=>()=>{}},settings:{lintMode:'show'}};
+  const host={app:{vault:{getMarkdownFiles:()=>[],getFiles:()=>[],configDir:'.obsidian'}},store:{all:()=>[],onChange:()=>()=>{}},settings:{lintMode:'show'}};
   const view=new InboxView({contentEl:root},host);
   view.renderHeader=()=>{};view.rebuildCrossInterference=()=>{};
   return {root,view,host};

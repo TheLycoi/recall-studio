@@ -119,6 +119,19 @@ test("a verifier annotation for an out-of-range sentence index cannot salvage a 
   assert.equal(report.refused, true);
 });
 
+test('verification cannot silently drop part of a multi-source justification',()=>{
+ const v=verification([{index:0,supported:true,cited:[1,2]}]);
+ assert.equal(rc.checkChatAnswer(PARAPHRASE_DRAFT,EVIDENCE,v).report.refused,true);
+});
+test('mixed real and nonexistent verifier citations refuse a paraphrase',()=>{
+ const v=verification([{index:0,supported:true,cited:[1,99]}]);
+ assert.equal(rc.checkChatAnswer(PARAPHRASE_DRAFT,EVIDENCE,v).report.refused,true);
+});
+test('conflicting duplicate verdicts fail closed',()=>{
+ const v=verification([{index:0,supported:false,cited:[]},{index:0,supported:true,cited:[1]}]);
+ assert.equal(rc.checkChatAnswer(PARAPHRASE_DRAFT,EVIDENCE,v).report.refused,true);
+});
+
 // --- contradiction -----------------------------------------------------------
 
 test("a claim the verifier marks unsupported is removed even with a real quote", () => {

@@ -1,7 +1,7 @@
 {
   "id": "review-inbox",
   "name": "Review Inbox",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "minAppVersion": "1.7.2",
   "description": "Flashcards from what you highlight, a source-linked inbox to review them, grounded vault chat, and export to Anki. Runs on the Codex CLI with your ChatGPT sign-in, the DeepSeek API with a key, or the opencode CLI.",
   "author": "Conrad Kelonu",

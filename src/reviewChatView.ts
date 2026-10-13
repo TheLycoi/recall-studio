@@ -14,6 +14,7 @@
  */
 import { Notice, type App, type TFile } from "obsidian";
 import { makeHighlight, type Highlight } from "./model";
+import { ChatRetriever } from "./chatRetrieval";
 import {
   buildChatEvidence,
   selectChatPassages,
@@ -28,6 +29,7 @@ import {
   type ChatGroundingReport,
   type ChatHistoryTurn,
   type ChatSeed,
+  type ChatVerification,
 } from "./reviewChat";
 
 /** Legacy view type, used only when migrating saved workspace leaves. */
@@ -36,6 +38,8 @@ export const VIEW_TYPE_CHAT = "review-inbox-chat";
 /** The model client the view needs: the one chat method, and an optional cancel. */
 export interface ChatLlm {
   answerSelected(args: ChatAnswerArgs): Promise<ChatAskDraft>;
+  expandChatQuery?(question: string): Promise<string[]>;
+  verifySelected?(args: ChatAnswerArgs, draft: ChatAskDraft): Promise<ChatVerification>;
   /** Cancel in-flight work. Optional: a host without it still type-checks; see `cancel`. */
   abort?(): Promise<void>;
 }
@@ -108,11 +112,14 @@ export class ChatView {
   private cancelled = false;
   private status = "";
   private scrollEl!: HTMLElement;
+  private retriever: ChatRetriever;
 
   constructor(
     private contentEl: HTMLElement,
     private host: ChatHost,
-  ) {}
+  ) {
+    this.retriever = new ChatRetriever(host.app, path => this.allowedPath(path));
+  }
 
   async onOpen(): Promise<void> {
     this.contentEl.addClass("review-chat");
@@ -136,9 +143,9 @@ export class ChatView {
     return true;
   }
 
-  /** Only user notes, excluding hidden, ignored and plugin-managed paths. */
-  private markdownFiles(): TFile[] {
-    return this.host.app.vault.getMarkdownFiles().filter(f => this.allowedPath(f.path));
+  /** Notes and PDFs, excluding hidden, ignored and plugin-managed paths. */
+  private sourceFiles(): TFile[] {
+    return this.host.app.vault.getFiles().filter(f => /^(md|pdf)$/i.test(f.extension) && this.allowedPath(f.path));
   }
 
   /** Captured PDF passages already in the inbox, offered as sources too. */
@@ -149,7 +156,7 @@ export class ChatView {
   /** The vault paths of the current selection, for the citation and stale checks. */
   private selectedSourcePaths(): string[] {
     const paths = new Set<string>();
-    for (const f of this.markdownFiles()) if (!this.selectionCount() || this.selected.has(f.path)) paths.add(f.path);
+    for (const f of this.sourceFiles()) if (!this.selectionCount() || this.selected.has(f.path)) paths.add(f.path);
     for (const h of this.storePassagesSelected()) paths.add(h.sourcePath);
     return [...paths];
   }
@@ -163,27 +170,19 @@ export class ChatView {
   }
 
   /** Search locally, keeping only a bounded set of relevant passage candidates. */
-  private async collectSeeds(question: string): Promise<ChatSeed[]> {
-    let candidates: ChatSeed[] = [];
-    let skipped = 0;
-    for (const f of this.markdownFiles()) {
-      if (this.cancelled) break;
-      if (this.selectionCount() && !this.selected.has(f.path)) continue;
-      if (f.stat?.size > 1_000_000) { skipped++; continue; }
-      try {
-        const text = await this.host.app.vault.cachedRead(f);
-        if (text.length > 1_000_000) { skipped++; continue; }
-        candidates = selectChatPassages([...candidates, { path: f.path, title: f.basename, page: null, line: 1, kind: "note", text }], question);
-      } catch (e) {
-        skipped++;
-        new Notice(`Review Inbox: could not read ${f.path} — ${errorText(e)}`);
-      }
-    }
-    for (const h of this.storePassagesSelected()) {
-      candidates = selectChatPassages([...candidates, { path: h.sourcePath, title: h.sourceTitle || h.title, page: h.page, line: h.line, kind: "pdf", text: h.text.slice(0, 1_000_000) }], question);
-    }
-    if (skipped) this.pushSystem(`${skipped} note(s) were unreadable or larger than 1 MB and were not searched.`);
-    return candidates;
+  private async collectSeeds(question: string, terms: readonly string[] = []): Promise<ChatSeed[]> {
+    const result = await this.retriever.search(question, {
+      paths: this.selectionCount() ? [...this.selected] : undefined,
+      terms,
+      cancelled: () => this.cancelled,
+    });
+    if (this.cancelled) return [];
+    const captures = this.storePassagesSelected().map(h => ({
+      path: h.sourcePath, title: h.sourceTitle || h.title, page: h.page, line: h.line,
+      kind: "pdf" as const, text: h.text.slice(0, 1_000_000),
+    }));
+    this.pushSystem(`Searched ${result.searched} notes and PDFs locally${result.skipped.length ? `; skipped ${result.skipped.length}: ${result.skipped.slice(0, 3).join("; ")}` : "."}`);
+    return selectChatPassages([...result.seeds, ...captures], question, 40, terms);
   }
 
   // ---- asking ---------------------------------------------------------------
@@ -201,8 +200,21 @@ export class ChatView {
     this.render();
 
     try {
-      const seeds = await this.collectSeeds(question);
+      let terms: string[] = [];
+      if (this.host.llm.expandChatQuery) {
+        this.status = "planning wiki search…";
+        this.render();
+        try { terms = await this.host.llm.expandChatQuery(question); }
+        catch { this.pushSystem("Search expansion unavailable; searching the original question."); }
+      }
       if (this.cancelled) return;
+      this.status = "searching notes and PDFs…";
+      this.render();
+      const seeds = await this.collectSeeds(question, terms);
+      if (this.cancelled || selectionChanged(selectedPaths, this.selectedSourcePaths())) {
+        this.pushSystem("Search cancelled because its source scope changed. Ask again.");
+        return;
+      }
       const { evidence, truncated, omitted } = buildChatEvidence(seeds);
       if (evidence.length === 0) {
         this.pushSystem("I could not find relevant passages in the notes searched. Try naming the topic more specifically.");
@@ -229,7 +241,15 @@ export class ChatView {
         return;
       }
 
-      const { answer, report } = checkChatAnswer(draft, evidence);
+      let verification: ChatVerification | undefined;
+      if (draft.coverage !== "none" && this.host.llm.verifySelected) {
+        this.status = "checking the answer against its sources…";
+        this.render();
+        try { verification = await this.host.llm.verifySelected(args, draft); }
+        catch { this.pushSystem("Answer verification failed; only exact source excerpts can be shown."); }
+      }
+      if (this.cancelled || selectionChanged(selectedPaths, this.selectedSourcePaths())) return;
+      const { answer, report } = checkChatAnswer(draft, evidence, verification);
       this.turns.push({
         role: "assistant",
         text: answer,
@@ -391,13 +411,24 @@ export class ChatView {
 
 
   private renderPicker(root: HTMLElement): void {
+    if (this.selectionCount()) {
+      root.createDiv({ cls: "review-chat-hint", text: "Searching only selected sources, not the whole wiki." });
+      const reset = root.createEl("button", { text: "Search whole wiki", attr: { type: "button" } });
+      reset.disabled = this.busy;
+      reset.addEventListener("click", () => {
+        if (this.busy) return;
+        this.selected.clear();
+        this.selectedHighlights.clear();
+        this.render();
+      });
+    }
     const details = root.createEl("details", { cls: "review-chat-sources" });
     details.open = false;
     const summary = details.createEl("summary", { cls: "review-chat-sources-head", text: this.selectionCount() ? `Search scope (${this.selectionCount()} selected)` : "Search scope: vault (optional)" });
     summary.setAttribute("aria-label", "Optionally narrow the search to specific sources");
 
-    const files = this.markdownFiles();
-    if (files.length === 0) details.createDiv({ cls: "review-chat-empty", text: "No Markdown notes in this vault." });
+    const files = this.sourceFiles();
+    if (files.length === 0) details.createDiv({ cls: "review-chat-empty", text: "No searchable notes or PDFs in this vault." });
     for (const f of files) {
       const label = details.createEl("label", { cls: "review-chat-source" });
       const box = label.createEl("input", { type: "checkbox" });
@@ -521,6 +552,7 @@ export class ChatView {
     if (report.refused) return "Not answered: the retrieved passages do not support an answer";
     const coverage = report.coverage === "full" ? "Answered from cited passages" : "Partly answered from cited passages";
     const parts = [coverage];
+    if (report.paraphrases) parts.push("AI-checked synthesis; verify the cited sources");
     if (report.removed > 0) parts.push(`${report.removed} unsupported sentence${report.removed === 1 ? "" : "s"} dropped`);
     if (report.quotesRejected > 0) parts.push(`${report.quotesRejected} quote${report.quotesRejected === 1 ? "" : "s"} rejected`);
     return parts.join(" · ");

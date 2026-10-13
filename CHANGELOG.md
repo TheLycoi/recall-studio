@@ -1,5 +1,14 @@
 # Changelog
 
+## Review Inbox 0.1.3
+
+- Chat retrieves text from uncaptured PDFs as well as Markdown notes and captured passages, with page or line citations.
+- Add bounded search-phrase expansion without letting it displace original-question matches.
+- Allow supported paraphrases after a separate evidence-only model check; keep exact quote and citation checks and refuse unsupported answers.
+- Add “Search whole wiki” to clear an old source restriction without losing the conversation or question.
+- Recheck exclusions after asynchronous reads and before provider calls. Bound the candidate pool and extracted source text, invalidate stale cache entries and clean up PDF documents.
+- Preserve the existing Inbox/Chat toggle, Export behavior and card data. No OCR, vector service or new dependency.
+
 ## Review Inbox 0.1.2
 
 - Restore the Inbox/Chat toggle within one workspace panel. Inbox opens first.

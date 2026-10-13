@@ -120,6 +120,31 @@ function makeApp(entries) {
   };
 }
 
+test('original question matches rank ahead of broad expansion-only matches',async()=>{
+ const {app}=makeApp([{path:'z.md',content:'A calorie measures food energy.'},...Array.from({length:45},(_,i)=>({path:`${i}.md`,content:'Energy nutrition metabolism measurement dietary intake. '+ 'noise '.repeat(180)}))]);
+ const result=await new ChatRetriever(app,()=>true).search('what is a calorie',{terms:['energy nutrition metabolism measurement dietary intake']});
+ assert.equal(result.seeds[0].path,'z.md');
+});
+
+test('a source excluded during its asynchronous read is not returned or cached',async()=>{
+ const {app}=makeApp([{path:'secret.md',content:'calorie private'}]);let allowed=true;
+ const read=app.vault.cachedRead;app.vault.cachedRead=async f=>{const text=await read(f);allowed=false;return text;};
+ const retriever=new ChatRetriever(app,()=>allowed);const result=await retriever.search('calorie');
+ assert.equal(result.seeds.length,0);assert.equal(retriever.cache.size,0);
+});
+test('Markdown length is bounded even when file metadata is stale',async()=>{
+ const {app}=makeApp([{path:'huge.md',size:0,content:'calorie '+ 'x'.repeat(1_000_001)}]);
+ const result=await new ChatRetriever(app,()=>true).search('calorie');
+ assert.equal(result.seeds.length,0);assert.equal(result.skipped.length,1);
+});
+
+test('PDF extracted text is bounded even when compressed bytes are small',async()=>{
+ const pdf=pdfController();currentPdfjs=pdf.pdfjs;
+ const {app}=makeApp([{path:'compressed.pdf',size:100,pdf:['calorie '+ 'x'.repeat(1_000_001)]}]);
+ const result=await new ChatRetriever(app,()=>true).search('calorie');
+ assert.equal(result.seeds.length,0);assert.equal(result.skipped.length,1);assert.equal(pdf.state.destroyed,1);
+});
+
 // --- PDF retrieval -----------------------------------------------------------
 
 test("an uncaptured PDF page ranks for the question and keeps its page number", async () => {

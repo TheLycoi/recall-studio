@@ -45,8 +45,8 @@ test("the view is driven by a structural host, not by importing the plugin", () 
 
 test("optional source narrowing lists Markdown with accessible checkboxes", () => {
   const s = SOURCE();
-  assert.ok(/getMarkdownFiles\(\)/.test(s), "markdown files are not listed");
-  assert.ok(/cachedRead\(/.test(s), "selected files are not read");
+  assert.ok(/getFiles\(\)/.test(s), "markdown files are not listed");
+  assert.ok(/retriever.search\(/.test(s), "source scope is not passed to local retrieval");
   assert.ok(/type:\s*"checkbox"/.test(s), "no accessible source checkbox");
   // No silent default selection: the class starts with an empty selection.
   assert.ok(/new Set<string>\(\)/.test(s), "the selection does not start empty");
