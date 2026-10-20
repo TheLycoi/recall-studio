@@ -1,5 +1,5 @@
 import type { Card, Highlight } from "./model";
-import { lintCard, LINT_LABELS } from "./lint";
+import { demoteSingleCloze, lintCard, LINT_LABELS } from "./lint";
 
 export interface CardCheck {
   content: string;
@@ -10,7 +10,10 @@ export interface CardCheck {
 /** Includes source context: a verdict is not reusable after its evidence changes. */
 export function cardContent(card: Card, highlight: Highlight): string {
   return JSON.stringify([card.kind, card.front, card.back, card.text, card.extra,
-    highlight.text, highlight.before, highlight.after, highlight.sourcePath]);
+    highlight.text, highlight.before, highlight.after, highlight.sourcePath,
+    highlight.sourceTitle, highlight.heading, highlight.instruction,
+    highlight.cards.filter(c => c.id !== card.id && c.status !== "deleted")
+      .map(c => [c.id, c.kind, c.front, c.back, c.text])]);
 }
 
 export function currentCardCheck(card: Card, highlight: Highlight): CardCheck | undefined {
@@ -28,12 +31,75 @@ export async function checkCard(
   const content = cardContent(card, highlight);
   const siblings = highlight.cards.filter(c => c.id !== card.id && c.status !== "deleted");
   const { failures, warnings } = lintCard(card, highlight, siblings);
-  const [verdict] = await critique({ ...highlight }, [{ ...card }], siblings.map(c => ({ ...c })));
-  if (!verdict || !["keep", "revise", "drop"].includes(verdict.verdict)) throw new Error("The check returned no valid verdict.");
+  const verdicts = await critique(structuredClone(highlight), [structuredClone(card)], structuredClone(siblings));
+  const verdict = verdicts[0];
+  if (verdicts.length !== 1 || !verdict || !["keep", "revise", "drop"].includes(verdict.verdict)) throw new Error("The check must return exactly one valid verdict.");
   if (!active() || cardContent(card, highlight) !== content || card.status === "deleted" || highlight.status === "dismissed") return;
   const issues = [...failures, ...warnings].map(id => LINT_LABELS[id]);
   if (verdict.verdict !== "keep") issues.push(verdict.reason?.trim() || `The model recommends ${verdict.verdict === "drop" ? "discarding" : "revising"} this card.`);
   card.userCheck = { content, at: new Date().toISOString(), issues };
+}
+
+type RepairDraft = Pick<Card, "kind" | "front" | "back" | "text">;
+type Critique = Parameters<typeof checkCard>[2];
+export type CardRepairResult = { status: "checked" | "repaired" | "cancelled" | "busy"; instruction?: string };
+const repairing = new WeakSet<Card>();
+
+/** One explicit repair attempt. The original survives until the replacement passes. */
+export async function checkAndRepairCard(
+  card: Card,
+  highlight: Highlight,
+  critique: Critique,
+  rewrite: (highlight: Highlight, card: Card, instruction: string) => Promise<RepairDraft>,
+  active: () => boolean = () => true,
+): Promise<CardRepairResult> {
+  if (repairing.has(card)) return { status: "busy" };
+  repairing.add(card);
+  try {
+    const content = cardContent(card, highlight);
+    const status = card.status;
+    const current = () => active() && cardContent(card, highlight) === content && card.status === status
+      && ["pending", "flagged", "approved"].includes(card.status)
+      && highlight.status === "ready" && !highlight.archived;
+    if (!current()) return { status: "cancelled" };
+    if (!currentCardCheck(card, highlight)?.issues.length) await checkCard(card, highlight, critique, current);
+    if (!current()) return { status: "cancelled" };
+    const check = currentCardCheck(card, highlight);
+    if (!check) return { status: "cancelled" };
+    if (!check.issues.length) return { status: "checked" };
+    const instruction = `Repair this card using the source and card-writing best practices. Fix these findings:\n${check.issues.map(issue => `- ${issue}`).join("\n")}\nKeep only supported facts, avoid repeating sibling cards, and preserve a clear retrieval cue. Return one corrected card, not a critique.`;
+    const draft = await rewrite(structuredClone(highlight), structuredClone(card), instruction);
+    if (!current()) return { status: "cancelled" };
+    let candidate: Card = { ...structuredClone(card), kind: draft.kind,
+      front: draft.kind === "qa" ? draft.front.trim() : "",
+      back: draft.kind === "qa" ? draft.back.trim() : "",
+      text: draft.kind === "cloze" ? draft.text.trim() : "" };
+    exportCandidates([{ ...highlight, cards: [candidate] }]);
+    if (lintCard(candidate, highlight, []).failures.includes("cloze-not-grounded")) {
+      throw new Error("The replacement hides text absent from the captured source. The original is unchanged.");
+    }
+    candidate = demoteSingleCloze(candidate);
+    if (cardContent(candidate, highlight) === content) throw new Error("The repair returned the same card. The original is unchanged.");
+    await checkCard(candidate, highlight, critique, current);
+    if (!current()) return { status: "cancelled" };
+    const checked = currentCardCheck(candidate, highlight);
+    if (!checked || checked.issues.length) throw new Error(`The replacement did not pass its check. The original is unchanged.${checked?.issues.length ? ` ${checked.issues.join(" · ")}` : ""}`);
+    card.kind = candidate.kind;
+    card.front = candidate.front;
+    card.back = candidate.back;
+    card.text = candidate.text;
+    card.edited = true;
+    card.status = "pending";
+    delete card.lintFailures;
+    delete card.lintWarnings;
+    delete card.critiqueReason;
+    delete card.bloom;
+    delete card.critiqueRan;
+    card.userCheck = checked;
+    return { status: "repaired", instruction };
+  } finally {
+    repairing.delete(card);
+  }
 }
 
 export type ExportItem = { card: Card; highlight: Highlight };
