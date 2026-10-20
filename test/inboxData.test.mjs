@@ -88,6 +88,19 @@ test("parseInboxJson accepts a file with extra unknown keys (old files)", () => 
   assert.deepEqual(result, { ok: true, data, fresh: false });
 });
 
+test("legacy highlights without an archive flag are not given invented receipts", () => {
+  const legacy = { id: "h1", status: "exported", cards: [{ id: "c1", status: "exported" }], sourcePath: "a.pdf", subpath: "page=4" };
+  const parsed = d.parseInboxJson(JSON.stringify({ version: 1, highlights: [legacy] }));
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(parsed.data.highlights[0], legacy);
+});
+
+test("a malformed archive flag is rejected without silently dropping a record", () => {
+  const parsed = d.parseInboxJson(JSON.stringify({ version: 1, highlights: [{ id: "h1", archived: "false" }] }));
+  assert.equal(parsed.ok, false);
+  assert.equal(parsed.reason, "bad-shape");
+});
+
 // --- pushRevision --------------------------------------------------------------
 
 test("pushRevision creates the revisions array when absent", () => {

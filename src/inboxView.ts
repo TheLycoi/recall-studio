@@ -429,11 +429,17 @@ export class InboxView extends ItemView {
       );
       menu.addItem((i) =>
         i
-          .setTitle("Clear exported and dismissed")
+          .setTitle("Archive exported and dismissed")
           .setIcon(RECALL_DISCARD_ICON)
-          .onClick(() => {
-            const n = this.plugin.store.clearExported();
-            new Notice(`Review Inbox: cleared ${n}.`);
+          .onClick(async () => {
+            try {
+              const n = this.plugin.store.clearExported();
+              await this.plugin.store.flush();
+              new Notice(n ? `Review Inbox: archived ${n} passage${n === 1 ? "" : "s"}.` : "Review Inbox: inbox saved; no new passages to archive.");
+            } catch (e) {
+              console.error("Review Inbox: archive was not saved", e);
+              new Notice("Review Inbox: archive not saved. Passage history remains in memory; retry after fixing storage.");
+            }
           }),
       );
       menu.addItem((i) =>

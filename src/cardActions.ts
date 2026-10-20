@@ -42,7 +42,7 @@ export type ExportItem = { card: Card; highlight: Highlight };
 export function exportCandidates(list: Highlight[], ids?: ReadonlySet<string>): ExportItem[] {
   const items: ExportItem[] = [];
   for (const highlight of list) {
-    if (highlight.status !== "ready") continue;
+    if (highlight.archived || highlight.status !== "ready") continue;
     for (const card of highlight.cards) {
       if (ids && !ids.has(card.id)) continue;
       if (!["pending", "flagged", "approved"].includes(card.status)) continue;

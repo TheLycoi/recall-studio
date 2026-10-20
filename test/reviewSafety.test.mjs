@@ -152,3 +152,18 @@ test('an uncaptured answer still adds a new highlight tagged origin ask', async 
   assert.equal(enqueued.length, 1);
   assert.equal(enqueued[0], added[0]);
 });
+
+test('Chat does not recapture a passage whose exported card was archived', async () => {
+  const passage = 'The hippocampus consolidates memory.';
+  const added = []; const enqueued = [];
+  const store = { all: () => [], hasDuplicate: (path, text) => path === 'n.md' && text === passage,
+    add: (h) => { added.push(h); return h; } };
+  const v = new View({}, { store, generator: { enqueue: (h) => enqueued.push(h) }, app: {}, openInbox() {} });
+  v.render = () => {}; v.selectedSourcePaths = () => ['n.md'];
+  const turn = { role: 'assistant', text: `${passage} [1]`, evidence: [{ n: 1, path: 'n.md', title: 'N', page: null, line: 1, text: passage }],
+    report: { coverage: 'full', kept: 1, removed: 0, quotesVerified: 1, quotesRejected: 0, cited: [1], refused: false }, selectedPaths: ['n.md'] };
+  v.turns = [{ role: 'user', text: 'What consolidates memory?' }, turn];
+  await v.sendToInbox(turn);
+  assert.equal(added.length, 0); assert.equal(enqueued.length, 0);
+  assert.match(v.turns.at(-1).text, /already/);
+});

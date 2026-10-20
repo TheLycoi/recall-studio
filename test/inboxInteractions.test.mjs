@@ -3,10 +3,13 @@ import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import Module from 'node:module';
 let InboxView;
+let lastMenu;
+const notices=[];
 before(async () => {
   const out = await build({entryPoints:['src/inboxView.ts'],bundle:true,write:false,format:'cjs',platform:'node',external:['obsidian'],logLevel:'silent'});
   const mod = new Module('inbox-view');
-  const obsidian = new Proxy({ItemView:class {constructor(leaf){this.contentEl=leaf.contentEl;} registerDomEvent(){}},setIcon(){}}, {get:(o,k)=>o[k] ?? class {}});
+  class Menu { constructor(){ this.items=[];lastMenu=this; } addItem(fn){const item={setTitle(t){this.title=t;return this;},setIcon(){return this;},setDisabled(){return this;},onClick(cb){this.click=cb;return this;}};fn(item);this.items.push(item);} showAtMouseEvent(){} }
+  const obsidian = new Proxy({ItemView:class {constructor(leaf){this.contentEl=leaf.contentEl;} registerDomEvent(){}},setIcon(){},Menu,Notice:class {constructor(message){notices.push(message);}}}, {get:(o,k)=>o[k] ?? class {}});
   mod.require = id => id === 'obsidian' ? obsidian : Module.createRequire(import.meta.url)(id);
   mod._compile(out.outputFiles[0].text,'inbox-view');
   InboxView=mod.exports.InboxView;
@@ -80,6 +83,32 @@ test('Inbox shortcuts leave the Chat textarea alone',()=>{
   const {view}=harness();let prevented=false;
   view.onKey({target:{tagName:'TEXTAREA'},key:'Enter',metaKey:true,preventDefault(){prevented=true;}});
   assert.equal(prevented,false);
+});
+
+test('archive menu reports success only after persistence, and reports a failed write honestly',async()=>{
+  const {root,view,host}=harness();
+  host.store.counts=()=>({queued:0,generating:0,toReview:0,flagged:0,errors:0});
+  let attempts=0;
+  host.store.clearExported=()=>attempts++===0?2:0;
+  host.store.flush=async()=>{throw Error('disk full');};
+  host.schema={openCount:()=>0};host.settings.defaultDeck='Default';
+  InboxView.prototype.renderHeader.call(view,root);
+  const more=descendants(root).find(e=>e.title==='More actions');
+  more.events.click({});
+  const item=lastMenu.items.find(i=>/archiv/i.test(i.title));
+  assert.ok(item,'the menu must say archive, not clear');
+  const before=notices.length;
+  const error=console.error;console.error=()=>{};
+  try { await item.click(); } finally { console.error=error; }
+  assert.ok(notices.slice(before).some(m=>/not saved/i.test(m)));
+  assert.ok(!notices.slice(before).some(m=>/archived 2/i.test(m)));
+  host.store.flush=async()=>{};
+  more.events.click({});
+  const retry=lastMenu.items.find(i=>/archiv/i.test(i.title));
+  const next=notices.length;
+  await retry.click();
+  assert.ok(notices.slice(next).some(m=>/saved/i.test(m)));
+  assert.ok(!notices.slice(next).some(m=>/archived 2/i.test(m)));
 });
 test('Inbox and Chat are one-at-a-time panels that default to Inbox',async()=>{
   const {root,view}=harness();await view.onOpen();

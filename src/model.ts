@@ -94,6 +94,8 @@ export interface Highlight {
   /** Per-highlight user instruction passed to the card writer. */
   instruction: string;
   status: HighlightStatus;
+  /** Hidden from the active Inbox, but kept with its cards and source provenance. Absent on legacy records. */
+  archived?: boolean;
   error: string | null;
   createdAt: string;
   generatedAt: string | null;

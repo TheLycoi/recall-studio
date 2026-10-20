@@ -67,3 +67,7 @@ test('export cleanup never revives a card deleted while sending',async()=>{
   await actions.withExportAcceptance(actions.exportCandidates([highlight]),async()=>{card.status='deleted';});
   assert.equal(card.status,'deleted');
 });
+test('a stale caller cannot export an archived ready highlight',()=>{
+  const {highlight}=fixture();highlight.archived=true;
+  assert.deepEqual(actions.exportCandidates([highlight]),[]);
+});

@@ -27,9 +27,8 @@ export type ParsedInbox =
  * created but never written) from a genuinely corrupt one — both parse to an
  * empty inbox, but only the latter should be moved aside and reported.
  *
- * Deliberately shallow: only `highlights` being an array is checked, the same
- * depth the store always validated at. A stricter check here would reject old
- * files that predate a field added later.
+ * Deliberately shallow for legacy fields. The optional archive flag is checked
+ * when present, so a malformed value cannot silently hide a passage.
  */
 export function parseInboxJson(raw: string): ParsedInbox {
   if (raw.trim() === "") return { ok: true, data: emptyInbox(), fresh: true };
@@ -41,6 +40,9 @@ export function parseInboxJson(raw: string): ParsedInbox {
   }
   if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as InboxData).highlights)) {
     return { ok: false, reason: "bad-shape", detail: "parsed JSON is not an inbox object with a highlights array" };
+  }
+  if ((parsed as InboxData).highlights.some((h) => h && typeof h === "object" && "archived" in h && typeof h.archived !== "boolean")) {
+    return { ok: false, reason: "bad-shape", detail: "a highlight has an invalid archive flag" };
   }
   return { ok: true, data: parsed as InboxData, fresh: false };
 }

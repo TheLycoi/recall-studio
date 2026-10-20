@@ -39,6 +39,8 @@ export class InboxStore {
   private closed = false;
   /** The write in progress, if any. Each flush waits on it, so writes land in the order they were asked for. */
   private flushing: Promise<void> = Promise.resolve();
+  private dirty = false;
+  private revision = 0;
 
   private legacyPath: string | null;
 
@@ -54,6 +56,11 @@ export class InboxStore {
   /** The vault path the inbox is kept at. */
   get filePath(): string {
     return this.path;
+  }
+
+  /** True until the latest in-memory change has been written successfully. */
+  get hasUnsavedChanges(): boolean {
+    return this.dirty;
   }
 
   /** Move a plugin-folder inbox.json into the Recall folder, once, when no inbox is there yet. */
@@ -115,7 +122,10 @@ export class InboxStore {
   private scheduleSave() {
     if (this.readOnly || this.closed) return;
     if (this.saveTimer !== null) window.clearTimeout(this.saveTimer);
-    this.saveTimer = window.setTimeout(() => void this.flush(), 400);
+    this.saveTimer = window.setTimeout(() => void this.flush().catch((e) => {
+      console.error("Review Inbox: failed to write inbox.json; changes remain in memory for retry", e);
+      new Notice("Review Inbox: inbox.json could not be saved. Changes are not yet durable; retry after fixing storage.");
+    }), 400);
   }
 
   async flush(): Promise<void> {
@@ -125,14 +135,24 @@ export class InboxStore {
       this.saveTimer = null;
     }
     const snapshot = JSON.stringify(this.data, null, 2);
-    this.flushing = this.flushing.then(async () => {
+    const revision = this.revision;
+    const attempt = this.flushing.then(async () => {
       try {
-        await this.app.vault.adapter.write(this.path, snapshot);
+        // Stage the complete snapshot before replacing the last good inbox.
+        // If writing is interrupted, the original remains readable on reload.
+        const staged = `${this.path}.pending`;
+        await this.app.vault.adapter.write(staged, snapshot);
+        await this.app.vault.adapter.rename(staged, this.path);
+        if (revision === this.revision) this.dirty = false;
       } catch (e) {
         console.error("Review Inbox: failed to write inbox.json", e);
+        throw e;
       }
     });
-    await this.flushing;
+    // A failed write must not poison the chain: the next flush writes the
+    // current full snapshot, including everything that failed to persist.
+    this.flushing = attempt.catch(() => {});
+    await attempt;
   }
 
   /** Stop saving for good. Called on unload, after the last flush. */
@@ -151,12 +171,24 @@ export class InboxStore {
 
   /** Call after mutating a highlight or card in place. */
   touch(): void {
+    this.dirty = true;
+    this.revision++;
     this.scheduleSave();
     for (const fn of this.listeners) fn();
   }
 
   all(): Highlight[] {
+    return this.data.highlights.filter((h) => !h.archived);
+  }
+
+  /** All captured passages, active and archived, in their original order. */
+  allHistory(): Highlight[] {
     return this.data.highlights;
+  }
+
+  /** Passage history for a source, including archived cards and exact PDF locators. */
+  sourceHistory(sourcePath: string): Highlight[] {
+    return this.data.highlights.filter((h) => h.sourcePath === sourcePath);
   }
 
   get(id: string): Highlight | undefined {
@@ -182,12 +214,12 @@ export class InboxStore {
     this.touch();
   }
 
-  /** True when the same text from the same note is already in the inbox (not dismissed). */
+  /** Active captures and retained cards block recapture; empty completed passages do not. */
   hasDuplicate(sourcePath: string, normalizedText: string): boolean {
     return this.data.highlights.some(
       (h) =>
         h.sourcePath === sourcePath &&
-        h.status !== "dismissed" &&
+        ((!h.archived && h.status !== "exported" && h.status !== "dismissed") || h.cards.some((c) => c.status !== "deleted")) &&
         h.text.replace(/\s+/g, " ").trim() === normalizedText,
     );
   }
@@ -205,7 +237,7 @@ export class InboxStore {
     let toReview = 0;
     let flagged = 0;
     let errors = 0;
-    for (const h of this.data.highlights) {
+    for (const h of this.all()) {
       if (h.status === "queued") queued++;
       else if (h.status === "generating") generating++;
       else if (h.status === "error") errors++;
@@ -218,10 +250,16 @@ export class InboxStore {
   }
 
   clearExported(): number {
-    const before = this.data.highlights.length;
-    this.data.highlights = this.data.highlights.filter((h) => h.status !== "exported" && h.status !== "dismissed");
-    this.touch();
-    return before - this.data.highlights.length;
+    if (this.readOnly || this.closed) throw new Error("Inbox cannot be archived while storage is read-only or closed.");
+    let archived = 0;
+    for (const h of this.data.highlights) {
+      if (!h.archived && (h.status === "exported" || h.status === "dismissed")) {
+        h.archived = true;
+        archived++;
+      }
+    }
+    if (archived) this.touch();
+    return archived;
   }
 
   getTranscript(sourcePath: string): TranscriptRecord | undefined {

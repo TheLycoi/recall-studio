@@ -48,6 +48,7 @@ export interface ChatLlm {
 export interface ChatStore {
   all(): Highlight[];
   add(h: Highlight): Highlight;
+  hasDuplicate?(sourcePath: string, normalizedText: string): boolean;
 }
 
 /** The part of the generator the view uses. */
@@ -366,6 +367,10 @@ export class ChatView {
         if (this.host.generator.more) this.host.generator.more(existing, row.instruction);
         else this.host.generator.enqueue(existing);
         added++;
+        continue;
+      }
+      if (this.host.store.hasDuplicate?.(row.sourcePath, normalized)) {
+        skipped++;
         continue;
       }
       const h = makeHighlight({

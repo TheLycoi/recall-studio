@@ -174,3 +174,161 @@ test("two quick flushes write the later snapshot last", async () => {
   assert.equal(JSON.parse(v.files.get(INBOX)).highlights[0].text, "second");
   store.close();
 });
+
+const card = (id, status, extra = {}) => ({ id, highlightId: `h-${id}`, kind: "qa", front: "Q?", back: "A", text: "", extra: "", status, edited: false, createdAt: "2026-01-01T00:00:00.000Z", ...extra });
+const highlight = (id, status, cards = [], extra = {}) => ({
+  id, status, cards, sourcePath: "notes/Study.md", sourceTitle: "Study", text: `Passage ${id}`,
+  before: "before", after: "after", line: 23, page: null, heading: "Mechanism", blockId: "block-1",
+  title: "Title", instruction: "Focus on mechanism", origin: "selection", error: null,
+  createdAt: "2026-01-01T00:00:00.000Z", generatedAt: "2026-01-02T00:00:00.000Z",
+  exportedAt: "2026-01-03T00:00:00.000Z", ...extra,
+});
+
+test("clear archives completed passages and preserves exact provenance across reload", async () => {
+  const exported = highlight("export", "exported", [card("export-card", "exported", { ankiNoteId: 123 })]);
+  const dismissed = highlight("dismissed", "dismissed", [card("dismiss-card", "pending")], { sourcePath: "paper.pdf", page: 7, subpath: "page=7&selection=2,3,4,5", origin: "pdf" });
+  const partial = highlight("partial", "ready", [card("partial-sent", "exported", { srNote: "cards/sr.md" }), card("partial-draft", "pending")]);
+  const queued = highlight("queued", "queued");
+  const v = memoryVault({ [INBOX]: JSON.stringify({ version: 1, highlights: [exported, dismissed, partial, queued], highlightInstructions: { "notes/Study.md": "Old setting" } }) });
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  await store.load();
+  assert.equal(store.clearExported(), 2);
+  assert.equal(store.clearExported(), 0);
+  assert.deepEqual(store.all().map(h => h.id), ["partial", "queued"]);
+  assert.deepEqual(store.counts(), { queued: 1, generating: 0, toReview: 1, flagged: 0, errors: 0 });
+  assert.deepEqual(store.allHistory().map(h => h.id), ["export", "dismissed", "partial", "queued"]);
+  assert.deepEqual(store.sourceHistory("paper.pdf").map(h => h.id), ["dismissed"]);
+  assert.deepEqual(store.get("export"), { ...exported, archived: true });
+  assert.equal(store.findCard("export-card").card.ankiNoteId, 123);
+  assert.equal(store.hasDuplicate("notes/Study.md", "Passage export"), true);
+  await store.flush();
+  store.close();
+  const disk = JSON.parse(v.files.get(INBOX));
+  assert.equal(disk.highlightInstructions["notes/Study.md"], "Old setting");
+  assert.deepEqual(disk.highlights[0], { ...exported, archived: true });
+  assert.deepEqual(disk.highlights[1], { ...dismissed, archived: true });
+  const reloaded = new s.InboxStore(v.app, "wiki/_schema");
+  await reloaded.load();
+  assert.deepEqual(reloaded.all().map(h => h.id), ["partial", "queued"]);
+  assert.deepEqual(reloaded.sourceHistory("paper.pdf")[0], { ...dismissed, archived: true });
+  assert.equal(reloaded.findCard("dismiss-card").highlight.id, "dismissed");
+  reloaded.close();
+});
+
+test("dismissed passages without live cards can be recaptured; completed cards remain duplicate evidence", async () => {
+  const empty = highlight("empty", "dismissed", [], { text: "empty" });
+  const deleted = highlight("deleted", "dismissed", [card("deleted-card", "deleted")], { text: "deleted" });
+  const generated = highlight("generated", "dismissed", [card("generated-card", "pending")], { text: "generated" });
+  const v = memoryVault({ [INBOX]: JSON.stringify({ version: 1, highlights: [empty, deleted, generated] }) });
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  await store.load();
+  store.clearExported();
+  assert.equal(store.hasDuplicate("notes/Study.md", "empty"), false);
+  assert.equal(store.hasDuplicate("notes/Study.md", "deleted"), false);
+  assert.equal(store.hasDuplicate("notes/Study.md", "generated"), true);
+  assert.deepEqual(store.sourceHistory("notes/Study.md").map(h => h.id), ["empty", "deleted", "generated"]);
+  store.close();
+});
+
+test("failed archive persistence reports failure and retains the full snapshot for a later retry", async () => {
+  const exported = highlight("export", "exported", [card("c", "exported")]);
+  const v = memoryVault({ [INBOX]: JSON.stringify({ version: 1, highlights: [exported] }) });
+  const original = v.files.get(INBOX);
+  const write = v.app.vault.adapter.write;
+  let fail = true;
+  v.app.vault.adapter.write = async (p, data) => {
+    if (fail) throw new Error("ENOSPC");
+    return write(p, data);
+  };
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  await store.load();
+  store.clearExported();
+  await quiet(() => assert.rejects(store.flush(), /ENOSPC/));
+  assert.equal(store.hasUnsavedChanges, true);
+  assert.equal(v.files.get(INBOX), original);
+  assert.deepEqual(store.all(), []);
+  assert.equal(store.findCard("c").highlight.id, "export");
+  fail = false;
+  await store.flush();
+  assert.equal(store.hasUnsavedChanges, false);
+  assert.deepEqual(JSON.parse(v.files.get(INBOX)).highlights, [{ ...exported, archived: true }]);
+  store.close();
+});
+
+test("read-only storage refuses archiving instead of claiming a durable clear", async () => {
+  const v = memoryVault({ [INBOX]: "unreadable" });
+  v.app.vault.adapter.read = async () => { throw new Error("locked"); };
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  await quiet(() => store.load());
+  assert.throws(() => store.clearExported(), /read-only/);
+  store.close();
+});
+
+test("explicit remove erases one passage while archive retains all cards", async () => {
+  const h = highlight("h", "exported", [card("c", "exported")]);
+  const v = memoryVault({ [INBOX]: JSON.stringify({ version: 1, highlights: [h] }) });
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  await store.load();
+  store.clearExported();
+  assert.ok(store.findCard("c"));
+  store.remove("h");
+  assert.equal(store.get("h"), undefined);
+  assert.equal(store.findCard("c"), undefined);
+  await store.flush();
+  assert.deepEqual(JSON.parse(v.files.get(INBOX)).highlights, []);
+  store.close();
+});
+
+test("legacy exported records stay active until archive and an archived pending record never counts", async () => {
+  const legacy = highlight("legacy", "exported", [card("legacy-card", "exported")]);
+  const hidden = highlight("hidden", "ready", [card("hidden-card", "pending")], { archived: true });
+  const v = memoryVault({ [INBOX]: JSON.stringify({ version: 1, highlights: [legacy, hidden] }) });
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  await store.load();
+  assert.deepEqual(store.all().map(h => h.id), ["legacy"]);
+  assert.equal(store.counts().toReview, 0);
+  assert.equal(store.findCard("hidden-card").highlight.id, "hidden");
+  assert.equal(store.clearExported(), 1);
+  assert.deepEqual(store.all(), []);
+  await store.flush();
+  assert.deepEqual(JSON.parse(v.files.get(INBOX)).highlights, [{ ...legacy, archived: true }, hidden]);
+  store.close();
+});
+
+test("an archived no-card passage is not mistaken for generated material", async () => {
+  const v = memoryVault({ [INBOX]: JSON.stringify({ version: 1, highlights: [highlight("empty", "exported", [], { text: "uncarded" })] }) });
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  await store.load();
+  store.clearExported();
+  assert.equal(store.hasDuplicate("notes/Study.md", "uncarded"), false);
+  assert.deepEqual(store.sourceHistory("notes/Study.md").map(h => h.id), ["empty"]);
+  store.close();
+});
+
+test("an interrupted write leaves the last good inbox intact for reload and retry", async () => {
+  const h = highlight("h", "exported", [card("c", "exported")]);
+  const original = JSON.stringify({ version: 1, highlights: [h] });
+  const v = memoryVault({ [INBOX]: original });
+  const write = v.app.vault.adapter.write;
+  let interrupted = true;
+  v.app.vault.adapter.write = async (p, data) => {
+    if (interrupted) {
+      await write(p, data.slice(0, 10));
+      throw Error("interrupted");
+    }
+    return write(p, data);
+  };
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  await store.load();
+  store.clearExported();
+  await quiet(() => assert.rejects(store.flush(), /interrupted/));
+  assert.equal(v.files.get(INBOX), original, "a partial write cannot replace the only good copy");
+  const restored = new s.InboxStore(v.app, "wiki/_schema");
+  await restored.load();
+  assert.equal(restored.all().length, 1);
+  restored.close();
+  interrupted = false;
+  await store.flush();
+  assert.equal(JSON.parse(v.files.get(INBOX)).highlights[0].archived, true);
+  store.close();
+});
