@@ -7,6 +7,8 @@ export interface CompletionRequest<T> {
   system: string;
   user: string;
   schema: z.ZodType<T>;
+  /** Disable provider response retries for a caller with a strict call budget. */
+  retryInvalidResponse?: boolean;
   /** Plural noun for error messages ("cards", "highlights"). */
   label: string;
   maxTokens: number;

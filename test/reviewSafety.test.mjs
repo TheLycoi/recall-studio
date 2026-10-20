@@ -79,12 +79,12 @@ test('an unapproved card changed during identity lookup is not sent', async () =
 test('dismissal during background generation is not undone by its response', async () => {
   let finish;
   const response=new Promise(resolve=>{finish=resolve;});
-  const plugin={settings:{critiquePass:false,lintMode:'badge',notifyWhenReady:false},store:{touch(){}},llm:{writeCards:()=>response}};
-  const g=new Generator(plugin);
   const h={id:'h',text:'A is B.',instruction:'',cards:[],status:'queued'};
+  const plugin={settings:{critiquePass:false,lintMode:'badge',notifyWhenReady:false},store:{touch(){},all:()=>[h],async flush(){}},llm:{generationContext:()=>response,prepareGeneration(){throw Error('dismissed capture must not reach the provider');}}};
+  const g=new Generator(plugin);
   const run=g.run(h);
   h.status='dismissed';
-  finish([{kind:'qa',front:'What is A?',back:'B',text:''}]);
+  finish({maxCards:1,language:'',instructions:'',rules:'',examples:''});
   await run;
   assert.equal(h.status,'dismissed');
   assert.equal(h.cards.length,0);

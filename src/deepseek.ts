@@ -216,7 +216,7 @@ export class DeepSeekBackend implements LlmBackend {
    * A truncated answer is not retried: the token cap is per call and nothing
    * about a second identical call would raise it.
    */
-  private async jsonText(req: TextRequest, label: string, schema: z.ZodType): Promise<string> {
+  private async jsonText(req: TextRequest & { retryInvalidResponse?: boolean }, label: string, schema: z.ZodType): Promise<string> {
     const attempt = async (): Promise<string> => {
       const system = [jsonPreamble(schema), req.system].join("\n\n");
       const { content, stop } = await this.chat(req, system, req.user, label, true);
@@ -240,7 +240,7 @@ export class DeepSeekBackend implements LlmBackend {
       // A bad key, a refused request or a timeout will fail again identically,
       // so only the empty and unparseable answers are worth a second call: a
       // second identical request is the cheap fix for a model slip.
-      if (!(e instanceof DeepSeekError) || (e.kind !== "empty" && e.kind !== "unparseable") || req.signal?.aborted) throw e;
+      if (req.retryInvalidResponse === false || !(e instanceof DeepSeekError) || (e.kind !== "empty" && e.kind !== "unparseable") || req.signal?.aborted) throw e;
       return attempt();
     }
   }

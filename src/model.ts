@@ -39,6 +39,37 @@ export type LintWarningId = "duplicate-card" | "shared-answer" | "cross-interfer
 /** Bloom's taxonomy level, judged by the critique pass. See README. */
 export type BloomLevel = "remember" | "understand" | "apply" | "analyze" | "evaluate" | "create";
 
+export type GenerationAuditStatus = "verified" | "unverified" | "failed";
+export interface GenerationPreparation {
+  facts: { id: string; statement: string; quote: string }[];
+  plan: { id: string; factIds: string[]; entity: string; aspect: string; value: string; reason: string }[];
+  exclusions: { factIds: string[]; reason: string }[];
+  omissions: { factIds: string[]; reason: string }[];
+  conflicts: { quote: string; reason: string }[];
+}
+export interface GenerationContext {
+  maxCards: number;
+  language: string;
+  instructions: string;
+  rules: string;
+  examples: string;
+}
+export interface GenerationBatch {
+  version: 1;
+  id: string;
+  /** One-off request, retained across reloads; never replaces the capture instruction. */
+  instruction: string;
+  inputKey: string;
+  phase: "preparing" | "writing" | "auditing" | "complete";
+  preparation?: GenerationPreparation;
+  /** Stable card IDs, checkpointed before audit; not published until the chain completes. */
+  drafts?: Card[];
+  audit?: { status: GenerationAuditStatus; reason: string; verdicts: { index: number; cardId: string; status: GenerationAuditStatus; reason: string }[] };
+  /** Persist before calling so an interrupted audit is never silently re-spent. */
+  auditRequested?: boolean;
+  committed?: boolean;
+}
+
 export interface Card {
   id: string;
   highlightId: string;
@@ -72,6 +103,12 @@ export interface Card {
    * pass was off, skipped, or failed — not that the card was approved.
    */
   critiqueRan?: boolean;
+  generation?: {
+    batchId: string;
+    planId: string;
+    factIds: string[];
+    audit: { status: GenerationAuditStatus; reason: string; content: string; sourceKey?: string };
+  };
   /** Present only after a user-requested check of this exact content. */
   userCheck?: { content: string; at: string; issues: string[] };
 }
@@ -101,6 +138,10 @@ export interface Highlight {
   generatedAt: string | null;
   exportedAt: string | null;
   cards: Card[];
+  /** Optional staged-generation checkpoints; legacy captures have none. */
+  generation?: GenerationBatch;
+  /** Prior inventories/audits keep older cards’ fact IDs resolvable without a second card store. */
+  generationHistory?: Omit<GenerationBatch, "drafts">[];
   origin: "selection" | "markdown-highlight" | "ai" | "highlighter" | "pdf" | "quiz" | "ask";
   /** PDF++ subpath (page=…&selection=…|annotation=…|rect=…) when the highlight came from a PDF++ link; lets the inbox open the exact highlight. */
   subpath?: string;

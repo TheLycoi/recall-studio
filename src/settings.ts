@@ -69,7 +69,7 @@ export interface RecallSettings {
   topicFolder: string;
 
   // Card quality
-  /** Second model call per highlight that checks grounding, sibling interference, and Bloom fit before the card is stored. */
+  /** Independent source audit after preparation, writing and deterministic lint. */
   critiquePass: boolean;
   /** What happens to a card that fails a deterministic lint check. */
   lintMode: LintMode;
@@ -421,9 +421,9 @@ export class RecallSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("Card quality").setHeading();
 
     new Setting(containerEl)
-      .setName("Critique pass")
+      .setName("Independent audit")
       .setDesc(
-        "Before a card is stored, a second model call checks it for grounding, interference between sibling cards, and Bloom fit. On by default, because it is the difference between a card you keep and one you delete. The cost is one extra model call per highlight, so cards take a little longer to appear; capture itself is unaffected either way. Turn it off if you are drafting in bulk and would rather triage by hand.",
+        "Generation uses one preparation request and one writer request. This adds at most one independent audit for the whole batch, including a single card. It checks claims against the captured source and reports findings without rewriting cards. Disabled, failed or incomplete audits remain visibly unverified. Audit is not approval; you still decide what to export.",
       )
       .addToggle((t) =>
         t.setValue(s.critiquePass).onChange((v) => {

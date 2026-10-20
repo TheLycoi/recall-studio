@@ -20,6 +20,7 @@ import { isPdfHighlight, liveCards, makeCard, pendingCards, type Card, type Card
 import { askInstruction, SchemaSuggestionsModal } from "./modals";
 import { countClozes, fmtDate, locateQuote, splitFrontmatter, plainText } from "./util";
 import { describeError } from "./llm";
+import { cardAuditLabel } from "./generation";
 import { findCrossInterference, LINT_LABELS, wrapCloze } from "./lint";
 import { DEFAULT_SETTINGS } from "./settings";
 import { cardContent, checkCard, currentCardCheck } from "./cardActions";
@@ -545,6 +546,20 @@ export class InboxView extends ItemView {
     );
     if (h.instruction) left.createDiv({ cls: "wikilm-hl-instruction", text: `“${h.instruction}”` });
     if (h.status === "error" && h.error) left.createDiv({ cls: "wikilm-error", text: h.error });
+    if (h.generation) {
+      const g = h.generation;
+      const batchCards = h.cards.filter(c => c.generation?.batchId === g.id);
+      const auditStatus = g.audit?.status === "verified" && (!batchCards.length || batchCards.some(c => !cardAuditLabel(c, h).startsWith("Audit verified"))) ? "unverified" : g.audit?.status ?? "unverified";
+      left.createDiv({ cls: "wikilm-muted", text: `${g.preparation ? "Preparation saved" : "Preparation pending"} · ${g.drafts ? "Drafts saved" : "Writer pending"} · Audit ${auditStatus}` });
+      if (g.audit && auditStatus !== "verified") left.createDiv({ cls: "wikilm-card-reason", text: g.audit.reason });
+      for (const [label, rows] of [["Excluded", g.preparation?.exclusions], ["Omitted", g.preparation?.omissions]] as const) {
+        for (const row of rows ?? []) left.createDiv({ cls: "wikilm-muted", text: `${label} ${row.factIds.join(", ")}: ${row.reason}` });
+      }
+      for (const conflict of g.preparation?.conflicts ?? []) left.createDiv({ cls: "wikilm-card-reason", text: `Source conflict: ${conflict.reason} Quote: “${conflict.quote}”` });
+    }
+    for (const prior of h.generationHistory ?? []) {
+      for (const conflict of prior.preparation?.conflicts ?? []) left.createDiv({ cls: "wikilm-card-reason", text: `Previous batch source conflict: ${conflict.reason} Quote: “${conflict.quote}”` });
+    }
 
     const hlActions = left.createDiv({ cls: "wikilm-hl-actions" });
     const iconBtn = (icon: string, tip: string, fn: () => void) => {
@@ -641,6 +656,9 @@ export class InboxView extends ItemView {
     }
     if (c.status === "duplicate") meta.createSpan({ cls: "wikilm-badge wikilm-badge-duplicate", text: "Duplicate content" });
     if (c.edited) meta.createSpan({ cls: "wikilm-badge", text: "edited" });
+    const auditLabel = cardAuditLabel(c, h);
+    const auditBadge = meta.createSpan({ cls: "wikilm-badge", text: auditLabel });
+    auditBadge.title = c.generation?.audit.reason ?? "No independent staged audit is recorded for this card. Human review is still required.";
     // Render what the pipeline actually recorded rather than recomputing it:
     // the stored lintFailures are the ones lintMode acted on, so a recomputed
     // check could disagree with the status the card is sitting in.
@@ -723,6 +741,7 @@ export class InboxView extends ItemView {
       return;
     }
 
+    if (c.generation && !auditLabel.startsWith("Audit verified")) el.createDiv({ cls: "wikilm-card-reason", text: c.generation.audit.reason });
     const userCheck = currentCardCheck(c, h);
     if (userCheck?.issues.length) el.createDiv({ cls: "wikilm-card-reason", text: userCheck.issues.join(" · ") });
 
