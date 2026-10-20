@@ -30,11 +30,16 @@ function element(tag='div', options={}) {
 function descendants(e){return [e,...e.children.flatMap(descendants)];}
 function harness(){
   const root=element();
-  const host={app:{vault:{getMarkdownFiles:()=>[],getFiles:()=>[],configDir:'.obsidian'}},store:{all:()=>[],onChange:()=>()=>{}},settings:{lintMode:'show'}};
+  const host={app:{workspace:{},metadataCache:{},vault:{getMarkdownFiles:()=>[],getFiles:()=>[],configDir:'.obsidian'}},store:{all:()=>[],onChange:()=>()=>{}},settings:{lintMode:'show'}};
   const view=new InboxView({contentEl:root},host);
   view.renderHeader=()=>{};view.rebuildCrossInterference=()=>{};
   return {root,view,host};
 }
+test('the compatible Chat entrypoint mounts Quiz in the same panel',async()=>{
+  const {view}=harness();await view.onOpen();
+  assert.equal(view.tabChat.options.text,'Quiz');assert.equal(view.chat.constructor.name,'QuizView');
+  view.focusChat();assert.equal(view.panel,'chat');
+});
 test('the passage star checks its live cards without asking to generate more',async()=>{
   const {root,view}=harness();
   const calls=[];view.checkAgainstPractices=async(h,c)=>calls.push(c.id);view.renderCard=()=>{};

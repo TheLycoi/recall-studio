@@ -13,6 +13,8 @@ export interface QuizSectionIn {
   part: number;
   parts: number;
   points: string[];
+  /** Rechecked at dispatch and after await; never serialized into the prompt. */
+  authorized?: () => boolean;
 }
 
 export interface QuizQuestionMessageArgs extends QuizSectionIn {

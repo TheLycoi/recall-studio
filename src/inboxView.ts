@@ -24,7 +24,7 @@ import { cardAuditLabel } from "./generation";
 import { findCrossInterference, LINT_LABELS, wrapCloze } from "./lint";
 import { DEFAULT_SETTINGS } from "./settings";
 import { cardContent, checkCard, currentCardCheck } from "./cardActions";
-import { ChatView } from "./reviewChatView";
+import { QuizView as ChatView } from "./quizView";
 
 export const VIEW_TYPE_INBOX = "review-inbox";
 
@@ -62,8 +62,8 @@ const ORIGIN_LABELS: Partial<Record<Highlight["origin"], string>> = {
 /**
  * The inbox: every highlight grouped under its source note, the highlighted
  * passage on the left and its cards on the right, built for fast triage.
- * Export accepts drafts. Chat stays inside this view. No quiz, dashboard or
- * scheduler lives here.
+ * Export accepts drafts. Quiz stays inside this view, without a dashboard
+ * or scheduler.
  */
 export class InboxView extends ItemView {
   private chat?: ChatView;
@@ -275,7 +275,7 @@ export class InboxView extends ItemView {
       return b;
     };
     this.tabInbox = tab("inbox", "Inbox");
-    this.tabChat = tab("chat", "Chat");
+    this.tabChat = tab("chat", "Quiz");
     this.updateTabs();
   }
 

@@ -48,13 +48,12 @@ test("the sidebar view has its own type, so Review Inbox and Recall can share a 
   assert.match(readFileSync("src/inboxView.ts", "utf8"), /VIEW_TYPE_INBOX = "review-inbox"/);
 });
 
-test("Review Inbox has no quiz, dashboard, statistics or scheduler surface", () => {
+test("Quiz stays embedded without a dashboard, statistics or scheduler surface", () => {
   const src = readdirSync("src").filter((n) => n.endsWith(".ts"));
   for (const f of src) {
     const text = readFileSync(`src/${f}`, "utf8");
-    // Real symbols, not prose: a comment saying "there is no dashboard" is
-    // fine; a registered dashboard or quiz view is not.
-    assert.equal(/QuizPanel|VIEW_TYPE_QUIZ|QuizView|VIEW_TYPE_DASHBOARD|DashboardView|StatisticsView/.test(text), false, f);
+    // Quiz is embedded in Inbox, never registered as a second view.
+    assert.equal(/QuizPanel|VIEW_TYPE_QUIZ|VIEW_TYPE_DASHBOARD|DashboardView|StatisticsView/.test(text), false, f);
   }
   // The removed surfaces are gone as files, not merely unregistered.
   for (const gone of ["src/quizPanel.ts", "src/quizPages.ts", "src/chatCommands.ts", "src/spaced.ts"]) {
