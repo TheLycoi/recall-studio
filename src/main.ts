@@ -16,6 +16,7 @@ import type { Card, Highlight } from "./model";
 import { DEFAULT_SETTINGS, RecallSettingTab, type RecallSettings } from "./settings";
 import { SchemaFile } from "./schemaFile";
 import { InboxStore } from "./store";
+import { registerSourceVisibility } from "./sourceVisibility";
 import { buildAnkiTextImport } from "./util";
 
 export default class RecallPlugin extends Plugin {
@@ -27,6 +28,8 @@ export default class RecallPlugin extends Plugin {
   anki!: AnkiClient;
   highlighter!: Highlighter;
   private statusBar: HTMLElement | null = null;
+  private unsubscribeStatus?: () => void;
+  private sourceVisibility?: ReturnType<typeof registerSourceVisibility>;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -55,7 +58,11 @@ export default class RecallPlugin extends Plugin {
     this.statusBar = this.addStatusBarItem();
     this.statusBar.addClass("wikilm-statusbar");
     this.statusBar.addEventListener("click", () => void this.openInbox());
-    this.store.onChange(() => this.refreshStatusBar());
+    this.unsubscribeStatus = this.store.onChange(() => this.refreshStatusBar());
+    this.sourceVisibility = registerSourceVisibility(this);
+    this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
+      this.store.moveSource(oldPath, file.path);
+    }));
     this.highlighter = new Highlighter(this);
     this.highlighter.install();
     this.refreshStatusBar();
@@ -111,7 +118,14 @@ export default class RecallPlugin extends Plugin {
 
   async onunload(): Promise<void> {
     this.generator.stop();
+    this.unsubscribeStatus?.();
     let failure: unknown;
+    try {
+      this.sourceVisibility?.destroy();
+    } catch (e) {
+      console.error("Review Inbox: source visibility cleanup failed during unload", e);
+      failure = e;
+    }
     try {
       await this.llm.abort();
     } catch (e) {
@@ -139,6 +153,7 @@ export default class RecallPlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+    this.sourceVisibility?.refresh();
     this.refreshStatusBar();
   }
 

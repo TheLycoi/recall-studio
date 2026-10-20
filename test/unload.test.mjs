@@ -21,7 +21,7 @@ before(async () => {
     stdin: { contents: 'import Plugin from "./src/main"; export { notices } from "obsidian"; export default Plugin;', resolveDir: root, sourcefile: "unload-probe.ts", loader: "ts" },
     outfile: out,
     logLevel: "error",
-    external: shared.external.filter(e => e !== "obsidian"),
+    external: shared.external.filter(e => e !== "obsidian" && e !== "@codemirror/view"),
     plugins: [{ name: "obsidian-stub", setup(b) {
       b.onResolve({ filter: /^obsidian$/ }, () => ({ path: "obsidian", namespace: "stub" }));
       b.onLoad({ filter: /.*/, namespace: "stub" }, () => ({ loader: "js", contents: `
@@ -31,6 +31,8 @@ before(async () => {
         export class TFolder extends TAbstractFile {}
         export class ItemView {}
         export class Modal {}
+        export class MarkdownRenderChild {}
+        export const editorInfoField = {};
         export class SuggestModal {}
         export class PluginSettingTab {}
         export class MarkdownView {}
@@ -49,6 +51,13 @@ before(async () => {
         export const loadPdfJs = () => {};
         export class Menu {}
       ` }));
+    } }, { name: "cm-stub", setup(b) {
+      b.onResolve({ filter: /^@codemirror\/view$/ }, () => ({ path: "cm", namespace: "stub-cm" }));
+      b.onLoad({ filter: /.*/, namespace: "stub-cm" }, () => ({ loader: "js", contents: `
+        export class WidgetType {}
+        export const Decoration = { none: [], widget: () => ({ range: () => ({ from: 0 }) }), set: xs => xs };
+        export const ViewPlugin = { fromClass: c => c };
+      ` }));
     } }],
   });
   const mod = createRequire(import.meta.url)(out);
@@ -57,19 +66,20 @@ before(async () => {
 });
 after(() => { if (dir) rmSync(dir, { recursive: true, force: true }); });
 
-for (const failing of ["abort", "flush"]) {
+for (const failing of ["visibility", "abort", "flush"]) {
   test(`registered plugin unload closes the store when ${failing} rejects`, async () => {
     const steps = [];
     const plugin = new PluginClass();
     plugin.generator = { stop: () => steps.push("stop") };
+    plugin.sourceVisibility = { destroy: () => { steps.push("visibility"); if (failing === "visibility") throw Error("visibility failed"); } };
     plugin.llm = { abort: async () => { steps.push("abort"); if (failing === "abort") throw Error("abort failed"); } };
     plugin.store = {
       flush: async () => { steps.push("flush"); if (failing === "flush") throw Error("disk full"); },
       close: () => steps.push("close"),
       get hasUnsavedChanges() { return failing === "flush"; },
     };
-    await assert.rejects(plugin.onunload(), failing === "abort" ? /abort failed/ : /disk full/);
-    assert.deepEqual(steps, ["stop", "abort", "flush", "close"]);
+    await assert.rejects(plugin.onunload(), failing === "visibility" ? /visibility failed/ : failing === "abort" ? /abort failed/ : /disk full/);
+    assert.deepEqual(steps, ["stop", "visibility", "abort", "flush", "close"]);
     if (failing === "flush") assert.ok(notices.some(n => /not yet durable|not saved|unsaved/.test(n)));
   });
 }

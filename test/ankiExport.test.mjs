@@ -162,6 +162,7 @@ class Plugin {
   registerDomEvent() {}
   registerInterval() {}
   registerMarkdownPostProcessor() {}
+  registerEditorExtension() {}
   async loadData() {
     return null;
   }
@@ -203,6 +204,7 @@ let requestUrlImpl = async (opts) => {
 const obsidian = {
   App: Stub, ButtonComponent: Stub, Editor: Stub, FileView: Stub, ItemView, MarkdownRenderer: Stub, MarkdownView: ItemView,
   Menu: Stub, Modal: Stub, Notice, Plugin, PluginSettingTab, Setting: Stub, SuggestModal: Stub,
+  MarkdownRenderChild: Stub, editorInfoField: {},
   TAbstractFile: Stub, TFile, TFolder: Stub, WorkspaceLeaf: Stub, WorkspaceWindow: Stub,
   addIcon() {}, setIcon() {}, loadPdfJs: async () => ({}),
   normalizePath: (p) => p.replace(/\/{2,}/g, "/").replace(/^\.\//, ""),
@@ -283,6 +285,7 @@ before(async () => {
   const origLoad = Module._load;
   Module._load = function (request, ...rest) {
     if (request === "obsidian") return obsidian;
+    if (request === "@codemirror/view") return { WidgetType: class {}, Decoration: { none: [], widget: () => ({ range: () => ({ from: 0 }) }), set: xs => xs }, ViewPlugin: { fromClass: c => c } };
     return origLoad.call(this, request, ...rest);
   };
   try {

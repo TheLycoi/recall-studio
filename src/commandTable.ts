@@ -49,6 +49,12 @@ export const COMMAND_TABLE: CommandSpec[] = [
     hint: "always",
   },
   {
+    id: "open-source-history",
+    name: "Open source history",
+    aliases: ["source-history"],
+    hint: "current note or PDF; choose a source otherwise",
+  },
+  {
     id: "open-chat",
     name: "Open chat",
     aliases: ["chat"],

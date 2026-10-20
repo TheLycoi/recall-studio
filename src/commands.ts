@@ -9,6 +9,7 @@ import { COMMAND_TABLE, type CommandSpec } from "./commandTable";
 import { captureMarkdownHighlights, capturePdfSelection, captureReadingSelection, captureSelection } from "./capture";
 import { isPdfFile, readPdfSelection } from "./pdf";
 import { askInstruction, SchemaSuggestionsModal } from "./modals";
+import { openCurrentSourceHistory } from "./sourceVisibility";
 
 export interface RecallCommand extends CommandSpec {
   /** True when the command can run right now; the palette hides it otherwise. */
@@ -90,6 +91,10 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
   "open-inbox": {
     available: () => true,
     run: (p) => void p.openInbox(),
+  },
+  "open-source-history": {
+    available: () => true,
+    run: (p) => openCurrentSourceHistory(p),
   },
   "open-chat": {
     available: () => true,

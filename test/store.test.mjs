@@ -65,6 +65,51 @@ after(() => {
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
+test("renaming a folder moves active and archived references with path boundary protection", async () => {
+  const { app } = memoryVault({});
+  const store = new s.InboxStore(app, "wiki/_schema");
+  await store.load();
+  store.add({ id: "one", sourcePath: "old/a.md", sourceTitle: "a", cards: [], status: "ready" });
+  store.add({ id: "two", sourcePath: "old/sub/b.pdf", sourceTitle: "b", cards: [], status: "exported", archived: true, page: 2, subpath: "page=2" });
+  store.add({ id: "three", sourcePath: "older/c.md", sourceTitle: "c", cards: [], status: "ready" });
+  assert.equal(store.moveSource("old", "new"), 2);
+  assert.deepEqual(store.sourceHistory("new/sub/b.pdf").map(h => [h.id, h.sourceTitle, h.subpath]), [["two", "b", "page=2"]]);
+  assert.equal(store.get("one").sourcePath, "new/a.md");
+  assert.equal(store.get("three").sourcePath, "older/c.md");
+  store.close();
+});
+
+test("rename rekeys source metadata without dropping active or archived links across reload", async () => {
+  const { app } = memoryVault({});
+  const store = new s.InboxStore(app, "wiki/_schema");
+  await store.load();
+  store.add({ id: "a", sourcePath: "old/a.md", sourceTitle: "a", text: "quote", cards: [{ id: "c", status: "exported" }], archived: true, status: "exported" });
+  store.setTranscript("old/a.md", { text: "transcript", origin: "pasted", sourceFile: null, addedAt: "now", truncated: false });
+  store.setHighlightInstruction("old/a.md", "instruction");
+  store.markIngested("old/a.md", "hash");
+  store.moveSource("old/a.md", "new/b.md");
+  await store.flush(); store.close();
+  const loaded = new s.InboxStore(app, "wiki/_schema"); await loaded.load();
+  assert.equal(loaded.get("a").sourcePath, "new/b.md");
+  assert.equal(loaded.findCard("c").highlight.sourcePath, "new/b.md");
+  assert.equal(loaded.getTranscript("new/b.md").text, "transcript");
+  assert.equal(loaded.getHighlightInstruction("new/b.md"), "instruction");
+  assert.equal(loaded.ingestedHash("new/b.md"), "hash");
+  assert.equal(loaded.getTranscript("old/a.md"), undefined);
+  loaded.close();
+});
+test("metadata collisions on rename preserve both snapshots rather than overwriting a retained source", async () => {
+  const { app } = memoryVault({}); const store = new s.InboxStore(app, "wiki/_schema"); await store.load();
+  store.add({ id: "a", sourcePath: "old/a.md", sourceTitle: "a", cards: [], status: "ready" });
+  store.setHighlightInstruction("old/a.md", "old instructions");
+  store.setHighlightInstruction("new/a.md", "retained instructions");
+  assert.equal(store.moveSource("old", "new"), 0);
+  assert.equal(store.get("a").sourcePath, "old/a.md");
+  assert.equal(store.getHighlightInstruction("old/a.md"), "old instructions");
+  assert.equal(store.getHighlightInstruction("new/a.md"), "retained instructions");
+  store.close();
+});
+
 /**
  * The vault adapter as far as src/store.ts reaches it (obsidian.d.ts
  * DataAdapter): exists, mkdir, read, write, remove and rename, over one map of files.

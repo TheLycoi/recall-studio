@@ -241,6 +241,35 @@ export class InboxStore {
     return this.data.highlights.filter((h) => h.sourcePath === sourcePath);
   }
 
+  /** Preserve source references when Obsidian renames a note, PDF, or folder. */
+  moveSource(oldPath: string, newPath: string): number {
+    if (this.readOnly || this.closed || !oldPath || !newPath || oldPath === newPath) return 0;
+    const move = (path: string) => path === oldPath ? newPath : path.startsWith(`${oldPath}/`) ? newPath + path.slice(oldPath.length) : path;
+    const maps = [this.data.transcripts, this.data.highlightInstructions, this.data.ingested];
+    if (newPath.startsWith(`${oldPath}/`) || maps.some(map => map && Object.keys(map).some(key => move(key) !== key && Object.hasOwn(map, move(key))))) {
+      new Notice("Review Inbox: source rename conflicts with retained metadata. History remains under its original path; no records were overwritten.", 0);
+      return 0;
+    }
+    let changed = 0;
+    for (const h of this.data.highlights) {
+      const next = move(h.sourcePath);
+      if (next === h.sourcePath) continue;
+      h.sourcePath = next;
+      h.sourceTitle = next.split("/").pop()?.replace(/\.[^.]+$/, "") ?? next;
+      changed++;
+    }
+    // These maps are keyed by source path; moving them keeps the source-specific context attached.
+    for (const map of [this.data.transcripts, this.data.highlightInstructions, this.data.ingested]) {
+      if (!map) continue;
+      for (const key of Object.keys(map)) {
+        const next = move(key);
+        if (next !== key) { map[next] = map[key]; delete map[key]; changed++; }
+      }
+    }
+    if (changed) this.touch();
+    return changed;
+  }
+
   get(id: string): Highlight | undefined {
     return this.data.highlights.find((h) => h.id === id);
   }

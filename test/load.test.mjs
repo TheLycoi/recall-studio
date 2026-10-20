@@ -110,6 +110,7 @@ function makeApp(files) {
  * nearly written for a bug the real app cannot have. The three cases are
  * asserted below, so the stub cannot drift back.
  */
+const openedModals = [];
 function obsidianStub() {
   class Plugin {
     constructor(app, manifest) {
@@ -142,11 +143,12 @@ function obsidianStub() {
     addStatusBarItem() {
       return el();
     }
-    addCommand() {}
+    addCommand(command) { (this.commands ??= []).push(command); }
     registerEvent() {}
     registerDomEvent() {}
     registerInterval() {}
-    registerMarkdownPostProcessor() {}
+    registerMarkdownPostProcessor(fn) { this.sourceProcessor = fn; }
+    registerEditorExtension(extension) { this.sourceExtension = extension; }
     addChild() {}
   }
   class PluginSettingTab {
@@ -164,7 +166,12 @@ function obsidianStub() {
     }
   }
   class FileView extends ItemView {}
-  class Modal {}
+  class Modal {
+    constructor(app) { this.app = app; this.contentEl = el(); this.titleEl = el(); }
+    open() { openedModals.push(this); this.onOpen(); }
+    close() { this.onClose?.(); }
+  }
+  class MarkdownRenderChild {}
   class SuggestModal extends Modal {}
   class TAbstractFile {}
   class TFile extends TAbstractFile {}
@@ -183,6 +190,8 @@ function obsidianStub() {
     ItemView,
     FileView,
     Modal,
+    MarkdownRenderChild,
+    editorInfoField: {},
     SuggestModal,
     TAbstractFile,
     TFile,
@@ -241,6 +250,7 @@ function load(data) {
   const origLoad = Module._load;
   Module._load = function (request, ...rest) {
     if (request === "obsidian") return stub;
+    if (request === "@codemirror/view") return { WidgetType: class {}, Decoration: { none: [], widget: () => ({ range: () => ({ from: 0 }) }), set: xs => xs }, ViewPlugin: { fromClass: c => c } };
     return origLoad.call(this, request, ...rest);
   };
 
@@ -297,6 +307,8 @@ test("onload resolves with a valid data.json, and builds every collaborator", as
   }
   assert.equal(plugin.settings.provider, "opencode", "the saved provider was not read");
   assert.equal(plugin.settings.opencodeModel, "deepseek/deepseek-flash", "the saved model was not read");
+  assert.ok(plugin.sourceExtension, "editor passage extension was not registered");
+  assert.equal(typeof plugin.sourceProcessor, "function", "reading passage processor was not registered");
 });
 
 test("onload resolves when data.json is malformed, falling back to defaults", async () => {
@@ -326,4 +338,28 @@ test("loading never writes data.json", async () => {
   const plugin = instance(mod, files);
   await plugin.onload();
   assert.equal(plugin.savedDuringLoad, 0, "onload wrote settings");
+});
+
+test("registered source-history command opens current-source archives without touching source notes", async () => {
+  const { mod, files } = load(VALID);
+  const plugin = instance(mod, files);
+  await plugin.onload();
+  const originalFiles = new Map(files);
+  const path = "missing.md";
+  plugin.store.add({ id: "archive", sourcePath: path, text: "Retained quote", archived: true, status: "exported", cards: [], page: null });
+  assert.equal(plugin.store.all().length, 0);
+  assert.equal(plugin.store.sourceHistory(path).length, 1);
+  plugin.app.workspace.getActiveFile = () => ({ path, extension: "md" });
+  plugin.app.workspace.offref = () => {};
+  plugin.app.vault.offref = () => {};
+  const command = plugin.commands.find(c => c.id === "open-source-history");
+  assert.ok(command);
+  const before = openedModals.length;
+  assert.equal(command.checkCallback(true), true);
+  assert.equal(openedModals.length, before);
+  assert.equal(command.checkCallback(false), true);
+  assert.equal(openedModals.at(-1).path, path);
+  openedModals.at(-1).close();
+  plugin.store.close();
+  assert.deepEqual(files, originalFiles);
 });
