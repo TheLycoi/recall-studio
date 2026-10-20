@@ -66,11 +66,12 @@ before(async () => {
 });
 after(() => { if (dir) rmSync(dir, { recursive: true, force: true }); });
 
-for (const failing of ["visibility", "abort", "flush"]) {
+for (const failing of ["visibility", "abort", "flush", "unsubscribe", "drain"]) {
   test(`registered plugin unload closes the store when ${failing} rejects`, async () => {
     const steps = [];
     const plugin = new PluginClass();
-    plugin.generator = { stop: () => steps.push("stop") };
+    plugin.generator = { stop: async () => { steps.push("stop"); if (failing === "drain") throw Error("drain failed"); } };
+    plugin.unsubscribeStatus = () => { steps.push("unsubscribe"); if (failing === "unsubscribe") throw Error("unsubscribe failed"); };
     plugin.sourceVisibility = { destroy: () => { steps.push("visibility"); if (failing === "visibility") throw Error("visibility failed"); } };
     plugin.llm = { abort: async () => { steps.push("abort"); if (failing === "abort") throw Error("abort failed"); } };
     plugin.store = {
@@ -78,8 +79,8 @@ for (const failing of ["visibility", "abort", "flush"]) {
       close: () => steps.push("close"),
       get hasUnsavedChanges() { return failing === "flush"; },
     };
-    await assert.rejects(plugin.onunload(), failing === "visibility" ? /visibility failed/ : failing === "abort" ? /abort failed/ : /disk full/);
-    assert.deepEqual(steps, ["stop", "visibility", "abort", "flush", "close"]);
+    await assert.rejects(plugin.onunload(), failing === "flush" ? /disk full/ : new RegExp(`${failing} failed`));
+    assert.deepEqual(steps, ["stop", "unsubscribe", "visibility", "abort", "flush", "close"]);
     if (failing === "flush") assert.ok(notices.some(n => /not yet durable|not saved|unsaved/.test(n)));
   });
 }

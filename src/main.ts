@@ -30,6 +30,7 @@ export default class RecallPlugin extends Plugin {
   private statusBar: HTMLElement | null = null;
   private unsubscribeStatus?: () => void;
   private sourceVisibility?: ReturnType<typeof registerSourceVisibility>;
+  private unloading?: Promise<void>;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -116,10 +117,22 @@ export default class RecallPlugin extends Plugin {
     });
   }
 
-  async onunload(): Promise<void> {
-    this.generator.stop();
-    this.unsubscribeStatus?.();
+  onunload(): Promise<void> {
+    return this.unloading ??= this.finishUnload();
+  }
+
+  private async finishUnload(): Promise<void> {
     let failure: unknown;
+    const stopped = this.generator.stop().catch(e => {
+      console.error("Recall Studio: generation cleanup failed during unload", e);
+      failure ??= e;
+    });
+    try {
+      this.unsubscribeStatus?.();
+    } catch (e) {
+      console.error("Recall Studio: status cleanup failed during unload", e);
+      failure ??= e;
+    }
     try {
       this.sourceVisibility?.destroy();
     } catch (e) {
@@ -132,6 +145,8 @@ export default class RecallPlugin extends Plugin {
       console.error("Recall Studio: model abort failed during unload", e);
       failure = e;
     }
+    // A cancelled run can still roll back cards after its final write resumes.
+    await stopped;
     try {
       await this.store.flush();
     } catch (e) {

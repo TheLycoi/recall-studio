@@ -12,6 +12,7 @@ class Interrupted extends Error {}
 /** Existing queue, with three bounded logical stages and durable checkpoints. */
 export class Generator {
   private running = new Set<string>();
+  private pending = new Set<Promise<void>>();
   private stopped = false;
   private lifetime = 0;
   private requests = new Map<string, number>();
@@ -21,7 +22,12 @@ export class Generator {
   constructor(private plugin: RecallPlugin) {}
 
   start(): void { this.stopped = false; this.kick(); }
-  stop(): void { this.stopped = true; this.lifetime++; }
+  /** Invalidate synchronously; abort providers before awaiting this drain. */
+  stop(): Promise<void> {
+    this.stopped = true;
+    this.lifetime++;
+    return Promise.allSettled(this.pending).then(() => {});
+  }
 
   enqueue(h: Highlight): void {
     if (h.archived || h.status === "dismissed") return;
@@ -60,7 +66,13 @@ export class Generator {
       if (this.running.size >= limit) break;
       if (h.archived || h.status !== "queued" || this.running.has(h.id)) continue;
       this.running.add(h.id);
-      void this.run(h).finally(() => { this.running.delete(h.id); this.kick(); });
+      const task = this.run(h).finally(() => {
+        this.running.delete(h.id);
+        this.pending.delete(task);
+        this.kick();
+      });
+      this.pending.add(task);
+      void task.catch(e => console.error("Recall Studio: generation failed", e));
     }
     this.plugin.refreshStatusBar();
   }
