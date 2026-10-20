@@ -128,6 +128,43 @@ test("registered editor SR indicator is opt-in, exact, unsaved and separate from
   modal.close(); env.controller.destroy();
   assert.equal(env.workspace.refs.size, 0);
 });
+test("container code has no registered SR indicator or history entry and leaves adjacent prose uncovered", async () => {
+  for (const block of [
+    "> ```\n> Not a question::Not an answer\n> ```",
+    "- ~~~\n  Not a question::Not an answer\n  ~~~",
+  ]) {
+    const env = setup({ raw: block, settings: { srRecognitionEnabled: true, srRecognitionNotePaths: "a.md" } });
+    let writes = 0;
+    for (const method of ["modify", "create", "append", "process"]) env.plugin.app.vault[method] = () => { writes++; throw new Error("Recognition must not write source notes"); };
+    const e = editor(env);
+    assert.deepEqual(e.marks(), [], block);
+    const code = reading(env, { start: 1, end: 1, rendered: block.split("\n")[1] }); await settle();
+    assert.equal(code.paragraph.querySelectorAll("button").length, 0);
+    api.openCurrentSourceHistory(env.plugin); await settle();
+    assert.doesNotMatch(opened.at(-1).contentEl.textContent, /Existing SR card|Not a question/);
+    opened.at(-1).close(); code.child.unload();
+    assert.equal(env.state.raw, block);
+    assert.deepEqual(env.state.history, []);
+
+    const raw = `Before::Answer\n\n${block}\n\nAfter:::Answer\n\nAdjacent prose`;
+    env.state.raw = raw;
+    e.view.dispatch({ changes: { from: 0, to: e.view.state.doc.length, insert: raw } });
+    assert.deepEqual(e.marks().map(m => m.from), ["Before::Answer".length, raw.indexOf("After:::Answer") + "After:::Answer".length]);
+    for (const mark of e.marks()) assert.match(mark.widget.toDOM(e.view).textContent, /Existing SR card/);
+    const before = reading(env, { start: 0, end: 0, rendered: "Before::Answer" });
+    const after = reading(env, { start: 6, end: 6, rendered: "After:::Answer" });
+    const prose = reading(env, { start: 8, end: 8, rendered: "Adjacent prose" });
+    await settle();
+    assert.equal(before.paragraph.querySelectorAll("button").length, 1);
+    assert.equal(after.paragraph.querySelectorAll("button").length, 1);
+    assert.equal(prose.paragraph.querySelectorAll("button").length, 0);
+    assert.equal(writes, 0);
+    assert.equal(env.state.raw, raw);
+    assert.deepEqual(env.state.history, []);
+    before.child.unload(); after.child.unload(); prose.child.unload();
+    e.instance.destroy(); env.controller.destroy();
+  }
+});
 test("reading SR marker requires one exact whole section card, and invalidates on unsaved edits/exclusion/unload", async () => {
   let ignore = false;
   const raw = "#cards\n\nQ::A\n\nNearby prose";

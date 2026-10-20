@@ -23,7 +23,7 @@ type Line = { text: string; start: number; line: number; blocked: boolean };
 
 /** Exclusions keep original offsets and never join across hidden source text. */
 function sourceLines(raw: string): Line[] {
-  let start = 0, frontmatter = /^(?:\uFEFF)?---\r?\n/.test(raw), fence = "", comment = "", metadata = false;
+  let start = 0, frontmatter = /^(?:\uFEFF)?---\r?\n/.test(raw), fence = "", comment = "", metadata = false, list = false;
   return raw.split("\n").map((value, i) => {
     let text = value.replace(/\r$/, ""), blocked = false;
     if (frontmatter) {
@@ -36,7 +36,11 @@ function sourceLines(raw: string): Line[] {
     } else {
       metadata = /^ {0,3}> ?\[!sr\|card-metadata\]/.test(text) || (metadata && /^ {0,3}>/.test(text));
       const open = !comment ? text.match(/^ {0,3}(`{3,}|~{3,})/)?.[1] : null;
-      if (metadata && !comment) blocked = true;
+      if (!comment) list = /^ {0,3}(?:[-+*]|\d+[.)])(?:[ \t]|$)/.test(text) || (list && /^(?:[ \t]|$)/.test(text));
+      // shortcut: blockquotes and lists (including indented continuations) are excluded;
+      // add container-aware parsing before recognizing cards inside them.
+      if (!comment && (list || /^ {0,3}>/.test(text))) blocked = true;
+      else if (metadata && !comment) blocked = true;
       else if (open) { fence = open; blocked = true; }
       else if (!comment && /^\t|^ {4}/.test(text)) blocked = true;
       else {

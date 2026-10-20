@@ -81,6 +81,106 @@ test("SR metadata callouts never expose scheduling fields as inline cards", () =
   const raw = "#cards\n\nQ::A\n> [!sr|card-metadata]\n> field::value\n> <!--SR:!2026-10-20,1,250-->\n\nOther::Answer";
   assert.deepEqual(api.recognizeSrCards(raw, "a.md", configured).map(c => c.text), ["Q::A", "Other::Answer"]);
 });
+test("blockquote fenced examples are not cards even in an exact-path eligible note", () => {
+  const raw = "> ```\n> Not a question::Not an answer\n> ```";
+  assert.deepEqual(api.recognizeSrCards(raw, "a.md", { srRecognitionEnabled: true, srRecognitionNotePaths: "a.md" }), []);
+});
+test("list-item fenced examples cannot supply cards from indented continuations", () => {
+  const raw = "- ```\n  Not a question::Not an answer\n  ```";
+  assert.deepEqual(api.recognizeSrCards(raw, "a.md", { srRecognitionEnabled: true, srRecognitionNotePaths: "a.md" }), []);
+});
+test("nested quotes and callouts exclude fences without changing surrounding card ranges", () => {
+  for (const block of [
+    ">> ```md\n>> hidden::answer\n>> ```",
+    "> > ~~~md\n> > hidden:::answer\n> > ~~~",
+    "   > [!example] A fenced example\n   > ```md\n   > The ==hidden answer==.\n   > ```",
+    "> [!example]\n> - ~~~\n>   hidden::answer\n>   ~~~",
+  ]) {
+    const raw = `Before::Answer\n\n${block}\n\nNearby prose\n\nAfter:::Answer`;
+    const cards = api.recognizeSrCards(raw, "a.md", { srRecognitionEnabled: true, srRecognitionNotePaths: "a.md" });
+    assert.deepEqual(cards, [
+      { kind: "basic", start: 0, end: "Before::Answer".length, text: "Before::Answer", line: 1 },
+      { kind: "reversed", start: raw.indexOf("After:::Answer"), end: raw.length, text: "After:::Answer", line: raw.split("\n").length },
+    ], block);
+  }
+});
+test("list fences stay excluded across marker styles, nesting and indentation", () => {
+  for (const block of [
+    "- ```md\n  hidden::answer\n  ```",
+    "+ ~~~md\n  hidden:::answer\n  ~~~",
+    "* ```\n  The ==hidden answer==.\n  ```",
+    "1. ~~~\n   hidden::answer\n   ~~~",
+    "2) ```\n   hidden::answer\n   ```",
+    "- Example:\n  ```md\n  hidden::answer\n  ```",
+    "  - Example:\n    ~~~md\n    hidden::answer\n    ~~~",
+    "- Example:\n  - ```\n    hidden::answer\n    ```",
+    "- Example:\n\t~~~\n\thidden::answer\n\t~~~",
+    "- Example:\n  > ```\n  > hidden::answer\n  > ```",
+    "    ```\n    hidden::answer\n    ```",
+    "\t~~~\n\thidden::answer\n\t~~~",
+  ]) {
+    const raw = `Before::Answer\n\n${block}\n\nAfter::Answer`;
+    const cards = api.recognizeSrCards(raw, "a.md", { srRecognitionEnabled: true, srRecognitionNotePaths: "a.md" });
+    assert.deepEqual(cards.map(c => c.text), ["Before::Answer", "After::Answer"], block);
+    for (const card of cards) assert.equal(raw.slice(card.start, card.end), card.text);
+  }
+});
+test("shorter, longer and missing closers never expose container code", () => {
+  for (const block of [
+    "> ````md\n> hidden::one\n> ```\n> hidden::two\n> `````",
+    "> ~~~~md\n> hidden::one\n> ~~~\n> hidden::two\n> ~~~~~",
+    "- ````md\n  hidden::one\n  ```\n  hidden::two\n  `````",
+    "- ~~~~md\n  hidden::one\n  ~~~\n  hidden::two\n  ~~~~~",
+    "> ```\n> hidden::answer",
+    "- ~~~\n  hidden::answer",
+    "> ```\n> hidden::answer\n> ~~~\n> still::hidden",
+  ]) {
+    const raw = `${block}\n\nOutside::Answer`;
+    assert.deepEqual(api.recognizeSrCards(raw, "a.md", { srRecognitionEnabled: true, srRecognitionNotePaths: "a.md" }).map(c => c.text), ["Outside::Answer"], block);
+  }
+  for (const fence of ["`", "~"]) {
+    const raw = `${fence.repeat(4)}\nhidden::one\n${fence.repeat(3)}\nhidden::two`;
+    assert.deepEqual(api.recognizeSrCards(raw, "a.md", { srRecognitionEnabled: true, srRecognitionNotePaths: "a.md" }), []);
+    assert.deepEqual(api.recognizeSrCards(`${raw}\n${fence.repeat(5)}\nOutside::Answer`, "a.md", { srRecognitionEnabled: true, srRecognitionNotePaths: "a.md" }).map(c => c.text), ["Outside::Answer"]);
+  }
+});
+test("tags only in container code cannot enable recognition for the rest of a note", () => {
+  for (const block of [
+    "> ```\n> #cards\n> ```",
+    "> > ~~~\n> > #cards/biology\n> > ~~~",
+    "> [!example]\n> ```\n> #cards\n> ```",
+    "- ```\n  #cards\n  ```",
+    "1. Example:\n   ~~~\n   #cards/biology\n   ~~~",
+    "- ```\n  #cards",
+  ]) {
+    assert.deepEqual(api.recognizeSrCards(`${block}\n\nQ::A`, "a.md", configured), [], block);
+    assert.deepEqual(api.recognizeSrCards(`${block}\n\n#cards\n\nQ::A`, "a.md", configured).map(c => c.text), ["Q::A"], block);
+  }
+});
+test("container exclusions preserve custom-separator CRLF ranges and never bridge hidden blocks", () => {
+  const s = { srRecognitionEnabled: true, srRecognitionNotePaths: "a.md", srSingleLineSeparator: "->", srSingleLineReversedSeparator: "<->", srMultilineSeparator: "ANSWER", srMultilineEndMarker: "END" };
+  const raw = [
+    "Nearby prose", "", "Before <-> Answer", "",
+    "> ```", "> hidden -> answer", "> ```", "",
+    "- ~~~", "  hidden -> answer", "  ~~~", "",
+    "Front", "ANSWER", "Back", "END", "Adjacent prose", "",
+    "> [!sr|card-metadata]", "> field::value", "",
+    "Final -> Answer <!--SR:!2026-10-20,1,250-->", "", "Nearby prose",
+  ].join("\r\n");
+  const saved = Buffer.from(raw);
+  const cards = api.recognizeSrCards(raw, "a.md", s);
+  assert.deepEqual(cards, [
+    { kind: "reversed", start: raw.indexOf("Before"), end: raw.indexOf("Before") + "Before <-> Answer".length, text: "Before <-> Answer", line: 3 },
+    { kind: "multiline-basic", start: raw.indexOf("Front"), end: raw.indexOf("Back") + "Back".length, text: "Front\r\nANSWER\r\nBack", line: 13 },
+    { kind: "basic", start: raw.indexOf("Final"), end: raw.indexOf("Final") + "Final -> Answer".length, text: "Final -> Answer", line: 22 },
+  ]);
+  for (const card of cards) assert.equal(raw.slice(card.start, card.end), card.text);
+  assert.deepEqual(Buffer.from(raw), saved);
+  assert.deepEqual(api.recognizeSrCards(raw, "a.md", { ...s, srRecognitionEnabled: false }), []);
+  for (const block of ["> ```\n> hidden\n> ```", "- ~~~\n  hidden\n  ~~~"]) {
+    assert.deepEqual(api.recognizeSrCards(`Front\n?\n${block}\nBack`, "a.md", { srRecognitionEnabled: true, srRecognitionNotePaths: "a.md" }), []);
+  }
+});
 test("recognition requires opt-in and explicit note or body-tag scope", () => {
   const raw = "#cards\n\nQ::A";
   assert.deepEqual(api.recognizeSrCards(raw, "a.md", {}), []);
