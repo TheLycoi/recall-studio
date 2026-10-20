@@ -24,17 +24,22 @@ export function currentCardCheck(card: Card, highlight: Highlight): CardCheck | 
 export async function checkCard(
   card: Card,
   highlight: Highlight,
-  critique: (highlight: Highlight, cards: Card[], siblings: Card[]) => Promise<Array<{ verdict: string; reason?: string }>>,
+  critique: (highlight: Highlight, cards: Card[], siblings: Card[], authorized: () => boolean) => Promise<Array<{ verdict: string; reason?: string }>>,
   active: () => boolean = () => true,
 ): Promise<void> {
   delete card.userCheck;
   const content = cardContent(card, highlight);
+  const status = card.status;
+  const current = () => active() && cardContent(card, highlight) === content && card.status === status
+    && ["pending", "flagged", "approved"].includes(card.status)
+    && highlight.status === "ready" && !highlight.archived;
+  if (!current()) return;
   const siblings = highlight.cards.filter(c => c.id !== card.id && c.status !== "deleted");
   const { failures, warnings } = lintCard(card, highlight, siblings);
-  const verdicts = await critique(structuredClone(highlight), [structuredClone(card)], structuredClone(siblings));
+  const verdicts = await critique(structuredClone(highlight), [structuredClone(card)], structuredClone(siblings), current);
+  if (!current()) return;
   const verdict = verdicts[0];
   if (verdicts.length !== 1 || !verdict || !["keep", "revise", "drop"].includes(verdict.verdict)) throw new Error("The check must return exactly one valid verdict.");
-  if (!active() || cardContent(card, highlight) !== content || card.status === "deleted" || highlight.status === "dismissed") return;
   const issues = [...failures, ...warnings].map(id => LINT_LABELS[id]);
   if (verdict.verdict !== "keep") issues.push(verdict.reason?.trim() || `The model recommends ${verdict.verdict === "drop" ? "discarding" : "revising"} this card.`);
   card.userCheck = { content, at: new Date().toISOString(), issues };
@@ -50,17 +55,17 @@ export async function checkAndRepairCard(
   card: Card,
   highlight: Highlight,
   critique: Critique,
-  rewrite: (highlight: Highlight, card: Card, instruction: string) => Promise<RepairDraft>,
+  rewrite: (highlight: Highlight, card: Card, instruction: string, authorized: () => boolean) => Promise<RepairDraft>,
   active: () => boolean = () => true,
 ): Promise<CardRepairResult> {
   if (repairing.has(card)) return { status: "busy" };
+  const content = cardContent(card, highlight);
+  const status = card.status;
+  const current = () => active() && cardContent(card, highlight) === content && card.status === status
+    && ["pending", "flagged", "approved"].includes(card.status)
+    && highlight.status === "ready" && !highlight.archived;
   repairing.add(card);
   try {
-    const content = cardContent(card, highlight);
-    const status = card.status;
-    const current = () => active() && cardContent(card, highlight) === content && card.status === status
-      && ["pending", "flagged", "approved"].includes(card.status)
-      && highlight.status === "ready" && !highlight.archived;
     if (!current()) return { status: "cancelled" };
     if (!currentCardCheck(card, highlight)?.issues.length) await checkCard(card, highlight, critique, current);
     if (!current()) return { status: "cancelled" };
@@ -68,7 +73,7 @@ export async function checkAndRepairCard(
     if (!check) return { status: "cancelled" };
     if (!check.issues.length) return { status: "checked" };
     const instruction = `Repair this card using the source and card-writing best practices. Fix these findings:\n${check.issues.map(issue => `- ${issue}`).join("\n")}\nKeep only supported facts, avoid repeating sibling cards, and preserve a clear retrieval cue. Return one corrected card, not a critique.`;
-    const draft = await rewrite(structuredClone(highlight), structuredClone(card), instruction);
+    const draft = await rewrite(structuredClone(highlight), structuredClone(card), instruction, current);
     if (!current()) return { status: "cancelled" };
     const candidate: Card = { ...structuredClone(card), kind: draft.kind,
       front: draft.kind === "qa" ? draft.front.trim() : "",
@@ -97,6 +102,9 @@ export async function checkAndRepairCard(
     delete card.critiqueRan;
     card.userCheck = checked;
     return { status: "repaired", instruction };
+  } catch (error) {
+    if (!current()) return { status: "cancelled" };
+    throw error;
   } finally {
     repairing.delete(card);
   }

@@ -2,8 +2,17 @@ import type { z } from "zod";
 
 export type ProviderName = "codex" | "deepseek" | "opencode";
 
+export interface SourceAuthorization {
+  /** Rechecked at transport dispatch, including retries after asynchronous setup. */
+  authorized?: () => boolean;
+}
+
+export function assertAuthorized(request: SourceAuthorization): void {
+  if (request.authorized && !request.authorized()) throw new Error("Source authorization expired.");
+}
+
 /** One structured-output request: a system prompt, a user message, and the zod schema the answer must satisfy. */
-export interface CompletionRequest<T> {
+export interface CompletionRequest<T> extends SourceAuthorization {
   system: string;
   user: string;
   schema: z.ZodType<T>;
@@ -37,7 +46,7 @@ export type TextStop = "end" | "length" | "other" | "unknown";
  * One plain-text request: the model's answer comes back as it wrote it, with
  * no schema and no parsing.
  */
-export interface TextRequest {
+export interface TextRequest extends SourceAuthorization {
   system: string;
   user: string;
   maxTokens: number;

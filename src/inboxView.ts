@@ -81,6 +81,7 @@ export class InboxView extends ItemView {
   private tabChat?: HTMLButtonElement;
   private checking = new Set<string>();
   private closed = false;
+  private checkEpoch = 0;
   private collapsed = new Set<string>();
   private editing: string | null = null;
   private focusedCard: string | null = null;
@@ -140,6 +141,7 @@ export class InboxView extends ItemView {
 
   async onClose(): Promise<void> {
     this.closed = true;
+    this.checkEpoch++;
     this.unsubscribe?.();
     await this.chat?.onClose();
   }
@@ -579,10 +581,14 @@ export class InboxView extends ItemView {
     if (h.status === "error") iconBtn(RECALL_RETRY_ICON, "Retry", () => this.plugin.generator.enqueue(h));
     if (h.status === "ready" && h.cards.some(c => ["pending", "flagged", "approved"].includes(c.status))) {
       iconBtn(RECALL_SPARK_ICON, "Check cards against best practices (repair issues)", async () => {
+        const settings = JSON.stringify(this.plugin.settings);
+        const epoch = this.checkEpoch;
+        const active = () => !this.closed && this.checkEpoch === epoch
+          && JSON.stringify(this.plugin.settings) === settings;
         for (const c of liveCards(h)) {
-          if (this.closed || h.status !== "ready") break;
+          if (!active() || h.status !== "ready") break;
           if (!["pending", "flagged", "approved"].includes(c.status)) continue;
-          await this.checkAgainstPractices(h, c);
+          if (await this.checkAgainstPractices(h, c, active) === false) break;
         }
       });
     }
@@ -830,14 +836,22 @@ export class InboxView extends ItemView {
     let checkedDraft: Card | undefined;
     const check = async (btn: HTMLButtonElement) => {
       const d = draft();
+      const original = cardContent(c, h);
+      const status = c.status;
+      const settings = JSON.stringify(this.plugin.settings);
+      const epoch = this.checkEpoch;
       checkedDraft = undefined;
       report.empty();
       report.show();
       report.setText("Checking card against best practices…");
       btn.disabled = true;
       try {
-        await checkCard(d, h, (source, cards, siblings) => this.plugin.llm.critiqueCards(source, cards, siblings),
-          () => !this.closed && this.editing === c.id && cardContent(draft(), h) === cardContent(d, h));
+        await checkCard(d, h, (source, cards, siblings, authorized) => this.plugin.llm.critiqueCards(source, cards, siblings, authorized),
+          () => !this.closed && this.checkEpoch === epoch && this.editing === c.id
+            && JSON.stringify(this.plugin.settings) === settings
+            && this.plugin.store.all().includes(h) && h.cards.includes(c)
+            && c.status === status && cardContent(c, h) === original
+            && cardContent(draft(), h) === cardContent(d, h));
         const result = currentCardCheck(d, h);
         if (!result) { report.setText("Draft changed or check cancelled. Check it again."); return; }
         checkedDraft = d;
@@ -959,20 +973,21 @@ export class InboxView extends ItemView {
     this.plugin.store.touch();
   }
 
-  private async checkAgainstPractices(h: Highlight, c: Card): Promise<void> {
-    if (this.checking.has(c.id)) return;
-    if (this.editing === c.id) { new Notice("Save or cancel this card's edits before checking and repairing it."); return; }
+  private async checkAgainstPractices(h: Highlight, c: Card, batchActive: () => boolean = () => true): Promise<boolean> {
+    if (this.checking.has(c.id)) return false;
+    if (this.editing === c.id) { new Notice("Save or cancel this card's edits before checking and repairing it."); return false; }
     this.checking.add(c.id);
     const notice = new Notice("Recall Studio: checking and repairing card…", 0);
     const settings = JSON.stringify(this.plugin.settings);
+    const epoch = this.checkEpoch;
     const was = snapshot(c);
-    const active = () => !this.closed && this.editing !== c.id
+    const active = () => batchActive() && !this.closed && this.checkEpoch === epoch && this.editing !== c.id
       && JSON.stringify(this.plugin.settings) === settings
       && this.plugin.store.all().includes(h) && h.cards.includes(c);
     try {
       const result = await checkAndRepairCard(c, h,
-        (source, cards, siblings) => this.plugin.llm.critiqueCards(source, cards, siblings),
-        (source, card, instruction) => this.plugin.llm.rewriteCard(source, card, instruction), active);
+        (source, cards, siblings, authorized) => this.plugin.llm.critiqueCards(source, cards, siblings, authorized),
+        (source, card, instruction, authorized) => this.plugin.llm.rewriteCard(source, card, instruction, authorized), active);
       if (result.status === "repaired") {
         this.plugin.store.recordRevision({ cardId: c.id, at: new Date().toISOString(), via: "repair",
           instruction: result.instruction!, before: was, after: snapshot(c) });
@@ -980,8 +995,10 @@ export class InboxView extends ItemView {
       } else if (result.status === "cancelled" && !this.closed) {
         new Notice("Card or source changed; the repair was cancelled without replacing it.");
       }
+      return result.status === "checked" || result.status === "repaired";
     } catch (e) {
       new Notice(`Recall Studio: check or repair failed. ${describeError(e)}`);
+      return false;
     } finally {
       this.checking.delete(c.id);
       this.plugin.store.touch();

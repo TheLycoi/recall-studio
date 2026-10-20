@@ -36,3 +36,11 @@ test('revocation after provider await invalidates a real wrapper result',async()
  client.codex={complete:async()=>{allowed=false;return{question:'What does affinity mean?',shape:'concept',expects:[1]};}};
  await assert.rejects(client.quizQuestion({...args(),authorized:()=>allowed}));
 });
+for(const method of ['quizQuestion','quizQuestionAudit','quizRecallGrade','quizMultipleChoice','quizChoiceAudit','quizGradeAudit'])test(`${method} retains authorization through real backend setup`,async()=>{
+ let allowed=true,calls=0;
+ const {LlmClient:Client}=await loadQuiz('src/llm.ts',{requestUrl:async()=>{calls++;return{status:200,json:{choices:[{message:{content:'{}'},finish_reason:'stop'}]}};}});
+ const client=new Client(()=>({provider:'deepseek',deepseekApiKey:'synthetic-test-key',deepseekModel:'synthetic-model',effort:'low'}));
+ client.deepseek.key=()=>{allowed=false;return{key:'synthetic-test-key',source:'settings'};};
+ await assert.rejects(client[method]({...args(),authorized:()=>allowed,draft:draft(),grade:grade()}));
+ assert.equal(calls,0,'Backend setup must not bypass Quiz authorization');
+});

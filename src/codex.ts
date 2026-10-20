@@ -5,6 +5,7 @@ import { homedir, tmpdir } from "os";
 import { delimiter, join } from "path";
 import { z } from "zod";
 import type { CompletionRequest, LlmBackend, TextRequest } from "./backend";
+import { assertAuthorized } from "./backend";
 import { extractJson, schemaJson } from "./jsonOut";
 import type { RecallSettings } from "./settings";
 
@@ -233,8 +234,9 @@ const live = new Set<Live>();
 const TIMEOUT_MS = 5 * 60 * 1000;
 const KILL_GRACE_MS = 5000;
 
-function runCodex(bin: string, args: string[], stdin: string, signal?: AbortSignal): Promise<RunResult> {
+function runCodex(bin: string, args: string[], stdin: string, signal?: AbortSignal, authorized?: () => boolean): Promise<RunResult> {
   return new Promise((resolve) => {
+    assertAuthorized({ authorized });
     const child = spawn(bin, args, { env: { ...process.env }, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
@@ -399,6 +401,7 @@ export class CodexBackend implements LlmBackend {
    * is plain text.
    */
   private async exec(req: TextRequest, label: string, schema?: z.ZodType): Promise<string> {
+    assertAuthorized(req);
     if (req.signal?.aborted) throw new CodexError("aborted", "Cancelled.");
     const s = this.getSettings();
     const bin = resolveCodexBinary(s.codexPath);
@@ -428,7 +431,7 @@ export class CodexBackend implements LlmBackend {
         "-",
       ];
       const prompt = (schema ? [PREAMBLE, req.system, req.user] : [TEXT_PREAMBLE, req.system, req.user].filter(Boolean)).join("\n\n");
-      const r = await runCodex(bin, args, prompt, req.signal);
+      const r = await runCodex(bin, args, prompt, req.signal, req.authorized);
       if (r.aborted && req.signal?.aborted) throw new CodexError("aborted", "Cancelled.");
       const { text, error } = parseCodexEvents(r.stdout);
       const failed = r.spawnError || r.timedOut || r.aborted || r.code !== 0;

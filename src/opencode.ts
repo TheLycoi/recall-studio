@@ -6,6 +6,7 @@ import { homedir, tmpdir } from "os";
 import { delimiter, join } from "path";
 import { z } from "zod";
 import type { CompletionRequest, LlmBackend, TextRequest } from "./backend";
+import { assertAuthorized } from "./backend";
 import { extractJson, jsonPreamble } from "./jsonOut";
 import type { RecallSettings } from "./settings";
 
@@ -278,8 +279,9 @@ const live = new Set<Live>();
 const TIMEOUT_MS = 5 * 60 * 1000;
 const KILL_GRACE_MS = 5000;
 
-function runOpencode(bin: string, args: string[], cwd: string, stdin: string, signal?: AbortSignal): Promise<RunResult> {
+function runOpencode(bin: string, args: string[], cwd: string, stdin: string, signal?: AbortSignal, authorized?: () => boolean): Promise<RunResult> {
   return new Promise((resolve) => {
+    assertAuthorized({ authorized });
     const child = spawn(bin, args, { cwd, env: opencodeEnv(process.env, cwd), stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
@@ -438,12 +440,13 @@ export class OpenCodeBackend implements LlmBackend {
    * only in scope at this layer.
    */
   private async exec(req: TextRequest, prompt: string): Promise<string> {
+    assertAuthorized(req);
     if (req.signal?.aborted) throw new OpenCodeError("aborted", "Cancelled.");
     const s = this.getSettings();
     const bin = resolveOpencodeBinary(s.opencodePath);
     const model = req.model ?? s.opencodeModel;
     const cwd = this.workspace();
-    const r = await runOpencode(bin, opencodeArgs(model), cwd, prompt, req.signal);
+    const r = await runOpencode(bin, opencodeArgs(model), cwd, prompt, req.signal, req.authorized);
     const events = parseOpencodeEvents(r.stdout);
     // Before any throw, never after: cleanup is fire-and-forget, so it cannot
     // turn a good answer into an error either way.

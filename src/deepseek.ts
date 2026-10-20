@@ -1,6 +1,7 @@
 import { requestUrl } from "obsidian";
 import { z } from "zod";
 import type { CompletionRequest, LlmBackend, TextRequest, TextStop } from "./backend";
+import { assertAuthorized } from "./backend";
 import { classifyStatus, DeepSeekError } from "./deepseekError";
 import { DEEPSEEK_BASE_URL, deepSeekEffort, readDeepSeekModels } from "./deepseekModels";
 import { resolveDeepSeekKey, type KeySource } from "./deepseekKey";
@@ -84,7 +85,8 @@ export class DeepSeekBackend implements LlmBackend {
    * caller gets the same classification. A timeout or an abort rejects without
    * cancelling the underlying request, which requestUrl does not support.
    */
-  private async post(path: string, body: unknown, signal?: AbortSignal): Promise<unknown> {
+  private async post(path: string, body: unknown, signal?: AbortSignal, authorized?: () => boolean): Promise<unknown> {
+    assertAuthorized({ authorized });
     const { key } = this.key();
     if (signal?.aborted) throw new DeepSeekError("aborted", "Cancelled.");
     let timedOut = false;
@@ -101,14 +103,16 @@ export class DeepSeekBackend implements LlmBackend {
       signal?.addEventListener("abort", onAbort, { once: true });
     });
     try {
+      const request = {
+        url: `${DEEPSEEK_BASE_URL}${path}`,
+        method: "POST",
+        headers: this.headers(key),
+        body: JSON.stringify(body),
+        throw: false,
+      };
+      assertAuthorized({ authorized });
       const res = await Promise.race([
-        requestUrl({
-          url: `${DEEPSEEK_BASE_URL}${path}`,
-          method: "POST",
-          headers: this.headers(key),
-          body: JSON.stringify(body),
-          throw: false,
-        }),
+        requestUrl(request),
         timeout,
         aborted,
       ]);
@@ -279,7 +283,7 @@ export class DeepSeekBackend implements LlmBackend {
     const model = req.model ?? s.deepseekModel;
     const body = this.body(model, system, user, req.maxTokens, req.effort ?? s.effort);
     if (json) body.response_format = { type: "json_object" };
-    const res = await this.post("/chat/completions", body, req.signal);
+    const res = await this.post("/chat/completions", body, req.signal, req.authorized);
     const { content, stop } = readChoice(res);
     if (!content.trim() && stop === "unknown") {
       throw new DeepSeekError("failed", `DeepSeek produced no message for the ${label}.`);

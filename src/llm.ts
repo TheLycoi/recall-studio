@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { CompletionRequest } from "./backend";
+import { assertAuthorized } from "./backend";
 import { QuizChoiceOut, QuizQuestionAuditOut, QuizGradeAuditOut, QuizChoiceAuditOut, type QuizChoiceDraft, type QuizChoiceAudit } from "./quizSchemas";
 import { QUIZ_CHOICE_SYSTEM, QUIZ_CHOICE_AUDIT_SYSTEM, QUIZ_GRADE_AUDIT_SYSTEM, buildChoiceMessage, buildChoiceAuditMessage, buildGradeAuditMessage } from "./quizPrompt";
 import type { LlmBackend } from "./backend";
@@ -320,6 +321,7 @@ export class LlmClient {
   private codex: CodexBackend;
   private deepseek: DeepSeekBackend;
   private opencode: OpenCodeBackend;
+  private epoch = 0;
 
   /**
    * `getHighlights` mirrors the `getSettings` callback rather than importing
@@ -386,10 +388,16 @@ export class LlmClient {
 
   /** Cancel in-flight work (plugin unload). */
   async abort(): Promise<void> {
+    this.epoch++;
     // All of them, not just the active one: the provider may have been switched
     // while a request was in flight, and both CLI backends have child processes
     // to kill.
     await Promise.all([this.codex.abort(), this.deepseek.abort(), this.opencode.abort()]);
+  }
+
+  private requestAuthorization(authorized?: () => boolean): () => boolean {
+    const epoch = this.epoch;
+    return () => epoch === this.epoch && (!authorized || authorized());
   }
 
   /** Capture prompt-dependent inputs once for a bounded generation batch. */
@@ -477,8 +485,10 @@ export class LlmClient {
    * point at a card are dropped rather than thrown on, since a stray index is
    * a model slip, not a reason to lose the whole highlight.
    */
-  async critiqueCards(h: Highlight, cards: Card[], existing: Card[] = []): Promise<CritiqueVerdict[]> {
+  async critiqueCards(h: Highlight, cards: Card[], existing: Card[] = [], authorized?: () => boolean): Promise<CritiqueVerdict[]> {
     if (!cards.length) return [];
+    const authorization = { authorized: this.requestAuthorization(authorized) };
+    assertAuthorized(authorization);
     const s = this.getSettings();
     const parts: string[] = [];
     parts.push(`<source title="${h.sourceTitle}"${h.heading ? ` section="${h.heading}"` : ""}>`);
@@ -499,6 +509,7 @@ export class LlmClient {
     // Same place as in writeCards: the critic holds cards to the rules the
     // writer was given, or it grades them against a standard nobody set.
     const criticRules = await this.rulesBlock();
+    assertAuthorized(authorization);
     if (criticRules) parts.push(criticRules);
     if (h.instruction.trim()) parts.push(`Instructions for this highlight: ${h.instruction.trim()}`);
     if (existing.length) {
@@ -510,16 +521,20 @@ export class LlmClient {
     parts.push(`Return exactly one verdict for each of the ${cards.length} cards above.`);
     const parsed = await this.backend().complete({
       system: CRITIC_SYSTEM,
+      ...authorization,
       user: parts.join("\n\n"),
       schema: VerdictsOut,
       label: "verdicts",
       maxTokens: 8000,
     });
+    assertAuthorized(authorization);
     return parsed.verdicts.filter((v) => Number.isInteger(v.index) && v.index >= 0 && v.index < cards.length);
   }
 
   /** Rewrite one card according to an instruction ("convert to cloze", "shorter", ...). */
-  async rewriteCard(h: Highlight, card: Card, instruction: string): Promise<CardDraft> {
+  async rewriteCard(h: Highlight, card: Card, instruction: string, authorized?: () => boolean): Promise<CardDraft> {
+    const authorization = { authorized: this.requestAuthorization(authorized) };
+    assertAuthorized(authorization);
     const s = this.getSettings();
     const current = card.kind === "qa" ? `Q: ${card.front}\nA: ${card.back}` : `Cloze: ${card.text}`;
     // Same source framing as writeCards: a rewrite is held to the writer's
@@ -550,9 +565,12 @@ export class LlmClient {
     // house rules are part of them — often the very rules the rewrite exists
     // to apply, since `## Learned` is promoted from edits like this one.
     const rewriteRules = await this.rulesBlock();
+    assertAuthorized(authorization);
     if (rewriteRules) parts.push(rewriteRules);
     if (h.instruction.trim()) parts.push(`Instructions for this highlight: ${h.instruction.trim()}`);
-    return this.backend().complete({ system: WRITER_SYSTEM, user: parts.join("\n\n"), schema: CardOut, label: "card", maxTokens: 4000 });
+    const result = await this.backend().complete({ system: WRITER_SYSTEM, user: parts.join("\n\n"), schema: CardOut, label: "card", maxTokens: 4000, ...authorization });
+    assertAuthorized(authorization);
+    return result;
   }
 
   /**
@@ -625,7 +643,7 @@ export class LlmClient {
     check();
     if (request.user.length > 30_000) throw Error("Quiz request exceeds the evidence limit.");
     // Quiz retries return to the caller, which rechecks editor-aware authorization.
-    const value = await this.backend().complete({ ...request, retryInvalidResponse: false });
+    const value = await this.backend().complete({ ...request, authorized: args.authorized, retryInvalidResponse: false });
     check(); return value;
   }
   async quizQuestionAudit(args: QuizQuestionMessageArgs & { draft: QuizQuestionDraft }): Promise<{ supported: boolean }> {
