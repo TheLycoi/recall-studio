@@ -62,7 +62,7 @@ test('conflicting final verdicts cannot authorize a replacement', async () => {
   assert.equal(card.front, original);
 });
 
-test('removing a duplicate deletion retains the distinct fact as a one-answer Q&A', async () => {
+test('removing a duplicate deletion retains the distinct fact as a single cloze', async () => {
   const { card, highlight } = fixture();
   highlight.text = 'Seeds enter dormancy and delay germination.';
   Object.assign(card, { kind: 'cloze', front: '', back: '', text: 'Seeds enter {{c1::dormancy}} and delay {{c2::germination}}.' });
@@ -73,9 +73,9 @@ test('removing a duplicate deletion retains the distinct fact as a one-answer Q&
     return { kind: 'cloze', front: '', back: '', text: 'Seed dormancy delays {{c1::germination}}.' };
   });
   assert.equal(result.status, 'repaired');
-  assert.equal(card.kind, 'qa');
-  assert.equal(card.back, 'germination');
-  assert.equal(card.text, '');
+  assert.equal(card.kind, 'cloze');
+  assert.equal(card.back, '');
+  assert.equal(card.text, 'Seed dormancy delays {{c1::germination}}.');
 });
 
 const keep = async () => [{ verdict: 'keep', reason: '' }];

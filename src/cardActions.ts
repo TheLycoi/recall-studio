@@ -1,5 +1,5 @@
 import type { Card, Highlight } from "./model";
-import { demoteSingleCloze, lintCard, LINT_LABELS } from "./lint";
+import { lintCard, LINT_LABELS } from "./lint";
 
 export interface CardCheck {
   content: string;
@@ -70,7 +70,7 @@ export async function checkAndRepairCard(
     const instruction = `Repair this card using the source and card-writing best practices. Fix these findings:\n${check.issues.map(issue => `- ${issue}`).join("\n")}\nKeep only supported facts, avoid repeating sibling cards, and preserve a clear retrieval cue. Return one corrected card, not a critique.`;
     const draft = await rewrite(structuredClone(highlight), structuredClone(card), instruction);
     if (!current()) return { status: "cancelled" };
-    let candidate: Card = { ...structuredClone(card), kind: draft.kind,
+    const candidate: Card = { ...structuredClone(card), kind: draft.kind,
       front: draft.kind === "qa" ? draft.front.trim() : "",
       back: draft.kind === "qa" ? draft.back.trim() : "",
       text: draft.kind === "cloze" ? draft.text.trim() : "" };
@@ -78,7 +78,7 @@ export async function checkAndRepairCard(
     if (lintCard(candidate, highlight, []).failures.includes("cloze-not-grounded")) {
       throw new Error("The replacement hides text absent from the captured source. The original is unchanged.");
     }
-    candidate = demoteSingleCloze(candidate);
+
     if (cardContent(candidate, highlight) === content) throw new Error("The repair returned the same card. The original is unchanged.");
     await checkCard(candidate, highlight, critique, current);
     if (!current()) return { status: "cancelled" };

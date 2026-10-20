@@ -32,6 +32,47 @@ function fixture(overrides={}) {
   return {h,settings,calls,saves,llm,backend,plugin,g};
 }
 
+test('six deletions on the same source sentence remain one cloze note', async () => {
+  const f = fixture({ lintMode: 'hide' });
+  const terms = ['agility', 'balance', 'coordination', 'speed', 'power', 'reaction time'];
+  f.h.text = `The skill-related components are ${terms.join(', ')}.`;
+  const text = `The skill-related components are ${terms.map((term, i) => `{{c${i + 1}::${term}}}`).join(', ')}.`;
+  f.backend.complete = async req => {
+    f.calls.push(req);
+    if (req.label === 'preparation') return req.schema.parse({
+      facts: terms.map((term, i) => ({ id: `F${i + 1}`, statement: `${term} is a skill-related component.`, quote: term })),
+      plan: [{ id: 'P1', factIds: terms.map((_, i) => `F${i + 1}`), entity: 'Skill-related components', aspect: 'members', value: terms.join(', '), reason: 'Independent deletions share their source sentence.' }],
+      exclusions: [], omissions: [], conflicts: [],
+    });
+    if (req.label === 'grounded cards') return req.schema.parse({ cards: [{ planId: 'P1', factIds: terms.map((_, i) => `F${i + 1}`), kind: 'cloze', front: '', back: '', text }] });
+    return req.schema.parse({ verdicts: [{ index: 0, cardId: JSON.parse(req.user).cards[0].id, status: 'verified', reason: 'Each hidden term appears in the source.' }] });
+  };
+  await f.g.run(f.h);
+  assert.equal(f.h.cards.length, 1);
+  assert.equal(f.h.cards[0].kind, 'cloze');
+  assert.equal(f.h.cards[0].text, text);
+  assert.equal(f.h.cards[0].status, 'pending');
+  assert.deepEqual(f.h.cards[0].lintFailures ?? [], []);
+  assert.equal(f.calls.length, 3);
+});
+
+test('source-backed cloze notes can exceed the old per-highlight quota without another request', async () => {
+  const f = fixture({ maxCardsPerHighlight: 1 });
+  const facts = Array.from({ length: 6 }, (_, i) => ({ id: `F${i + 1}`, statement: `Item${i + 1} stores token${i + 1}.`, quote: `Item${i + 1} stores token${i + 1}.` }));
+  f.h.text = facts.map(fact => fact.quote).join(' ');
+  f.backend.complete = async req => {
+    f.calls.push(req);
+    if (req.label === 'preparation') return req.schema.parse({ facts, plan: facts.map((fact, i) => ({ id: `P${i + 1}`, factIds: [fact.id], entity: `Item${i + 1}`, aspect: 'property', value: `token${i + 1}`, reason: 'A distinct supported fact.' })), exclusions: [], omissions: [], conflicts: [] });
+    if (req.label === 'grounded cards') return req.schema.parse({ cards: facts.map((fact, i) => ({ planId: `P${i + 1}`, factIds: [fact.id], kind: 'cloze', front: '', back: '', text: `Item${i + 1} stores {{c1::token${i + 1}}}.` })) });
+    return req.schema.parse({ verdicts: JSON.parse(req.user).cards.map((card, index) => ({ index, cardId: card.id, status: 'verified', reason: 'Supported by the source.' })) });
+  };
+  await f.g.run(f.h);
+  assert.equal(f.h.status, 'ready');
+  assert.equal(f.h.cards.length, 6);
+  assert.ok(f.h.cards.every(card => card.kind === 'cloze' && card.status === 'pending'));
+  assert.equal(f.calls.length, 3);
+});
+
 for(const [provider,Backend] of [['codex',()=>CodexBackend],['opencode',()=>OpenCodeBackend]])test(`${provider} actual complete adapter validates all three stages through a mocked transport`,async()=>{
   const f=fixture({provider});const backend=new (Backend())(()=>f.settings);let transports=0;
   backend.exec=async req=>{transports++;const user=JSON.parse(req.user);const result=req.label==='preparation'?preparation():req.label==='grounded cards'?draft():{verdicts:[{index:0,cardId:user.cards[0].id,status:'verified',reason:'Captured source supports the claim'}]};if(provider==='codex'){const schema=toStrictSchema(req.schema);assert.equal(schema.additionalProperties,false);}return JSON.stringify(result);};
@@ -50,10 +91,10 @@ test('ungrounded cloze content is still linted and flagged even with a positive 
   await f.g.run(f.h);assert.equal(f.h.cards[0].status,'flagged');assert.ok(f.h.cards[0].lintFailures.includes('cloze-not-grounded'));assert.notEqual(f.h.cards[0].generation.audit.status,'verified');
 });
 
-test('single cloze demotion keeps evidence links and a stable export identity on retry',async()=>{
+test('a single cloze stays cloze with evidence links and a stable export identity on retry',async()=>{
   const f=fixture();const original=f.backend.complete;
   f.backend.complete=async req=>req.label==='grounded cards'?(f.calls.push(req),req.schema.parse({cards:[{planId:'P1',factIds:['F1'],kind:'cloze',front:'',back:'',text:'Amber stores {{c1::heat}}.'}]})):original(req);
-  await f.g.run(f.h);const c=f.h.cards[0];assert.equal(c.kind,'qa');assert.deepEqual(c.generation.factIds,['F1']);const id=c.id;await f.g.run(f.h);assert.equal(f.h.cards[0].id,id);assert.equal(f.calls.length,3);
+  await f.g.run(f.h);const c=f.h.cards[0];assert.equal(c.kind,'cloze');assert.equal(c.text,'Amber stores {{c1::heat}}.');assert.deepEqual(c.generation.factIds,['F1']);const id=c.id;await f.g.run(f.h);assert.equal(f.h.cards[0].id,id);assert.equal(f.calls.length,3);
 });
 
 test('DeepSeek staged preparation performs one HTTP request even on empty JSON output',async()=>{

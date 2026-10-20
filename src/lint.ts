@@ -48,13 +48,9 @@ export function lintCard(card: Card, highlight: Highlight, siblings: Card[]): Li
     }
     const distinctNumbers = [...new Set(deletions.map((d) => d.n))].sort((a, b) => a - b);
 
-    // cloze-count: counts DISTINCT deletion numbers, not raw {{cN::}} matches.
-    // {{c1::a}} ... {{c1::b}} is one deletion tested in two places (a
-    // legitimate overlapping-cloze pattern), not two deletions. 2 to 3
-    // distinct numbers inclusive: a sentence with one deletion is a basic
-    // card wearing cloze markup (by design), and the
-    // generator demotes such a draft before it gets here.
-    if (distinctNumbers.length < 2 || distinctNumbers.length > 3) {
+    // A cloze needs an answer to hide; the source determines how many.
+    // One deletion is valid. There is no count ceiling or forced Q&A conversion.
+    if (distinctNumbers.length === 0) {
       failures.push("cloze-count");
     }
 
@@ -177,7 +173,7 @@ export function findCrossInterference(
 /** Short human label per id, for the inbox badge. */
 export const LINT_LABELS: Record<LintFailureId | LintWarningId, string> = {
   "cloze-not-grounded": "not grounded",
-  "cloze-count": "cloze count",
+  "cloze-count": "missing cloze",
   "cloze-numbering": "cloze numbering",
   "cloze-framing": "cloze framing",
   "qa-empty": "empty",
@@ -201,7 +197,7 @@ export const LINT_LABELS: Record<LintFailureId | LintWarningId, string> = {
  */
 export const LINT_FIX_INSTRUCTIONS: Record<LintFailureId | LintWarningId, string> = {
   "cloze-not-grounded": "a deletion hides text that is not in the highlight; re-word the sentence so every deletion is a span the highlight states verbatim",
-  "cloze-count": "the card has no deletions or more than three; keep one to three, splitting the rest onto their own card",
+  "cloze-count": "the card has no valid deletion; mark the supported answer span without imposing a deletion quota or splitting the sentence to meet a count",
   "cloze-numbering": "the deletion numbers skip or repeat out of order; number them c1, c2, c3 with no gaps",
   "cloze-framing": "a deletion hides framing words or runs too long; each deletion should hide one short span, a term, number, or name",
   "qa-empty": "the card is missing its question, its answer, or its cloze text; write the missing side from the highlight",
@@ -214,42 +210,7 @@ export const LINT_FIX_INSTRUCTIONS: Record<LintFailureId | LintWarningId, string
   "cross-interference": "a card on another highlight has this answer; add a cue naming this subject so the two cannot be confused",
 };
 
-/** The four fields of a drafted card, as the writer returns them and the generator files them. */
-interface DraftLike {
-  kind: "qa" | "cloze";
-  front: string;
-  back: string;
-  text: string;
-}
-
 const CLOZE_RE = /\{\{c(\d+)::([\s\S]*?)(?:::[^}]*)?\}\}/g;
-
-/**
- * A cloze card with one deletion number is a basic card: the reader's rule.
- * One blank in a sentence tests one thing, and a question/answer card says
- * so plainly, without cloze markup that Anki would review as a single item
- * anyway. The sentence becomes the front with the deletion shown as a
- * blank, and the deleted span the back; a number used twice yields two
- * blanks and both answers. Two or more numbers, or a qa draft, come back
- * untouched — the same object, so a caller can test identity.
- */
-export function demoteSingleCloze<T extends DraftLike>(d: T): T {
-  if (d.kind !== "cloze") return d;
-  const numbers = new Set<string>();
-  const bodies: string[] = [];
-  for (const m of d.text.matchAll(CLOZE_RE)) {
-    numbers.add(m[1]);
-    bodies.push(m[2].trim());
-  }
-  if (numbers.size !== 1) return d;
-  return {
-    ...d,
-    kind: "qa",
-    front: d.text.replace(CLOZE_RE, "___").replace(/[ \t]{2,}/g, " ").trim(),
-    back: bodies.join("; "),
-    text: "",
-  };
-}
 
 /**
  * The editor's Cloze button: wrap the selected span with the next unused

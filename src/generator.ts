@@ -3,7 +3,7 @@ import { newId, plainText } from "./util";
 import type RecallPlugin from "./main";
 import { makeCard, type Card, type GenerationBatch, type Highlight } from "./model";
 import { describeError } from "./llm";
-import { lintCard, demoteSingleCloze } from "./lint";
+import { lintCard } from "./lint";
 import { nextInstruction } from "./inboxData";
 import { cardAuditContent, generationKey, generationSource, generationSourceKey, validatePreparation, validateDrafts, validateAudit } from "./generation";
 
@@ -133,8 +133,7 @@ export class Generator {
         checkInputs();
         const drafts = validateDrafts({ cards: raw }, preparation, context.maxCards);
         const cards = drafts.map(d => {
-          const normalized = demoteSingleCloze(d);
-          const card = makeCard(h.id, { kind: normalized.kind, front: normalized.kind === "qa" ? normalized.front.trim() : "", back: normalized.kind === "qa" ? normalized.back.trim() : "", text: normalized.kind === "cloze" ? normalized.text.trim() : "" });
+          const card = makeCard(h.id, { kind: d.kind, front: d.kind === "qa" ? d.front.trim() : "", back: d.kind === "qa" ? d.back.trim() : "", text: d.kind === "cloze" ? d.text.trim() : "" });
           card.generation = { batchId: batch.id, planId: d.planId, factIds: [...d.factIds], audit: { status: "unverified", reason: "Independent audit has not run.", content: cardAuditContent(card), sourceKey: generationSourceKey(h) } };
           return card;
         });

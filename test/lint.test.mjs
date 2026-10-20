@@ -88,7 +88,7 @@ test("cloze-not-grounded: passes when the deletion body is in the highlight", ()
   assert.ok(!r.failures.includes("cloze-not-grounded"), "should not fail cloze-not-grounded");
 });
 
-// ---- cloze-count (distinct deletion numbers, 1 to 3 inclusive)
+// ---- cloze validity: at least one deletion, no numeric quota
 
 test("cloze-count: fails with 0 deletions", () => {
   const card = clozeCard("Contemplation: the client intends to change within the next six months.");
@@ -96,15 +96,15 @@ test("cloze-count: fails with 0 deletions", () => {
   assert.ok(r.failures.includes("cloze-count"), "expected cloze-count for 0 deletions");
 });
 
-test("cloze-count: fails with 4 distinct deletions", () => {
+test("four distinct deletions do not trigger a count failure", () => {
   const card = clozeCard(
     "{{c1::Contemplation}}: the {{c2::client}} intends to {{c3::change}} within the next {{c4::six months}}.",
   );
   const r = l.lintCard(card, highlight, []);
-  assert.ok(r.failures.includes("cloze-count"), "expected cloze-count for 4 distinct deletions");
+  assert.ok(!r.failures.includes("cloze-count"), "there is no deletion-count ceiling");
 });
 
-test("cloze-count: passes with 2 to 3 distinct deletions, and repeated same-number markers do not inflate the count", () => {
+test("repeated same-number markers remain valid", () => {
   const card = clozeCard(
     "{{c1::Contemplation}}: the client intends to {{c2::change}} within the next {{c1::six months}}.",
   );
@@ -472,18 +472,18 @@ test("a two-deletion card over one sentence passes", () => {
   assert.deepEqual(failures, []);
 });
 
-test("three deletions are the ceiling, not a failure", () => {
+test("three supported deletions pass without implying a ceiling", () => {
   const card = clozeCard("{{c1::Contemplation}}: the client intends to change within the next {{c2::six months}} and weighs {{c3::pros and cons}}.");
   const { failures } = l.lintCard(card, highlight, []);
   assert.deepEqual(failures, []);
 });
 
-test("a fourth deletion still fails cloze-count", () => {
+test("a fourth deletion remains valid", () => {
   const card = clozeCard(
     "{{c1::Contemplation}}: the {{c2::client}} intends to change within the next {{c3::six months}} and weighs {{c4::pros and cons}}.",
   );
   const { failures } = l.lintCard(card, highlight, []);
-  assert.ok(failures.includes("cloze-count"));
+  assert.ok(!failures.includes("cloze-count"));
 });
 
 test("density does not excuse an ungrounded deletion", () => {
@@ -512,30 +512,22 @@ test("fix instructions say what to do, not just what is wrong", () => {
   }
 });
 
-// ---- a single cloze is a basic card ----------------------------------------------
+// ---- a single deletion remains a cloze ------------------------------------------
 
-test("demoteSingleCloze turns a one-deletion cloze into a question/answer card with a blank, and leaves others alone", () => {
-  const one = { kind: "cloze", front: "", back: "", text: "Qualitative analysis is a {{c1::non-numerical}}, description of variables of interest." };
-  assert.deepEqual(l.demoteSingleCloze(one), {
-    kind: "qa",
-    front: "Qualitative analysis is a ___, description of variables of interest.",
-    back: "non-numerical",
-    text: "",
-  });
-  const hinted = { kind: "cloze", front: "", back: "", text: "Set {{c1::t = 0::when?}} at movement onset." };
-  assert.deepEqual(l.demoteSingleCloze(hinted).back, "t = 0");
-  const twice = { kind: "cloze", front: "", back: "", text: "{{c1::Alarm}} then {{c1::exhaustion}}." };
-  assert.deepEqual(l.demoteSingleCloze(twice), { kind: "qa", front: "___ then ___.", back: "Alarm; exhaustion", text: "" });
-  const two = { kind: "cloze", front: "", back: "", text: "{{c1::Alarm}} then {{c2::exhaustion}}." };
-  assert.equal(l.demoteSingleCloze(two), two, "two numbers stay a cloze card");
-  const qa = { kind: "qa", front: "Q?", back: "A", text: "" };
-  assert.equal(l.demoteSingleCloze(qa), qa);
+test("single hinted and repeated-number clozes have no minimum count of two", () => {
+  for (const text of ["Set {{c1::t = 0::when?}} at movement onset.", "{{c1::Alarm}} then {{c1::exhaustion}}."]) {
+    const h = { text: "Set t = 0 at movement onset. Alarm then exhaustion." };
+    const card = { kind: "cloze", front: "", back: "", text };
+    assert.deepEqual(l.lintCard(card, h, []).failures, []);
+    assert.equal(card.kind, "cloze");
+    assert.equal(card.text, text);
+  }
 });
 
-test("cloze-count: a single deletion now fails, because one cloze is a basic card", () => {
+test("one deletion is a valid cloze", () => {
   const h = { text: "Qualitative analysis is a non-numerical description." };
   const r = l.lintCard({ kind: "cloze", text: "Qualitative analysis is a {{c1::non-numerical}} description.", front: "", back: "" }, h, []);
-  assert.ok(r.failures.includes("cloze-count"));
+  assert.ok(!r.failures.includes("cloze-count"));
 });
 
 // ---- the Cloze button: wrap the selection with the next number -------------------
