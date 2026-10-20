@@ -1110,7 +1110,7 @@ export class InboxView extends ItemView {
       const n = await this.plugin.schema.learn(new Date().toISOString().slice(0, 10));
       if (n > 0) {
         new Notice(`Recall Studio: ${n} new card rule suggestion${n === 1 ? "" : "s"}. See the inbox header.`);
-        this.render();
+        this.scheduleRender();
       }
     } catch (e) {
       // Learning is a nicety on top of an edit that already succeeded; a

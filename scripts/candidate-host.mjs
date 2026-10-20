@@ -37,6 +37,7 @@ export default class CandidateProbe extends Plugin {
     };
     const settings = { ...DEFAULT_SETTINGS, schemaLearning: false, srRecognitionEnabled: false, srRecognitionNotePaths: file.path };
     const store = new InboxStore(app, 'synthetic-data');
+    await store.load();
     const llm = new LlmClient(() => settings);
     const keep = { index: 0, verdict: 'keep', reason: '', bloom: 'remember', kind: 'qa', front: '', back: '', text: '' };
     llm.codex = { complete: async req => {
@@ -109,6 +110,49 @@ export default class CandidateProbe extends Plugin {
       ok(restored.findCard(c.id)?.card.front === c.front && restored.revisions().at(-1)?.via === 'repair', 'Repair survives real store serialization and reload'); restored.close();
       generated.cards[0].status = 'exported'; generated.status = 'exported'; store.clearExported(); await store.flush();
       ok(!store.all().includes(generated) && store.sourceHistory(file.path).includes(generated), 'Archived exported capture retains source history');
+      // Optional learning must not redraw over a draft typed after Convert succeeds.
+      settings.schemaLearning = true;
+      let finishLearning, learningStarted = false, suggestions = 0;
+      host.schema.openCount = () => suggestions;
+      host.schema.learn = () => { learningStarted = true; return new Promise(resolve => { finishLearning = resolve; }); };
+      const complete = llm.codex.complete;
+      const converted = { kind: 'cloze', front: '', back: '', text: 'Dormancy delays {{c1::germination}}.' };
+      llm.codex.complete = async req => {
+        if (req.label !== 'card') return complete(req);
+        calls.push(req.label);
+        return req.schema.parse(converted);
+      };
+      const cardRoot = () => root.querySelector(`.wikilm-card[data-id="${c.id}"]`);
+      cardRoot().querySelector('button[title="Edit (e)"]').click();
+      const originalEditor = cardRoot().querySelector('.wikilm-editor');
+      cardRoot().querySelector('button[title="Convert to cloze"]').click();
+      await wait(() => learningStarted);
+      const form = cardRoot().querySelector('.wikilm-editor'), editorIdentity = view.editorDraft;
+      ok(c.kind === 'cloze' && c.text === converted.text && form !== originalEditor && store.revisions().at(-1)?.via === 'rewrite', 'Authorized Convert redraws its accepted replacement and records a rewrite before learning');
+      const question = form.querySelector('textarea[aria-label="Question"]');
+      const sentence = form.querySelector('textarea[aria-label="Cloze sentence"]');
+      const extra = form.querySelector('textarea[aria-label="Extra"]');
+      question.value = 'My newer unsaved question after Convert';
+      sentence.value = 'My newer {{c1::unsaved}} sentence';
+      extra.value = 'My newer unsaved annotation';
+      for (const field of [question, sentence, extra]) field.dispatchEvent(new Event('input'));
+      const savedCard = JSON.stringify(c), savedHistory = JSON.stringify(store.revisions());
+      suggestions = 1; finishLearning(1);
+      await wait(() => !view.checking.has(c.id));
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      const currentEditor = cardRoot().querySelector('.wikilm-editor');
+      ok(currentEditor === form && form.isConnected && view.editing === c.id && view.editorDraft === editorIdentity
+        && currentEditor.querySelector('textarea[aria-label="Question"]').value === 'My newer unsaved question after Convert'
+        && currentEditor.querySelector('textarea[aria-label="Cloze sentence"]').value === 'My newer {{c1::unsaved}} sentence'
+        && currentEditor.querySelector('textarea[aria-label="Extra"]').value === 'My newer unsaved annotation', 'Late learning preserves the mounted editor and newer unsaved fields');
+      ok(JSON.stringify(c) === savedCard && JSON.stringify(store.revisions()) === savedHistory && !root.querySelector('.wikilm-schema-chip'), 'Learning preserves saved rewrite/history and defers the proposal header while editing');
+      [...currentEditor.querySelectorAll('button')].find(b => b.textContent === 'Cancel').click();
+      await wait(() => root.querySelector('.wikilm-schema-chip')?.textContent === '1 card rule suggestion');
+      ok(view.editing === null && JSON.stringify(c) === savedCard, 'Cancel releases the proposal header without undoing the accepted rewrite');
+      await store.flush();
+      const learned = new InboxStore(app, 'synthetic-data'); await learned.load();
+      ok(JSON.stringify(learned.findCard(c.id)?.card) === savedCard && JSON.stringify(learned.revisions()) === savedHistory, 'Accepted rewrite and history survive serialization after late learning'); learned.close();
+      settings.schemaLearning = false; llm.codex.complete = complete;
       // Mount the actual CM6 extension without registering it in the live vault.
       let extension, processor;
       host.registerEditorExtension = value => { extension = value; };
