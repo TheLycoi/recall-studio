@@ -405,6 +405,38 @@ test("restart prefers a completed live commit and clears an old backup", async (
   store.close();
 });
 
+test("restart prefers an intentionally empty live inbox over populated backup", async () => {
+  const empty = JSON.stringify({ version: 1, highlights: [] });
+  const v = memoryVault({ [INBOX]: empty, [`${INBOX}.backup`]: REAL });
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  await store.load();
+  assert.deepEqual(store.allHistory(), []);
+  assert.equal(v.files.get(INBOX), empty);
+  assert.equal(v.files.has(`${INBOX}.backup`), false);
+  store.close();
+});
+
+test("restart restores a good backup when the live inbox is empty", async () => {
+  const v = memoryVault({ [INBOX]: "", [`${INBOX}.backup`]: REAL });
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  await store.load();
+  assert.equal(v.files.get(INBOX), REAL);
+  assert.equal(store.get("h1").text, "kept");
+  assert.ok([...v.files.entries()].some(([p, contents]) => p.startsWith(`${INBOX}.corrupt-`) && contents === ""));
+  store.close();
+});
+
+test("restart restores a good backup when the live inbox is whitespace", async () => {
+  const whitespace = " \n\t ";
+  const v = memoryVault({ [INBOX]: whitespace, [`${INBOX}.backup`]: REAL });
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  await store.load();
+  assert.equal(v.files.get(INBOX), REAL);
+  assert.equal(store.get("h1").text, "kept");
+  assert.ok([...v.files.entries()].some(([p, contents]) => p.startsWith(`${INBOX}.corrupt-`) && contents === whitespace));
+  store.close();
+});
+
 test("restart recovers from a damaged live inbox when a good backup exists", async () => {
   const v = memoryVault({ [INBOX]: "partial", [`${INBOX}.backup`]: REAL });
   const store = new s.InboxStore(v.app, "wiki/_schema");
@@ -423,6 +455,54 @@ test("unrecoverable backup makes the store read-only instead of overwriting it",
   await store.flush();
   assert.equal(v.files.has(INBOX), false);
   assert.equal(v.files.get(`${INBOX}.backup`), "partial");
+  store.close();
+});
+
+test("blank backup without a live inbox stays read-only and untouched", async () => {
+  const v = memoryVault({ [`${INBOX}.backup`]: " \n" });
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  await quiet(() => store.load());
+  assert.equal(store.readOnly, true);
+  store.touch();
+  await store.flush();
+  assert.equal(v.files.has(INBOX), false);
+  assert.equal(v.files.get(`${INBOX}.backup`), " \n");
+  store.close();
+});
+
+test("blank backup with corrupt live inbox preserves both and stays read-only", async () => {
+  const v = memoryVault({ [INBOX]: "partial", [`${INBOX}.backup`]: "" });
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  await quiet(() => store.load());
+  assert.equal(store.readOnly, true);
+  store.touch();
+  await store.flush();
+  assert.equal(v.files.get(INBOX), "partial");
+  assert.equal(v.files.get(`${INBOX}.backup`), "");
+  store.close();
+});
+
+test("both blank inbox and backup stay untouched and read-only", async () => {
+  const v = memoryVault({ [INBOX]: "", [`${INBOX}.backup`]: " \t" });
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  await quiet(() => store.load());
+  assert.equal(store.readOnly, true);
+  store.touch();
+  await store.flush();
+  assert.equal(v.files.get(INBOX), "");
+  assert.equal(v.files.get(`${INBOX}.backup`), " \t");
+  store.close();
+});
+
+test("legacy blank inbox without backup still loads as fresh", async () => {
+  const v = memoryVault({ [INBOX]: "" });
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  await store.load();
+  assert.deepEqual(store.allHistory(), []);
+  assert.equal(store.readOnly, false);
+  store.add(highlight("first", "queued"));
+  await store.flush();
+  assert.equal(JSON.parse(v.files.get(INBOX)).highlights[0].id, "first");
   store.close();
 });
 

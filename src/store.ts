@@ -81,11 +81,11 @@ export class InboxStore {
       if (await adapter.exists(backup)) {
         if (await adapter.exists(this.path)) {
           const live = parseInboxJson(await adapter.read(this.path));
-          if (live.ok) {
+          if (live.ok && !live.fresh) {
             await adapter.remove(backup);
           } else {
             const saved = parseInboxJson(await adapter.read(backup));
-            if (!saved.ok) throw new Error(`Neither inbox nor backup is readable: ${saved.detail}`);
+            if (!saved.ok || saved.fresh) throw new Error(`Neither inbox nor backup is readable: ${saved.ok ? "backup is blank" : saved.detail}`);
             const moved = `${this.path}.corrupt-${timestamp(new Date())}`;
             await adapter.rename(this.path, moved);
             await adapter.rename(backup, this.path);
@@ -93,7 +93,7 @@ export class InboxStore {
           }
         } else {
           const saved = parseInboxJson(await adapter.read(backup));
-          if (!saved.ok) throw new Error(`Inbox backup is unreadable: ${saved.detail}`);
+          if (!saved.ok || saved.fresh) throw new Error(`Inbox backup is unreadable: ${saved.ok ? "backup is blank" : saved.detail}`);
           await adapter.rename(backup, this.path);
           new Notice("Review Inbox: recovered inbox.json from an interrupted save.");
         }
