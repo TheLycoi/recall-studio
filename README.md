@@ -7,7 +7,7 @@ and multiple-choice practice from the notes you choose.
 
 The display name is Recall Studio. Plugin ID `review-inbox`, default storage
 `Review Inbox/`, command IDs and BRAT repository `TheLycoi/review-inbox` stay
-unchanged. Version 0.1.4 is a beta release. It adds no scheduler.
+unchanged. Version 0.1.5 is a beta release. It adds no scheduler.
 
 ## What it does
 

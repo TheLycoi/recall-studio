@@ -1,5 +1,17 @@
 # Changelog
 
+## Recall Studio 0.1.5 beta
+
+This replaces the rejected 0.1.4 beta. Keep its published tag and assets unchanged; do not install 0.1.4.
+
+- Validate usable stored records before choosing a recovery snapshot; preserve damaged bytes and fail read-only when recovery is uncertain.
+- Drain generation rollback and final persistence on unload. A separately loaded successor waits for the old store before reading or saving.
+- Recheck permission before every check/repair or explicit Rewrite request and retry. Preserve current cards, revisions and newer editor drafts when work is cancelled or stale.
+- Defer optional rule-learning redraws while a card editor is open.
+- Exclude code examples inside list and blockquote containers from optional Spaced Repetition recognition. Genuine cards in unsupported containers remain unrecognized.
+
+The plugin ID, data paths, provider bindings and BRAT repository stay unchanged. Failed persistence blocks a same-path reload until restart; this is not crash-durability protection. Provider quality and live Anki exports are not covered by synthetic acceptance.
+
 ## Recall Studio 0.1.4 beta
 
 - Add same-panel Quiz with source-grounded free-response and multiple-choice practice. Sending missed material to the Inbox remains an explicit choice.
