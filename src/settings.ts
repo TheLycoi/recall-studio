@@ -5,6 +5,7 @@ import { forgetCachedKey } from "./deepseekKey";
 import { App, Notice, PluginSettingTab, Setting, ButtonComponent } from "obsidian";
 import type RecallPlugin from "./main";
 import { DEFAULT_EXPORT_FOLDER, DEFAULT_RULES_FOLDER, DEFAULT_WIKI_FOLDER } from "./paths";
+import { SR_RECOGNITION_DEFAULTS, type SrRecognitionSettings } from "./srRecognition";
 
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 export type MarkMode = "none" | "highlight" | "highlight+block";
@@ -12,7 +13,7 @@ export type LintMode = "badge" | "hide" | "drop";
 /** "codex": OpenAI's Codex CLI on your ChatGPT sign-in. "deepseek": the DeepSeek API with a key. "opencode": the opencode CLI, which owns its own credentials. */
 export type Provider = "codex" | "deepseek" | "opencode";
 
-export interface RecallSettings {
+export interface RecallSettings extends SrRecognitionSettings {
   // LLM
   /** Which provider writes the cards and grades the quiz. */
   provider: Provider;
@@ -82,6 +83,7 @@ export interface RecallSettings {
 const CUSTOM_MODEL = "__custom__";
 
 export const DEFAULT_SETTINGS: RecallSettings = {
+  ...SR_RECOGNITION_DEFAULTS,
   provider: "codex",
   codexPath: "",
   codexModel: "gpt-5.5",
@@ -561,6 +563,26 @@ export class RecallSettingTab extends PluginSettingTab {
           void this.plugin.saveSettings();
         }),
       );
+
+    new Setting(containerEl).setName("Existing Spaced Repetition cards").setHeading();
+    new Setting(containerEl)
+      .setName("Recognize existing SR cards")
+      .setDesc("Read-only syntax indicators and source history. Off by default; configure eligible tags or exact note paths below. These are explicit settings, not detected SR configuration. No SR installation is required. No scheduling or Inbox records are written.")
+      .addToggle(t => t.setValue(s.srRecognitionEnabled).onChange(v => { s.srRecognitionEnabled = v; save(); }));
+    const srText = (name: string, key: keyof Omit<SrRecognitionSettings, "srRecognitionEnabled" | "srHighlightCloze">, desc: string) =>
+      new Setting(containerEl).setName(name).setDesc(desc).addText(t => t.setValue(s[key]).onChange(v => { s[key] = v; save(); }));
+    srText("SR body tags", "srRecognitionTags", "Space-separated tags, including # (for example #flashcards). Matching body tags or their subtags enable the note. Frontmatter tags are not used; use an exact note path instead. Empty means no tag scope.");
+    new Setting(containerEl).setName("SR note paths")
+      .setDesc("One exact vault-relative Markdown path per line. Either a listed path or a configured body tag is required; access exclusions still apply.")
+      .addTextArea(t => t.setValue(s.srRecognitionNotePaths).onChange(v => { s.srRecognitionNotePaths = v; save(); }));
+    srText("SR single-line separator", "srSingleLineSeparator", "Reference default ::. Empty disables this format. Longest inline separator wins before multiline or cloze syntax.");
+    srText("SR reversed single-line separator", "srSingleLineReversedSeparator", "Reference default :::. Recognition identifies an existing reversed question, not a generated-card count.");
+    srText("SR multiline separator", "srMultilineSeparator", "Reference default ?. Separator must occupy its own line, with nonempty text on both sides.");
+    srText("SR reversed multiline separator", "srMultilineReversedSeparator", "Reference default ??. Separator must occupy its own line.");
+    srText("SR multiline end marker", "srMultilineEndMarker", "Reference default is empty (a blank line ends the card). A configured marker occupies its own line and permits blank lines inside cards.");
+    new Setting(containerEl).setName("SR plain highlight clozes")
+      .setDesc("Recognize plain ==answer== paragraphs. Indexed/hinted or custom cloze patterns, bold/curly clozes, and complex excluded blocks are unsupported. Syntax recognition does not verify scheduling or learning progress.")
+      .addToggle(t => t.setValue(s.srHighlightCloze).onChange(v => { s.srHighlightCloze = v; save(); }));
 
     new Setting(containerEl).setName("Anki").setHeading();
 
