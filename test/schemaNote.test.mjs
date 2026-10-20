@@ -22,9 +22,9 @@ const HEADINGS = ["Card Templates", "Card Rules", "Content Rules", "Learned"];
 test("the default schema carries today's date", () => {
   const md = s.renderDefaultSchema(opts);
   assert.match(md, /^---\nversion: 1\nupdated: 2026-09-19\nlearned_count: 0\n---\n/);
-  assert.match(md, /^# Review Inbox Card Rules$/m);
-  assert.ok(!md.includes("Review Inbox reads this note before every card it writes."), "the intro says it once");
-  assert.ok(md.includes("These are your rules for the cards Review Inbox writes."));
+  assert.match(md, /^# Recall Studio Card Rules$/m);
+  assert.ok(!md.includes("Recall Studio reads this note before every card it writes."), "the intro says it once");
+  assert.ok(md.includes("These are your rules for the cards Recall Studio writes."));
 });
 
 test("the rules note has no wiki sections", () => {
@@ -139,7 +139,7 @@ test("appendLearnedRule creates the section and the frontmatter when they are mi
 test("the empty suggestions file explains itself", () => {
   const md = s.renderEmptySuggestions();
   assert.ok(!md.startsWith("---\n"), "no frontmatter");
-  assert.match(md, /^# Review Inbox Card Rule Suggestions$/m);
+  assert.match(md, /^# Recall Studio Card Rule Suggestions$/m);
   assert.match(md, /^> .+$/m);
   assert.ok(md.includes("Review Inbox/recall-rules.md"));
   assert.deepEqual(s.parseProposals(md), []);

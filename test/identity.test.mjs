@@ -7,9 +7,10 @@ const manifest = JSON.parse(readFileSync("manifest.json", "utf8"));
 const pkg = JSON.parse(readFileSync("package.json", "utf8"));
 const versions = JSON.parse(readFileSync("versions.json", "utf8"));
 
-test("the plugin is Review Inbox 0.1.3", () => {
+test("Recall Studio preserves the Review Inbox identity and unreleased version", () => {
   assert.equal(manifest.id, "review-inbox");
-  assert.equal(manifest.name, "Review Inbox");
+  assert.equal(manifest.name, "Recall Studio");
+  assert.equal(pkg.name, "review-inbox");
   assert.equal(manifest.version, "0.1.3");
   assert.equal(manifest.minAppVersion, "1.7.2");
   assert.equal(manifest.isDesktopOnly, true);
@@ -115,7 +116,7 @@ test("no string the reader can see still calls the plugin Recall", () => {
   const offenders = [];
   for (const f of readdirSync("src").filter((n) => n.endsWith(".ts"))) {
     for (const lit of stringLiterals(readFileSync(`src/${f}`, "utf8"))) {
-      if (/\bRecall\b/.test(lit.replaceAll("Recall DeepSeek API key", ""))) {
+      if (/\bRecall\b/.test(lit.replaceAll("Recall Studio", "").replaceAll("Recall DeepSeek API key", ""))) {
         offenders.push(`${f}: ${JSON.stringify(lit)}`);
       }
     }

@@ -21,9 +21,9 @@ import { askInstruction, SchemaSuggestionsModal } from "./modals";
 import { countClozes, fmtDate, locateQuote, splitFrontmatter, plainText } from "./util";
 import { describeError } from "./llm";
 import { cardAuditLabel } from "./generation";
-import { findCrossInterference, LINT_LABELS, wrapCloze } from "./lint";
+import { findCrossInterference, lintCard, LINT_LABELS, wrapCloze } from "./lint";
 import { DEFAULT_SETTINGS } from "./settings";
-import { cardContent, checkCard, currentCardCheck } from "./cardActions";
+import { cardContent, checkCard, checkAndRepairCard, currentCardCheck } from "./cardActions";
 import { QuizView as ChatView } from "./quizView";
 
 export const VIEW_TYPE_INBOX = "review-inbox";
@@ -113,7 +113,7 @@ export class InboxView extends ItemView {
     return VIEW_TYPE_INBOX;
   }
   getDisplayText(): string {
-    return "Review Inbox";
+    return "Recall Studio";
   }
   getIcon(): string {
     return RECALL_ICON;
@@ -248,7 +248,7 @@ export class InboxView extends ItemView {
       empty.createEl("p", { text: this.filter === "review" ? "Nothing to review." : "Nothing here." });
       empty.createEl("p", {
         cls: "wikilm-muted",
-        text: "Turn on highlighter mode (ribbon pen) and drag across a passage in a note or PDF, or select text and run “Review Inbox: send selection to inbox”. Cards are written in the background and show up here as drafts.",
+        text: "Turn on highlighter mode (ribbon pen) and drag across a passage in a note or PDF, or select text and run “Recall Studio: send selection to inbox”. Cards are written in the background and show up here as drafts.",
       });
       return;
     }
@@ -398,7 +398,7 @@ export class InboxView extends ItemView {
         cls: "wikilm-schema-chip",
         text: `${suggestions} card rule suggestion${suggestions === 1 ? "" : "s"}`,
       });
-      chip.title = "Rules Review Inbox noticed in your own edits, waiting for your decision";
+      chip.title = "Rules Recall Studio noticed in your own edits, waiting for your decision";
       chip.addEventListener("click", () => {
         new SchemaSuggestionsModal(this.plugin.app, this.plugin.schema, () => this.scheduleRender()).open();
       });
@@ -436,10 +436,10 @@ export class InboxView extends ItemView {
             try {
               const n = this.plugin.store.clearExported();
               await this.plugin.store.flush();
-              new Notice(n ? `Review Inbox: archived ${n} passage${n === 1 ? "" : "s"}.` : "Review Inbox: inbox saved; no new passages to archive.");
+              new Notice(n ? `Recall Studio: archived ${n} passage${n === 1 ? "" : "s"}.` : "Recall Studio: inbox saved; no new passages to archive.");
             } catch (e) {
-              console.error("Review Inbox: archive was not saved", e);
-              new Notice("Review Inbox: archive not saved. Passage history remains in memory; retry after fixing storage.");
+              console.error("Recall Studio: archive was not saved", e);
+              new Notice("Recall Studio: archive not saved. Passage history remains in memory; retry after fixing storage.");
             }
           }),
       );
@@ -578,7 +578,7 @@ export class InboxView extends ItemView {
     }
     if (h.status === "error") iconBtn(RECALL_RETRY_ICON, "Retry", () => this.plugin.generator.enqueue(h));
     if (h.status === "ready" && h.cards.some(c => ["pending", "flagged", "approved"].includes(c.status))) {
-      iconBtn(RECALL_SPARK_ICON, "Check cards against best practices", async () => {
+      iconBtn(RECALL_SPARK_ICON, "Check cards against best practices (repair issues)", async () => {
         for (const c of liveCards(h)) {
           if (this.closed || h.status !== "ready") break;
           if (!["pending", "flagged", "approved"].includes(c.status)) continue;
@@ -664,6 +664,8 @@ export class InboxView extends ItemView {
     // check could disagree with the status the card is sitting in.
     if (c.status === "pending" || c.status === "approved" || c.status === "flagged") {
       for (const id of c.lintFailures ?? []) {
+        // Old count ceilings are not missing-deletion findings under today's rules.
+        if (id === "cloze-count" && !lintCard(c, h, []).failures.includes(id)) continue;
         const b = meta.createSpan({ cls: "wikilm-badge wikilm-badge-warn", text: LINT_LABELS[id] });
         b.title = `Lint check failed: ${id}`;
       }
@@ -727,7 +729,7 @@ export class InboxView extends ItemView {
       // the pipeline already recorded what is wrong it fixes the card on one
       // click instead of asking for an instruction that only restates the
       // critique.
-      btn(RECALL_SPARK_ICON, this.checking.has(c.id) ? "Checking card…" : "Check card against best practices", () => void this.checkAgainstPractices(h, c));
+      btn(RECALL_SPARK_ICON, this.checking.has(c.id) ? "Checking and repairing card…" : "Check card against best practices (repair issues)", () => void this.checkAgainstPractices(h, c));
       btn(c.kind === "qa" ? RECALL_CLOZE_ICON : RECALL_QA_ICON, c.kind === "qa" ? "Convert to cloze" : "Convert to Q&A", () =>
         void this.rewrite(h, c, c.kind === "qa" ? "Convert this Q&A card into a cloze card." : "Convert this cloze card into a question and answer card."),
       );
@@ -859,7 +861,7 @@ export class InboxView extends ItemView {
       c.extra = extra.value.trim();
       const empty = c.kind === "qa" ? !c.front || !c.back : !c.text;
       if (empty) {
-        new Notice("Review Inbox: empty card discarded.");
+        new Notice("Recall Studio: empty card discarded.");
         c.status = "deleted";
       } else if (JSON.stringify([c.kind, c.front, c.back, c.text, c.extra]) !== before) {
         c.edited = true;
@@ -959,14 +961,27 @@ export class InboxView extends ItemView {
 
   private async checkAgainstPractices(h: Highlight, c: Card): Promise<void> {
     if (this.checking.has(c.id)) return;
+    if (this.editing === c.id) { new Notice("Save or cancel this card's edits before checking and repairing it."); return; }
     this.checking.add(c.id);
-    const notice = new Notice("Review Inbox: checking card against best practices…", 0);
+    const notice = new Notice("Recall Studio: checking and repairing card…", 0);
+    const settings = JSON.stringify(this.plugin.settings);
+    const was = snapshot(c);
+    const active = () => !this.closed && this.editing !== c.id
+      && JSON.stringify(this.plugin.settings) === settings
+      && this.plugin.store.all().includes(h) && h.cards.includes(c);
     try {
-      const run = checkCard(c, h, (source, cards, siblings) => this.plugin.llm.critiqueCards(source, cards, siblings), () => !this.closed);
-      this.plugin.store.touch();
-      await run;
+      const result = await checkAndRepairCard(c, h,
+        (source, cards, siblings) => this.plugin.llm.critiqueCards(source, cards, siblings),
+        (source, card, instruction) => this.plugin.llm.rewriteCard(source, card, instruction), active);
+      if (result.status === "repaired") {
+        this.plugin.store.recordRevision({ cardId: c.id, at: new Date().toISOString(), via: "repair",
+          instruction: result.instruction!, before: was, after: snapshot(c) });
+        new Notice("Card repaired and rechecked. It remains a draft until you export it.");
+      } else if (result.status === "cancelled" && !this.closed) {
+        new Notice("Card or source changed; the repair was cancelled without replacing it.");
+      }
     } catch (e) {
-      new Notice(`Review Inbox: check failed. ${describeError(e)}`);
+      new Notice(`Recall Studio: check or repair failed. ${describeError(e)}`);
     } finally {
       this.checking.delete(c.id);
       this.plugin.store.touch();
@@ -977,7 +992,7 @@ export class InboxView extends ItemView {
   private async rewrite(h: Highlight, c: Card, preset?: string): Promise<void> {
     const instruction = preset ?? (await askInstruction(this.plugin.app, "Rewrite card", "e.g. make the answer shorter, ask about the date instead"));
     if (!instruction) return;
-    const notice = new Notice("Review Inbox: rewriting…", 0);
+    const notice = new Notice("Recall Studio: rewriting…", 0);
     const was = snapshot(c);
     try {
       const d = await this.plugin.llm.rewriteCard({ ...h, text: plainText(h.text) }, c, instruction);
@@ -1015,7 +1030,7 @@ export class InboxView extends ItemView {
         await this.learnFromEdits();
       }
     } catch (e) {
-      new Notice(`Review Inbox: ${describeError(e)}`);
+      new Notice(`Recall Studio: ${describeError(e)}`);
     } finally {
       notice.hide();
     }
@@ -1033,13 +1048,13 @@ export class InboxView extends ItemView {
     try {
       const n = await this.plugin.schema.learn(new Date().toISOString().slice(0, 10));
       if (n > 0) {
-        new Notice(`Review Inbox: ${n} new card rule suggestion${n === 1 ? "" : "s"}. See the inbox header.`);
+        new Notice(`Recall Studio: ${n} new card rule suggestion${n === 1 ? "" : "s"}. See the inbox header.`);
         this.render();
       }
     } catch (e) {
       // Learning is a nicety on top of an edit that already succeeded; a
       // failure here must not look to the reader like the edit failed.
-      console.error("Review Inbox: could not write a schema suggestion", e);
+      console.error("Recall Studio: could not write a schema suggestion", e);
     }
   }
 
@@ -1079,7 +1094,7 @@ export class InboxView extends ItemView {
           return;
         }
       } catch (e) {
-        console.error("Review Inbox: could not re-locate the highlight", e);
+        console.error("Recall Studio: could not re-locate the highlight", e);
       }
     }
     const line = Math.min(h.line, editor.lineCount() - 1);

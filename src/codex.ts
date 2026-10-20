@@ -196,7 +196,7 @@ export function resolveCodexBinary(configured: string): string {
     : `Not on Obsidian's PATH and the ChatGPT app is not installed at ${BUNDLED_CODEX}.`;
   throw new CodexError(
     "not-found",
-    `Codex CLI not found. ${hint} Set “Codex CLI path” in Review Inbox settings to the output of \`which codex\`, or install the ChatGPT desktop app.`,
+    `Codex CLI not found. ${hint} Set “Codex CLI path” in Recall Studio settings to the output of \`which codex\`, or install the ChatGPT desktop app.`,
   );
 }
 
@@ -309,10 +309,10 @@ function runQuick(bin: string, args: string[]): Promise<{ stdout: string; stderr
 }
 
 function classify(r: RunResult, eventError: string | null): CodexError {
-  if (r.aborted) return new CodexError("aborted", "Cancelled because Review Inbox was unloaded.");
+  if (r.aborted) return new CodexError("aborted", "Cancelled because Recall Studio was unloaded.");
   if (r.spawnError?.code === "ENOENT") {
     binaryCache = null;
-    return new CodexError("not-found", `Codex CLI could not be started (${r.spawnError.path ?? "unknown path"}). Check “Codex CLI path” in Review Inbox settings.`);
+    return new CodexError("not-found", `Codex CLI could not be started (${r.spawnError.path ?? "unknown path"}). Check “Codex CLI path” in Recall Studio settings.`);
   }
   if (r.spawnError) return new CodexError("failed", `Could not start Codex: ${r.spawnError.message}`);
   if (r.timedOut) return new CodexError("timeout", `Codex did not answer within ${Math.round(TIMEOUT_MS / 60000)} minutes.`);

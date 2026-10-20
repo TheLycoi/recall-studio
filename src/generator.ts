@@ -196,7 +196,7 @@ export class Generator {
       h.status = "ready";
       h.error = null;
       await save();
-      if (this.plugin.settings.notifyWhenReady) new Notice(`Review Inbox: ${cards.length} cards ready for “${h.title || h.sourceTitle}”. Audit ${batch.audit.status}.`);
+      if (this.plugin.settings.notifyWhenReady) new Notice(`Recall Studio: ${cards.length} cards ready for “${h.title || h.sourceTitle}”. Audit ${batch.audit.status}.`);
     } catch (e) {
       const rollback = e instanceof Interrupted && appended.length > 0;
       if (rollback) {
@@ -216,7 +216,7 @@ export class Generator {
           if (this.plugin.store.hasUnsavedChanges) throw new Error("Rollback was not saved.");
         } catch (saveError) {
           if (!superseded) { h.status = "error"; h.error = `Stale generation removed in memory, but saving failed: ${describeError(saveError)}`; }
-          new Notice("Review Inbox: stale generation could not be removed from storage. Changes remain in memory; fix storage and retry.");
+          new Notice("Recall Studio: stale generation could not be removed from storage. Changes remain in memory; fix storage and retry.");
           this.plugin.store.touch();
         }
       }

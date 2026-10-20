@@ -32,13 +32,14 @@ export interface RecallSettings extends SrRecognitionSettings {
   /** opencode model id, in the `provider/model` form `opencode models` prints, e.g. deepseek/deepseek-flash. */
   opencodeModel: string;
   effort: Effort;
+  /** Retained only for compatibility with saved settings; no writing quota. */
   maxCardsPerHighlight: number;
   contextChars: number;
   language: string;
   writerInstructions: string;
   concurrency: number;
   notifyWhenReady: boolean;
-  /** Review Inbox's own folder: the card rules note, the inbox, and the rule suggestions note. Keep it outside the wiki folder. */
+  /** Recall Studio's own folder: the card rules note, the inbox, and the rule suggestions note. Keep it outside the wiki folder. */
   schemaFolder: string;
 
   // Capture
@@ -66,7 +67,7 @@ export interface RecallSettings extends SrRecognitionSettings {
   exportFolder: string;
 
   // Sources
-  /** The folder other notes live in (a wiki plugin, a sources folder). Review Inbox reads the pages you select from it for chat and never changes it. */
+  /** The folder other notes live in (a wiki plugin, a sources folder). Recall Studio reads the pages you select from it for chat and never changes it. */
   topicFolder: string;
 
   // Card quality
@@ -156,9 +157,9 @@ export class RecallSettingTab extends PluginSettingTab {
       } catch (e) {
         listed = ` Could not list models: ${(e as Error).message}`;
       }
-      new Notice(`Review Inbox: ${r.model} answered (${r.via}).${listed}`, 8000);
+      new Notice(`Recall Studio: ${r.model} answered (${r.via}).${listed}`, 8000);
     } catch (e) {
-      new Notice(`Review Inbox: ${(e as Error).message}`, 8000);
+      new Notice(`Recall Studio: ${(e as Error).message}`, 8000);
     } finally {
       b.setDisabled(false);
     }
@@ -175,7 +176,7 @@ export class RecallSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Provider")
       .setDesc(
-        "Codex runs OpenAI's CLI on your ChatGPT sign-in and needs no key. DeepSeek calls the DeepSeek API with an API key. OpenCode runs the opencode CLI, which owns its own credentials, so Review Inbox holds no key for it. Test sends one small request and loads the model list.",
+        "Codex runs OpenAI's CLI on your ChatGPT sign-in and needs no key. DeepSeek calls the DeepSeek API with an API key. OpenCode runs the opencode CLI, which owns its own credentials, so Recall Studio holds no key for it. Test sends one small request and loads the model list.",
       )
       .addDropdown((d) =>
         d
@@ -250,7 +251,7 @@ export class RecallSettingTab extends PluginSettingTab {
       new Setting(containerEl)
         .setName("OpenCode CLI path")
         .setDesc(
-          "Leave empty to auto-detect: `opencode` on the PATH, then ~/.opencode/bin/opencode. Sign in with `opencode auth login`; add a provider key with `opencode service set env`. OpenCode owns its credentials, so Review Inbox stores none for it.",
+          "Leave empty to auto-detect: `opencode` on the PATH, then ~/.opencode/bin/opencode. Sign in with `opencode auth login`; add a provider key with `opencode service set env`. OpenCode owns its credentials, so Recall Studio stores none for it.",
         )
         .addText((t) =>
           t.setPlaceholder("auto-detect").setValue(s.opencodePath).onChange((v) => {
@@ -346,7 +347,7 @@ export class RecallSettingTab extends PluginSettingTab {
         s.provider === "deepseek"
           ? "How much reasoning DeepSeek spends per call. It accepts low, high and max; medium and xhigh both land on high, which is the level the API maps them to. Thinking is always on."
           : s.provider === "opencode"
-            ? "Unused by OpenCode, which carries a model's reasoning level in the model id itself: append #low, #high or #max to an id whose model offers that variant, e.g. deepseek/deepseek-flash#high. Review Inbox passes the id through unchanged rather than guessing a variant, because naming one the model does not offer fails the call."
+            ? "Unused by OpenCode, which carries a model's reasoning level in the model id itself: append #low, #high or #max to an id whose model offers that variant, e.g. deepseek/deepseek-flash#high. Recall Studio passes the id through unchanged rather than guessing a variant, because naming one the model does not offer fails the call."
             : "Reasoning effort passed to Codex. Levels the chosen model does not support (gpt-5.5 stops at xhigh) are rounded down automatically.",
       )
       .addDropdown((d) =>
@@ -355,20 +356,6 @@ export class RecallSettingTab extends PluginSettingTab {
           .setValue(s.effort)
           .onChange((v) => {
             s.effort = v as Effort;
-            save();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Max cards per highlight")
-      .setDesc("Upper bound. The writer makes fewer when the highlight only supports one or two.")
-      .addSlider((sl) =>
-        sl
-          .setLimits(1, 12, 1)
-          .setValue(s.maxCardsPerHighlight)
-          .setDynamicTooltip()
-          .onChange((v) => {
-            s.maxCardsPerHighlight = v;
             save();
           }),
       );
@@ -409,9 +396,9 @@ export class RecallSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
-      .setName("Review Inbox folder")
+      .setName("Recall Studio folder")
       .setDesc(
-        "Where Review Inbox keeps its own files: the card rules note, your inbox, and the rule suggestions. Keep it outside the wiki folder. Reload Review Inbox after you change it. Files already in the old folder stay there. Move them by hand if you want to keep them.",
+        "Where Recall Studio keeps its own files: the card rules note, your inbox, and the rule suggestions. Keep it outside the wiki folder. Reload Recall Studio after you change it. Files already in the old folder stay there. Move them by hand if you want to keep them.",
       )
       .addText((t) =>
         t.setValue(s.schemaFolder).onChange((v) => {
@@ -468,7 +455,7 @@ export class RecallSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Propose card rules from my edits")
       .setDesc(
-        "When the same correction shows up in three or four of your card edits, Review Inbox writes a proposed rule to `recall-suggestions.md` and shows a chip in the inbox. Nothing enters the card rules note until you accept it.",
+        "When the same correction shows up in three or four of your card edits, Recall Studio writes a proposed rule to `recall-suggestions.md` and shows a chip in the inbox. Nothing enters the card rules note until you accept it.",
       )
       .addToggle((t) =>
         t.setValue(s.schemaLearning).onChange((v) => {
@@ -530,7 +517,7 @@ export class RecallSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Mark captured text in the note")
       .setDesc(
-        "Off by default — Review Inbox sends passages to the inbox without editing your notes. Marking wraps the passage in ==…==, which can break headings and list formatting when a passage spans more than one line. Pages under the wiki folder are never marked.",
+        "Off by default — Recall Studio sends passages to the inbox without editing your notes. Marking wraps the passage in ==…==, which can break headings and list formatting when a passage spans more than one line. Pages under the wiki folder are never marked.",
       )
       .addDropdown((d) =>
         d
@@ -556,7 +543,7 @@ export class RecallSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Wiki folder")
-      .setDesc("The folder your wiki or sources live in. Chat reads the pages you select from it and capture never marks them. Review Inbox never changes them.")
+      .setDesc("The folder your wiki or sources live in. Capture never marks these pages. Quiz resolves eligible notes throughout the vault from the requested note, alias or tag.")
       .addText((t) =>
         t.setValue(s.topicFolder).onChange((v) => {
           s.topicFolder = v.trim() || DEFAULT_SETTINGS.topicFolder;
@@ -624,9 +611,9 @@ export class RecallSettingTab extends PluginSettingTab {
           try {
             await this.plugin.detectNoteTypes();
             this.display();
-            new Notice("Review Inbox: note types detected.");
+            new Notice("Recall Studio: note types detected.");
           } catch (e) {
-            new Notice(`Review Inbox: ${(e as Error).message}`);
+            new Notice(`Recall Studio: ${(e as Error).message}`);
           }
         }),
       );

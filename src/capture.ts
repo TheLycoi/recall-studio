@@ -47,7 +47,7 @@ function announce(plugin: RecallPlugin, h: Highlight, opts: CaptureOptions): voi
   plugin.store.add(h);
   plugin.generator.enqueue(h);
   const what = opts.gesture ? "highlighted and sent to inbox" : "sent to inbox";
-  new Notice(`Review Inbox: ${what}${opts.instruction ? " with instructions" : ""}.`);
+  new Notice(`Recall Studio: ${what}${opts.instruction ? " with instructions" : ""}.`);
   if (plugin.settings.openInboxOnCapture) void plugin.openInbox();
 }
 
@@ -67,7 +67,7 @@ export async function captureSelection(
     if (opts.gesture) return null;
     const p = paragraphAt(editor);
     if (!p) {
-      new Notice("Review Inbox: select some text first.");
+      new Notice("Recall Studio: select some text first.");
       return null;
     }
     from = p.from;
@@ -76,11 +76,11 @@ export async function captureSelection(
   }
   const text = stripMarks(sel).trim();
   if (text.length < 3) {
-    if (!opts.gesture) new Notice("Review Inbox: selection is too short.");
+    if (!opts.gesture) new Notice("Recall Studio: selection is too short.");
     return null;
   }
   if (plugin.store.hasDuplicate(file.path, normalizeWs(text))) {
-    if (!opts.gesture) new Notice("Review Inbox: that highlight is already in the inbox.");
+    if (!opts.gesture) new Notice("Recall Studio: that highlight is already in the inbox.");
     return null;
   }
 
@@ -158,8 +158,8 @@ export async function captureMarkdownHighlights(plugin: RecallPlugin, file: TFil
   }
   new Notice(
     spans.length === 0
-      ? "Review Inbox: no ==highlights== found in this note."
-      : `Review Inbox: queued ${added} highlight${added === 1 ? "" : "s"}${spans.length - added ? ` (${spans.length - added} already in inbox)` : ""}.`,
+      ? "Recall Studio: no ==highlights== found in this note."
+      : `Recall Studio: queued ${added} highlight${added === 1 ? "" : "s"}${spans.length - added ? ` (${spans.length - added} already in inbox)` : ""}.`,
   );
   return added;
 }
@@ -261,17 +261,17 @@ export async function captureReadingSelection(
   const { body } = splitFrontmatter(raw);
   const loc = locateQuote(body, text);
   if (!loc) {
-    new Notice("Review Inbox: could not find that selection in the note's markdown.");
+    new Notice("Recall Studio: could not find that selection in the note's markdown.");
     return null;
   }
   if (plugin.store.hasDuplicate(file.path, normalizeWs(stripMarks(body.slice(loc.start, loc.end))))) {
-    if (!opts.gesture) new Notice("Review Inbox: that highlight is already in the inbox.");
+    if (!opts.gesture) new Notice("Recall Studio: that highlight is already in the inbox.");
     return null;
   }
   const { created } = await captureSpans(plugin, file, raw, [loc], opts.gesture ? "highlighter" : "selection", opts.instruction ?? "");
   sel?.removeAllRanges();
   if (!created.length) return null;
-  new Notice(`Review Inbox: ${opts.gesture ? "highlighted and " : ""}sent to inbox.`);
+  new Notice(`Recall Studio: ${opts.gesture ? "highlighted and " : ""}sent to inbox.`);
   if (plugin.settings.openInboxOnCapture) void plugin.openInbox();
   return created[0];
 }
@@ -286,7 +286,7 @@ export function capturePdfSelection(
   const text = sel.text.trim();
   if (text.length < 3) return null;
   if (plugin.store.hasDuplicate(file.path, normalizeWs(text))) {
-    if (!opts.gesture) new Notice("Review Inbox: that highlight is already in the inbox.");
+    if (!opts.gesture) new Notice("Recall Studio: that highlight is already in the inbox.");
     return null;
   }
   let before = "";

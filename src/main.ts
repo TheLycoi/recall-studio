@@ -54,7 +54,7 @@ export default class RecallPlugin extends Plugin {
 
     this.addSettingTab(new RecallSettingTab(this.app, this));
 
-    this.addRibbonIcon(RECALL_ICON, "Review Inbox inbox", () => void this.openInbox());
+    this.addRibbonIcon(RECALL_ICON, "Recall Studio inbox", () => void this.openInbox());
     this.statusBar = this.addStatusBarItem();
     this.statusBar.addClass("wikilm-statusbar");
     this.statusBar.addEventListener("click", () => void this.openInbox());
@@ -88,14 +88,14 @@ export default class RecallPlugin extends Plugin {
         if (!file) return;
         menu.addItem((item) =>
           item
-            .setTitle(editor.getSelection().trim() ? "Review Inbox: send selection to inbox" : "Review Inbox: send paragraph to inbox")
+            .setTitle(editor.getSelection().trim() ? "Recall Studio: send selection to inbox" : "Recall Studio: send paragraph to inbox")
             .setIcon(RECALL_ICON)
             .setSection("review-inbox")
             .onClick(() => void captureSelection(this, editor, file)),
         );
         menu.addItem((item) =>
           item
-            .setTitle("Review Inbox: send with instructions…")
+            .setTitle("Recall Studio: send with instructions…")
             .setIcon(RECALL_SPARK_ICON)
             .setSection("review-inbox")
             .onClick(async () => {
@@ -123,24 +123,24 @@ export default class RecallPlugin extends Plugin {
     try {
       this.sourceVisibility?.destroy();
     } catch (e) {
-      console.error("Review Inbox: source visibility cleanup failed during unload", e);
+      console.error("Recall Studio: source visibility cleanup failed during unload", e);
       failure = e;
     }
     try {
       await this.llm.abort();
     } catch (e) {
-      console.error("Review Inbox: model abort failed during unload", e);
+      console.error("Recall Studio: model abort failed during unload", e);
       failure = e;
     }
     try {
       await this.store.flush();
     } catch (e) {
-      console.error("Review Inbox: inbox save failed during unload", e);
+      console.error("Recall Studio: inbox save failed during unload", e);
       failure ??= e;
     } finally {
       this.store.close();
     }
-    if (this.store.hasUnsavedChanges) new Notice("Review Inbox: inbox.json was not saved on unload; changes are not yet durable.", 0);
+    if (this.store.hasUnsavedChanges) new Notice("Recall Studio: inbox.json was not saved on unload; changes are not yet durable.", 0);
     if (failure) throw failure;
   }
 
@@ -166,9 +166,9 @@ export default class RecallPlugin extends Plugin {
     if (c.toReview) parts.push(`⧉ ${c.toReview}`);
     if (c.flagged) parts.push(`⚑ ${c.flagged}`);
     if (c.errors) parts.push(`⚠ ${c.errors}`);
-    this.statusBar.setText(parts.length ? `Review Inbox ${parts.join(" · ")}` : "Review Inbox");
+    this.statusBar.setText(parts.length ? `Recall Studio ${parts.join(" · ")}` : "Recall Studio");
     this.statusBar.toggleClass("wikilm-statusbar-highlighter", !!this.highlighter?.enabled);
-    this.statusBar.title = `Review Inbox: ${this.highlighter?.enabled ? "highlighter mode on, " : ""}${c.queued + c.generating} writing, ${c.toReview} cards to review${c.flagged ? `, ${c.flagged} flagged` : ""}${c.errors ? `, ${c.errors} failed` : ""}. Click to open the inbox.`;
+    this.statusBar.title = `Recall Studio: ${this.highlighter?.enabled ? "highlighter mode on, " : ""}${c.queued + c.generating} writing, ${c.toReview} cards to review${c.flagged ? `, ${c.flagged} flagged` : ""}${c.errors ? `, ${c.errors} failed` : ""}. Click to open the inbox.`;
   }
 
   async openInbox(): Promise<void> {
@@ -179,7 +179,7 @@ export default class RecallPlugin extends Plugin {
     await this.app.workspace.revealLeaf(leaf);
   }
 
-  /** Focus Chat inside the existing Inbox. */
+  /** Focus Quiz inside the existing Inbox, retaining the entrypoint identity. */
   async openChat(): Promise<void> {
     await this.openInbox();
     const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_INBOX)[0];
@@ -191,7 +191,7 @@ export default class RecallPlugin extends Plugin {
     try {
       decks = await this.anki.deckNames();
     } catch {
-      new Notice("Review Inbox: Anki not reachable; type a deck name.");
+      new Notice("Recall Studio: Anki not reachable; type a deck name.");
     }
     return pickDeck(this.app, decks);
   }
@@ -226,14 +226,14 @@ export default class RecallPlugin extends Plugin {
 
   /** Export is the acceptance action; failed attempts restore draft state. */
   private async acceptExport(list: Highlight[], ids: ReadonlySet<string> | undefined, send: (items: ExportItem[]) => Promise<void>): Promise<void> {
-    if (this.exportBusy) { new Notice("Review Inbox: an export is already running."); return; }
+    if (this.exportBusy) { new Notice("Recall Studio: an export is already running."); return; }
     this.exportBusy = true;
     try {
       const items = exportCandidates(list, ids);
-      if (!items.length) { new Notice("Review Inbox: no visible drafts to export."); return; }
+      if (!items.length) { new Notice("Recall Studio: no visible drafts to export."); return; }
       await withExportAcceptance(items, () => send(items));
     } catch (e) {
-      new Notice(`Review Inbox: export failed. ${(e as Error).message}`, 8000);
+      new Notice(`Recall Studio: export failed. ${(e as Error).message}`, 8000);
     } finally {
       this.exportBusy = false;
       this.store.touch();
@@ -249,7 +249,7 @@ export default class RecallPlugin extends Plugin {
   }
 
   private async sendToAnki(items: ExportItem[]): Promise<void> {
-    const notice = new Notice(`Review Inbox: exporting ${items.length} card${items.length === 1 ? "" : "s"} to “${this.settings.defaultDeck}”…`, 0);
+    const notice = new Notice(`Recall Studio: exporting ${items.length} card${items.length === 1 ? "" : "s"} to “${this.settings.defaultDeck}”…`, 0);
     try {
       const res: ExportResult = await exportToAnki(this.anki, items, {
         settings: this.settings,
@@ -267,12 +267,12 @@ export default class RecallPlugin extends Plugin {
       if (res.alreadyExported) bits.push(`${res.alreadyExported} already sent`);
       if (res.duplicates) bits.push(`${res.duplicates} duplicate content`);
       if (res.failed.length) bits.push(`${res.failed.length} failed`);
-      new Notice(`Review Inbox: ${bits.join(", ")}.`, res.failed.length ? 8000 : 4000);
-      for (const f of res.failed) console.warn("Review Inbox: export failed", f.error, f.card);
-      if (res.failed.length) new Notice(`Review Inbox: ${res.failed[0].error}`, 8000);
+      new Notice(`Recall Studio: ${bits.join(", ")}.`, res.failed.length ? 8000 : 4000);
+      for (const f of res.failed) console.warn("Recall Studio: export failed", f.error, f.card);
+      if (res.failed.length) new Notice(`Recall Studio: ${res.failed[0].error}`, 8000);
     } catch (e) {
       const msg = (e as Error).message;
-      new Notice(`Review Inbox: export failed. ${msg}\nUse “Export as Anki text file” from the inbox menu if Anki is closed.`, 10000);
+      new Notice(`Recall Studio: export failed. ${msg}\nUse “Export as Anki text file” from the inbox menu if Anki is closed.`, 10000);
       this.store.touch();
     } finally {
       notice.hide();
@@ -315,7 +315,7 @@ export default class RecallPlugin extends Plugin {
     });
     finalizeHighlights(items.map((i) => i.highlight));
     this.store.touch();
-    new Notice(`Review Inbox: wrote ${files.map(([p]) => p).join(" and ")}. In Anki: File → Import.`, 8000);
+    new Notice(`Recall Studio: wrote ${files.map(([p]) => p).join(" and ")}. In Anki: File → Import.`, 8000);
   }
 
   /** Used by the settings tab and tests; resolves a TFile from a path. */

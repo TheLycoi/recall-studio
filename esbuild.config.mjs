@@ -3,7 +3,7 @@ import process from "process";
 import { readFileSync } from "node:fs";
 import { sharedBuildOptions } from "./scripts/esbuild-shared.mjs";
 
-const banner = `/*\nReview Inbox for Obsidian.\n${readFileSync(new URL("./LICENSE", import.meta.url), "utf8")}\n${readFileSync(new URL("./NOTICE.txt", import.meta.url), "utf8")}\n*/\n`;
+const banner = `/*\nRecall Studio for Obsidian.\n${readFileSync(new URL("./LICENSE", import.meta.url), "utf8")}\n${readFileSync(new URL("./NOTICE.txt", import.meta.url), "utf8")}\n*/\n`;
 
 const prod = process.argv[2] === "production";
 

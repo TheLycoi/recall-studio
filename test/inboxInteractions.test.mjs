@@ -45,7 +45,7 @@ test('the passage star checks its live cards without asking to generate more',as
   const calls=[];view.checkAgainstPractices=async(h,c)=>calls.push(c.id);view.renderCard=()=>{};
   const h={id:'h',status:'ready',text:'Source.',createdAt:new Date().toISOString(),cards:[{id:'a',status:'pending'},{id:'b',status:'flagged'},{id:'c',status:'deleted'},{id:'d',status:'approved'},{id:'e',status:'duplicate'},{id:'f',status:'exported'}]};
   view.renderHighlight(root,h);
-  const button=descendants(root).find(e=>e.title==='Check cards against best practices');
+  const button=descendants(root).find(e=>e.title==='Check cards against best practices (repair issues)');
   assert.ok(button,'passage star must offer a best-practices check');
   await button.events.click();
   assert.deepEqual(calls,['a','b','d']);

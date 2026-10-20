@@ -69,7 +69,7 @@ export class DeepSeekBackend implements LlmBackend {
     if (!resolved.key) {
       throw new DeepSeekError(
         "no-key",
-        "No DeepSeek API key. Paste one in Review Inbox settings, export DEEPSEEK_API_KEY, add a keychain item named DEEPSEEK_API_KEY, or switch the provider to Codex.",
+        "No DeepSeek API key. Paste one in Recall Studio settings, export DEEPSEEK_API_KEY, add a keychain item named DEEPSEEK_API_KEY, or switch the provider to Codex.",
       );
     }
     return resolved;

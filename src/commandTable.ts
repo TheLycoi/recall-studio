@@ -27,8 +27,7 @@ export interface CommandSpec {
 // The palette order is the order of use: capture, inbox, chat, export, then the
 // card rules. The two hidden commands are run by name.
 //
-// Review Inbox has no quiz, no dashboard, no statistics and no review
-// scheduler: the surfaces here are capture, the inbox, chat and Anki export.
+// Quiz uses the compatible open-chat identity; no review scheduler is registered.
 export const COMMAND_TABLE: CommandSpec[] = [
   {
     id: "capture-selection",
@@ -56,7 +55,7 @@ export const COMMAND_TABLE: CommandSpec[] = [
   },
   {
     id: "open-chat",
-    name: "Open chat",
+    name: "Open quiz",
     aliases: ["chat"],
     hint: "always",
   },

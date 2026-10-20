@@ -48,9 +48,9 @@ updated: ${today}
 learned_count: 0
 ---
 
-# Review Inbox Card Rules
+# Recall Studio Card Rules
 
-These are your rules for the cards Review Inbox writes. Every section below is read before each card it writes and handed to the model as your house rules, so a rule you write here applies from the next run onward — no setting to find, no code to edit. Delete a rule and it stops applying; delete a whole section and nothing from it is sent. The sections are yours to rewrite in your own words.
+These are your rules for the cards Recall Studio writes. Every section below is read before each card it writes and handed to the model as your house rules, so a rule you write here applies from the next run onward — no setting to find, no code to edit. Delete a rule and it stops applying; delete a whole section and nothing from it is sent. The sections are yours to rewrite in your own words.
 
 ## Card Templates
 
@@ -59,7 +59,7 @@ These are your rules for the cards Review Inbox writes. Every section below is r
 
 ## Card Rules
 
-- One fact per card. A highlight with three facts becomes three cards, or one cloze sentence with three numbered deletions — never one card with a paragraph answer.
+- One fact per retrieval. Independent cloze deletions can share a source sentence. There is no fixed deletion count or cloze-card quota; a single deletion is valid. Do not split or duplicate a stem solely to meet a number.
 - The question must not contain its answer, and must not be answerable by grammar, length, or the only candidate the sentence admits.
 - Use the highlight's own words. A card is verifiable against the text at a glance, or it is not verifiable at all.
 - Answers are short: a term, a number, a name, or a phrase.
@@ -231,9 +231,9 @@ export interface Proposal {
  * default is the default setting's path, for a caller with nothing better.
  */
 export function renderEmptySuggestions(schemaPath = "Review Inbox/recall-rules.md"): string {
-  return `# Review Inbox Card Rule Suggestions
+  return `# Recall Studio Card Rule Suggestions
 
-> These are rules Review Inbox noticed in your own edits to its cards. None of them is in force. Accept one by copying its rule into a section of \`${schemaPath}\`, or dismiss it; either way the entry stays here so the same observation is not proposed to you twice.
+> These are rules Recall Studio noticed in your own edits to its cards. None of them is in force. Accept one by copying its rule into a section of \`${schemaPath}\`, or dismiss it; either way the entry stays here so the same observation is not proposed to you twice.
 
 ---
 `;

@@ -71,7 +71,7 @@ export class InboxStore {
     if (dir && !(await adapter.exists(dir))) await adapter.mkdir(dir);
     if (!this.legacyPath || (await adapter.exists(this.path)) || !(await adapter.exists(this.legacyPath))) return;
     await adapter.rename(this.legacyPath, this.path);
-    console.debug(`Review Inbox: inbox moved from the plugin folder to ${this.path}`);
+    console.debug(`Recall Studio: inbox moved from the plugin folder to ${this.path}`);
   }
 
   async load(): Promise<void> {
@@ -89,25 +89,25 @@ export class InboxStore {
             const moved = `${this.path}.corrupt-${timestamp(new Date())}`;
             await adapter.rename(this.path, moved);
             await adapter.rename(backup, this.path);
-            new Notice(`Review Inbox: recovered inbox.json from backup; damaged file kept at ${moved}.`, 0);
+            new Notice(`Recall Studio: recovered inbox.json from backup; damaged file kept at ${moved}.`, 0);
           }
         } else {
           const saved = parseInboxJson(await adapter.read(backup));
           if (!saved.ok || saved.fresh) throw new Error(`Inbox backup is unreadable: ${saved.ok ? "backup is blank" : saved.detail}`);
           await adapter.rename(backup, this.path);
-          new Notice("Review Inbox: recovered inbox.json from an interrupted save.");
+          new Notice("Recall Studio: recovered inbox.json from an interrupted save.");
         }
       }
     } catch (e) {
-      console.error("Review Inbox: could not recover inbox.json backup", e);
+      console.error("Recall Studio: could not recover inbox.json backup", e);
       this.readOnly = true;
-      new Notice("Review Inbox: inbox.json backup could not be recovered; storage is read-only until restart.", 0);
+      new Notice("Recall Studio: inbox.json backup could not be recovered; storage is read-only until restart.", 0);
       return;
     }
     try {
       await this.migrate();
     } catch (e) {
-      console.error("Review Inbox: could not move the inbox into the Review Inbox folder", e);
+      console.error("Recall Studio: could not move the inbox into the Recall Studio folder", e);
     }
     try {
       if (await this.app.vault.adapter.exists(this.path)) {
@@ -122,17 +122,17 @@ export class InboxStore {
           const moved = `${this.path}.corrupt-${timestamp(new Date())}`;
           try {
             await this.app.vault.adapter.rename(this.path, moved);
-            console.error(`Review Inbox: inbox.json could not be read; moved to ${moved}`, parsed.detail);
+            console.error(`Recall Studio: inbox.json could not be read; moved to ${moved}`, parsed.detail);
             const basename = moved.split("/").pop() ?? moved;
             new Notice(
-              `Review Inbox: inbox.json was unreadable and has been moved to ${basename}. The inbox starts empty; the old file is kept.`,
+              `Recall Studio: inbox.json was unreadable and has been moved to ${basename}. The inbox starts empty; the old file is kept.`,
               0,
             );
           } catch (renameError) {
             // Couldn't even move it aside — leave it in place, untouched,
             // and never schedule a write, or the next save would clobber
             // the one copy of the reader's inbox that still exists on disk.
-            console.error("Review Inbox: inbox.json is unreadable and could not be moved aside", renameError);
+            console.error("Recall Studio: inbox.json is unreadable and could not be moved aside", renameError);
             this.readOnly = true;
           }
         }
@@ -141,9 +141,9 @@ export class InboxStore {
       // The file may be there and simply unreadable right now (evicted by
       // iCloud, locked by a sync). Writing would put an empty inbox over it,
       // so nothing is saved until the plugin is loaded again.
-      console.error("Review Inbox: failed to read inbox.json", e);
+      console.error("Recall Studio: failed to read inbox.json", e);
       this.readOnly = true;
-      new Notice("Review Inbox: inbox.json could not be read; the inbox is read-only until Obsidian is restarted.");
+      new Notice("Recall Studio: inbox.json could not be read; the inbox is read-only until Obsidian is restarted.");
     }
     // Anything interrupted mid-generation goes back to the queue.
     for (const h of this.data.highlights) if (h.status === "generating") h.status = "queued";
@@ -153,8 +153,8 @@ export class InboxStore {
     if (this.readOnly || this.closed) return;
     if (this.saveTimer !== null) window.clearTimeout(this.saveTimer);
     this.saveTimer = window.setTimeout(() => void this.flush().catch((e) => {
-      console.error("Review Inbox: failed to write inbox.json; changes remain in memory for retry", e);
-      new Notice("Review Inbox: inbox.json could not be saved. Changes are not yet durable; retry after fixing storage.");
+      console.error("Recall Studio: failed to write inbox.json; changes remain in memory for retry", e);
+      new Notice("Recall Studio: inbox.json could not be saved. Changes are not yet durable; retry after fixing storage.");
     }), 400);
   }
 
@@ -193,7 +193,7 @@ export class InboxStore {
         if (existing) await adapter.remove(backup);
         if (revision === this.revision) this.dirty = false;
       } catch (e) {
-        console.error("Review Inbox: failed to write inbox.json", e);
+        console.error("Recall Studio: failed to write inbox.json", e);
         throw e;
       } finally {
         if (await adapter.exists(staged)) await adapter.remove(staged);
@@ -247,7 +247,7 @@ export class InboxStore {
     const move = (path: string) => path === oldPath ? newPath : path.startsWith(`${oldPath}/`) ? newPath + path.slice(oldPath.length) : path;
     const maps = [this.data.transcripts, this.data.highlightInstructions, this.data.ingested];
     if (newPath.startsWith(`${oldPath}/`) || maps.some(map => map && Object.keys(map).some(key => move(key) !== key && Object.hasOwn(map, move(key))))) {
-      new Notice("Review Inbox: source rename conflicts with retained metadata. History remains under its original path; no records were overwritten.", 0);
+      new Notice("Recall Studio: source rename conflicts with retained metadata. History remains under its original path; no records were overwritten.", 0);
       return 0;
     }
     let changed = 0;

@@ -188,7 +188,7 @@ export function resolveOpencodeBinary(configured: string): string {
   const hint = configured.trim() ? `Nothing runnable at "${configured.trim()}".` : "Not on Obsidian's PATH.";
   throw new OpenCodeError(
     "not-found",
-    `OpenCode CLI not found. ${hint} Set “OpenCode CLI path” in Review Inbox settings to the output of \`which opencode\`, or install it with \`brew install sst/tap/opencode\`.`,
+    `OpenCode CLI not found. ${hint} Set “OpenCode CLI path” in Recall Studio settings to the output of \`which opencode\`, or install it with \`brew install sst/tap/opencode\`.`,
   );
 }
 
@@ -216,7 +216,7 @@ export function opencodeAgentConfig(): string {
       agents: {
         [OPENCODE_AGENT]: {
           mode: "primary",
-          description: "Review Inbox's card writer: answers from the prompt, with no tools.",
+          description: "Recall Studio's card writer: answers from the prompt, with no tools.",
           permissions: [{ action: "*", resource: "*", effect: "deny" }],
         },
       },
@@ -360,10 +360,10 @@ function listOpencodeModels(bin: string, cwd: string): Promise<{ stdout: string;
 }
 
 function classify(r: RunResult, events: RunEvents, model: string): OpenCodeError {
-  if (r.aborted) return new OpenCodeError("aborted", "Cancelled because Review Inbox was unloaded.");
+  if (r.aborted) return new OpenCodeError("aborted", "Cancelled because Recall Studio was unloaded.");
   if (r.spawnError?.code === "ENOENT") {
     binaryCache = null;
-    return new OpenCodeError("not-found", `OpenCode CLI could not be started (${r.spawnError.path ?? "unknown path"}). Check “OpenCode CLI path” in Review Inbox settings.`);
+    return new OpenCodeError("not-found", `OpenCode CLI could not be started (${r.spawnError.path ?? "unknown path"}). Check “OpenCode CLI path” in Recall Studio settings.`);
   }
   if (r.spawnError) return new OpenCodeError("failed", `Could not start opencode: ${r.spawnError.message}`);
   if (r.timedOut) return new OpenCodeError("timeout", `OpenCode did not answer within ${Math.round(TIMEOUT_MS / 60000)} minutes.`);
@@ -371,7 +371,7 @@ function classify(r: RunResult, events: RunEvents, model: string): OpenCodeError
   if (/model unavailable|no-route|not found.*model/i.test(text)) {
     return new OpenCodeError(
       "model",
-      `OpenCode does not serve ${model}: ${events.error ?? r.stderr.split("\n")[0]}. Click Test in Review Inbox settings to list the models this machine has.`,
+      `OpenCode does not serve ${model}: ${events.error ?? r.stderr.split("\n")[0]}. Click Test in Recall Studio settings to list the models this machine has.`,
     );
   }
   if (/unauthori[sz]ed|no api key|missing api key|\b401\b/i.test(text)) {

@@ -237,7 +237,7 @@ test("a classified error never echoes key material", () => {
   assert.match(e.message, /Invalid key/);
   assert.match(e.message, /for this request/);
   // The advice the reader needs is untouched.
-  assert.match(e.message, /Check the key in Review Inbox settings/);
+  assert.match(e.message, /Check the key in Recall Studio settings/);
 });
 
 test("redactDetail strips credential shapes and caps the length", () => {

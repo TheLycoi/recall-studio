@@ -32,7 +32,7 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
       const file = p.app.workspace.getActiveFile();
       if (isPdfFile(file)) {
         const sel = readPdfSelection(activeWindow);
-        if (!sel) new Notice("Review Inbox: select text inside a PDF page first.");
+        if (!sel) new Notice("Recall Studio: select text inside a PDF page first.");
         else capturePdfSelection(p, file, sel);
         return;
       }
@@ -53,7 +53,7 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
       if (isPdfFile(file)) {
         const sel = readPdfSelection(activeWindow);
         if (!sel) {
-          new Notice("Review Inbox: select text inside a PDF page first.");
+          new Notice("Recall Studio: select text inside a PDF page first.");
           return;
         }
         const inst = await askInstruction(p.app, INSTRUCTION_TITLE, INSTRUCTION_PLACEHOLDER);
@@ -65,7 +65,7 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
       if (view.getMode() === "preview") {
         const text = activeWindow.getSelection()?.toString().trim() ?? "";
         if (!text) {
-          new Notice("Review Inbox: select text in the note first.");
+          new Notice("Recall Studio: select text in the note first.");
           return;
         }
         const inst = await askInstruction(p.app, INSTRUCTION_TITLE, INSTRUCTION_PLACEHOLDER);
@@ -109,7 +109,7 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
     run: (p) => {
       let n = 0;
       for (const h of p.store.all()) if (h.status === "error") (p.generator.enqueue(h), n++);
-      new Notice(`Review Inbox: retrying ${n}.`);
+      new Notice(`Recall Studio: retrying ${n}.`);
     },
   },
   "open-schema": {
@@ -134,10 +134,10 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
 // command that throws when run; an implementation with no spec would never be
 // registered at all. Both are programming errors, so fail loudly at import.
 for (const spec of COMMAND_TABLE) {
-  if (!IMPLEMENTATIONS[spec.id]) throw new Error(`Review Inbox: command "${spec.id}" has no implementation.`);
+  if (!IMPLEMENTATIONS[spec.id]) throw new Error(`Recall Studio: command "${spec.id}" has no implementation.`);
 }
 for (const id of Object.keys(IMPLEMENTATIONS)) {
-  if (!COMMAND_TABLE.some((spec) => spec.id === id)) throw new Error(`Review Inbox: implementation "${id}" has no command spec.`);
+  if (!COMMAND_TABLE.some((spec) => spec.id === id)) throw new Error(`Recall Studio: implementation "${id}" has no command spec.`);
 }
 
 export const RECALL_COMMANDS: RecallCommand[] = COMMAND_TABLE.map((spec) => ({ ...spec, ...IMPLEMENTATIONS[spec.id] }));

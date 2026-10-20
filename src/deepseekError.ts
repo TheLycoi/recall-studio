@@ -69,7 +69,7 @@ export function classifyStatus(status: number, detail: string | null): DeepSeekE
   const safe = redactDetail(detail);
   const tail = safe ? `: ${safe}` : "";
   if (status === 401 || status === 403) {
-    return new DeepSeekError("auth", `DeepSeek rejected the API key${tail}. Check the key in Review Inbox settings.`);
+    return new DeepSeekError("auth", `DeepSeek rejected the API key${tail}. Check the key in Recall Studio settings.`);
   }
   if (status === 402) {
     return new DeepSeekError("balance", `DeepSeek reports insufficient balance${tail}. Top up at platform.deepseek.com.`);

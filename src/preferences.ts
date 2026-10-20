@@ -144,7 +144,7 @@ export function observe(
   // An edit that changed no field is a save, not a correction: it is evidence
   // for nothing, and counting it would let a reader reach a threshold by
   // pressing the button.
-  const edits = (revisions ?? []).filter(changed);
+  const edits = (revisions ?? []).filter(r => r.via !== "repair" && changed(r));
   const out: Observation[] = [];
 
   out.push(...shorterAnswers(edits, thresholds["shorter-answers"]));

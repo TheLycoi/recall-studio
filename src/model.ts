@@ -48,7 +48,8 @@ export interface GenerationPreparation {
   conflicts: { quote: string; reason: string }[];
 }
 export interface GenerationContext {
-  maxCards: number;
+  /** Legacy saved batches may carry this field; it no longer limits writing. */
+  maxCards?: number;
   language: string;
   instructions: string;
   rules: string;
@@ -177,8 +178,8 @@ export interface CardRevision {
   cardId: string;
   /** ISO timestamp of the edit. */
   at: string;
-  /** "rewrite" = the model rewrote it from an instruction; "edit" = typed by hand. */
-  via: "rewrite" | "edit";
+  /** "repair" is a best-practices fix, retained as history but not learned as a preference. */
+  via: "rewrite" | "edit" | "repair";
   /** The rewrite instruction, or "" for a hand edit. */
   instruction: string;
   before: CardSnapshot;

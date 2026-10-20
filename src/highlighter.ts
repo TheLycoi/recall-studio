@@ -34,7 +34,7 @@ export class Highlighter {
 
   install(): void {
     const p = this.plugin;
-    this.ribbon = p.addRibbonIcon(RECALL_HIGHLIGHT_ICON, "Review Inbox highlighter mode", () => void this.toggle());
+    this.ribbon = p.addRibbonIcon(RECALL_HIGHLIGHT_ICON, "Recall Studio highlighter mode", () => void this.toggle());
     this.reflect();
     p.addCommand({ id: "toggle-highlighter", name: "Toggle highlighter mode", callback: () => void this.toggle() });
 
@@ -50,12 +50,12 @@ export class Highlighter {
     this.plugin.settings.highlighterMode = on;
     await this.plugin.saveSettings();
     this.reflect();
-    new Notice(`Review Inbox: highlighter ${on ? "on. Drag across a passage to send it to the inbox." : "off."}`);
+    new Notice(`Recall Studio: highlighter ${on ? "on. Drag across a passage to send it to the inbox." : "off."}`);
   }
 
   reflect(): void {
     this.ribbon?.toggleClass("wikilm-highlighter-on", this.enabled);
-    this.ribbon?.setAttribute("aria-label", `Review Inbox highlighter mode (${this.enabled ? "on" : "off"})`);
+    this.ribbon?.setAttribute("aria-label", `Recall Studio highlighter mode (${this.enabled ? "on" : "off"})`);
     document.body.toggleClass("wikilm-highlighter-active", this.enabled);
     this.plugin.refreshStatusBar();
   }
@@ -108,7 +108,7 @@ export class Highlighter {
         win.getSelection()?.removeAllRanges();
       }
     } catch (e) {
-      console.error("Review Inbox: highlighter capture failed", e);
+      console.error("Recall Studio: highlighter capture failed", e);
     } finally {
       this.busy = false;
     }

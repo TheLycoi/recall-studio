@@ -43,6 +43,12 @@ const find = (obs, id) => obs.find((o) => o.id === id);
 
 // ---- thresholds and empty input ---------------------------------------------
 
+test("automated repairs stay in history without teaching writing preferences", () => {
+  const revisions = [shorten(20, 6), shorten(20, 7), shorten(20, 5), shorten(20, 8)];
+  assert.ok(p.observe(revisions).length);
+  assert.deepEqual(p.observe(revisions.map(r => ({ ...r, via: "repair" }))), []);
+});
+
 test("no revisions produce no observations", () => {
   assert.deepEqual(p.observe([]), []);
 });
