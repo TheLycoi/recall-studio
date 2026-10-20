@@ -20,6 +20,15 @@ export function currentCardCheck(card: Card, highlight: Highlight): CardCheck | 
   return card.userCheck?.content === cardContent(card, highlight) ? card.userCheck : undefined;
 }
 
+/** Authorization is tied to the wording and lifecycle the reader acted on. */
+export function cardAuthorization(card: Card, highlight: Highlight, active: () => boolean = () => true): () => boolean {
+  const content = cardContent(card, highlight);
+  const status = card.status;
+  return () => active() && cardContent(card, highlight) === content && card.status === status
+    && ["pending", "flagged", "approved"].includes(card.status)
+    && highlight.status === "ready" && !highlight.archived;
+}
+
 /** Explicit, read-only critique. Never applies the model's proposed rewrite. */
 export async function checkCard(
   card: Card,
@@ -29,10 +38,7 @@ export async function checkCard(
 ): Promise<void> {
   delete card.userCheck;
   const content = cardContent(card, highlight);
-  const status = card.status;
-  const current = () => active() && cardContent(card, highlight) === content && card.status === status
-    && ["pending", "flagged", "approved"].includes(card.status)
-    && highlight.status === "ready" && !highlight.archived;
+  const current = cardAuthorization(card, highlight, active);
   if (!current()) return;
   const siblings = highlight.cards.filter(c => c.id !== card.id && c.status !== "deleted");
   const { failures, warnings } = lintCard(card, highlight, siblings);
@@ -46,9 +52,32 @@ export async function checkCard(
 }
 
 type RepairDraft = Pick<Card, "kind" | "front" | "back" | "text">;
+
+/** Validate a replacement before any of its fields reach the original. */
+export function cardReplacement(card: Card, highlight: Highlight, draft: RepairDraft): Card {
+  const candidate: Card = { ...structuredClone(card), kind: draft.kind,
+    front: draft.kind === "qa" ? draft.front.trim() : "",
+    back: draft.kind === "qa" ? draft.back.trim() : "",
+    text: draft.kind === "cloze" ? draft.text.trim() : "" };
+  exportCandidates([{ ...highlight, cards: [candidate] }]);
+  const { failures } = lintCard(candidate, highlight, []);
+  if (failures.includes("qa-empty")) throw new Error("The replacement is empty. The original is unchanged.");
+  if (failures.includes("cloze-not-grounded")) {
+    throw new Error("The replacement hides text absent from the captured source. The original is unchanged.");
+  }
+  return candidate;
+}
+
 type Critique = Parameters<typeof checkCard>[2];
 export type CardRepairResult = { status: "checked" | "repaired" | "cancelled" | "busy"; instruction?: string };
 const repairing = new WeakSet<Card>();
+
+/** Share the per-card lock between explicit rewrites and automatic repairs. */
+export function beginCardRewrite(card: Card): (() => void) | undefined {
+  if (repairing.has(card)) return;
+  repairing.add(card);
+  return () => repairing.delete(card);
+}
 
 /** One explicit repair attempt. The original survives until the replacement passes. */
 export async function checkAndRepairCard(
@@ -58,13 +87,10 @@ export async function checkAndRepairCard(
   rewrite: (highlight: Highlight, card: Card, instruction: string, authorized: () => boolean) => Promise<RepairDraft>,
   active: () => boolean = () => true,
 ): Promise<CardRepairResult> {
-  if (repairing.has(card)) return { status: "busy" };
+  const release = beginCardRewrite(card);
+  if (!release) return { status: "busy" };
   const content = cardContent(card, highlight);
-  const status = card.status;
-  const current = () => active() && cardContent(card, highlight) === content && card.status === status
-    && ["pending", "flagged", "approved"].includes(card.status)
-    && highlight.status === "ready" && !highlight.archived;
-  repairing.add(card);
+  const current = cardAuthorization(card, highlight, active);
   try {
     if (!current()) return { status: "cancelled" };
     if (!currentCardCheck(card, highlight)?.issues.length) await checkCard(card, highlight, critique, current);
@@ -75,14 +101,7 @@ export async function checkAndRepairCard(
     const instruction = `Repair this card using the source and card-writing best practices. Fix these findings:\n${check.issues.map(issue => `- ${issue}`).join("\n")}\nKeep only supported facts, avoid repeating sibling cards, and preserve a clear retrieval cue. Return one corrected card, not a critique.`;
     const draft = await rewrite(structuredClone(highlight), structuredClone(card), instruction, current);
     if (!current()) return { status: "cancelled" };
-    const candidate: Card = { ...structuredClone(card), kind: draft.kind,
-      front: draft.kind === "qa" ? draft.front.trim() : "",
-      back: draft.kind === "qa" ? draft.back.trim() : "",
-      text: draft.kind === "cloze" ? draft.text.trim() : "" };
-    exportCandidates([{ ...highlight, cards: [candidate] }]);
-    if (lintCard(candidate, highlight, []).failures.includes("cloze-not-grounded")) {
-      throw new Error("The replacement hides text absent from the captured source. The original is unchanged.");
-    }
+    const candidate = cardReplacement(card, highlight, draft);
 
     if (cardContent(candidate, highlight) === content) throw new Error("The repair returned the same card. The original is unchanged.");
     await checkCard(candidate, highlight, critique, current);
@@ -106,7 +125,7 @@ export async function checkAndRepairCard(
     if (!current()) return { status: "cancelled" };
     throw error;
   } finally {
-    repairing.delete(card);
+    release();
   }
 }
 

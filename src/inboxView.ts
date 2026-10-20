@@ -23,7 +23,7 @@ import { describeError } from "./llm";
 import { cardAuditLabel } from "./generation";
 import { findCrossInterference, lintCard, LINT_LABELS, wrapCloze } from "./lint";
 import { DEFAULT_SETTINGS } from "./settings";
-import { cardContent, checkCard, checkAndRepairCard, currentCardCheck } from "./cardActions";
+import { beginCardRewrite, cardAuthorization, cardContent, cardReplacement, checkCard, checkAndRepairCard, currentCardCheck } from "./cardActions";
 import { QuizView as ChatView } from "./quizView";
 
 export const VIEW_TYPE_INBOX = "review-inbox";
@@ -84,6 +84,7 @@ export class InboxView extends ItemView {
   private checkEpoch = 0;
   private collapsed = new Set<string>();
   private editing: string | null = null;
+  private editorDraft?: { content: () => string; saved: () => boolean };
   private focusedCard: string | null = null;
   /** Highlight ids whose flagged-card group is expanded under lintMode "hide". */
   private expandedFlagged = new Set<string>();
@@ -833,6 +834,20 @@ export class InboxView extends ItemView {
       extra: extra.value.trim(),
     });
 
+    const editor = this.editorDraft = {
+      content: () => JSON.stringify([kindSel.value, front.value, back.value, text.value, extra.value, instruction.value]),
+      saved: () => kindSel.value === c.kind && front.value.trim() === c.front && back.value.trim() === c.back
+        && text.value.trim() === c.text && extra.value.trim() === c.extra && !instruction.value.trim(),
+    };
+
+    const editorEpoch = this.checkEpoch;
+    const editorSettings = JSON.stringify(this.plugin.settings);
+    const editorActive = this.plugin.llm.requestAuthorization(() => !this.closed && this.checkEpoch === editorEpoch
+      && this.editing === c.id && this.editorDraft === editor
+      && JSON.stringify(this.plugin.settings) === editorSettings
+      && this.plugin.store.all().includes(h) && h.cards.includes(c));
+    let originalCurrent = cardAuthorization(c, h, editorActive);
+
     let checkedDraft: Card | undefined;
     const check = async (btn: HTMLButtonElement) => {
       const d = draft();
@@ -864,7 +879,9 @@ export class InboxView extends ItemView {
     };
 
     const save = async () => {
+      if (this.checking.has(c.id) || this.closed || this.editing !== c.id || this.editorDraft !== editor) return;
       const ask = instruction.value.trim();
+      if (ask && !originalCurrent()) { new Notice("Card or source changed. Your draft is unchanged; reopen the card before saving."); return; }
       const was = snapshot(c);
       let edited = false;
       const before = JSON.stringify([c.kind, c.front, c.back, c.text, c.extra]);
@@ -891,7 +908,7 @@ export class InboxView extends ItemView {
         delete c.userCheck;
       }
       if (checkedDraft && cardContent(c, h) === cardContent(checkedDraft, h)) c.userCheck = currentCardCheck(checkedDraft, h);
-      this.editing = null;
+      if (!ask || c.status === "deleted") this.editing = null;
       if (edited) {
         // What the reader typed, as one revision. Recorded before the
         // instruction runs, and with the saved text as its `after`.
@@ -904,10 +921,11 @@ export class InboxView extends ItemView {
           after: snapshot(c),
         });
       }
+      originalCurrent = cardAuthorization(c, h, editorActive);
       this.plugin.store.touch();
       // The instruction runs against the just-saved text, so a hand edit and a
       // "now shorten it" land in one pass rather than fighting each other.
-      if (ask && c.status !== "deleted") await this.rewrite(h, c, ask);
+      if (ask && c.status !== "deleted") await this.rewrite(h, c, ask, originalCurrent);
       else if (edited) await this.learnFromEdits();
     };
     const cancel = () => {
@@ -1006,17 +1024,40 @@ export class InboxView extends ItemView {
     }
   }
 
-  private async rewrite(h: Highlight, c: Card, preset?: string): Promise<void> {
-    const instruction = preset ?? (await askInstruction(this.plugin.app, "Rewrite card", "e.g. make the answer shorter, ask about the date instead"));
-    if (!instruction) return;
-    const notice = new Notice("Recall Studio: rewriting…", 0);
-    const was = snapshot(c);
+  private async rewrite(h: Highlight, c: Card, preset?: string, savedEditor?: () => boolean): Promise<void> {
+    const epoch = this.checkEpoch;
+    const settings = JSON.stringify(this.plugin.settings);
+    const editing = this.editing;
+    const editor = editing === c.id ? this.editorDraft : undefined;
+    if (editing === c.id && (!editor || (!savedEditor && !editor.saved()))) {
+      new Notice("Save or cancel this card's edits before converting it.");
+      return;
+    }
+    const draftContent = editor?.content();
+    const current = this.plugin.llm.requestAuthorization(cardAuthorization(c, h, () => !this.closed && this.checkEpoch === epoch
+      && (!savedEditor || savedEditor())
+      && this.editing === editing && (!editor || (this.editorDraft === editor && editor.content() === draftContent))
+      && JSON.stringify(this.plugin.settings) === settings
+      && this.plugin.store.all().includes(h) && h.cards.includes(c)));
+    if (!current()) return;
+    const release = beginCardRewrite(c);
+    if (!release) return;
+    this.checking.add(c.id);
+    let notice: Notice | undefined;
     try {
-      const d = await this.plugin.llm.rewriteCard({ ...h, text: plainText(h.text) }, c, instruction);
-      c.kind = d.kind;
-      c.front = d.kind === "qa" ? d.front.trim() : "";
-      c.back = d.kind === "qa" ? d.back.trim() : "";
-      c.text = d.kind === "cloze" ? d.text.trim() : "";
+      const instruction = preset ?? (await askInstruction(this.plugin.app, "Rewrite card", "e.g. make the answer shorter, ask about the date instead"));
+      if (!instruction || !current()) return;
+      notice = new Notice("Recall Studio: rewriting…", 0);
+      const was = snapshot(c);
+      const source = structuredClone(h);
+      source.text = plainText(source.text);
+      const d = await this.plugin.llm.rewriteCard(source, structuredClone(c), instruction, current);
+      if (!current()) return;
+      const candidate = cardReplacement(c, h, d);
+      c.kind = candidate.kind;
+      c.front = candidate.front;
+      c.back = candidate.back;
+      c.text = candidate.text;
       c.edited = true;
       // The recorded lint failures and critique reason described the previous
       // wording, so they are stale once the card has been rewritten. Clearing
@@ -1028,6 +1069,7 @@ export class InboxView extends ItemView {
       delete c.lintWarnings;
       delete c.critiqueReason;
       delete c.userCheck;
+      if (savedEditor) this.editing = null;
       this.plugin.store.touch();
       // The reader asked for this rewrite from the open editor's own buttons,
       // so the fields are redrawn from the rewritten card rather than held.
@@ -1047,9 +1089,11 @@ export class InboxView extends ItemView {
         await this.learnFromEdits();
       }
     } catch (e) {
-      new Notice(`Recall Studio: ${describeError(e)}`);
+      if (current()) new Notice(`Recall Studio: ${describeError(e)}`);
     } finally {
-      notice.hide();
+      this.checking.delete(c.id);
+      release();
+      notice?.hide();
     }
   }
 

@@ -395,7 +395,8 @@ export class LlmClient {
     await Promise.all([this.codex.abort(), this.deepseek.abort(), this.opencode.abort()]);
   }
 
-  private requestAuthorization(authorized?: () => boolean): () => boolean {
+  /** Capture lifecycle authorization before asynchronous UI or prompt preparation. */
+  requestAuthorization(authorized?: () => boolean): () => boolean {
     const epoch = this.epoch;
     return () => epoch === this.epoch && (!authorized || authorized());
   }
