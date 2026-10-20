@@ -34,9 +34,11 @@ export default class RecallPlugin extends Plugin {
 
   async onload(): Promise<void> {
     await this.loadSettings();
+    if (this.unloading) return;
     registerRecallIcon();
     this.store = new InboxStore(this.app, this.settings.schemaFolder, this.manifest.dir ?? `${this.app.vault.configDir}/plugins/review-inbox`);
     await this.store.load();
+    if (this.unloading) return;
     // Before the client, which holds a callback into it: the reader's house
     // rules are read on the way to every model call (src/schemaFile.ts).
     this.schema = new SchemaFile(this);
@@ -118,12 +120,14 @@ export default class RecallPlugin extends Plugin {
   }
 
   onunload(): Promise<void> {
-    return this.unloading ??= this.finishUnload();
+    return this.unloading ??= this.store
+      ? this.store.handover(() => this.finishUnload())
+      : this.finishUnload();
   }
 
   private async finishUnload(): Promise<void> {
     let failure: unknown;
-    const stopped = this.generator.stop().catch(e => {
+    const stopped = Promise.resolve(this.generator?.stop()).catch(e => {
       console.error("Recall Studio: generation cleanup failed during unload", e);
       failure ??= e;
     });
@@ -140,7 +144,7 @@ export default class RecallPlugin extends Plugin {
       failure = e;
     }
     try {
-      await this.llm.abort();
+      await this.llm?.abort();
     } catch (e) {
       console.error("Recall Studio: model abort failed during unload", e);
       failure = e;
@@ -148,14 +152,17 @@ export default class RecallPlugin extends Plugin {
     // A cancelled run can still roll back cards after its final write resumes.
     await stopped;
     try {
-      await this.store.flush();
+      await this.store?.flush();
     } catch (e) {
       console.error("Recall Studio: inbox save failed during unload", e);
       failure ??= e;
     } finally {
-      this.store.close();
+      this.store?.close();
     }
-    if (this.store.hasUnsavedChanges) new Notice("Recall Studio: inbox.json was not saved on unload; changes are not yet durable.", 0);
+    if (this.store?.hasUnsavedChanges) {
+      new Notice("Recall Studio: inbox.json was not saved on unload; changes are not yet durable.", 0);
+      failure ??= new Error("Inbox changes were not saved on unload.");
+    }
     if (failure) throw failure;
   }
 

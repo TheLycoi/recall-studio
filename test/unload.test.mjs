@@ -75,6 +75,7 @@ for (const failing of ["visibility", "abort", "flush", "unsubscribe", "drain"]) 
     plugin.sourceVisibility = { destroy: () => { steps.push("visibility"); if (failing === "visibility") throw Error("visibility failed"); } };
     plugin.llm = { abort: async () => { steps.push("abort"); if (failing === "abort") throw Error("abort failed"); } };
     plugin.store = {
+      handover: cleanup => cleanup(),
       flush: async () => { steps.push("flush"); if (failing === "flush") throw Error("disk full"); },
       close: () => steps.push("close"),
       get hasUnsavedChanges() { return failing === "flush"; },

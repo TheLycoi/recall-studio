@@ -12,6 +12,14 @@ function timestamp(d: Date): string {
 
 type Listener = () => void;
 
+// Symbol.for survives plugin bundle re-evaluation; only identities and settlement
+// promises live here, never serialized inbox data or settings.
+const handoverKey = Symbol.for("recall-studio.inbox-handovers.v1");
+function handovers(): WeakMap<object, Map<string, Promise<void>>> {
+  const host = globalThis as typeof globalThis & { [handoverKey]?: WeakMap<object, Map<string, Promise<void>>> };
+  return host[handoverKey] ??= new WeakMap();
+}
+
 /**
  * Persistent inbox. Lives in the Recall folder (the Recall folder
  * setting) as inbox.json, beside the house rules, so everything the plugin
@@ -41,6 +49,9 @@ export class InboxStore {
   private revision = 0;
 
   private legacyPath: string | null;
+  private handingOver?: Promise<void>;
+  private loading?: Promise<void>;
+  private loaded = false;
 
   constructor(
     private app: App,
@@ -71,8 +82,18 @@ export class InboxStore {
     console.debug(`Recall Studio: inbox moved from the plugin folder to ${this.path}`);
   }
 
-  async load(): Promise<void> {
+  load(): Promise<void> {
+    return this.loading ??= this.readInbox();
+  }
+
+  private async readInbox(): Promise<void> {
     const adapter = this.app.vault.adapter;
+    // Native Component.unload does not await onunload. Do not even inspect
+    // recovery files until the previous instance's rollback and save settle.
+    this.readOnly = true;
+    await handovers().get(adapter)?.get(this.path);
+    if (this.closed) return;
+    this.readOnly = false;
     const backup = `${this.path}.backup`;
     let loaded = false;
     try {
@@ -136,6 +157,7 @@ export class InboxStore {
     }
     // Anything interrupted mid-generation goes back to the queue.
     for (const h of this.data.highlights) if (h.status === "generating") h.status = "queued";
+    this.loaded = true;
   }
 
   private scheduleSave() {
@@ -148,7 +170,7 @@ export class InboxStore {
   }
 
   async flush(): Promise<void> {
-    if (this.readOnly || this.closed) return;
+    if (!this.loaded || this.readOnly || this.closed) return;
     if (this.saveTimer !== null) {
       window.clearTimeout(this.saveTimer);
       this.saveTimer = null;
@@ -192,6 +214,25 @@ export class InboxStore {
     // current full snapshot, including everything that failed to persist.
     this.flushing = attempt.catch(() => {});
     await attempt;
+  }
+
+  /** Register before cleanup starts, including its first asynchronous boundary. */
+  handover(cleanup: () => Promise<void>): Promise<void> {
+    if (this.handingOver) return this.handingOver;
+    const registry = handovers();
+    let paths = registry.get(this.app.vault.adapter);
+    if (!paths) registry.set(this.app.vault.adapter, paths = new Map());
+    const previous = paths.get(this.path);
+    let resolve!: () => void, reject!: (error: unknown) => void;
+    const settled = this.handingOver = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
+    paths.set(this.path, settled);
+    // Observe the host's ignored rejection. Keep a failed handover registered:
+    // a new instance must not accept an uncertain rollback as durable state.
+    void settled.then(() => {
+      if (paths.get(this.path) === settled) paths.delete(this.path);
+    }, () => {});
+    try { void Promise.all([previous, this.loading, cleanup()]).then(() => resolve(), reject); } catch (e) { reject(e); }
+    return settled;
   }
 
   /** Stop saving for good. Called on unload, after the last flush. */
