@@ -32,6 +32,7 @@ Export accepts the visible drafts in its scope and sends them to Anki with sourc
 | Send selection to inbox | `capture`, `send`, `pdf` | Queues the selected text for card writing. On a PDF it keeps the page number. |
 | Send selection to inbox with instructions… | `capture-instruct`, `pdf-instruct` | The same, with a one-line instruction for the card writer first. |
 | Open inbox | `inbox` | Opens the flashcard inbox. |
+| Open source history | `source-history` | Shows retained captures and cards for the current note or PDF, with a picker for other captured sources. |
 | Open chat | `chat` | Focuses Chat inside Inbox, with vault search and verified citations. |
 | Export to Anki | `export` | Accepts and exports all eligible drafts. Inbox Export buttons limit this to visible cards in their scope. |
 | Open the card rules note | `rules`, `schema` | Opens your house rules for the card writer, and creates the note if needed. |
@@ -61,6 +62,26 @@ send to a different deck looks the note up instead of adding a duplicate. Notes
 are only ever added, never overwritten, so existing review history is safe. A
 card whose content already exists in Anki as an unrelated note is reported, not
 merged. If Anki is closed or an export fails, unsent cards keep their previous state.
+
+## Source history
+
+Clearing exported or dismissed captures archives them instead of deleting their
+cards. Archived records leave the active Inbox but remain available through
+**Open source history**, including after a restart.
+
+In Markdown editing, Live Preview and reading view, a passage label shows how
+many retained cards were created, await export, or have confirmed Anki IDs.
+Select the label to inspect the saved quote and cards. File-export records
+without Anki IDs are marked unconfirmed, not as successful Anki imports.
+
+Labels require an exact, unambiguous match. Changed text and ambiguous repeats
+remain available in source history without an inline label. Complex rendered
+Markdown may also require the command. Renames update retained source paths;
+deleting a source does not delete its history. PDFs retain page locators in
+history, without PDF overlays or a claim that the text was reverified.
+
+These overlays do not edit the source note. Card counts describe captured
+passages, not whether you learned them or completed the whole note.
 
 ## The chat
 
