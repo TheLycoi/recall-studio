@@ -1,5 +1,17 @@
 # Changelog
 
+## Recall Studio 0.1.4 beta
+
+- Add same-panel Quiz with source-grounded free-response and multiple-choice practice. Sending missed material to the Inbox remains an explicit choice.
+- Prepare source facts, write cards and audit them in separate stages with retained checkpoints.
+- Retain passage history after exported cards leave the Inbox, with source indicators and history lookup.
+- Make card and passage stars check, repair and recheck findings. Failed or stale repairs leave the original intact.
+- Remove fixed cloze-deletion and card-count quotas. One deletion remains a valid cloze, and grouping follows the source.
+- Add opt-in, read-only recognition of supported Spaced Repetition card syntax without changing schedules.
+- Change the display name to Recall Studio while retaining the plugin ID, storage paths, keychain names and BRAT repository.
+
+The release has no scheduler, study-data migration or automatic rewrite of existing cards. Provider request and token budgets remain. Source tests and synthetic Obsidian checks do not establish real-provider writing quality or actual Anki export acceptance.
+
 ## Review Inbox 0.1.3
 
 - Chat retrieves text from uncaptured PDFs as well as Markdown notes and captured passages, with page or line citations.

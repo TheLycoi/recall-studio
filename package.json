@@ -1,6 +1,6 @@
 {
   "name": "review-inbox",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Flashcards from what you highlight, a source-linked inbox to review them, grounded chat over selected sources, and export to Anki. Runs on the Codex CLI, the DeepSeek API, or the opencode CLI.",
   "main": "main.js",
   "private": true,
