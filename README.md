@@ -63,6 +63,26 @@ are only ever added, never overwritten, so existing review history is safe. A
 card whose content already exists in Anki as an unrelated note is reported, not
 merged. If Anki is closed or an export fails, unsent cards keep their previous state.
 
+## Staged generation
+
+A generation batch uses one preparation request to inventory exact quotes and
+plan cards, then one writer request. Deterministic checks validate quote and
+fact references, card fields and cloze grounding. With **Independent audit**
+enabled, at most one additional request checks the drafted claims against the
+captured passage, including batches containing only one card.
+
+Completed stages are checkpointed in the existing inbox file. Retrying after a
+writer failure reuses valid preparation; changed inputs start a new batch.
+Retries preserve card IDs and do not duplicate completed cards. An audit that
+was interrupted is not silently requested again: its cards remain unverified.
+**Write more cards** deliberately starts another batch and retains prior evidence.
+
+Audit findings never rewrite or delete cards. The Inbox distinguishes verified,
+unverified and failed findings; missing verdicts, disabled audits and source
+conflicts cannot become a verified pass. Editing a card or its captured source
+invalidates the displayed audit. A model audit is probabilistic, not proof of
+truth or approval to export. You still review the cards and choose Export.
+
 ## Source history
 
 Clearing exported or dismissed captures archives them instead of deleting their
@@ -131,8 +151,12 @@ its JSON event stream, so the model is whatever that CLI is signed in to.
 
 ## Network and data
 
-Review Inbox sends the passage and the prompt to whichever provider you picked,
-and nothing else leaves the machine.
+Card generation sends the captured passage, surrounding context, source title
+and heading, your instructions, house rules and existing cards to the selected
+provider. If history examples are enabled, selected examples also enter those
+requests. Later stages include the saved preparation and drafted cards. Chat
+sends the question and retrieved evidence as described above. Source-history
+labels and lookups run locally without a model request.
 
 - **Codex** (default): Review Inbox starts the Codex CLI, and Codex sends the request to OpenAI under your ChatGPT account.
 - **DeepSeek**: Review Inbox posts to `https://api.deepseek.com` with your API key.

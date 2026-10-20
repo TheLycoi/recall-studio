@@ -48,3 +48,53 @@ test('real read-only store does not authorize a single provider request',async()
   const f=await fixture();f.store.close();const s=new InboxStore({vault:{adapter:{exists:async()=>{throw Error('unreadable');}}}},'study');const error=console.error;console.error=()=>{};
   try{await s.load();s.add(f.h);f.plugin.store=s;await new Generator(f.plugin).run(f.h);assert.deepEqual(f.calls,[]);assert.equal(f.h.status,'error');assert.equal(s.hasUnsavedChanges,true);}finally{console.error=error;s.close();}
 });
+
+test('generated evidence and card identity survive archive, source rename and real-store reload', async () => {
+  const f = await fixture();
+  let reloaded;
+  try {
+    await f.g.run(f.h);
+    const id = f.h.cards[0].id;
+    f.h.cards[0].status = 'exported';
+    f.h.cards[0].ankiNoteId = 123;
+    f.h.status = 'exported';
+    const generation = structuredClone(f.h.generation);
+    assert.equal(f.store.clearExported(), 1);
+    assert.equal(f.store.moveSource('synthetic.md', 'renamed.md'), 1);
+    await f.store.flush();
+    f.store.close();
+    reloaded = new InboxStore(f.app, 'study');
+    await reloaded.load();
+    assert.equal(reloaded.all().length, 0);
+    const [history] = reloaded.sourceHistory('renamed.md');
+    assert.equal(history.cards[0].id, id);
+    assert.equal(history.cards[0].ankiNoteId, 123);
+    assert.deepEqual(history.generation, generation);
+    assert.equal(history.cards[0].generation.audit.status, 'verified');
+    assert.equal(reloaded.hasDuplicate('renamed.md', f.h.text), true);
+    assert.deepEqual(f.calls, ['preparation', 'grounded cards', 'audit']);
+  } finally {
+    f.store.close();
+    reloaded?.close();
+  }
+});
+
+test('source-history rename during generation stops the stale batch before publication', async () => {
+  const f = await fixture();
+  const complete = f.backend.complete;
+  f.backend.complete = async req => {
+    const result = await complete(req);
+    if (req.label === 'grounded cards') f.store.moveSource('synthetic.md', 'renamed.md');
+    return result;
+  };
+  try {
+    await f.g.run(f.h);
+    await f.store.flush();
+    assert.equal(f.h.status, 'error');
+    assert.equal(f.store.sourceHistory('renamed.md')[0].cards.length, 0);
+    assert.equal(JSON.parse(f.files.get(f.store.filePath)).highlights[0].cards.length, 0);
+    assert.deepEqual(f.calls, ['preparation', 'grounded cards']);
+  } finally {
+    f.store.close();
+  }
+});
