@@ -16,7 +16,7 @@ import { sharedBuildOptions } from "../scripts/esbuild-shared.mjs";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const INBOX = "wiki/_schema/inbox.json";
-const REAL = JSON.stringify({ highlights: [{ id: "h1", text: "kept", status: "ready", cards: [] }] }, null, 2);
+const REAL = JSON.stringify({ highlights: [{ id: "h1", sourcePath: "a.md", sourceTitle: "A", text: "kept", before: "", after: "", instruction: "", status: "ready", cards: [] }] }, null, 2);
 
 function obsidianStub() {
   return {
@@ -83,7 +83,7 @@ test("rename rekeys source metadata without dropping active or archived links ac
   const { app } = memoryVault({});
   const store = new s.InboxStore(app, "wiki/_schema");
   await store.load();
-  store.add({ id: "a", sourcePath: "old/a.md", sourceTitle: "a", text: "quote", cards: [{ id: "c", status: "exported" }], archived: true, status: "exported" });
+  store.add(highlight("a", "exported", [card("c", "exported")], { sourcePath: "old/a.md", sourceTitle: "a", text: "quote", archived: true }));
   store.setTranscript("old/a.md", { text: "transcript", origin: "pasted", sourceFile: null, addedAt: "now", truncated: false });
   store.setHighlightInstruction("old/a.md", "instruction");
   store.markIngested("old/a.md", "hash");
@@ -450,6 +450,40 @@ test("restart prefers a completed live commit and clears an old backup", async (
   store.close();
 });
 
+test("usable live records win even when the stale backup has malformed records", async () => {
+  const badBackup = '{"version":1,"highlights":[null]}';
+  const v = memoryVault({ [INBOX]: REAL, [`${INBOX}.backup`]: badBackup });
+  const read = v.app.vault.adapter.read;
+  v.app.vault.adapter.read = async p => {
+    assert.notEqual(p, `${INBOX}.backup`, "a completed usable live save does not need its superseded backup");
+    return read(p);
+  };
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  try {
+    await store.load();
+    assert.equal(store.get("h1").text, "kept");
+    assert.equal(store.readOnly, false);
+    assert.deepEqual([...v.files.entries()], [[INBOX, REAL]]);
+  } finally { store.close(); }
+});
+
+test("restart consumes the validated live snapshot instead of rereading after deleting recovery data", async () => {
+  const v = memoryVault({ [INBOX]: REAL, [`${INBOX}.backup`]: REAL });
+  const read = v.app.vault.adapter.read;
+  let liveReads = 0;
+  v.app.vault.adapter.read = async p => {
+    if (p === INBOX && ++liveReads > 1) throw Error("live file became unavailable after validation");
+    return read(p);
+  };
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  try {
+    await quiet(() => store.load());
+    assert.equal(store.get("h1")?.text, "kept");
+    assert.equal(store.readOnly, false);
+    assert.equal(liveReads, 1);
+  } finally { store.close(); }
+});
+
 test("restart prefers an intentionally empty live inbox over populated backup", async () => {
   const empty = JSON.stringify({ version: 1, highlights: [] });
   const v = memoryVault({ [INBOX]: empty, [`${INBOX}.backup`]: REAL });
@@ -482,6 +516,39 @@ test("restart restores a good backup when the live inbox is whitespace", async (
   store.close();
 });
 
+test("restart recovers usable records before discarding a populated backup", async () => {
+  const damaged = '{"version":1,"highlights":[null]}';
+  const good = JSON.stringify({ version: 1, highlights: [highlight("recovered", "generating", [card("saved", "pending")])] });
+  const v = memoryVault({ [INBOX]: damaged, [`${INBOX}.backup`]: good });
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  try {
+    await assert.doesNotReject(store.load());
+    assert.equal(v.files.get(INBOX), good, "the last usable snapshot becomes the live inbox");
+    assert.ok([...v.files.entries()].some(([p, raw]) => p.startsWith(`${INBOX}.corrupt-`) && raw === damaged), "damaged live bytes survive recovery");
+    assert.equal(store.get("recovered").status, "queued");
+    assert.equal(store.findCard("saved").card.back, "A");
+    assert.equal(store.counts().queued, 1);
+    store.touch();
+    await store.flush();
+    assert.equal(JSON.parse(v.files.get(INBOX)).highlights[0].cards[0].id, "saved", "a later save cannot replace recovery data with an empty inbox");
+  } finally {
+    store.close();
+  }
+});
+
+test("restart rejects a malformed nested card without consuming the good backup", async () => {
+  const damaged = JSON.stringify({ version: 1, highlights: [highlight("broken", "ready", [null])] });
+  const good = JSON.stringify({ version: 1, highlights: [highlight("saved", "ready", [card("saved-card", "pending")])] });
+  const v = memoryVault({ [INBOX]: damaged, [`${INBOX}.backup`]: good });
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  try {
+    await store.load();
+    assert.equal(v.files.get(INBOX), good);
+    assert.ok([...v.files.entries()].some(([p, raw]) => p.startsWith(`${INBOX}.corrupt-`) && raw === damaged));
+    assert.equal(store.findCard("saved-card").card.status, "pending");
+  } finally { store.close(); }
+});
+
 test("restart recovers from a damaged live inbox when a good backup exists", async () => {
   const v = memoryVault({ [INBOX]: "partial", [`${INBOX}.backup`]: REAL });
   const store = new s.InboxStore(v.app, "wiki/_schema");
@@ -490,6 +557,120 @@ test("restart recovers from a damaged live inbox when a good backup exists", asy
   assert.equal(store.get("h1").text, "kept");
   assert.ok([...v.files.keys()].some(p => p.startsWith(`${INBOX}.corrupt-`)));
   store.close();
+});
+
+test("unusable live records without a usable backup remain read-only and untouched", async () => {
+  const damaged = JSON.stringify({ version: 1, highlights: [highlight("broken", "ready", [null])] });
+  const v = memoryVault({ [INBOX]: damaged });
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  try {
+    await quiet(() => store.load());
+    assert.equal(store.readOnly, true);
+    store.add(highlight("new", "queued"));
+    await store.flush();
+    assert.deepEqual([...v.files.entries()], [[INBOX, damaged]], "uncertain records cannot become an empty writable store");
+  } finally { store.close(); }
+});
+
+test("unusable live and backup records preserve both files read-only", async () => {
+  const damaged = JSON.stringify({ version: 1, highlights: [highlight("broken", "ready", [null])] });
+  const badBackup = '{"version":1,"highlights":[null]}';
+  const initial = { [INBOX]: damaged, [`${INBOX}.backup`]: badBackup };
+  const v = memoryVault(initial);
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  try {
+    await quiet(() => store.load());
+    assert.equal(store.readOnly, true);
+    store.add(highlight("new", "queued"));
+    await store.flush();
+    assert.deepEqual([...v.files.entries()], Object.entries(initial));
+  } finally { store.close(); }
+});
+
+test("missing live with unusable backup records cannot create a writable empty inbox", async () => {
+  const badBackup = '{"version":1,"highlights":[null]}';
+  const v = memoryVault({ [`${INBOX}.backup`]: badBackup });
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  try {
+    await quiet(() => store.load());
+    assert.equal(store.readOnly, true);
+    store.add(highlight("new", "queued"));
+    await store.flush();
+    assert.deepEqual([...v.files.entries()], [[`${INBOX}.backup`, badBackup]]);
+  } finally { store.close(); }
+});
+
+test("legacy and unknown fields survive backup recovery and a save without invented defaults", async () => {
+  const legacyCard = { id: "legacy-card", kind: "cloze", status: "exported", front: "", back: "", text: "{{c1::kept}}", extra: "", futureCard: { kept: true } };
+  const legacy = {
+    ...JSON.parse(REAL), futureInbox: ["preserved"],
+    transcripts: { "a.md": { text: "transcript", origin: "pasted", sourceFile: null, addedAt: "now", truncated: false, futureTranscript: 7 } },
+    highlightInstructions: { "a.md": "instructions" }, ingested: { "a.md": "legacy-hash" },
+  };
+  Object.assign(legacy.highlights[0], {
+    cards: [legacyCard], topicPath: "old/topic.md", futureHighlight: { notes: ["kept"] },
+    generation: { version: 1, id: "old-batch", instruction: "", inputKey: "", phase: "preparing", futureBatch: "kept" },
+  });
+  const good = JSON.stringify(legacy);
+  const damaged = '{"version":1,"highlights":[null]}';
+  const v = memoryVault({ [INBOX]: damaged, [`${INBOX}.backup`]: good });
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  try {
+    await store.load();
+    assert.deepEqual(store.get("h1"), legacy.highlights[0]);
+    assert.equal(Object.hasOwn(store.get("h1"), "archived"), false);
+    assert.equal(store.getTranscript("a.md").text, "transcript");
+    store.touch();
+    await store.flush();
+    assert.deepEqual(JSON.parse(v.files.get(INBOX)), legacy);
+    assert.ok([...v.files.entries()].some(([p, raw]) => p.startsWith(`${INBOX}.corrupt-`) && raw === damaged));
+  } finally { store.close(); }
+});
+
+test("failed recovery operations retain every original byte and block later writes", async (t) => {
+  const damaged = '{"version":1,"highlights":[null]}';
+  const backup = `${INBOX}.backup`;
+  for (const boundary of ["live read", "backup read", "preserve rename", "restore rename", "missing live rename", "backup remove"]) {
+    await t.test(boundary, async () => {
+      const live = boundary === "backup remove" ? REAL.replace("kept", "newer") : damaged;
+      const initial = { ...(boundary === "missing live rename" ? {} : { [INBOX]: live }), [backup]: REAL };
+      const v = memoryVault(initial);
+      const adapter = v.app.vault.adapter;
+      const { read, rename, remove } = adapter;
+      adapter.read = async p => {
+        if ((boundary === "live read" && p === INBOX) || (boundary === "backup read" && p === backup)) throw Error(boundary);
+        return read(p);
+      };
+      adapter.rename = async (from, to) => {
+        if ((boundary === "preserve rename" && from === INBOX) ||
+            (["restore rename", "missing live rename"].includes(boundary) && from === backup)) throw Error(boundary);
+        return rename(from, to);
+      };
+      adapter.remove = async p => {
+        if (boundary === "backup remove" && p === backup) throw Error(boundary);
+        return remove(p);
+      };
+      const store = new s.InboxStore(v.app, "wiki/_schema");
+      try {
+        await quiet(() => store.load());
+        assert.equal(store.readOnly, true);
+        for (const raw of Object.values(initial)) assert.ok([...v.files.values()].includes(raw), "each original survives at its live, backup, or preserved path");
+        assert.equal(v.files.get(backup), REAL);
+        const afterLoad = [...v.files.entries()];
+        store.add(highlight("must-not-persist", "queued"));
+        await store.flush();
+        assert.deepEqual([...v.files.entries()], afterLoad);
+        // Once the failed operation is available again, restart can recover.
+        Object.assign(adapter, { read, rename, remove });
+        const restarted = new s.InboxStore(v.app, "wiki/_schema");
+        try {
+          await restarted.load();
+          assert.equal(restarted.get("h1").text, boundary === "backup remove" ? "newer" : "kept");
+          assert.equal(restarted.readOnly, false);
+        } finally { restarted.close(); }
+      } finally { store.close(); }
+    });
+  }
 });
 
 test("unrecoverable backup makes the store read-only instead of overwriting it", async () => {

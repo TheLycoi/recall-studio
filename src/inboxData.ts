@@ -3,6 +3,56 @@
 // can be unit-tested with node directly; InboxStore itself imports `obsidian`
 // and so cannot be.
 import type { CardRevision, InboxData } from "./model";
+import { z } from "zod";
+import { PreparationOut, AuditOut } from "./generation";
+
+const AuditStatus = z.enum(["verified", "unverified", "failed"]);
+
+const CardRecord = z.object({
+  id: z.string(), kind: z.enum(["qa", "cloze"]), status: z.enum(["pending", "approved", "exported", "duplicate", "deleted", "flagged"]),
+  front: z.string(), back: z.string(), text: z.string(), extra: z.string(),
+  highlightId: z.string().optional(), edited: z.boolean().optional(), ankiNoteId: z.number().optional(),
+  srNote: z.string().optional(), createdAt: z.string().optional(), critiqueReason: z.string().optional(),
+  bloom: z.string().optional(), critiqueRan: z.boolean().optional(),
+  lintFailures: z.array(z.string()).optional(), lintWarnings: z.array(z.string()).optional(),
+  userCheck: z.object({ content: z.string(), at: z.string(), issues: z.array(z.string()) }).optional(),
+  generation: z.object({
+    batchId: z.string(), planId: z.string(), factIds: z.array(z.string()),
+    audit: z.object({ status: AuditStatus, reason: z.string(), content: z.string(), sourceKey: z.string().optional() }),
+  }).optional(),
+});
+const BatchRecord = z.object({
+  version: z.literal(1), id: z.string(), instruction: z.string(), inputKey: z.string(),
+  phase: z.enum(["preparing", "writing", "auditing", "complete"]),
+  preparation: PreparationOut.optional(), drafts: z.array(CardRecord).optional(),
+  audit: z.object({ status: AuditStatus, reason: z.string(), verdicts: AuditOut.shape.verdicts }).optional(),
+  auditRequested: z.boolean().optional(), committed: z.boolean().optional(),
+});
+const HighlightRecord = z.object({
+  id: z.string(), sourcePath: z.string(), sourceTitle: z.string(), text: z.string(),
+  before: z.string(), after: z.string(), instruction: z.string(), status: z.enum(["queued", "generating", "ready", "exported", "error", "dismissed"]),
+  cards: z.array(CardRecord), archived: z.boolean().optional(),
+  line: z.number().optional(), page: z.number().nullable().optional(),
+  heading: z.string().nullable().optional(), blockId: z.string().nullable().optional(),
+  title: z.string().optional(), origin: z.string().optional(), subpath: z.string().optional(),
+  error: z.string().nullable().optional(), createdAt: z.string().optional(),
+  generatedAt: z.string().nullable().optional(), exportedAt: z.string().nullable().optional(),
+  generation: BatchRecord.optional(), generationHistory: z.array(BatchRecord).optional(),
+});
+const CardSnapshot = CardRecord.pick({ kind: true, front: true, back: true, text: true, extra: true });
+const InboxFile = z.object({
+  version: z.literal(1).optional(), highlights: z.array(HighlightRecord),
+  highlightInstructions: z.record(z.string(), z.string()).optional(),
+  ingested: z.record(z.string(), z.string()).optional(),
+  transcripts: z.record(z.string(), z.object({
+    text: z.string(), origin: z.string().optional(), sourceFile: z.string().nullable().optional(),
+    addedAt: z.string().optional(), truncated: z.boolean().optional(),
+  })).optional(),
+  revisions: z.array(z.object({
+    before: CardSnapshot, after: CardSnapshot, instruction: z.string(),
+    cardId: z.string().optional(), at: z.string().optional(), via: z.string().optional(),
+  })).optional(),
+});
 
 /** Revisions are kept vault-wide, not per-card, so one number bounds the file. */
 export const REVISION_CAP = 200;
@@ -23,12 +73,12 @@ export type ParsedInbox =
  * hand-edited file becomes a typed failure instead of an exception, so the
  * caller can decide what to do with the bad file rather than losing it.
  *
- * `fresh` distinguishes "no file yet" (empty or whitespace-only, e.g. a file
- * created but never written) from a genuinely corrupt one — both parse to an
- * empty inbox, but only the latter should be moved aside and reported.
+ * `fresh` distinguishes blank, never-written input from a serialized empty
+ * inbox. A blank file is not proof of a completed save and must not supersede
+ * recovery data; the caller decides whether a new writable inbox is safe.
  *
- * Deliberately shallow for legacy fields. The optional archive flag is checked
- * when present, so a malformed value cannot silently hide a passage.
+ * Validate the fields consumers need, without adding defaults or filtering
+ * records. Return the original object so unknown legacy fields survive saves.
  */
 export function parseInboxJson(raw: string): ParsedInbox {
   if (raw.trim() === "") return { ok: true, data: emptyInbox(), fresh: true };
@@ -38,11 +88,9 @@ export function parseInboxJson(raw: string): ParsedInbox {
   } catch (e) {
     return { ok: false, reason: "invalid-json", detail: (e as Error).message };
   }
-  if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as InboxData).highlights)) {
-    return { ok: false, reason: "bad-shape", detail: "parsed JSON is not an inbox object with a highlights array" };
-  }
-  if ((parsed as InboxData).highlights.some((h) => h && typeof h === "object" && "archived" in h && typeof h.archived !== "boolean")) {
-    return { ok: false, reason: "bad-shape", detail: "a highlight has an invalid archive flag" };
+  const checked = InboxFile.safeParse(parsed);
+  if (!checked.success) {
+    return { ok: false, reason: "bad-shape", detail: checked.error.message };
   }
   return { ok: true, data: parsed as InboxData, fresh: false };
 }

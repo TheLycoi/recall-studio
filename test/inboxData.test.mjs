@@ -15,6 +15,29 @@ before(async () => {
   d = await import(pathToFileURL(out).href);
 });
 
+const savedCard = (extra = {}) => ({ id: "c1", kind: "qa", status: "pending", front: "Q?", back: "A", text: "", extra: "", ...extra });
+const savedHighlight = (extra = {}) => ({
+  id: "h1", sourcePath: "a.pdf", sourceTitle: "A", text: "kept", before: "", after: "", instruction: "",
+  status: "ready", cards: [], ...extra,
+});
+
+const savedPreparation = () => ({
+  facts: [{ id: "F1", statement: "kept", quote: "kept" }],
+  plan: [{ id: "P1", factIds: ["F1"], entity: "A", aspect: "", value: "kept", reason: "stated" }],
+  exclusions: [{ factIds: ["F2"], reason: "not tested" }], omissions: [], conflicts: [{ quote: "conflict", reason: "check" }],
+});
+const savedBatch = () => ({
+  version: 1, id: "batch", instruction: "", inputKey: "key", phase: "complete", preparation: savedPreparation(),
+  drafts: [savedCard()], audit: { status: "unverified", reason: "check", verdicts: [{ index: 0, cardId: "c1", status: "unverified", reason: "check" }] },
+  auditRequested: true, committed: true,
+});
+const nestedHighlight = () => savedHighlight({
+  cards: [savedCard({
+    generation: { batchId: "batch", planId: "P1", factIds: ["F1"], audit: { status: "verified", reason: "checked", content: "wording" } },
+    userCheck: { content: "wording", at: "now", issues: [] }, lintFailures: [], lintWarnings: [],
+  })], generation: savedBatch(), generationHistory: [savedBatch()],
+});
+
 function rev(overrides = {}) {
   return {
     cardId: "c-1",
@@ -36,7 +59,7 @@ test("emptyInbox returns version 1 with an empty highlights array", () => {
 // --- parseInboxJson ----------------------------------------------------------
 
 test("parseInboxJson round-trips a valid file", () => {
-  const data = { version: 1, highlights: [{ id: "h1" }] };
+  const data = { version: 1, highlights: [savedHighlight()] };
   const result = d.parseInboxJson(JSON.stringify(data));
   assert.deepEqual(result, { ok: true, data, fresh: false });
 });
@@ -89,16 +112,103 @@ test("parseInboxJson accepts a file with extra unknown keys (old files)", () => 
 });
 
 test("legacy highlights without an archive flag are not given invented receipts", () => {
-  const legacy = { id: "h1", status: "exported", cards: [{ id: "c1", status: "exported" }], sourcePath: "a.pdf", subpath: "page=4" };
+  const legacy = savedHighlight({ status: "exported", cards: [savedCard({ status: "exported" })], subpath: "page=4" });
   const parsed = d.parseInboxJson(JSON.stringify({ version: 1, highlights: [legacy] }));
   assert.equal(parsed.ok, true);
   assert.deepEqual(parsed.data.highlights[0], legacy);
 });
 
 test("a malformed archive flag is rejected without silently dropping a record", () => {
-  const parsed = d.parseInboxJson(JSON.stringify({ version: 1, highlights: [{ id: "h1", archived: "false" }] }));
+  const parsed = d.parseInboxJson(JSON.stringify({ version: 1, highlights: [savedHighlight({ archived: "false" })] }));
   assert.equal(parsed.ok, false);
   assert.equal(parsed.reason, "bad-shape");
+});
+
+test("record validation rejects unsafe highlight fields without filtering the snapshot", async (t) => {
+  for (const key of ["id", "sourcePath", "sourceTitle", "text", "before", "after", "instruction", "status"]) {
+    for (const value of [null, 42, {}, [], undefined]) {
+      await t.test(`${key} = ${JSON.stringify(value)}`, () => {
+        const parsed = d.parseInboxJson(JSON.stringify({ highlights: [savedHighlight(), savedHighlight({ [key]: value })] }));
+        assert.equal(parsed.ok, false);
+        assert.equal(parsed.reason, "bad-shape");
+        assert.equal("data" in parsed, false, "no partial writable snapshot escapes validation");
+      });
+    }
+  }
+});
+
+test("record validation rejects unsafe card fields", async (t) => {
+  for (const key of ["id", "kind", "status", "front", "back", "text", "extra"]) {
+    for (const value of [null, 42, {}, [], undefined]) {
+      await t.test(`${key} = ${JSON.stringify(value)}`, () => {
+        const parsed = d.parseInboxJson(JSON.stringify({ highlights: [savedHighlight({ cards: [savedCard({ [key]: value })] })] }));
+        assert.equal(parsed.ok, false);
+        assert.equal(parsed.reason, "bad-shape");
+      });
+    }
+  }
+});
+
+test("record validation refuses unrecognized lifecycle and card formats", async (t) => {
+  for (const [label, h] of [
+    ["highlight status", savedHighlight({ status: "unknown" })],
+    ["card status", savedHighlight({ cards: [savedCard({ status: "unknown" })] })],
+    ["card kind", savedHighlight({ cards: [savedCard({ kind: "unknown" })] })],
+  ]) await t.test(label, () => assert.equal(d.parseInboxJson(JSON.stringify({ highlights: [h] })).ok, false));
+});
+
+test("nested generation and review metadata must be safe for immediate readers", async (t) => {
+  const paths = [
+    "cards.0.generation", "cards.0.generation.audit", "cards.0.generation.audit.reason", "cards.0.generation.factIds",
+    "cards.0.userCheck", "cards.0.userCheck.issues", "cards.0.lintFailures", "cards.0.lintWarnings",
+    "generation", "generation.preparation", "generation.preparation.facts", "generation.preparation.facts.0",
+    "generation.preparation.plan", "generation.preparation.plan.0.factIds",
+    "generation.preparation.exclusions", "generation.preparation.exclusions.0", "generation.preparation.exclusions.0.factIds",
+    "generation.preparation.omissions", "generation.preparation.conflicts", "generation.preparation.conflicts.0",
+    "generation.drafts", "generation.drafts.0", "generation.audit", "generation.audit.verdicts", "generation.audit.verdicts.0",
+    "generationHistory", "generationHistory.0", "generationHistory.0.preparation.conflicts.0",
+  ];
+  for (const path of paths) await t.test(path, () => {
+    const h = nestedHighlight();
+    const keys = path.split(".");
+    const key = keys.pop();
+    let target = h;
+    for (const k of keys) target = target[k];
+    target[key] = null;
+    const parsed = d.parseInboxJson(JSON.stringify({ highlights: [h] }));
+    assert.equal(parsed.ok, false);
+    assert.equal(parsed.reason, "bad-shape");
+  });
+  const data = { highlights: [nestedHighlight()] };
+  assert.deepEqual(d.parseInboxJson(JSON.stringify(data)), { ok: true, data, fresh: false });
+});
+
+test("optional inbox collections reject malformed members rather than hiding history", async (t) => {
+  const bad = [
+    { version: 2 }, { version: null },
+    { highlightInstructions: [] }, { highlightInstructions: null }, { highlightInstructions: { "a.md": 5 } },
+    { ingested: [] }, { ingested: { "a.md": null } },
+    { transcripts: [] }, { transcripts: { "a.md": null } }, { transcripts: { "a.md": { text: 5 } } },
+    { revisions: {} }, { revisions: [null] }, { revisions: [rev({ before: null })] },
+    { revisions: [rev({ after: { ...rev().after, back: [] } })] }, { revisions: [rev({ instruction: 2 })] },
+  ];
+  for (const extra of bad) await t.test(JSON.stringify(extra), () => {
+    const parsed = d.parseInboxJson(JSON.stringify({ highlights: [savedHighlight()], ...extra }));
+    assert.equal(parsed.ok, false);
+    assert.equal(parsed.reason, "bad-shape");
+  });
+});
+
+test("present optional metadata must retain its consumer-safe primitive types", async (t) => {
+  const cases = [
+    ...["line", "page", "heading", "blockId", "title", "origin", "subpath", "error", "createdAt", "generatedAt", "exportedAt"].map(key => ({ highlights: [savedHighlight({ [key]: {} })] })),
+    ...["highlightId", "edited", "ankiNoteId", "srNote", "createdAt", "critiqueReason", "bloom", "critiqueRan"].map(key => ({ highlights: [savedHighlight({ cards: [savedCard({ [key]: {} })] })] })),
+    ...["origin", "sourceFile", "addedAt", "truncated"].map(key => ({ highlights: [], transcripts: { "a.md": { text: "kept", [key]: {} } } })),
+    ...["cardId", "at", "via"].map(key => ({ highlights: [], revisions: [rev({ [key]: {} })] })),
+  ];
+  for (const data of cases) await t.test(JSON.stringify(data), () => assert.equal(d.parseInboxJson(JSON.stringify(data)).ok, false));
+  const legacy = { highlights: [savedHighlight({ page: null, heading: null, blockId: null, error: null, generatedAt: null, exportedAt: null })] };
+  assert.deepEqual(d.parseInboxJson(JSON.stringify(legacy)), { ok: true, data: legacy, fresh: false });
 });
 
 // --- pushRevision --------------------------------------------------------------

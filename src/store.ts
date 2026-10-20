@@ -25,11 +25,8 @@ export class InboxStore {
   private saveTimer: number | null = null;
   private path: string;
   /**
-   * Set when inbox.json could not be read at all, or was unreadable and
-   * could not even be moved aside.
-   * Writing in that state would still destroy whatever the reader has —
-   * only now there is no copy at all, not even the renamed original — so
-   * every save is a no-op until the plugin is reloaded.
+   * Set when no usable snapshot can be loaded or recovery fails. Every save
+   * is a no-op until reload, so uncertain inbox and backup bytes stay intact.
    */
   private readOnly = false;
   /**
@@ -77,26 +74,32 @@ export class InboxStore {
   async load(): Promise<void> {
     const adapter = this.app.vault.adapter;
     const backup = `${this.path}.backup`;
+    let loaded = false;
     try {
       if (await adapter.exists(backup)) {
         if (await adapter.exists(this.path)) {
           const live = parseInboxJson(await adapter.read(this.path));
           if (live.ok && !live.fresh) {
             await adapter.remove(backup);
+            this.data = live.data;
           } else {
             const saved = parseInboxJson(await adapter.read(backup));
             if (!saved.ok || saved.fresh) throw new Error(`Neither inbox nor backup is readable: ${saved.ok ? "backup is blank" : saved.detail}`);
             const moved = `${this.path}.corrupt-${timestamp(new Date())}`;
             await adapter.rename(this.path, moved);
             await adapter.rename(backup, this.path);
+            this.data = saved.data;
             new Notice(`Recall Studio: recovered inbox.json from backup; damaged file kept at ${moved}.`, 0);
           }
         } else {
           const saved = parseInboxJson(await adapter.read(backup));
           if (!saved.ok || saved.fresh) throw new Error(`Inbox backup is unreadable: ${saved.ok ? "backup is blank" : saved.detail}`);
           await adapter.rename(backup, this.path);
+          this.data = saved.data;
           new Notice("Recall Studio: recovered inbox.json from an interrupted save.");
         }
+        // Consume the exact snapshot that justified removing recovery data.
+        loaded = true;
       }
     } catch (e) {
       console.error("Recall Studio: could not recover inbox.json backup", e);
@@ -110,31 +113,17 @@ export class InboxStore {
       console.error("Recall Studio: could not move the inbox into the Recall Studio folder", e);
     }
     try {
-      if (await this.app.vault.adapter.exists(this.path)) {
+      if (!loaded && await this.app.vault.adapter.exists(this.path)) {
         const raw = await this.app.vault.adapter.read(this.path);
         const parsed = parseInboxJson(raw);
         if (parsed.ok) {
           this.data = parsed.data;
         } else {
-          // A corrupt or truncated file must never be silently overwritten
-          // by the next scheduled save — move it aside first, so the
-          // reader's inbox is only ever renamed, not lost.
-          const moved = `${this.path}.corrupt-${timestamp(new Date())}`;
-          try {
-            await this.app.vault.adapter.rename(this.path, moved);
-            console.error(`Recall Studio: inbox.json could not be read; moved to ${moved}`, parsed.detail);
-            const basename = moved.split("/").pop() ?? moved;
-            new Notice(
-              `Recall Studio: inbox.json was unreadable and has been moved to ${basename}. The inbox starts empty; the old file is kept.`,
-              0,
-            );
-          } catch (renameError) {
-            // Couldn't even move it aside — leave it in place, untouched,
-            // and never schedule a write, or the next save would clobber
-            // the one copy of the reader's inbox that still exists on disk.
-            console.error("Recall Studio: inbox.json is unreadable and could not be moved aside", renameError);
-            this.readOnly = true;
-          }
+          // Without a usable snapshot, keep the original in place and refuse
+          // writes rather than turning uncertain history into an empty inbox.
+          console.error("Recall Studio: inbox.json has unusable records", parsed.detail);
+          this.readOnly = true;
+          new Notice("Recall Studio: inbox.json could not be read; the original file is kept and storage is read-only until restart.", 0);
         }
       }
     } catch (e) {
