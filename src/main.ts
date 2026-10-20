@@ -111,9 +111,23 @@ export default class RecallPlugin extends Plugin {
 
   async onunload(): Promise<void> {
     this.generator.stop();
-    await this.llm.abort();
-    await this.store.flush();
-    this.store.close();
+    let failure: unknown;
+    try {
+      await this.llm.abort();
+    } catch (e) {
+      console.error("Review Inbox: model abort failed during unload", e);
+      failure = e;
+    }
+    try {
+      await this.store.flush();
+    } catch (e) {
+      console.error("Review Inbox: inbox save failed during unload", e);
+      failure ??= e;
+    } finally {
+      this.store.close();
+    }
+    if (this.store.hasUnsavedChanges) new Notice("Review Inbox: inbox.json was not saved on unload; changes are not yet durable.", 0);
+    if (failure) throw failure;
   }
 
   // ---------------------------------------------------------------- helpers

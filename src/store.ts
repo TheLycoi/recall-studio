@@ -1,5 +1,6 @@
 import type { App } from "obsidian";
 import { Notice, normalizePath } from "obsidian";
+import { randomUUID } from "crypto";
 import type { Highlight, InboxData, Card, CardRevision, TranscriptRecord } from "./model";
 import { emptyInbox, parseInboxJson, pushRevision, rememberInstruction } from "./inboxData";
 
@@ -74,6 +75,35 @@ export class InboxStore {
   }
 
   async load(): Promise<void> {
+    const adapter = this.app.vault.adapter;
+    const backup = `${this.path}.backup`;
+    try {
+      if (await adapter.exists(backup)) {
+        if (await adapter.exists(this.path)) {
+          const live = parseInboxJson(await adapter.read(this.path));
+          if (live.ok) {
+            await adapter.remove(backup);
+          } else {
+            const saved = parseInboxJson(await adapter.read(backup));
+            if (!saved.ok) throw new Error(`Neither inbox nor backup is readable: ${saved.detail}`);
+            const moved = `${this.path}.corrupt-${timestamp(new Date())}`;
+            await adapter.rename(this.path, moved);
+            await adapter.rename(backup, this.path);
+            new Notice(`Review Inbox: recovered inbox.json from backup; damaged file kept at ${moved}.`, 0);
+          }
+        } else {
+          const saved = parseInboxJson(await adapter.read(backup));
+          if (!saved.ok) throw new Error(`Inbox backup is unreadable: ${saved.detail}`);
+          await adapter.rename(backup, this.path);
+          new Notice("Review Inbox: recovered inbox.json from an interrupted save.");
+        }
+      }
+    } catch (e) {
+      console.error("Review Inbox: could not recover inbox.json backup", e);
+      this.readOnly = true;
+      new Notice("Review Inbox: inbox.json backup could not be recovered; storage is read-only until restart.", 0);
+      return;
+    }
     try {
       await this.migrate();
     } catch (e) {
@@ -137,16 +167,36 @@ export class InboxStore {
     const snapshot = JSON.stringify(this.data, null, 2);
     const revision = this.revision;
     const attempt = this.flushing.then(async () => {
+      if (this.closed || this.readOnly) return;
+      const adapter = this.app.vault.adapter;
+      const staged = `${this.path}.pending-${randomUUID()}`;
+      const backup = `${this.path}.backup`;
       try {
-        // Stage the complete snapshot before replacing the last good inbox.
-        // If writing is interrupted, the original remains readable on reload.
-        const staged = `${this.path}.pending`;
-        await this.app.vault.adapter.write(staged, snapshot);
-        await this.app.vault.adapter.rename(staged, this.path);
+        if (await adapter.exists(backup)) throw new Error("Inbox backup still exists; reload before saving.");
+        await adapter.write(staged, snapshot);
+        if (this.closed || this.readOnly) return;
+        // Obsidian's adapter refuses rename onto an existing destination.
+        // Keep the previous file recoverable across the gap between renames.
+        const existing = await adapter.exists(this.path);
+        if (this.closed || this.readOnly) return;
+        if (existing) await adapter.rename(this.path, backup);
+        if (this.closed || this.readOnly) {
+          if (existing && !(await adapter.exists(this.path))) await adapter.rename(backup, this.path);
+          return;
+        }
+        try {
+          await adapter.rename(staged, this.path);
+        } catch (e) {
+          if (existing && !(await adapter.exists(this.path))) await adapter.rename(backup, this.path);
+          throw e;
+        }
+        if (existing) await adapter.remove(backup);
         if (revision === this.revision) this.dirty = false;
       } catch (e) {
         console.error("Review Inbox: failed to write inbox.json", e);
         throw e;
+      } finally {
+        if (await adapter.exists(staged)) await adapter.remove(staged);
       }
     });
     // A failed write must not poison the chain: the next flush writes the

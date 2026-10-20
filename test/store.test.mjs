@@ -67,7 +67,7 @@ after(() => {
 
 /**
  * The vault adapter as far as src/store.ts reaches it (obsidian.d.ts
- * DataAdapter): exists, mkdir, read, write and rename, over one map of files.
+ * DataAdapter): exists, mkdir, read, write, remove and rename, over one map of files.
  */
 function memoryVault(initial) {
   const files = new Map(Object.entries(initial));
@@ -91,7 +91,12 @@ function memoryVault(initial) {
       files.set(p, data);
       addDirs(p);
     },
+    remove: async (p) => {
+      if (!files.delete(p)) throw new Error(`ENOENT: ${p}`);
+    },
     rename: async (p, to) => {
+      if (!files.has(p)) throw new Error(`ENOENT: ${p}`);
+      if (files.has(to)) throw new Error("Destination file already exists!");
       files.set(to, files.get(p));
       files.delete(p);
       addDirs(to);
@@ -172,6 +177,32 @@ test("two quick flushes write the later snapshot last", async () => {
   const b = store.flush();
   await Promise.all([a, b]);
   assert.equal(JSON.parse(v.files.get(INBOX)).highlights[0].text, "second");
+  store.close();
+});
+
+test("first save creates an inbox under the strict no-overwrite adapter", async () => {
+  const v = memoryVault({});
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  await store.load();
+  store.add(highlight("first", "queued"));
+  await store.flush();
+  assert.equal(JSON.parse(v.files.get(INBOX)).highlights[0].id, "first");
+  assert.equal(store.hasUnsavedChanges, false);
+  store.close();
+});
+
+test("a second save replaces an existing inbox under the strict no-overwrite adapter", async () => {
+  const v = vaultWithInbox();
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  await store.load();
+  store.all()[0].text = "first edit";
+  store.touch();
+  await store.flush();
+  store.all()[0].text = "second edit";
+  store.touch();
+  await store.flush();
+  assert.equal(JSON.parse(v.files.get(INBOX)).highlights[0].text, "second edit");
+  assert.equal(store.hasUnsavedChanges, false);
   store.close();
 });
 
@@ -331,4 +362,147 @@ test("an interrupted write leaves the last good inbox intact for reload and retr
   await store.flush();
   assert.equal(JSON.parse(v.files.get(INBOX)).highlights[0].archived, true);
   store.close();
+});
+
+test("commit rename failure restores the old inbox and a later flush retries", async () => {
+  const v = vaultWithInbox();
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  await store.load();
+  store.all()[0].text = "new";
+  store.touch();
+  const rename = v.app.vault.adapter.rename;
+  let fail = true;
+  v.app.vault.adapter.rename = async (from, to) => {
+    if (fail && from.includes(".pending-") && to === INBOX) throw Error("commit failed");
+    return rename(from, to);
+  };
+  await quiet(() => assert.rejects(store.flush(), /commit failed/));
+  assert.equal(v.files.get(INBOX), REAL);
+  assert.equal(store.hasUnsavedChanges, true);
+  fail = false;
+  await store.flush();
+  assert.equal(JSON.parse(v.files.get(INBOX)).highlights[0].text, "new");
+  assert.equal(v.files.has(`${INBOX}.backup`), false);
+  store.close();
+});
+
+test("restart restores the last good backup after a crash between renames", async () => {
+  const v = memoryVault({ [`${INBOX}.backup`]: REAL, [`${INBOX}.pending-crashed`]: "partial" });
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  await store.load();
+  assert.equal(v.files.get(INBOX), REAL);
+  assert.equal(store.get("h1").text, "kept");
+  store.close();
+});
+
+test("restart prefers a completed live commit and clears an old backup", async () => {
+  const newer = REAL.replace("kept", "committed");
+  const v = memoryVault({ [INBOX]: newer, [`${INBOX}.backup`]: REAL });
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  await store.load();
+  assert.equal(store.get("h1").text, "committed");
+  assert.equal(v.files.has(`${INBOX}.backup`), false);
+  store.close();
+});
+
+test("restart recovers from a damaged live inbox when a good backup exists", async () => {
+  const v = memoryVault({ [INBOX]: "partial", [`${INBOX}.backup`]: REAL });
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  await store.load();
+  assert.equal(v.files.get(INBOX), REAL);
+  assert.equal(store.get("h1").text, "kept");
+  assert.ok([...v.files.keys()].some(p => p.startsWith(`${INBOX}.corrupt-`)));
+  store.close();
+});
+
+test("unrecoverable backup makes the store read-only instead of overwriting it", async () => {
+  const v = memoryVault({ [`${INBOX}.backup`]: "partial" });
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  await quiet(() => store.load());
+  store.touch();
+  await store.flush();
+  assert.equal(v.files.has(INBOX), false);
+  assert.equal(v.files.get(`${INBOX}.backup`), "partial");
+  store.close();
+});
+
+test("closing with a queued flush prevents its stale snapshot from committing", async () => {
+  const v = vaultWithInbox();
+  let release;
+  const write = v.app.vault.adapter.write;
+  v.app.vault.adapter.write = async (p, data) => {
+    if (data.includes('"first"')) await new Promise(resolve => { release = resolve; });
+    return write(p, data);
+  };
+  const old = new s.InboxStore(v.app, "wiki/_schema");
+  await old.load();
+  old.all()[0].text = "first";
+  old.touch();
+  const first = old.flush();
+  await new Promise(resolve => setImmediate(resolve));
+  old.all()[0].text = "queued";
+  old.touch();
+  const second = old.flush();
+  old.close();
+  const fresh = new s.InboxStore(v.app, "wiki/_schema");
+  await fresh.load();
+  fresh.all()[0].text = "replacement";
+  fresh.touch();
+  await fresh.flush();
+  release();
+  await Promise.all([first, second]);
+  assert.equal(JSON.parse(v.files.get(INBOX)).highlights[0].text, "replacement");
+  assert.equal(old.hasUnsavedChanges, true);
+  assert.equal([...v.files.keys()].some(p => p.includes(".pending-")), false);
+  fresh.close();
+});
+
+test("failed commit and failed immediate rollback remain recoverable on reload", async () => {
+  const v = vaultWithInbox();
+  const store = new s.InboxStore(v.app, "wiki/_schema");
+  await store.load();
+  store.all()[0].text = "new";
+  store.touch();
+  const rename = v.app.vault.adapter.rename;
+  v.app.vault.adapter.rename = async (from, to) => {
+    if (to === INBOX) throw Error("rename unavailable");
+    return rename(from, to);
+  };
+  await quiet(() => assert.rejects(store.flush(), /rename unavailable/));
+  assert.equal(store.hasUnsavedChanges, true);
+  assert.equal(v.files.has(INBOX), false);
+  assert.equal(v.files.get(`${INBOX}.backup`), REAL);
+  store.close();
+  v.app.vault.adapter.rename = rename;
+  const reloaded = new s.InboxStore(v.app, "wiki/_schema");
+  await reloaded.load();
+  assert.equal(reloaded.get("h1").text, "kept");
+  reloaded.close();
+});
+
+test("close during the backup rename does not commit the old snapshot", async () => {
+  const v = vaultWithInbox();
+  const rename = v.app.vault.adapter.rename;
+  let release;
+  let entered;
+  const atRename = new Promise(resolve => { entered = resolve; });
+  v.app.vault.adapter.rename = async (from, to) => {
+    if (from === INBOX && to === `${INBOX}.backup`) {
+      entered();
+      await new Promise(resolve => { release = resolve; });
+    }
+    return rename(from, to);
+  };
+  const old = new s.InboxStore(v.app, "wiki/_schema");
+  await old.load();
+  old.all()[0].text = "old attempt";
+  old.touch();
+  const pending = old.flush();
+  await atRename;
+  old.close();
+  release();
+  await pending;
+  assert.equal(v.files.get(INBOX), REAL);
+  assert.equal(old.hasUnsavedChanges, true);
+  assert.equal(v.files.has(`${INBOX}.backup`), false);
 });
