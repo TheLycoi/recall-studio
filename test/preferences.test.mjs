@@ -192,21 +192,20 @@ test("two dropped openings stay silent, one below the threshold", () => {
 
 // ---- 4. extra-field ----------------------------------------------------------
 
-test("four cleared extra fields with none filled propose leaving it empty", () => {
+test("four cleared extra fields do not propose unsupported writer automation", () => {
   const clear = () => rev({ kind: "qa", front: "Q?", back: "A", extra: "A supporting sentence." }, { kind: "qa", front: "Q?", back: "A", extra: "" });
-  const obs = p.observe([clear(), clear(), clear(), clear()]);
-  const o = find(obs, "extra-field:empty");
-  assert.ok(o);
-  assert.equal(o.count, 4);
-  assert.equal(o.rule, "Leave the extra field empty.");
+  const revisions = [clear(), clear(), clear(), clear()];
+  const saved = structuredClone(revisions);
+  assert.deepEqual(p.observe(revisions), []);
+  assert.deepEqual(revisions, saved, "manual annotations and edit evidence remain unchanged");
 });
 
-test("four filled extra fields propose the opposite rule", () => {
+test("four filled extra fields do not propose a field absent from writer schemas", () => {
   const fill = () => rev({ kind: "qa", front: "Q?", back: "A", extra: "" }, { kind: "qa", front: "Q?", back: "A", extra: "A supporting sentence." });
-  const obs = p.observe([fill(), fill(), fill(), fill()]);
-  const o = find(obs, "extra-field:filled");
-  assert.ok(o);
-  assert.equal(o.rule, "Put a supporting sentence from the highlight in the extra field.");
+  const revisions = [fill(), fill(), fill(), fill()];
+  const saved = structuredClone(revisions);
+  assert.deepEqual(p.observe(revisions), []);
+  assert.deepEqual(revisions, saved, "manual annotations and edit evidence remain unchanged");
 });
 
 test("one fill against four clears silences the extra-field pattern", () => {
@@ -218,6 +217,25 @@ test("one fill against four clears silences the extra-field pattern", () => {
 });
 
 // ---- 5. instruction ----------------------------------------------------------
+
+test("legacy extra-field thresholds cannot reactivate unsupported observations", () => {
+  const revisions = [rev({ extra: "" }, { extra: "Manual note" })];
+  assert.deepEqual(p.observe(revisions, { thresholds: { "extra-field": 1 } }), []);
+});
+
+test("extra-only edits retain evidence for explicitly requested rewrite instructions", () => {
+  const revisions = Array.from({ length: 3 }, () => rev(
+    { front: "Q?", back: "A", extra: "" },
+    { front: "Q?", back: "A", extra: "Manual note" },
+    { via: "rewrite", instruction: "Use precise wording" },
+  ));
+  const saved = structuredClone(revisions);
+  const obs = p.observe(revisions);
+  assert.deepEqual(obs.map(o => o.id), ["instruction:use precise wording"]);
+  assert.equal(obs[0].count, 3);
+  assert.equal(obs[0].evidence.length, 3);
+  assert.deepEqual(revisions, saved);
+});
 
 test("three rewrites with the same instruction propose it, normalizing case, space and punctuation", () => {
   const ask = (instruction) =>
@@ -307,7 +325,6 @@ test("observations are ordered by count descending, then by id", () => {
     obs.map((o) => [o.id, o.count]),
     [
       ["shorter-answers", 6],
-      ["extra-field:empty", 4],
       ["prefer-kind:cloze", 4],
     ],
   );

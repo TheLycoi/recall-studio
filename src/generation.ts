@@ -1,6 +1,8 @@
 import { createHash } from "crypto";
 import { z } from "zod";
-import type { Card, GenerationContext, GenerationPreparation, Highlight } from "./model";
+import { makeCard, makeHighlight, type Card, type GenerationContext, type GenerationPreparation, type Highlight } from "./model";
+import { exportCandidates } from "./cardActions";
+import { lintCard } from "./lint";
 import type { RecallSettings } from "./settings";
 
 const text = z.string().min(1).max(16000);
@@ -64,6 +66,13 @@ export function validateDrafts(raw: unknown, p: GenerationPreparation, _legacyMa
     used.add(d.planId);
     if (new Set(d.factIds).size !== d.factIds.length || d.factIds.length !== row.factIds.length || d.factIds.some(id => !row.factIds.includes(id))) throw new Error("Card fact links do not match its plan.");
     if (d.kind === "qa" ? !d.front.trim() || !d.back.trim() || !!d.text : !d.text.trim() || !!d.front || !!d.back) throw new Error("Malformed card fields.");
+    if (d.kind === "cloze") {
+      // Reuse export syntax and empty-answer checks, not lint's style limits.
+      const card = makeCard("", d);
+      const highlight = makeHighlight({ sourcePath: "", sourceTitle: "", text: "", status: "ready", cards: [card] });
+      exportCandidates([highlight]);
+      if (/\{\{\{|\}\}\}/.test(d.text) || lintCard(card, highlight, []).failures.includes("qa-empty")) throw new Error("Malformed cloze or empty deletion.");
+    }
   }
   if (used.size !== p.plan.length) throw new Error("Writer omitted a planned card.");
   return drafts;

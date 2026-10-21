@@ -189,17 +189,15 @@ export function normalizePlain(s: string): string {
 }
 
 /**
- * Deterministic check that every cloze deletion is really in the highlight.
- * Returns the deletions that are not. Borrowed from an earlier version of
- * this plugin's linter idea: grounding is a rule you can check by counting,
- * so check it rather than trusting the prompt.
+ * Return deletions absent as whole normalized tokens or phrases in the highlight.
+ * Lexical presence is necessary, but does not prove the authored claim is supported.
  */
 export function ungroundedClozes(clozeText: string, highlight: string): string[] {
-  const hay = normalizePlain(highlight);
+  const hay = ` ${normalizePlain(highlight)} `;
   const out: string[] = [];
   for (const m of clozeText.matchAll(/\{\{c\d+::([\s\S]*?)(?:::[^}]*)?\}\}/g)) {
     const body = normalizePlain(m[1]);
-    if (body && !hay.includes(body)) out.push(m[1].trim());
+    if (body && !hay.includes(` ${body} `)) out.push(m[1].trim());
   }
   return out;
 }

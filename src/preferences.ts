@@ -150,7 +150,7 @@ export function observe(
   out.push(...shorterAnswers(edits, thresholds["shorter-answers"]));
   out.push(...preferKind(edits, thresholds["prefer-kind"]));
   out.push(...dropOpening(edits, thresholds["drop-opening"]));
-  out.push(...extraField(edits, thresholds["extra-field"]));
+  // Legacy extra-field IDs remain readable, but writer schemas cannot act on them.
   out.push(...instructions(edits, thresholds["instruction"]));
 
   // Strongest evidence first; id breaks the tie so the order is the same on
@@ -293,54 +293,6 @@ function dropOpening(edits: CardRevision[], threshold: number): Observation[] {
     });
   }
   return out;
-}
-
-/**
- * The reader always clears the extra field, or always fills it.
- *
- * As with the card kind, mixed evidence means the reader is deciding per
- * card, so a single edit the other way silences both directions.
- */
-function extraField(edits: CardRevision[], threshold: number): Observation[] {
-  const cleared: CardRevision[] = [];
-  const filled: CardRevision[] = [];
-  for (const r of edits) {
-    const before = r.before.extra.trim();
-    const after = r.after.extra.trim();
-    if (before !== "" && after === "") cleared.push(r);
-    else if (before === "" && after !== "") filled.push(r);
-  }
-
-  const propose = (
-    winners: CardRevision[],
-    losers: CardRevision[],
-    id: string,
-    rule: string,
-    summary: (n: number) => string,
-  ): Observation[] => {
-    if (winners.length < threshold || losers.length > 0) return [];
-    return [
-      {
-        id,
-        pattern: "extra-field",
-        rule,
-        summary: summary(winners.length),
-        evidence: evidenceFrom(winners),
-        count: winners.length,
-      },
-    ];
-  };
-
-  return [
-    ...propose(cleared, filled, "extra-field:empty", "Leave the extra field empty.", (n) => `You cleared the extra field on ${n} ${plural(n, "card", "cards")}.`),
-    ...propose(
-      filled,
-      cleared,
-      "extra-field:filled",
-      "Put a supporting sentence from the highlight in the extra field.",
-      (n) => `You filled in the extra field on ${n} ${plural(n, "card", "cards")}.`,
-    ),
-  ];
 }
 
 /**
