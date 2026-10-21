@@ -3,6 +3,7 @@ import { Plugin, editorInfoField } from 'obsidian';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { InboxView } from '../src/inboxView';
+import RecallPlugin from '../src/main';
 import { LlmClient } from '../src/llm';
 import { InboxStore } from '../src/store';
 import { Generator } from '../src/generator';
@@ -12,15 +13,16 @@ import { registerSourceVisibility } from '../src/sourceVisibility';
 
 export default class CandidateProbe extends Plugin {
   async loadCSS() {} // Never install or register this probe's CSS globally.
-  async onload() { this.result = await this.verify(); }
+  async onload() { try { this.result = await this.verify(); } catch (error) { this.result = { error: error.stack }; } }
   async verify() {
-    const checks = [], calls = [];
+    const checks = [], calls = [], reads = [], exports = [];
     const ok = (condition, message) => { if (!condition) throw Error(message); checks.push(message); };
     const pause = () => new Promise(r => setTimeout(r, 20));
     const wait = async predicate => { for (let i = 0; i < 100 && !predicate(); i++) await pause(); if (!predicate()) throw Error('Probe timed out'); };
     const source = 'Affinity is the strength with which a drug binds its receptor.';
     const file = { path: 'synthetic/Receptors.md', basename: 'Receptors', extension: 'md', stat: { mtime: 1, size: source.length } };
     let raw = source;
+    const extraFile = { ...file, path: 'synthetic/Extra.md', basename: 'Extra', stat: { ...file.stat } };
     const files = new Map(), refs = new Set();
     const on = (name, fn) => { const ref = { name, fn }; refs.add(ref); return ref; };
     const offref = ref => refs.delete(ref);
@@ -30,10 +32,10 @@ export default class CandidateProbe extends Plugin {
       rename: async (from, to) => { if (!files.has(from) || files.has(to)) throw Error('synthetic rename conflict'); files.set(to, files.get(from)); files.delete(from); },
     };
     const app = {
-      vault: { adapter, configDir: '.obsidian', getFiles: () => [file], getAbstractFileByPath: path => path === file.path ? file : null,
-        read: async f => { if (f !== file) throw Error('Unexpected source'); return raw; }, on, offref },
+      vault: { adapter, configDir: '.obsidian', getFiles: () => [file, extraFile], getAbstractFileByPath: path => [file, extraFile].find(f => f.path === path) ?? null,
+        read: async f => { if (![file, extraFile].includes(f)) throw Error('Unexpected source'); reads.push(f.path); return f === file ? raw : source; }, on, offref },
       workspace: { getActiveFile: () => file, getLeavesOfType: () => [], on, offref, openLinkText: () => { throw Error('Navigation forbidden'); } },
-      metadataCache: { isUserIgnored: () => false, getFileCache: () => ({ frontmatter: { aliases: ['Binding sites'] } }), on, offref },
+      metadataCache: { isUserIgnored: () => false, getFileCache: f => ({ frontmatter: { aliases: f === file ? ['Binding sites'] : [] } }), on, offref },
     };
     const settings = { ...DEFAULT_SETTINGS, schemaLearning: false, srRecognitionEnabled: false, srRecognitionNotePaths: file.path };
     const store = new InboxStore(app, 'synthetic-data');
@@ -42,7 +44,8 @@ export default class CandidateProbe extends Plugin {
     const keep = { index: 0, verdict: 'keep', reason: '', bloom: 'remember', kind: 'qa', front: '', back: '', text: '' };
     llm.codex = { complete: async req => {
       calls.push(req.label);
-      const value = req.label === 'preparation' ? { facts: [{ id: 'F1', statement: source, quote: source }], plan: [{ id: 'P1', factIds: ['F1'], entity: 'Affinity', aspect: 'definition', value: 'strength', reason: 'Stated in source' }], exclusions: [], omissions: [], conflicts: [] }
+      const value = req.label === 'study evidence' ? { selections: JSON.parse(req.user).passages.map(p => ({ id: p.id, quote: p.text })), gaps: [] }
+        : req.label === 'preparation' ? { facts: [{ id: 'F1', statement: source, quote: source }], plan: [{ id: 'P1', factIds: ['F1'], entity: 'Affinity', aspect: 'definition', value: 'strength', reason: 'Stated in source' }], exclusions: [], omissions: [], conflicts: [] }
         : req.label === 'grounded cards' ? { cards: [{ kind: 'cloze', front: '', back: '', text: source.replace('strength', '{{c1::strength}}'), planId: 'P1', factIds: ['F1'] }] }
         : req.label === 'audit' ? { verdicts: JSON.parse(req.user).cards.map((c, index) => ({ index, cardId: c.id, status: 'verified', reason: 'Supported by source' })) }
         : req.label === 'quiz cue' ? { question: 'What does affinity mean?', shape: 'concept', expects: [1] }
@@ -58,16 +61,21 @@ export default class CandidateProbe extends Plugin {
     } };
     const queued = [];
     const host = { app, settings, store, llm, generator: null, refreshStatusBar() {},
-      schema: { openCount: () => 0 }, exportHighlights: () => { throw Error('Export forbidden'); },
-      fileAt: path => path === file.path ? file : null, activeMarkdown: () => null, openInbox() {} };
+      schema: { openCount: () => 0 }, exportHighlights: async hs => { exports.push(hs.map(h => h.id)); },
+      fileAt: path => [file, extraFile].find(f => f.path === path) ?? null, activeMarkdown: () => null, openInbox() {} };
     const generator = new Generator(host);
     host.generator = { enqueue: h => { queued.push(h); generator.enqueue(h); }, more: () => { throw Error('Unexpected more'); } };
     const mount = document.createElement('div');
     mount.style.cssText = 'position:fixed;left:-10000px;top:0;width:800px;height:900px;overflow:auto;pointer-events:none;';
+    mount.dataset.recallCandidateHost = 'true';
+    mount.inert = true; // Run synthetic clicks without taking focus from the user's current input.
     document.body.appendChild(mount);
     let view, editor, controller, readingChild;
     try {
       view = new InboxView(this.app._probeLeaf, host);
+      Object.assign(app.workspace, { getLeavesOfType: kind => kind === 'review-inbox' ? [{ view }] : [], getRightLeaf: () => null, revealLeaf: async () => {} });
+      host.openInbox = RecallPlugin.prototype.openInbox.bind(host);
+      host.openChat = RecallPlugin.prototype.openChat.bind(host);
       if (view.containerEl === this.app._probeLeaf.view.containerEl) throw Error('Candidate shares live container');
       mount.appendChild(view.containerEl);
       await view.onOpen();
@@ -79,7 +87,9 @@ export default class CandidateProbe extends Plugin {
       ok(getComputedStyle(view.cardsEl).display === 'none' && getComputedStyle(view.chatEl).display !== 'none', 'Quiz/Inbox panels are mutually exclusive');
       const quiz = view.chat;
       const type = text => { const box = root.querySelector('.review-chat textarea'); box.value = text; box.dispatchEvent(new Event('input')); };
-      type('quiz me on Binding sites'); button('Start quiz').click(); await pause();
+      type('quiz me on Binding sites'); button('Send').click(); await pause();
+      ok(quiz.awaitingGuide && !button('Free response') && !calls.length && !reads.length, 'Alias Quiz asks for a fresh guide before reads or provider calls');
+      type('Test the definition of affinity.'); button('Send').click(); await wait(() => !!button('Free response'));
       button('Free response').click(); await wait(() => !quiz.busy);
       ok(!!quiz.session?.current && !view.chatEl.textContent.includes(source), 'Free response hides source answer until attempted');
       type('Affinity means mass.'); button('Submit answer').click(); await wait(() => !quiz.busy);
@@ -92,7 +102,10 @@ export default class CandidateProbe extends Plugin {
       await wait(() => store.all()[0].status === 'ready' || store.all()[0].status === 'error');
       const generated = store.all()[0];
       ok(generated.cards[0]?.kind === 'cloze' && generated.cards[0].generation?.audit.status === 'verified', 'Quiz capture completes preparation, single-cloze writing and audit');
-      button('Cancel quiz').click(); type('quiz me'); button('Start quiz').click(); await pause();
+      button('Cancel').click(); const beforeNewQuiz = calls.length;
+      type('quiz me on Binding sites'); button('Send').click(); await pause();
+      ok(quiz.awaitingGuide && !button('Multiple choice') && calls.length === beforeNewQuiz, 'A second Quiz cannot reuse the previous guide');
+      type('Test the definition of affinity.'); button('Send').click(); await wait(() => !!button('Multiple choice'));
       button('Multiple choice').click(); await wait(() => !quiz.busy);
       ok(quiz.mc?.correctId === 'A' && !view.chatEl.textContent.includes('correctId'), 'Multiple choice keeps answer key internal');
       const beforeGrade = calls.length; button(`A. ${source}`).click();
@@ -100,11 +113,67 @@ export default class CandidateProbe extends Plugin {
       type('unfinished request'); button('Inbox').click(); button('Quiz').click();
       ok(quiz.draftQuestion === 'unfinished request', 'Panel round trip retains unfinished request');
       button('Inbox').click();
+      const command = root.querySelector('textarea[aria-label="Inbox command"]');
+      const enterCommand = async text => { command.value = text; command.dispatchEvent(new Event('input')); button('Send command').click(); await pause(); };
+      const chatIdentity = view.chat, cardsIdentity = view.cardsEl;
+      const studyTextarea = root.querySelector('.review-chat textarea');
+      const beforeRejected = { session: quiz.session, plan: quiz.plan, guide: quiz.guide, turns: JSON.stringify(quiz.turns), sources: JSON.stringify([...quiz.unitSources]), calls: calls.length, reads: reads.length, queued: queued.length, captures: store.all().length };
+      await enterCommand('Make flashcards on Extra');
+      ok(command.value === 'Make flashcards on Extra' && root.querySelector('textarea[aria-label="Inbox command"]') === command
+        && quiz.draftQuestion === 'unfinished request'
+        && root.querySelector('.review-chat textarea') === studyTextarea && studyTextarea.value === 'unfinished request'
+        && view.chat === chatIdentity && view.cardsEl === cardsIdentity,
+      'Inbox rejects an external command and preserves both mounted drafts');
+      ok(quiz.session === beforeRejected.session && quiz.plan === beforeRejected.plan && quiz.guide === beforeRejected.guide
+        && JSON.stringify(quiz.turns) === beforeRejected.turns && JSON.stringify([...quiz.unitSources]) === beforeRejected.sources
+        && calls.length === beforeRejected.calls && reads.length === beforeRejected.reads
+        && queued.length === beforeRejected.queued && store.all().length === beforeRejected.captures,
+      'Rejected command leaves study state, reads, requests and captures unchanged');
+      for (const registered of ['Make flashcards', '/flashcards', '/make-flashcards']) {
+        await enterCommand(registered);
+        ok(command.value === registered && quiz.draftQuestion === 'unfinished request'
+          && root.querySelector('.review-chat textarea') === studyTextarea && studyTextarea.value === 'unfinished request'
+          && quiz.session === beforeRejected.session && quiz.plan === beforeRejected.plan && quiz.guide === beforeRejected.guide
+          && JSON.stringify(quiz.turns) === beforeRejected.turns && JSON.stringify([...quiz.unitSources]) === beforeRejected.sources
+          && calls.length === beforeRejected.calls && reads.length === beforeRejected.reads
+          && queued.length === beforeRejected.queued && store.all().length === beforeRejected.captures,
+        `Registered ${registered} preserves both rejected drafts through actual main.openChat`);
+      }
+      type(''); // Explicitly clear the synthetic draft through its normal input event.
+      button('Inbox').click(); button('Send command').click(); await pause();
+      ok(quiz.awaitingTopic && quiz.studyMode === 'flashcards' && quiz.guide === '' && command.value === ''
+        && calls.length === beforeRejected.calls && reads.length === beforeRejected.reads, 'Retained registered command retries once and requires a fresh topic');
+      type('Extra'); button('Send').click(); await pause();
+      ok(quiz.awaitingGuide && view.chat === chatIdentity && view.cardsEl === cardsIdentity && command.value === '', 'Inbox command opens the mounted study chat and requires a fresh guide');
+      type('Test the definition of affinity.'); button('Send').click(); await wait(() => !quiz.busy);
+      const extraCapture = store.all().find(h => h.sourcePath === extraFile.path);
+      ok(extraCapture?.text === source && queued.length === 2 && extraCapture.instruction.includes('Test the definition'), 'Make Flashcards sends exact notes and coverage instructions to the existing queue');
+      await wait(() => extraCapture.status === 'ready' || extraCapture.status === 'error');
+      ok(extraCapture.cards.length === 1 && extraCapture.cards[0].generation?.audit.status === 'verified', 'Make Flashcards runs the existing writer and audit');
+      ok(view.chatEl.querySelector('a[href="synthetic/Extra.md"]') && /Experimental/.test(view.chatEl.textContent), 'Experimental Flashcards retain clickable source provenance');
+      button('Inbox').click();
+      await enterCommand('Make flashcards on Extra');
+      type('Test the definition of affinity.'); button('Send').click(); await wait(() => !quiz.busy);
+      ok(queued.length === 2 && store.all().length === 2, 'A fresh repeat cannot generate duplicate captures');
+      button('Inbox').click();
+      await enterCommand('/export');
+      ok(exports.length === 1 && view.panel === 'inbox', 'Inbox resolves an existing registered command without starting study');
       const h = makeHighlight({ sourcePath: file.path, sourceTitle: 'Synthetic', text: 'Dormancy delays germination.', status: 'ready' });
       const c = makeCard(h.id, { kind: 'qa', front: 'What does it delay?', back: 'germination' }); h.cards = [c]; store.add(h); view.render();
       root.querySelector(`[data-id="${c.id}"] button[title^="Check card against"]`).click();
       await wait(() => !view.checking.size);
       ok(c.front === 'What does dormancy delay?' && store.revisions().at(-1)?.via === 'repair', 'Real card star repairs and records history');
+      const verifyIn = row => [...row.querySelectorAll('button')].find(b => b.textContent === 'Verify');
+      for (const [scope, selector, expected] of [['passage', '.wikilm-hl-actions', 1], ['source', '.wikilm-source-actions', 2], ['inbox', '.wikilm-header-right', 3]]) {
+        view.render();
+        const card = root.querySelector(`[data-id="${c.id}"]`);
+        const row = scope === 'passage' ? card.closest('.wikilm-hl').querySelector(selector)
+          : scope === 'source' ? card.closest('.wikilm-source').querySelector(selector) : root.querySelector(selector);
+        const verify = verifyIn(row), siblings = [...row.children], beforeVerify = calls.filter(c => c === 'verdicts').length;
+        ok(verify && siblings[siblings.indexOf(verify) - 1]?.textContent === 'Export' && verify.getAttribute('aria-label'), `${scope} Verify is labeled and immediately follows Export`);
+        verify.click(); await wait(() => !view.verifying);
+        ok(calls.filter(c => c === 'verdicts').length - beforeVerify === expected && exports.length === 1, `${scope} Verify respects visible scope without exporting`);
+      }
       await store.flush();
       const restored = new InboxStore(app, 'synthetic-data'); await restored.load();
       ok(restored.findCard(c.id)?.card.front === c.front && restored.revisions().at(-1)?.via === 'repair', 'Repair survives real store serialization and reload'); restored.close();
@@ -146,6 +215,19 @@ export default class CandidateProbe extends Plugin {
         && currentEditor.querySelector('textarea[aria-label="Cloze sentence"]').value === 'My newer {{c1::unsaved}} sentence'
         && currentEditor.querySelector('textarea[aria-label="Extra"]').value === 'My newer unsaved annotation', 'Late learning preserves the mounted editor and newer unsaved fields');
       ok(JSON.stringify(c) === savedCard && JSON.stringify(store.revisions()) === savedHistory && !root.querySelector('.wikilm-schema-chip'), 'Learning preserves saved rewrite/history and defers the proposal header while editing');
+      type('Another unfinished study draft');
+      const editorStudyBox = root.querySelector('.review-chat textarea');
+      const beforeEditorCommand = { calls: calls.length, reads: reads.length, queued: queued.length, turns: JSON.stringify(quiz.turns) };
+      await enterCommand('/flashcards');
+      ok(command.value === '/flashcards' && quiz.draftQuestion === 'Another unfinished study draft'
+        && root.querySelector('.review-chat textarea') === editorStudyBox && editorStudyBox.value === 'Another unfinished study draft'
+        && cardRoot().querySelector('.wikilm-editor') === form && form.isConnected
+        && question.value === 'My newer unsaved question after Convert' && sentence.value === 'My newer {{c1::unsaved}} sentence'
+        && extra.value === 'My newer unsaved annotation' && JSON.stringify(c) === savedCard && JSON.stringify(store.revisions()) === savedHistory
+        && calls.length === beforeEditorCommand.calls && reads.length === beforeEditorCommand.reads
+        && queued.length === beforeEditorCommand.queued && JSON.stringify(quiz.turns) === beforeEditorCommand.turns,
+      'Rejected registered command preserves the real mounted card editor and both composers');
+      type(''); command.value = ''; command.dispatchEvent(new Event('input')); button('Inbox').click();
       [...currentEditor.querySelectorAll('button')].find(b => b.textContent === 'Cancel').click();
       await wait(() => root.querySelector('.wikilm-schema-chip')?.textContent === '1 card rule suggestion');
       ok(view.editing === null && JSON.stringify(c) === savedCard, 'Cancel releases the proposal header without undoing the accepted rewrite');
@@ -177,6 +259,70 @@ export default class CandidateProbe extends Plugin {
       ok(!editor.dom.textContent.includes('Existing SR card'), 'SR marker disappears after unsaved edit');
       controller.destroy(); controller = null;
       ok(!editor.dom.textContent.includes('Existing SR card'), 'Visibility unload removes markers');
+      // The writer already ran above; these regressions isolate the explicit capture boundary.
+      await generator.stop();
+      host.generator.enqueue = h => queued.push(h);
+      raw = 'Affinity is the strength with which a drug binds its receptor, and this binding strength describes the interaction between that drug and its receptor. Receptor occupancy is the proportion of receptors occupied by a drug at a given concentration, and occupancy increases as that concentration rises. Efficacy is the capacity of a bound drug to activate its receptor and produce a biological response after binding has occurred.';
+      file.stat.mtime++; file.stat.size = raw.length;
+      button('Quiz').click(); type(`quiz me on ${file.path}`); button('Send').click(); await pause();
+      type('Test the stated definitions.'); button('Send').click(); await pause();
+      button('Free response').click(); await wait(() => !quiz.busy);
+      const splitPoints = quiz.session.items.flatMap(item => item.points);
+      ok(splitPoints.length > 1 && splitPoints.every(point => /#s\d+$/.test(point.id) && quiz.unitSources.get(point.id)?.path === file.path), 'Split quiz points retain their original passage provenance');
+      const beforeSplit = { captures: store.all().length, queued: queued.length };
+      button('Skip').click(); await pause();
+      ok(store.all().length === beforeSplit.captures && queued.length === beforeSplit.queued, 'Split-point miss alone does not capture or queue');
+      button('Send to Inbox').click(); await pause();
+      const splitCapture = store.all().find(h => h.sourcePath === file.path && h.text === raw);
+      ok(splitCapture && store.all().length === beforeSplit.captures + 1 && queued.length === beforeSplit.queued + 1 && queued.at(-1) === splitCapture, 'Explicit split-point capture keeps the full original passage and queues once');
+      // Two-page synthetic PDF: blank first page, source definition on page 2.
+      const pdfBytes = Uint8Array.from(atob('JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUiA0IDAgUl0gL0NvdW50IDIgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIgNzkyXSAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA1IDAgUiA+PiA+PiAvQ29udGVudHMgNiAwIFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIgNzkyXSAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA1IDAgUiA+PiA+PiAvQ29udGVudHMgNyAwIFIgPj4KZW5kb2JqCjUgMCBvYmoKPDwgL1R5cGUgL0ZvbnQgL1N1YnR5cGUgL1R5cGUxIC9CYXNlRm9udCAvSGVsdmV0aWNhID4+CmVuZG9iago2IDAgb2JqCjw8IC9MZW5ndGggMCA+PgpzdHJlYW0KZW5kc3RyZWFtCmVuZG9iago3IDAgb2JqCjw8IC9MZW5ndGggOTQgPj4Kc3RyZWFtCkJUIC9GMSAxMiBUZiA3MiA3MjAgVGQgKEFmZmluaXR5IGlzIHRoZSBzdHJlbmd0aCB3aXRoIHdoaWNoIGEgZHJ1ZyBiaW5kcyBpdHMgcmVjZXB0b3IuKSBUaiBFVAplbmRzdHJlYW0KZW5kb2JqCnhyZWYKMCA4CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAwMCBuIAowMDAwMDAwMDU4IDAwMDAwIG4gCjAwMDAwMDAxMjEgMDAwMDAgbiAKMDAwMDAwMDI0NyAwMDAwMCBuIAowMDAwMDAwMzczIDAwMDAwIG4gCjAwMDAwMDA0NDMgMDAwMDAgbiAKMDAwMDAwMDQ5MSAwMDAwMCBuIAp0cmFpbGVyCjw8IC9TaXplIDggL1Jvb3QgMSAwIFIgPj4Kc3RhcnR4cmVmCjYzNAolJUVPRgo='), c => c.charCodeAt(0));
+      const pdfFile = { path: 'synthetic/NativeEvidence.pdf', basename: 'NativeEvidence', extension: 'pdf', stat: { mtime: 1, size: pdfBytes.length } };
+      app.vault.getFiles = () => [file, extraFile, pdfFile];
+      app.vault.getAbstractFileByPath = path => app.vault.getFiles().find(f => f.path === path) ?? null;
+      host.fileAt = app.vault.getAbstractFileByPath;
+      app.vault.readBinary = async f => { if (f !== pdfFile) throw Error('Unexpected PDF read'); reads.push(f.path); return pdfBytes.buffer.slice(0); };
+      button('Inbox').click();
+      const beforePdf = { reads: reads.length, calls: calls.length, captures: store.all().length, queued: queued.length };
+      await enterCommand(`Make flashcards on ${pdfFile.path}`);
+      ok(quiz.awaitingGuide && reads.length === beforePdf.reads && calls.length === beforePdf.calls, 'Explicit PDF command requires a fresh guide before native extraction');
+      type('Test the definition of affinity.'); button('Send').click(); await wait(() => !quiz.busy);
+      const pdfCapture = store.all().find(h => h.sourcePath === pdfFile.path);
+      ok(pdfCapture?.page === 2 && pdfCapture.text === source && pdfCapture.origin === 'pdf' && reads.slice(beforePdf.reads).every(path => path === pdfFile.path), 'Native PDF.js extraction preserves exact file, page and source text');
+      ok(store.all().length === beforePdf.captures + 1 && queued.length === beforePdf.queued + 1 && queued.at(-1) === pdfCapture, 'PDF Make Flashcards queues the exact passage through the existing capture boundary');
+      type(`quiz me on ${pdfFile.path}`); button('Send').click(); await pause();
+      ok(quiz.awaitingGuide && !button('Free response'), 'PDF Quiz asks for new coverage instead of reusing Flashcards instructions');
+      type('Test the definition of affinity.'); button('Send').click(); await pause();
+      button('Free response').click(); await wait(() => !quiz.busy);
+      ok(!!quiz.session?.current && quiz.turns.at(-1).source?.page === 2 && quiz.turns.at(-1).source?.path === pdfFile.path && view.chatEl.querySelector(`a[href="${pdfFile.path}#page=2"]`), 'Native PDF Quiz starts with page-linked source provenance');
+      const beforePdfMiss = queued.length;
+      button('Skip').click(); await pause();
+      ok(queued.length === beforePdfMiss, 'PDF Quiz miss still requires deliberate capture');
+      button('Send to Inbox').click(); await pause();
+      ok(queued.length === beforePdfMiss && store.all().filter(h => h.sourcePath === pdfFile.path).length === 1, 'Explicit PDF Quiz capture reuses the existing passage without duplicate queueing');
+      const beforeScopeFunctions = { getFiles: app.vault.getFiles, getAbstractFileByPath: app.vault.getAbstractFileByPath, read: app.vault.read, getFileCache: app.metadataCache.getFileCache, isUserIgnored: app.metadataCache.isUserIgnored };
+      const ignoredFile = { ...file, path: 'ignored/Private.md', basename: 'Private' };
+      app.vault.getFiles = () => [...beforeScopeFunctions.getFiles(), ignoredFile];
+      app.vault.getAbstractFileByPath = path => app.vault.getFiles().find(f => f.path === path) ?? null;
+      app.vault.read = async f => { if (f === ignoredFile) { reads.push(f.path); throw Error('Excluded synthetic note must not be read'); } return beforeScopeFunctions.read(f); };
+      app.metadataCache.isUserIgnored = path => path === ignoredFile.path;
+      app.metadataCache.getFileCache = f => f === file ? { frontmatter: { aliases: ['Binding sites', 'missing/Private', 'ignored/Private', 'Missing'] } } : beforeScopeFunctions.getFileCache(f);
+      try {
+        for (const mode of ['quiz me', 'make flashcards']) for (const requested of ['missing/Private.md', 'ignored/Private.md', '[[Missing.md ]]']) {
+          const beforeScope = { reads: reads.length, calls: calls.length, captures: store.all().length, queued: queued.length };
+          await enterCommand(`${mode} on ${requested}`);
+          ok(quiz.awaitingGuide && reads.length === beforeScope.reads && calls.length === beforeScope.calls, `${mode} ${requested} requests fresh coverage before resolution`);
+          type('Test the definition of affinity.'); button('Send').click(); await pause();
+          if (button('Free response')) { button('Free response').click(); await wait(() => !quiz.busy); }
+          ok(quiz.target === null && !quiz.choices.length && /No eligible note or tag matched/.test(view.chatEl.textContent)
+            && reads.length === beforeScope.reads && calls.length === beforeScope.calls
+            && store.all().length === beforeScope.captures && queued.length === beforeScope.queued,
+          `${mode} ${requested} fails closed before an unrelated alias can read, disclose or capture`);
+        }
+      } finally {
+        Object.assign(app.vault, { getFiles: beforeScopeFunctions.getFiles, getAbstractFileByPath: beforeScopeFunctions.getAbstractFileByPath, read: beforeScopeFunctions.read });
+        Object.assign(app.metadataCache, { getFileCache: beforeScopeFunctions.getFileCache, isUserIgnored: beforeScopeFunctions.isUserIgnored });
+      }
       return { checks, providerRequests: calls, syntheticDiskFiles: files.size, actualNetworkRequests: 0 };
     } finally {
       readingChild?.unload(); controller?.destroy(); editor?.destroy();

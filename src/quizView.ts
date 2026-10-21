@@ -1,9 +1,10 @@
 import type { App } from "obsidian";
+import { StudyCoordinator, STUDY_GUIDE_MAX_CHARS, type StudyHost, type StudyPlan, type StudyPassage } from "./study";
 import { indexPage } from "./pageIndex";
 import { buildItems, startRecall, nextItem, sectionIn, checkQuestion, acceptQuestion, questionPoints, skipRecall, recallMisses, afterFirstAttempt, renderRevealMarkdown, itemById, type RecallSession } from "./recall";
 import type { QuizChoiceDraft, QuizChoiceAudit } from "./quizSchemas";
 import { validatedQuizGrade, validateQuizAudit, validateQuizChoices, validateChoiceAudit } from "./quizValidation";
-import { QuizSources, type QuizSource } from "./quizSources";
+import { QuizSources } from "./quizSources";
 import { makeHighlight } from "./model";
 import { parseQuizCommand, isDontKnow } from "./quiz";
 import { resolveQuizTarget, type QuizNote } from "./quizTarget";
@@ -22,12 +23,12 @@ export interface QuizLlm {
 export interface QuizHost {
   app: App;
   settings?: { schemaFolder?: string; exportFolder?: string };
-  llm: QuizLlm;
-  store: ChatStore;
+  llm: QuizLlm & StudyHost["llm"];
+  store: StudyHost["store"];
   generator: ChatGenerator;
   openInbox(): void | Promise<void>;
 }
-interface Turn { role: "assistant" | "user"; text: string }
+interface Turn { role: "assistant" | "user"; text: string; current?: () => boolean; source?: StudyPassage }
 
 /** Quiz uses the existing Recall session, with old conversation kept only for display. */
 export class QuizView {
@@ -40,15 +41,23 @@ export class QuizView {
   private target: { paths: string[]; label: string } | null = null;
   private choices: QuizNote[] = [];
   private choosingMode = false;
+  private awaitingGuide = false;
+  private awaitingTopic = false;
+  private guide = "";
+  private topic = "";
+  private studyMode: "quiz" | "flashcards" = "quiz";
+  private study: StudyCoordinator;
+  private plan: StudyPlan | null = null;
   private mode: "free" | "mc" = "free";
   private mc: QuizChoiceDraft | null = null;
   private sent = new Map<string, string>();
 
   private epoch = 0;
-  private sources: QuizSource[] = [];
+  private unitSources = new Map<string, StudyPassage>();
   private reader: QuizSources;
   constructor(private contentEl: HTMLElement, private host: QuizHost) {
     this.reader = new QuizSources(host.app, () => host.settings ?? {});
+    this.study = new StudyCoordinator(host);
   }
   private cleanup: Array<() => void> = [];
   async onOpen(): Promise<void> {
@@ -65,47 +74,79 @@ export class QuizView {
   }
   async onClose(): Promise<void> { for (const dispose of this.cleanup.splice(0)) dispose(); this.cancel(); this.cancelled = true; }
   private cancel(): void {
-    this.epoch++; this.busy = false; this.session = null; this.sources = [];
-    this.target = null; this.choices = []; this.choosingMode = false; this.mc = null;
+    this.epoch++; this.study.cancel(); this.plan = null; this.busy = false; this.session = null; this.unitSources.clear();
+    this.target = null; this.choices = []; this.choosingMode = false; this.awaitingTopic = false; this.awaitingGuide = false; this.guide = ""; this.mc = null;
     this.status = "Quiz cancelled. No review schedule changed."; this.render();
   }
   refreshSources(): void {
-    if (this.sources.length && !this.sources.every(s => this.reader.current(s))) {
-      this.cancel(); this.status = "Quiz source changed or access was revoked. Start again."; this.render();
+    if (this.plan && !this.study.current(this.plan)) {
+      this.cancel(); this.status = "Study source changed or access was revoked. Start again.";
     }
+    this.render();
   }
   private authorized(epoch: number): boolean {
-    return !this.cancelled && this.epoch === epoch && this.sources.length > 0 && this.sources.every(s => this.reader.current(s));
+    return !this.cancelled && this.epoch === epoch && !!this.plan && this.study.current(this.plan);
   }
   private requireCurrent(epoch: number): void {
     if (!this.authorized(epoch)) { this.refreshSources(); throw Error("stale quiz"); }
   }
 
   private notes(): QuizNote[] {
-    return this.host.app.vault.getFiles().filter(f => f.extension.toLowerCase() === "md" && this.reader.allowed(f.path)).map(f => {
+    return this.host.app.vault.getFiles().filter(f => /^(md|pdf)$/i.test(f.extension) && this.reader.allowed(f.path)).map(f => {
       const cache = this.host.app.metadataCache?.getFileCache(f);
       const values = (v: unknown): string[] => (Array.isArray(v) ? v : typeof v === "string" ? [v] : []).filter((s): s is string => typeof s === "string");
       return { path: f.path, name: f.basename, aliases: [...values(cache?.frontmatter?.aliases), ...values(cache?.frontmatter?.alias)], tags: [...values(cache?.frontmatter?.tags).flatMap(t => t.split(/[,\s]+/)).filter(Boolean).map(t => t.startsWith("#") ? t : `#${t}`), ...(cache?.tags ?? []).map(t => t.tag)] };
     });
   }
 
+  async submit(message: string): Promise<boolean> {
+    if (this.cancelled || this.busy || this.draftQuestion) return false;
+    this.draftQuestion = message; await this.ask(); return true;
+  }
+
   private async ask(): Promise<void> {
     const text = this.draftQuestion.trim();
     if (!text) return;
-    const command = parseQuizCommand(text, !!this.session || this.choosingMode);
-    if (command?.kind === "stop") { this.cancel(); return; }
-    if (command?.kind === "start") {
-      this.epoch++; this.busy = false; this.sources = [];
+    if (text.length > STUDY_GUIDE_MAX_CHARS) { this.status = `Keep the message within ${STUDY_GUIDE_MAX_CHARS} characters; it has not been truncated or sent.`; this.render(); return; }
+    const flashcards = /^\/?(?:make[\s-]+flashcards|flashcards)(?:\s+(?:on|about)\s+([\s\S]+))?$/i.exec(text);
+    const command = parseQuizCommand(text, !!this.session || this.choosingMode || this.awaitingGuide || this.awaitingTopic);
+    if (command?.kind === "stop" || /^\/?cancel(?: (?:quiz|study))?$/i.test(text)) { this.draftQuestion = ""; this.cancel(); return; }
+    if (command?.kind === "start" || flashcards) {
+      this.epoch++;
+      if (!this.plan) this.study.cancel();
+      this.study = new StudyCoordinator(this.host); this.plan = null; this.busy = false; this.unitSources.clear();
+      this.studyMode = flashcards ? "flashcards" : "quiz";
       this.session = null; this.mc = null; this.choices = []; this.target = null; this.choosingMode = false;
-      const query = command.scope === "this" ? "" : command.query || "all";
-      const resolved = resolveQuizTarget(query, this.notes(), this.host.app.workspace.getActiveFile?.()?.path ?? null);
+      const query = flashcards ? flashcards[1]?.trim() ?? "" : command?.kind === "start" && command.scope !== "this" ? command.query || "all" : "";
+      this.topic = query || (/\b(?:this|active|current|open) (?:note|file)\b|\bon this$/i.test(text) ? this.host.app.workspace.getActiveFile?.()?.path ?? "" : "");
       this.turns.push({ role: "user", text }); this.draftQuestion = "";
-      if (resolved.kind === "resolved") { this.target = resolved; this.choosingMode = true; this.status = "Choose a question format."; }
-      else if (resolved.kind === "choices") { this.choices = resolved.choices; this.status = "Choose a note. No source has been sent."; }
-      else this.status = "No eligible note or tag matched. Name a note, path, alias or #tag.";
+      this.awaitingTopic = !this.topic; this.awaitingGuide = !!this.topic; this.guide = "";
+      if (this.awaitingTopic) { this.status = "What topic should we study? You can name a subject, note, path or #tag."; this.turns.push({ role: "assistant", text: this.status }); }
+      else this.promptGuide();
       this.render(); return;
     }
     if (this.busy) return;
+    if (this.awaitingTopic) {
+      this.topic = text; this.awaitingTopic = false; this.awaitingGuide = true;
+      this.turns.push({ role: "user", text }); this.draftQuestion = ""; this.promptGuide(); this.render(); return;
+    }
+    if (this.awaitingGuide) {
+      this.guide = text; this.awaitingGuide = false;
+      this.turns.push({ role: "user", text }); this.draftQuestion = "";
+      const sourcePath = this.topic.trim().replace(/^\[\[([\s\S]*)\]\]$/, "$1");
+      // Explicit PDF paths cannot fall back to aliases or suggestions for other files.
+      const notes = this.notes().filter(note => !/\.pdf$/i.test(sourcePath) || note.path.toLocaleLowerCase() === sourcePath.toLocaleLowerCase());
+      const resolved = /^(all|everything)$/i.test(this.topic)
+        ? notes.length ? { kind: "resolved" as const, paths: notes.map(n => n.path), label: this.topic } : { kind: "missing" as const }
+        : resolveQuizTarget(this.topic, notes, null);
+      if (resolved.kind === "resolved") this.target = resolved;
+      else if (resolved.kind === "choices") this.choices = resolved.choices;
+      else if (!/^#|[/\\]|\.(?:md|pdf)$|^\[\[|^(?:all|everything)$/i.test(this.topic)) this.target = { paths: [], label: this.topic };
+      this.choosingMode = this.studyMode === "quiz" && !!this.target;
+      this.status = this.target ? "Choose a question format." : this.choices.length ? "Choose a note. No source has been sent." : "No eligible note or tag matched. Start again with an available source.";
+      if (this.studyMode === "flashcards" && this.target) await this.makeFlashcards();
+      this.render(); return;
+    }
     if (command?.kind === "hint") { this.hint(); this.draftQuestion = ""; return; }
     if (command?.kind === "skip" || (this.session?.current && isDontKnow(text))) {
       this.draftQuestion = "";
@@ -131,8 +172,26 @@ export class QuizView {
       // Source excerpts are the feedback. Generated elaboration and hints are not evidence.
       this.session = afterFirstAttempt(session, text, marks, "", true);
       this.turns.push({ role: "user", text }); this.draftQuestion = "";
-      this.status = "";
+      this.recordResult(); this.status = "";
     } catch { if (epoch === this.epoch) this.status = "Could not validate the grade. No attempt counted; retry your answer."; }
+    finally { if (epoch === this.epoch) { this.busy = false; this.render(); } }
+  }
+
+  private promptGuide(): void {
+    this.status = "Paste a study guide or describe what to focus on. It defines coverage only; all facts must come from your notes.";
+    this.turns.push({ role: "assistant", text: this.status });
+  }
+
+  private async makeFlashcards(): Promise<void> {
+    this.busy = true; const epoch = this.epoch; this.status = "Finding references in your notes…"; this.render();
+    try {
+      const plan = await this.study.prepare({ mode: "flashcards", topic: this.topic, guide: this.guide }, this.target?.paths.length ? this.target.paths : undefined);
+      if (this.cancelled || epoch !== this.epoch) return;
+      this.plan = plan;
+      if (!plan.passages.length) { this.status = "No matching note evidence was selected. Nothing was queued; the guide is not a source."; return; }
+      const captured = this.study.capture(plan);
+      this.status = `${captured.added} reference passages queued for the Inbox card writer; ${captured.duplicates} already captured. No cards were exported.`;
+    } catch { if (epoch === this.epoch) this.status = "Could not prepare or queue references. Check source access and start again; any captures already added remain in the Inbox."; }
     finally { if (epoch === this.epoch) { this.busy = false; this.render(); } }
   }
 
@@ -141,21 +200,24 @@ export class QuizView {
     this.mode = mode; this.mc = null; this.sent.clear();
     this.busy = true; this.choosingMode = false; const epoch = this.epoch; this.render();
     try {
-      if (this.target.paths.length > 20) throw Error("too many sources");
-      const units = [];
-      this.sources = [];
-      let chars = 0;
-      for (const path of this.target.paths) {
-        const source = await this.reader.read(path);
-        if (this.cancelled || epoch !== this.epoch) return;
-        this.sources.push(source); this.requireCurrent(epoch);
-        chars += source.text.length;
-        if (chars > 250_000) throw Error("source budget exceeded");
-        units.push(...indexPage(path, source.text));
-      }
+      const plan = await this.study.prepare({ mode: "quiz", topic: this.topic, guide: this.guide }, this.target.paths.length ? this.target.paths : undefined);
+      if (this.cancelled || epoch !== this.epoch) return;
+      this.plan = plan; this.requireCurrent(epoch);
+      if (!plan.passages.length) { this.status = "No matching note evidence was selected. The guide is not a source; start again with a narrower topic."; return; }
+      const units = plan.passages.flatMap(passage => indexPage(passage.path, passage.text).map(unit => {
+        const id = `${unit.id}:study:${passage.id}`;
+        this.unitSources.set(id, passage);
+        return { ...unit, id, noteTitle: passage.title, page: passage.page,
+          section: [unit.section, passage.page ? `page ${passage.page}` : `line ${passage.line}`].filter(Boolean).join(" › ") };
+      }));
       const items = buildItems(units);
-      if (items.some(i => i.points.reduce((n, p) => n + p.text.length, 0) > 12_000)) throw Error("section too large");
-      this.session = startRecall({ kind: "note", label: this.target.label }, "", items, 20);
+      for (const point of items.flatMap(item => item.points)) {
+        // Sentence points inherit the selected passage of their original evidence unit.
+        const source = this.unitSources.get(point.id) ?? this.unitSources.get(point.id.replace(/#s\d+$/, ""));
+        if (source) this.unitSources.set(point.id, source);
+      }
+      if (!items.length) { this.status = "The selected notes contain no usable quiz statements. Start again with another topic."; return; }
+      this.session = startRecall({ kind: "query", label: this.topic }, this.guide, items, 20);
       await this.nextQuestion();
     } catch { if (epoch === this.epoch) this.status = "Could not read or validate the quiz source (20 notes, 100,000 characters each, 250,000 total, 12,000 per section). Start again."; }
     finally { if (epoch === this.epoch) { this.busy = false; this.render(); } }
@@ -167,7 +229,7 @@ export class QuizView {
     if (!item || session.finished) { this.status = "Quiz complete."; return; }
     const epoch = this.epoch;
     this.requireCurrent(epoch);
-    const args: QuizQuestionMessageArgs = { ...sectionIn(item), level: 1, asked: [], standingInstructions: "", failure: "", authorized: () => this.authorized(epoch) };
+    const args: QuizQuestionMessageArgs = { ...sectionIn(item), level: 1, asked: [], standingInstructions: `Coverage instructions only, not source evidence:\n${this.guide}\nUse only the supplied note points for facts.`, failure: "", authorized: () => this.authorized(epoch) };
     if (this.mode === "mc") {
       const draft = validateQuizChoices(await this.host.llm.quizMultipleChoice(args), item);
       this.requireCurrent(epoch);
@@ -175,6 +237,7 @@ export class QuizView {
       this.requireCurrent(epoch); validateChoiceAudit(audit, draft);
       this.mc = draft;
       this.session = acceptQuestion(session, item, draft.question, "concept", false, [item.points[draft.point - 1].id]);
+      this.recordSourceTurn(draft.question, this.unitSources.get(item.points[0].id));
       this.status = ""; return;
     }
     const draft = await this.host.llm.quizQuestion(args);
@@ -185,6 +248,7 @@ export class QuizView {
     this.requireCurrent(epoch);
     if (audit.supported !== true) throw Error("unsupported question");
     this.session = acceptQuestion(session, item, checked.cue, checked.shape, false, checked.expects);
+    this.recordSourceTurn(checked.cue, this.unitSources.get(item.points[0].id));
     this.status = "";
   }
 
@@ -209,7 +273,7 @@ export class QuizView {
   }
   private skip(): void {
     if (!this.session?.current || this.busy) return;
-    try { this.requireCurrent(this.epoch); this.session = skipRecall(this.session, ""); this.mc = null; this.status = ""; }
+    try { this.requireCurrent(this.epoch); this.turns.push({ role: "user", text: "Skip" }); this.session = skipRecall(this.session, ""); this.mc = null; this.recordResult(); this.status = ""; }
     catch { this.status = "Quiz source changed. Start again."; }
     this.render();
   }
@@ -220,13 +284,13 @@ export class QuizView {
       const miss = recallMisses(this.session).find(m => m.unit.id === id);
       if (!miss) return;
       const unit = miss.unit;
-      const normalized = unit.text.replace(/\s+/g, " ").trim();
-      const duplicate = this.host.store.all().some(h => h.sourcePath === unit.notePath && h.text.replace(/\s+/g, " ").trim() === normalized) || this.host.store.hasDuplicate?.(unit.notePath, normalized);
+      const source = this.unitSources.get(id);
+      if (!source) return;
+      const normalized = source.text.replace(/\s+/g, " ").trim();
+      const duplicate = this.host.store.allHistory().some(h => h.sourcePath === source.path && h.text.replace(/\s+/g, " ").trim() === normalized) || this.host.store.hasDuplicate?.(source.path, normalized);
       if (duplicate) { this.sent.set(id, "Already captured"); this.render(); return; }
-      const source = this.sources.find(s => s.path === unit.notePath)!;
-      const line = Math.max(0, source.text.split("\n").findIndex(t => t.includes(unit.text)));
-      const h = makeHighlight({ sourcePath: unit.notePath, sourceTitle: unit.noteTitle, text: unit.text, line, page: null,
-        title: unit.text.slice(0, 80), instruction: "The reader missed this source point during Quiz. Test only what the quoted passage states.", origin: "quiz" });
+      const h = makeHighlight({ sourcePath: source.path, sourceTitle: source.title, text: source.text, line: source.line - 1, page: source.page,
+        title: unit.text.slice(0, 80), instruction: `The reader missed this source point during Quiz: ${unit.text}\nTest only this point using the captured note excerpt.`, origin: "quiz" });
       const stored = this.host.store.add(h);
       this.sent.set(id, stored.id === h.id ? "Sent to Inbox" : "Already captured");
       if (stored.id === h.id) this.host.generator.enqueue(stored);
@@ -242,21 +306,47 @@ export class QuizView {
       const correct = id === this.mc.correctId;
       const marks = questionPoints(this.session).map(p => ({ unitId: p.id, status: correct ? "recalled" as const : "wrong" as const, said: "", verified: true, note: "", cue: "", dispute: false }));
       this.session = afterFirstAttempt(this.session, id, marks, "", true);
-      this.mc = null; this.status = "";
+      this.turns.push({ role: "user", text: `${id}. ${this.mc.choices.find(c => c.id === id)!.text}` });
+      this.draftQuestion = ""; this.mc = null; this.recordResult(); this.status = "";
     } catch { this.status = "Quiz source changed. Start again."; }
     this.render();
   }
 
+  private recordSourceTurn(text: string, source?: StudyPassage): void {
+    const study = this.study, plan = this.plan!;
+    this.turns.push({ role: "assistant", text, source, current: () => study.current(plan) });
+  }
+  private recordResult(): void {
+    const result = this.session?.results.at(-1);
+    const item = result && itemById(this.session!, result.itemId);
+    if (result && item) this.recordSourceTurn(`${renderRevealMarkdown(result, item)}\n${this.mode === "free" ? "AI-checked grading; compare with the source excerpts." : "Choice graded locally against the checked answer key."}`, this.unitSources.get(item.points[0].id));
+  }
+  private sourceLink(root: HTMLElement, source: StudyPassage): void {
+    const href = source.path + (source.page ? `#page=${source.page}` : "");
+    const link = root.createEl("a", { text: source.title + (source.page ? ` · page ${source.page}` : ` · line ${source.line}`), href });
+    link.addEventListener("click", e => { e.preventDefault(); if (this.reader.allowed(source.path)) void this.host.app.workspace.openLinkText(href, "", false); });
+  }
+
   private render(): void {
     const root = this.contentEl; root.empty();
-    root.createEl("h3", { text: "Quiz" });
+    root.createEl("h3", { text: "Quiz & Make Flashcards · Experimental" });
     const log = root.createDiv({ cls: "review-chat-log" });
-    for (const turn of this.turns) log.createDiv({ cls: `review-chat-turn is-${turn.role}`, text: turn.text });
+    for (const turn of this.turns) {
+      const valid = !turn.current || turn.current();
+      const row = log.createDiv({ cls: `review-chat-turn is-${turn.role}`, text: valid ? turn.text : "Source changed or access was revoked; this earlier study turn is no longer current." });
+      if (valid && turn.source) this.sourceLink(row, turn.source);
+    }
     const action = (label: string, fn: () => void | Promise<void>) => {
       const b = root.createEl("button", { text: label, attr: { type: "button" } });
       b.disabled = this.busy; b.addEventListener("click", fn); return b;
     };
-    for (const choice of this.choices) action(choice.path, () => { this.target = { paths: [choice.path], label: choice.name }; this.choices = []; this.choosingMode = true; this.render(); });
+    for (const choice of this.choices) action(choice.path, async () => {
+      this.target = { paths: [choice.path], label: choice.name }; this.choices = [];
+      this.turns.push({ role: "user", text: choice.path });
+      this.choosingMode = this.studyMode === "quiz"; this.status = this.choosingMode ? "Choose a question format." : "";
+      if (this.studyMode === "flashcards") await this.makeFlashcards();
+      this.render();
+    });
     if (this.choosingMode) {
       action("Free response", () => this.begin("free"));
       action("Multiple choice", () => this.begin("mc"));
@@ -265,21 +355,20 @@ export class QuizView {
       const a = root.createEl("a", { text: title, href: path });
       a.addEventListener("click", e => { e.preventDefault(); if (this.reader.allowed(path)) void this.host.app.workspace.openLinkText(path, "", false); });
     };
+    if (this.plan && this.study.current(this.plan)) {
+      if (this.plan.truncated) root.createDiv({ cls: "review-chat-muted", text: "Limited search: some note content was outside the retrieval budget. Narrow the topic if needed; coverage is not exhaustive." });
+      if (this.plan.gaps.length) root.createDiv({ cls: "review-chat-a", text: `Not supported by the selected note excerpts (from your guide):\n${this.plan.gaps.join("\n")}` });
+    }
+    if (this.studyMode === "flashcards" && this.plan && this.study.current(this.plan)) {
+      for (const passage of this.plan.passages) sourceLink(passage.path, passage.title);
+    }
     const session = this.session;
     if (session?.current) {
       const item = itemById(session, session.current.itemId)!;
       sourceLink(item.notePath, item.noteTitle);
-      root.createDiv({ cls: "review-chat-a", text: session.current.cue });
+
       if (this.mc) for (const choice of this.mc.choices) action(`${choice.id}. ${choice.text}`, () => this.submitChoice(choice.id));
       action("Hint", () => this.hint()); action("Skip", () => this.skip());
-    }
-    for (const result of session?.results ?? []) {
-      const item = itemById(session!, result.itemId);
-      if (item) {
-        root.createDiv({ cls: "review-chat-a", text: renderRevealMarkdown(result, item) });
-        sourceLink(item.notePath, item.noteTitle);
-        root.createDiv({ cls: "review-chat-grounding", text: this.mode === "free" ? "AI-checked grading; compare with the source excerpts." : "Choice graded locally against the checked answer key." });
-      }
     }
     for (const miss of session ? recallMisses(session) : []) {
       const b = action(this.sent.get(miss.unit.id) ?? "Send to Inbox", () => this.sendMiss(miss.unit.id));
@@ -289,10 +378,10 @@ export class QuizView {
     if (session && !session.current && !session.finished) action("Next question", () => this.advance());
     const form = root.createDiv({ cls: "review-chat-input" });
     const box = form.createEl("textarea", { attr: { rows: "2", "aria-label": session?.current ? "Your answer" : "Quiz request", placeholder: "quiz me on Note name or #tag" } });
-    box.value = this.draftQuestion; box.maxLength = 4000; box.disabled = this.busy;
+    box.value = this.draftQuestion; box.disabled = this.busy;
     box.addEventListener("input", () => { this.draftQuestion = box.value; });
-    if (!this.mc) action(session?.current ? "Submit answer" : "Start quiz", () => this.ask());
-    action("Cancel quiz", () => this.cancel()).disabled = false;
+    action(session?.current ? "Submit answer" : "Send", () => this.ask());
+    action("Cancel", () => this.cancel()).disabled = false;
     if (this.status) root.createDiv({ cls: "review-chat-status", text: this.status, attr: { role: "status", "aria-live": "polite" } });
   }
 }

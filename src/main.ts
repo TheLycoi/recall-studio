@@ -202,10 +202,15 @@ export default class RecallPlugin extends Plugin {
   }
 
   /** Focus Quiz inside the existing Inbox, retaining the entrypoint identity. */
-  async openChat(): Promise<void> {
+  async openChat(message?: string): Promise<boolean> {
     await this.openInbox();
     const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_INBOX)[0];
-    if (leaf?.view instanceof InboxView) leaf.view.focusChat();
+    if (leaf?.view instanceof InboxView) {
+      if (message) return leaf.view.startStudy(message);
+      leaf.view.focusChat();
+      return true;
+    }
+    return false;
   }
 
   async chooseDeck(): Promise<string | null> {

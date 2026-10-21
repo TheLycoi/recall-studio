@@ -11,9 +11,9 @@ test('real DeepSeek Quiz transport never blindly retries empty source-bearing ou
 test('rendered free-response caller uses the real LlmClient and fails closed on a semantic audit rejection',async()=>{
  const {QuizView}=await loadQuiz();const {harness,start,text}=await import('./quizHarness.mjs');
  const h=harness(QuizView);const client=new LlmClient(()=>({provider:'codex'}));const labels=[];
- client.codex={complete:async req=>{labels.push(req.label);return req.schema.parse(req.label==='quiz cue'?{question:'What does affinity mean?',shape:'concept',expects:[1]}:req.label==='quiz question audit'?{supported:true}:req.label==='grade'?{...grade(),points:[{...grade().points[0],said:'Affinity does not describe binding strength.'}]}:{points:[{n:1,agrees:false}]});}};
+ client.codex={complete:async req=>{labels.push(req.label);return req.schema.parse(req.label==='study evidence'?{selections:JSON.parse(req.user).passages.map(p=>({id:p.id,quote:p.text})),gaps:[]}:req.label==='quiz cue'?{question:'What does affinity mean?',shape:'concept',expects:[1]}:req.label==='quiz question audit'?{supported:true}:req.label==='grade'?{...grade(),points:[{...grade().points[0],said:'Affinity does not describe binding strength.'}]}:{points:[{n:1,agrees:false}]});}};
  h.host.llm=client;await start(h);h.view.draftQuestion='Affinity does not describe binding strength.';await h.view.ask();
- assert.deepEqual(labels,['quiz cue','quiz question audit','grade','quiz grade audit']);assert.equal(h.view.session.results.length,0);assert.match(text(h.root),/No attempt counted/);
+ assert.deepEqual(labels,['study evidence','quiz cue','quiz question audit','grade','quiz grade audit']);assert.equal(h.view.session.results.length,0);assert.match(text(h.root),/No attempt counted/);
 });
 before(async()=>{({LlmClient}=await loadQuiz('src/llm.ts'));});
 const args=()=>({noteTitle:'Receptors',section:'',part:1,parts:1,points:[SOURCE],level:1,asked:[],standingInstructions:'',failure:'',question:'What does affinity mean?',answer:SOURCE,cued:false,authorized:()=>true});

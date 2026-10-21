@@ -34,7 +34,8 @@ Export accepts the visible drafts in its scope and sends them to Anki with sourc
 | Send selection to inbox with instructions… | `capture-instruct`, `pdf-instruct` | The same, with a one-line instruction for the card writer first. |
 | Open inbox | `inbox` | Opens the flashcard inbox. |
 | Open source history | `source-history` | Shows retained captures and cards for the current note or PDF, with a picker for other captured sources. |
-| Open quiz | `chat` | Focuses Quiz inside Inbox. The legacy command ID and alias remain compatible. |
+| Open quiz (Experimental) | `chat` | Focuses the study conversation inside Inbox. The legacy command ID and alias remain compatible. |
+| Make flashcards (Experimental) | `make flashcards`, `flashcards` | Asks for a topic and fresh coverage guide, then queues selected note excerpts for the Inbox card writer. |
 | Export to Anki | `export` | Accepts and exports all eligible drafts. Inbox Export buttons limit this to visible cards in their scope. |
 | Open the card rules note | `rules`, `schema` | Opens your house rules for the card writer, and creates the note if needed. |
 | Review card rule suggestions | `suggestions` | Rules Recall Studio proposes from the edits you keep making. Accept, edit, or dismiss each one. |
@@ -52,8 +53,10 @@ the header sends the visible drafts across the Inbox. Hidden flagged groups and
 collapsed sources are excluded. The command palette exports all eligible drafts.
 Dismissed passages, deleted cards and already exported cards are excluded.
 
-The passage star and per-card star check and repair cards against the source and
-current writing rules. Findings trigger one rewrite and a replacement check.
+Verify sits beside Export in the Inbox header, expanded sources and passages.
+It checks the visible eligible cards in that scope, sequentially, without exporting.
+Individual card stars remain. These actions check and repair cards against the
+source and current writing rules. Findings trigger one rewrite and a replacement check.
 Clean cards stay unchanged; failed or stale replacements preserve the original.
 Save or cancel an open card editor first. Successful repairs are recorded as
 revisions, not learned as new writing preferences, and never export automatically.
@@ -115,30 +118,45 @@ history, without PDF overlays or a claim that the text was reverified.
 These overlays do not edit the source note. Card counts describe captured
 passages, not whether you learned them or completed the whole note.
 
-## Quiz
+## Quiz and Make Flashcards (Experimental)
 
-Use the Inbox/Quiz toggle. `quiz me` uses the active Markdown note;
-`quiz me on ___` resolves a note name, exact path, alias or #tag. Ambiguous
-names offer choices. Topic suggestions use note metadata and require selection;
-missing targets do not silently broaden the search. PDFs are not Quiz targets.
+These additions are in the unreleased source checkpoint, not the installed 0.1.5 beta.
 
-Choose free response or multiple choice. Free response checks complete point
-judgments and uses an independent semantic audit. Multiple choice hides its
-answer key until an attempt and grades locally against the checked key. Feedback
-shows source excerpts and links; hints name the source section only. Semantic
-checks remain probabilistic, so compare feedback with the source.
+Type `quiz me on human growth hormone` or `make flashcards on human growth hormone`
+in the Inbox command box or the study conversation. Bare commands ask for a topic.
+Every run then asks for a fresh study guide or instructions about what to cover.
+The guide is coverage only: all factual evidence must come from eligible vault notes,
+never general model knowledge, guide-only claims or earlier assistant answers.
+
+The Inbox also accepts registered command names and aliases, with or without a
+leading slash. `/rules` opens the writing rules; `/export` keeps the existing
+export-all command behavior. Typing Make Flashcards queues references; it does
+not export cards. Existing command IDs and hotkeys remain compatible.
+
+Topic retrieval searches note contents as well as titles. Explicit note paths,
+aliases and #tags resolve a source scope; ambiguous names require a choice.
+Missing or excluded explicit sources must not broaden into other notes. The
+model selects exact quotations, not composed facts, and the existing card writer
+receives those excerpts with source paths and locators. Duplicate active or
+archived captures never trigger another batch.
+
+Choose free response or multiple choice for Quiz. Questions, learner answers and
+feedback stay in the conversation. Free response checks complete point judgments
+and uses an independent semantic audit. Multiple choice hides its answer key until
+an attempt and grades locally against the checked key. Feedback shows source
+excerpts and links; hints name the source section only. These checks are
+probabilistic, so compare feedback with the source.
 
 Misses become cards only when you select **Send to Inbox**. That action captures
-the source point, never the incorrect answer, and starts card generation. Existing
-active or archived captures do not trigger duplicate cards or new batches.
+the original note excerpt, never the incorrect answer. It changes no review schedules.
 
 Notes, unsaved editor content and exclusions are rechecked before provider work
 and after asynchronous results. Source changes, cancellation or unload invalidate
-late results. Quiz uses at most 20 notes, 100,000 characters per note, 250,000 total
-and 12,000 per section; over-budget sessions fail visibly. It sends no old answers
-as evidence and changes no review schedules. Cancellation discards late results
-without aborting unrelated generation. The compatible internal Chat entrypoint
-now opens Quiz; the legacy general-answer engine remains in source.
+late results without aborting unrelated generation. Retrieval is lexical and
+bounded, not an exhaustive vault search: at most 40 candidate passages and 12,000
+evidence characters reach selection. The existing Markdown and PDF reader limits
+still apply. Guides over 8,000 characters are rejected rather than truncated.
+Exact quotations prove where text came from, not that the text is factually correct.
 
 ## Existing Spaced Repetition cards
 

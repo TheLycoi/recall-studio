@@ -55,9 +55,15 @@ export const COMMAND_TABLE: CommandSpec[] = [
   },
   {
     id: "open-chat",
-    name: "Open quiz",
+    name: "Open quiz (Experimental)",
     aliases: ["chat"],
     hint: "always",
+  },
+  {
+    id: "make-flashcards",
+    name: "Make flashcards (Experimental)",
+    aliases: ["make flashcards", "flashcards"],
+    hint: "asks for a topic and a fresh coverage guide; facts come only from notes",
   },
   {
     id: "export-reviewed",

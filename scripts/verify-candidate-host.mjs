@@ -27,10 +27,12 @@ const expression = `(async()=>{
   const leaf=app.workspace.getLeavesOfType('review-inbox')[0];
   if(!live||!leaf)throw Error('Existing plugin/view unavailable');
   const liveView=leaf.view;
-  const snapshot=()=>hash({settings:live.settings,data:live.store?.data,workspace:app.workspace.getLayout(),
+  const snapshot=()=>Object.fromEntries(Object.entries({settings:live.settings,data:live.store?.data,workspace:app.workspace.getLayout(),
     interaction:{panel:liveView.panel,editing:liveView.editing,turns:liveView.chat?.turns,draft:liveView.chat?.draftQuestion},
-    editors:app.workspace.getLeavesOfType('markdown').map(l=>({path:l.view.file?.path,text:l.view.editor?.getValue()}))});
+    editors:app.workspace.getLeavesOfType('markdown').map(l=>({path:l.view.file?.path,text:l.view.editor?.getValue()}))}).map(([key,value])=>[key,hash(value)]));
   const before=snapshot(); const focus=document.activeElement;
+  const webContents=require('@electron/remote').getCurrentWebContents();
+  const throttling=webContents.getBackgroundThrottling();
   const id='recall-candidate-probe';
   const bytes=fs.readFileSync(${JSON.stringify(bundlePath)},'utf8');
   const manager={isEnabled:()=>true,plugins:{},manifests:{[id]:{id,name:'Candidate probe',version:'0.0.0',dir:'synthetic-only'}},
@@ -38,14 +40,18 @@ const expression = `(async()=>{
   const style=document.createElement('style');style.textContent=${JSON.stringify(css)};document.head.appendChild(style);
   let candidate;
   try{
+    webContents.setBackgroundThrottling(false);
     candidate=await app.plugins.loadPlugin.call(manager,id);
     const result=candidate.result;
-    if(snapshot()!==before)throw Error('Live data or interaction changed during probe');
+    const after=snapshot(), changed=Object.keys(before).filter(key=>before[key]!==after[key]);
+    if(changed.length)throw Error('Live state changed during probe: '+changed.join(', ')+'; probe error: '+(result?.error??'none'));
+    if(result?.error)throw Error('Candidate probe: '+result.error);
     return JSON.stringify({vault:app.vault.getName(),installedVersion:live.manifest.version,installedName:live.manifest.name,
       liveStatePreserved:true,installedRegistrationPreserved:app.plugins.plugins['review-inbox']===live&&!app.plugins.plugins[id],
       candidateBundleSha256:crypto.createHash('sha256').update(bytes).digest('hex'),...result});
   }finally{
     (candidate??manager.plugins[id])?.unload();style.remove();
+    webContents.setBackgroundThrottling(throttling);
     if(focus?.isConnected&&document.activeElement!==focus)focus.focus({preventScroll:true});
   }
 })()`;

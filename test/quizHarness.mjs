@@ -25,7 +25,9 @@ export function harness(QuizView) {
     metadataCache:{isUserIgnored:()=>ignored,getFileCache:()=>({frontmatter:{aliases:['Binding sites'],tags:['bio']},tags:[{tag:'#bio/receptors'}]})},
     workspace:{getActiveFile:()=>file,getLeavesOfType:()=>editors,on:(name,fn)=>{events[name]=fn;return{};},openLinkText:async()=>{}}};
   const calls=[];
-  const host={app,settings:{},store:{all:()=>rows,add:h=>{rows.push(h);return h;},hasDuplicate:(p,t)=>rows.some(h=>h.sourcePath===p&&h.text.replace(/\s+/g,' ').trim()===t)},generator:{enqueue:h=>queued.push(h),more:()=>{throw Error('must not request more');}},openInbox(){},llm:{
+  const host={app,settings:{},store:{all:()=>rows,allHistory:()=>rows,touch:()=>{},add:h=>{rows.push(h);return h;},hasDuplicate:(p,t)=>rows.some(h=>h.sourcePath===p&&h.text.replace(/\s+/g,' ').trim()===t)},generator:{enqueue:h=>queued.push(h),more:()=>{throw Error('must not request more');}},openInbox(){},llm:{
+    requestAuthorization:(check=()=>true)=>check,
+    selectStudyEvidence:async args=>({selections:args.passages.map(p=>({id:p.id,quote:p.text})),gaps:[]}),
     quizQuestion:async args=>{calls.push(['question',args]);return{question:'What does affinity mean?',shape:'concept',expects:[1]};},
     quizQuestionAudit:async()=>({supported:true}),
     quizRecallGrade:async args=>{calls.push(['grade',args]);return{points:[{n:1,status:'recalled',said:args.answer,note:'',cue:''}],feedback:'Untrusted feedback'};},
@@ -34,7 +36,12 @@ export function harness(QuizView) {
   const view=new QuizView(root,host);
   return {root,view,host,file,rows,queued,calls,events,editors,setRaw:s=>{raw=s;},ignore:()=>{ignored=true;}};
 }
-export async function start(h,mode='Free response',request='quiz me') {
+export async function prepare(h,request='quiz me on Receptors') {
   h.view.draftQuestion=request;await h.view.ask();
+  if(h.view.awaitingTopic){h.view.draftQuestion='Receptors';await h.view.ask();}
+  h.view.draftQuestion='Test the definition and mechanism.';await h.view.ask();
+}
+export async function start(h,mode='Free response',request='quiz me on Receptors') {
+  await prepare(h,request);
   const b=button(h.root,mode);if(!b)throw Error('Mode button missing: '+text(h.root));await b.events.click();
 }

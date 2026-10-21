@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased: experimental study commands
+
+- Add an Inbox command box and conversational `quiz me on …` and `make flashcards on …` entrypoints. Both ask for a fresh study guide or coverage instructions.
+- Find exact note excerpts for the requested topic. Guides define coverage, never facts; earlier answers and general knowledge are not evidence.
+- Queue selected references through the existing Inbox card writer. Quiz misses still require an explicit Send to Inbox action.
+- Add scoped Verify controls beside Export in the Inbox, expanded sources and passages. Verify checks, repairs and rechecks without exporting.
+
+This is source work, not a published or installed release. Plugin identity, stored data and 0.1.5 release metadata stay unchanged.
+
 ## Recall Studio 0.1.5 beta
 
 This replaces the rejected 0.1.4 beta. Keep its published tag and assets unchanged; do not install 0.1.4.

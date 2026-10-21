@@ -1,6 +1,6 @@
 import { before,test } from 'node:test';
 import assert from 'node:assert/strict';
-import {loadQuiz,harness,start,button,text,SOURCE} from './quizHarness.mjs';
+import {loadQuiz,harness,start,prepare,button,text,SOURCE} from './quizHarness.mjs';
 const mc=()=>({question:'Which statement describes affinity?',point:1,choices:[{id:'A',text:'Affinity is a measure of drug mass.'},{id:'B',text:SOURCE},{id:'C',text:'Affinity is a measure of receptor size.'}],correctId:'B'});
 function withMc(h){h.host.llm.quizMultipleChoice=async()=>mc();h.host.llm.quizChoiceAudit=async()=>({choices:[{id:'A',supported:false},{id:'B',supported:true},{id:'C',supported:false}]});return h;}
 let QuizView;
@@ -46,7 +46,7 @@ test('conflicting unsaved editors and oversized sources fail before dispatch',as
 });
 test('cancelled session cannot overwrite a newly started session when its old question resolves',async()=>{
  const h=harness(QuizView);let release;h.host.llm.quizQuestion=async()=>new Promise(r=>{release=r;});
- h.view.draftQuestion='quiz me';await h.view.ask();const old=button(h.root,'Free response').events.click();
+ await prepare(h);const old=button(h.root,'Free response').events.click();
  while(!release)await new Promise(r=>setTimeout(r,0));
  h.view.cancel();h.host.llm.quizQuestion=async()=>({question:'Explain the binding concept?',shape:'concept',expects:[1]});await start(h);
  release({question:'Stale old question?',shape:'concept',expects:[1]});await old;
@@ -59,7 +59,7 @@ test('source-bearing provider failures are generic and retryable, not learner mi
 });
 test('cancelling MC removes old choices and restores the start action',async()=>{
  const h=withMc(harness(QuizView));await start(h,'Multiple choice');h.view.cancel();
- assert.ok(button(h.root,'Start quiz'));assert.equal(h.view.mc,null);
+ assert.ok(button(h.root,'Send'));assert.equal(h.view.mc,null);
 });
 test('a free-response question that the source cannot answer is not shown',async()=>{
  const h=harness(QuizView);h.host.llm.quizQuestion=async()=>({question:'Why do unicorns bind this receptor?',shape:'concept',expects:[1]});
@@ -155,7 +155,7 @@ for(const mutation of ['ignored','disk edit','rename','delete','unsaved edit'])
  test(`revocation during question await invalidates the result: ${mutation}`,async()=>{
   const h=harness(QuizView);let release;
   h.host.llm.quizQuestion=async()=>new Promise(r=>{release=r;});
-  h.view.draftQuestion='quiz me';await h.view.ask();const pending=button(h.root,'Free response').events.click();
+  await prepare(h);const pending=button(h.root,'Free response').events.click();
   while(!release)await new Promise(r=>setTimeout(r,0));
   if(mutation==='ignored')h.ignore();
   if(mutation==='disk edit')h.file.stat.mtime++;
@@ -172,7 +172,7 @@ test('privacy is rechecked after an async source read before any provider call',
 test('hidden and managed source names cannot authorize a read',async()=>{
  for(const path of ['.secret/Receptors.md','cards/Receptors.md','exports/Receptors.md']){
   const h=harness(QuizView);h.file.path=path;h.host.settings={schemaFolder:'cards',exportFolder:'exports'};
-  h.view.draftQuestion=`quiz me on ${path}`;await h.view.ask();
+  await prepare(h,`quiz me on ${path}`);
   assert.equal(button(h.root,'Free response'),undefined);assert.equal(h.calls.length,0);
  }
 });
@@ -193,7 +193,7 @@ test('cancel and unload discard delayed work without aborting shared generation'
  for(const stop of ['cancel','onClose']){
   const h=harness(QuizView);let release;h.host.llm.abort=()=>{throw Error('shared abort forbidden');};
   h.host.llm.quizQuestion=async()=>new Promise(r=>{release=r;});
-  h.view.draftQuestion='quiz me';await h.view.ask();const pending=button(h.root,'Free response').events.click();
+  await prepare(h);const pending=button(h.root,'Free response').events.click();
   while(!release)await new Promise(r=>setTimeout(r,0));await h.view[stop]();
   release({question:'What does affinity mean?',shape:'concept',expects:[1]});await pending;
   assert.equal(h.view.session?.current??null,null);

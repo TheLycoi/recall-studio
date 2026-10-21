@@ -14,8 +14,8 @@ import { openCurrentSourceHistory } from "./sourceVisibility";
 export interface RecallCommand extends CommandSpec {
   /** True when the command can run right now; the palette hides it otherwise. */
   available(plugin: RecallPlugin): boolean;
-  /** Performs the command. Callers use `void` or `await`; errors surface as Notices. */
-  run(plugin: RecallPlugin): Promise<void> | void;
+  /** False refuses execution; legacy void results count as accepted. */
+  run(plugin: RecallPlugin): Promise<boolean | void> | boolean | void;
 }
 
 type Implementation = Pick<RecallCommand, "available" | "run">;
@@ -98,7 +98,11 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
   },
   "open-chat": {
     available: () => true,
-    run: (p) => void p.openChat(),
+    run: (p) => p.openChat(),
+  },
+  "make-flashcards": {
+    available: () => true,
+    run: (p) => p.openChat("Make flashcards"),
   },
   "export-reviewed": {
     available: () => true,
@@ -141,3 +145,15 @@ for (const id of Object.keys(IMPLEMENTATIONS)) {
 }
 
 export const RECALL_COMMANDS: RecallCommand[] = COMMAND_TABLE.map((spec) => ({ ...spec, ...IMPLEMENTATIONS[spec.id] }));
+
+/** Exact names and aliases only. Null means unknown; false means refused. */
+export async function runNamedCommand(plugin: RecallPlugin, text: string): Promise<boolean | null> {
+  const name = text.trim().replace(/^\//, "").replace(/^Recall Studio:\s*/i, "").toLowerCase();
+  const command = RECALL_COMMANDS.find(c => [c.id, c.name, c.name.replace(/ \(Experimental\)$/, ""), ...c.aliases].some(alias => alias.toLowerCase() === name));
+  if (!command) return null;
+  if (!command.available(plugin)) {
+    new Notice(`Recall Studio: ${command.name} ${command.hint}.`);
+    return false;
+  }
+  return (await command.run(plugin)) !== false;
+}
