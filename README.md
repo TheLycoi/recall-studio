@@ -5,9 +5,10 @@ source-linked inbox as drafts. Export accepts the cards you choose and sends
 them to Anki. Quiz in the same panel offers source-grounded free-response
 and multiple-choice practice from the notes you choose.
 
-The display name is Recall Studio. Plugin ID `review-inbox`, default storage
-`Review Inbox/`, command IDs and BRAT repository `TheLycoi/review-inbox` stay
-unchanged. Version 0.1.5 is a beta release. It adds no scheduler.
+The repository and BRAT target are `TheLycoi/recall-studio`, formerly
+`TheLycoi/review-inbox`. Plugin ID `review-inbox`, default storage
+`Review Inbox/` and command IDs stay unchanged. Version 0.1.5 is a beta release.
+It adds no scheduler.
 
 ## What it does
 
