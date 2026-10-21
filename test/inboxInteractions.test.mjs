@@ -40,13 +40,16 @@ test('the compatible Chat entrypoint mounts Quiz in the same panel',async()=>{
   assert.equal(view.tabChat.options.text,'Quiz');assert.equal(view.chat.constructor.name,'QuizView');
   view.focusChat();assert.equal(view.panel,'chat');
 });
-test('the passage star checks its live cards without asking to generate more',async()=>{
-  const {root,view}=harness();
-  const calls=[];view.checkAgainstPractices=async(h,c)=>calls.push(c.id);view.renderCard=()=>{};
+test('passage Verify checks its visible eligible cards without asking to generate more',async()=>{
+  const {root,view,host}=harness();
+  const calls=[];view.checkAgainstPractices=async(h,c)=>{calls.push(c.id);return true;};view.renderCard=()=>{};
   const h={id:'h',status:'ready',text:'Source.',createdAt:new Date().toISOString(),cards:[{id:'a',status:'pending'},{id:'b',status:'flagged'},{id:'c',status:'deleted'},{id:'d',status:'approved'},{id:'e',status:'duplicate'},{id:'f',status:'exported'}]};
+  host.store.all=()=>[h];host.llm={requestAuthorization:active=>active};
+  view.cardIds=()=>h.cards.filter(c=>c.status!=='deleted').map(c=>c.id);
+  root.querySelectorAll=()=>[];
   view.renderHighlight(root,h);
-  const button=descendants(root).find(e=>e.title==='Check cards against best practices (repair issues)');
-  assert.ok(button,'passage star must offer a best-practices check');
+  const button=descendants(root).find(e=>e.options.text==='Verify');
+  assert.ok(button,'passage must offer a labeled Verify control');
   await button.events.click();
   assert.deepEqual(calls,['a','b','d']);
 });

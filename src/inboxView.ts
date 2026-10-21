@@ -80,6 +80,7 @@ export class InboxView extends ItemView {
   private tabInbox?: HTMLButtonElement;
   private tabChat?: HTMLButtonElement;
   private checking = new Set<string>();
+  private verifying = false;
   private closed = false;
   private checkEpoch = 0;
   private collapsed = new Set<string>();
@@ -412,6 +413,7 @@ export class InboxView extends ItemView {
     exportAll.title = "Accept and export visible draft cards to Anki (⌘⏎)";
     exportAll.setAttribute("aria-label", exportAll.title);
     exportAll.addEventListener("click", () => void this.exportHighlights(this.visibleHighlights()));
+    this.renderVerify(right, () => this.visibleHighlights(), "inbox");
 
     const more = right.createEl("button", { cls: "clickable-icon wikilm-icon-btn" });
     setIcon(more, RECALL_MORE_ICON);
@@ -485,6 +487,7 @@ export class InboxView extends ItemView {
       b.title = "Accept and export visible draft cards from this note to Anki";
       b.setAttribute("aria-label", b.title);
       b.addEventListener("click", () => void this.exportHighlights(list));
+      this.renderVerify(actions, () => list, "source");
     }
     if (this.collapsed.has(path)) return;
 
@@ -578,21 +581,9 @@ export class InboxView extends ItemView {
       b.title = "Accept and export visible draft cards from this passage to Anki";
       b.setAttribute("aria-label", b.title);
       b.addEventListener("click", () => void this.exportHighlights([h]));
+      this.renderVerify(hlActions, () => [h], "passage");
     }
     if (h.status === "error") iconBtn(RECALL_RETRY_ICON, "Retry", () => this.plugin.generator.enqueue(h));
-    if (h.status === "ready" && h.cards.some(c => ["pending", "flagged", "approved"].includes(c.status))) {
-      iconBtn(RECALL_SPARK_ICON, "Check cards against best practices (repair issues)", async () => {
-        const settings = JSON.stringify(this.plugin.settings);
-        const epoch = this.checkEpoch;
-        const active = () => !this.closed && this.checkEpoch === epoch
-          && JSON.stringify(this.plugin.settings) === settings;
-        for (const c of liveCards(h)) {
-          if (!active() || h.status !== "ready") break;
-          if (!["pending", "flagged", "approved"].includes(c.status)) continue;
-          if (await this.checkAgainstPractices(h, c, active) === false) break;
-        }
-      });
-    }
     iconBtn(RECALL_ADD_ICON, "Add a card by hand", () => {
       const c = makeCard(h.id, { kind: "qa", front: "", back: "" });
       h.cards.push(c);
@@ -989,6 +980,49 @@ export class InboxView extends ItemView {
     if (this.editing === c.id) this.editing = null;
     if (this.focusedCard === c.id) this.focusedCard = this.neighbourCardId(c.id);
     this.plugin.store.touch();
+  }
+
+  private renderVerify(row: HTMLElement, highlights: () => Highlight[], scope: string): void {
+    const button = row.createEl("button", { cls: "wikilm-verify", text: "Verify", attr: { type: "button" } });
+    button.title = `Check visible drafts in this ${scope} against the captured source and writing rules, repair issues and recheck. Does not guarantee factual accuracy or export cards.`;
+    button.setAttribute("aria-label", `Verify visible drafts in this ${scope}`);
+    button.disabled = this.verifying;
+    button.setAttribute("aria-busy", String(this.verifying));
+    button.addEventListener("click", () => this.verifyHighlights(highlights()));
+  }
+
+  private updateVerifyButtons(): void {
+    for (const button of Array.from(this.contentEl.querySelectorAll<HTMLButtonElement>(".wikilm-verify"))) {
+      button.disabled = this.verifying;
+      button.setAttribute("aria-busy", String(this.verifying));
+    }
+  }
+
+  private async verifyHighlights(list: Highlight[]): Promise<void> {
+    if (this.verifying) return;
+    const visible = new Set(this.cardIds());
+    const targets = list.flatMap(h => h.status === "ready" && !h.archived
+      ? h.cards.filter(c => visible.has(c.id) && ["pending", "flagged", "approved"].includes(c.status)).map(c => ({ h, c }))
+      : []);
+    if (!targets.length) { new Notice("Recall Studio: no visible draft cards to verify."); return; }
+    const settings = JSON.stringify(this.plugin.settings);
+    const epoch = this.checkEpoch;
+    const active = this.plugin.llm.requestAuthorization(() => !this.closed && this.checkEpoch === epoch
+      && this.panel === "inbox" && JSON.stringify(this.plugin.settings) === settings);
+    this.verifying = true;
+    this.updateVerifyButtons();
+    try {
+      for (const { h, c } of targets) {
+        const current = () => active() && this.visibleHighlights().includes(h) && !this.collapsed.has(h.sourcePath)
+          && !(this.plugin.settings.lintMode === "hide" && c.status === "flagged" && !this.expandedFlagged.has(h.id))
+          && this.cardIds().includes(c.id);
+        if (!current()) { new Notice("Recall Studio: Verify stopped because its scope or authorization changed."); break; }
+        if (!await this.checkAgainstPractices(h, c, current) || !current()) break;
+      }
+    } finally {
+      this.verifying = false;
+      this.updateVerifyButtons();
+    }
   }
 
   private async checkAgainstPractices(h: Highlight, c: Card, batchActive: () => boolean = () => true): Promise<boolean> {

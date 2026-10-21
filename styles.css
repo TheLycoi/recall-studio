@@ -169,6 +169,10 @@
   color: var(--text-accent);
 }
 .wikilm-source-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+  min-width: 0;
   margin-left: auto;
 }
 
@@ -265,6 +269,7 @@
 }
 .wikilm-hl-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 2px;
   margin-top: var(--size-4-2);
 }

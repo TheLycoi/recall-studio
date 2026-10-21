@@ -212,9 +212,11 @@ for (const stage of [1, 2, 3]) {
 function clickBatch(f) {
   f.h.cards.push(makeCard(f.h.id, { kind: 'qa', front: 'Which organisms use dormancy?', back: 'seeds' }));
   f.view.renderHighlight(f.root, f.h);
-  const star = nodes(f.root).find(n => n.title === 'Check cards against best practices (repair issues)');
-  assert.ok(star, 'The rendered passage must expose its batch repair star');
-  return star.events.click();
+  const button = nodes(f.root).find(n => n.text === 'Verify');
+  assert.ok(button, 'The rendered passage must expose its labeled Verify control');
+  f.root.querySelectorAll = selector => nodes(f.root).filter(n => n.classes.includes(selector.slice(1)));
+  for (const node of nodes(f.root)) node.closest = () => null; // No collapsed groups in this fixture.
+  return button.events.click();
 }
 for (const stage of [1, 2, 3]) for (const [name, revoke] of Object.entries(invalidations)) {
   test(`batch stops without later disclosure when stage ${stage} is revoked by ${name}`, async () => {
