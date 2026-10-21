@@ -136,14 +136,15 @@ test('empty topic/oversized guide are errors, while no matches and model refusal
   assert.deepEqual(refusal.passages, []);
   assert.deepEqual(refusal.gaps, [request().guide]);
 });
-test('selection chooses only exact note quotes and reports gaps using guide lines', async () => {
+test('selection validates exact note quotes, retains their source passages and reports guide gaps', async () => {
   const f = fixture();
   f.reply = args => {
     return { selections: [{ id: args.passages[0].id, quote: 'delays germination.' }], gaps: [2] };
   };
   const plan = await f.coordinator.prepare({ ...request(), guide: 'Cover dormancy.\nCover invented guide-only fact.' });
   assert.equal(f.calls.length, 1);
-  assert.equal(plan.passages[0].text, 'delays germination.');
+  assert.deepEqual(plan.passages, [f.calls[0].passages[0]]);
+  assert.equal(plan.passages[0].text, 'Dormancy delays germination.');
   assert.deepEqual(plan.gaps, ['Cover invented guide-only fact.']);
 });
 
@@ -258,6 +259,21 @@ test('text-bearing PDF evidence keeps the actual page and queues through the exi
   assert.equal(f.queued[0].line, 0);
   assert.equal(f.queued[0].origin, 'pdf');
 });
+test('PDF substring selection keeps the original qualified passage and page on capture', async () => {
+  const quote = 'dormancy always promotes germination.';
+  const passage = `The lecture explicitly states that it is false that ${quote}`;
+  const f = fixture([{ path: 'sources/lecture.pdf', pdf: ['Cover.', passage] }]);
+  f.reply = args => ({ selections: [{ id: args.passages[0].id, quote }], gaps: [] });
+  const plan = await f.coordinator.prepare(request());
+  assert.deepEqual(plan.passages, f.calls[0].passages);
+  f.coordinator.capture(plan);
+  assert.equal(f.queued.length, 1);
+  assert.equal(f.queued[0].text, passage);
+  assert.equal(f.queued[0].sourcePath, 'sources/lecture.pdf');
+  assert.equal(f.queued[0].page, 2);
+  assert.equal(f.queued[0].line, 0);
+  assert.equal(f.queued[0].origin, 'pdf');
+});
 for (const stage of ['load', 'page']) test(`cancelling PDF ${stage} setup blocks later reads or disclosure and releases documents`, async () => {
   const f = fixture([{ path: 'sources/lecture.pdf', pdf: ['Dormancy delays germination.'] }]), b = barrier();
   f[stage === 'load' ? 'beforePdfLoad' : 'beforePdfText'] = b.pause;
@@ -291,12 +307,17 @@ test('plan gap text can never contain generated advice or instructions', async (
   await assert.rejects(f.coordinator.prepare(request()), /study evidence|study.*schema/i);
   assert.deepEqual(f.rows, []);
 });
-test('overlapping windows dedupe the same span but keep distinct occurrences on the same line', async () => {
+test('overlapping selected windows retain original context and distinct occurrences on the same line', async () => {
   const text = 'Dormancy delays germination.';
   const f = fixture([{ path: 'notes/long.md', text: 'dormancy ' + 'a'.repeat(1000) + ' ' + text + 'b'.repeat(1400) + ' ' + text + 'c'.repeat(1000) }]);
   f.reply = args => ({ selections: args.passages.filter(p => p.text.includes(text)).map(p => ({ id: p.id, quote: text })), gaps: [] });
   const plan = await f.coordinator.prepare(request());
-  assert.equal(plan.passages.length, 2, 'Two distinct source spans, not one quote string');
+  const candidates = f.calls[0].passages.filter(p => p.text.includes(text));
+  assert.deepEqual(plan.passages, candidates, 'Distinct bounded windows retain their context even if their selected quotes overlap');
+  assert.equal(candidates.length, 3, 'The first occurrence appears in two overlapping windows');
+  const occurrenceStarts = new Set(plan.passages.map(p => f.entries[0].text.indexOf(p.text) + p.text.indexOf(text)));
+  assert.equal(occurrenceStarts.size, 2, 'Both original quote occurrences remain represented');
+  assert.ok(plan.passages.every(p => p.line === 1));
   assert.ok(f.calls[0].passages.length > 2, 'Overlap must actually be exercised');
 });
 test('a caller-supplied toJSON cannot hide mutated evidence from preflight', async () => {

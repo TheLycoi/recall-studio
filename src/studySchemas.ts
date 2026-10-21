@@ -41,11 +41,11 @@ export function validateStudyEvidence(value: unknown, passages: readonly StudyPa
     seen.add(selection.id);
     const loc = locateQuote(source.text, selection.quote);
     if (!selection.quote.trim() || !loc?.exact || source.text.slice(loc.start, loc.end) !== selection.quote || source.text.indexOf(selection.quote, loc.start + 1) !== -1) throw Error("Study evidence quote is not exact or is ambiguous.");
-    const line = source.line + (source.text.slice(0, loc.start).match(/\n/g)?.length ?? 0);
-    const key = JSON.stringify([source.path, source.page, spanStarts ? spanStarts.get(source.id)! + loc.start : source.id, selection.quote]);
+    // Selection marks relevance; only the original passage preserves qualifiers and context.
+    const key = JSON.stringify([source.path, source.page, spanStarts?.get(source.id) ?? source.id, source.text]);
     if (spans.has(key)) continue;
     spans.add(key);
-    accepted.push({ ...source, line, text: selection.quote });
+    accepted.push({ ...source });
   }
   const lines = studyGuideLines(guide);
   if (new Set(parsed.data.gaps).size !== parsed.data.gaps.length || parsed.data.gaps.some(n => n > lines.length)) throw Error("Invalid study coverage gap reference.");
