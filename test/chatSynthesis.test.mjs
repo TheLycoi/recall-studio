@@ -8,8 +8,9 @@
 // kept, but ONLY after an independent, evidence-only model check approves it,
 // and never on the model's assurance alone — the quote stays mandatory and is
 // still checked literally, the citation still has to name real evidence the
-// verifier agrees with, and a contradiction or a missing verdict falls back to
-// the extractive refusal. The last block reads src/llm.ts as text and checks
+// verifier agrees with. Negative, duplicate or missing verdicts reject even
+// literal matches when verification is supplied. Lexical extraction without a
+// verifier is a compatibility fallback, not semantic proof. The last block checks
 // the provider wiring for the two new LlmClient methods.
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
@@ -62,14 +63,74 @@ test("the paraphrase is refused with no verification: extractive stays the defau
   assert.equal(report.paraphrases, 0);
 });
 
-test("an exact quote keeps its claim even when the verifier is silent about it", () => {
-  // Exact quotes are the strongest evidence: the verifier only extends reach
-  // to paraphrases, it never withdraws a claim the source states verbatim.
+test("an explicit negative verdict vetoes the original exact-quote fixture", () => {
   const d = draft("full", LITERAL_QUOTE, [claim("Receptors bind ligands with high affinity.", [1])]);
   const { answer, report } = rc.checkChatAnswer(d, EVIDENCE, verification([{ index: 0, supported: false, cited: [] }]));
+  assert.equal(answer, rc.CHAT_REFUSAL);
+  assert.equal(report.refused, true);
+  assert.equal(report.removed, 1);
+  assert.equal(report.paraphrases, 0);
+});
+
+const NEGATED_SOURCE = "It is false that affinity measures receptor size.";
+const EXTRACTED_FALSE_CLAIM = "affinity measures receptor size.";
+const NEGATED_EVIDENCE = [ev(1, { text: NEGATED_SOURCE })];
+const NEGATED_DRAFT = draft("full", [{ n: 1, quote: NEGATED_SOURCE }], [claim(EXTRACTED_FALSE_CLAIM, [1])]);
+
+test("a negative semantic verdict rejects a substring extracted from a negation", () => {
+  const { answer, report } = rc.checkChatAnswer(NEGATED_DRAFT, NEGATED_EVIDENCE,
+    verification([{ index: 0, supported: false, cited: [] }]));
+  assert.equal(answer, rc.CHAT_REFUSAL);
+  assert.equal(report.removed, 1);
+  assert.equal(report.paraphrases, 0);
+});
+
+for (const supported of [[true, false], [false, true], [true, true], [false, true, true]]) {
+  for (const [label, d, evidence] of [
+    ["extraction", NEGATED_DRAFT, NEGATED_EVIDENCE],
+    ["paraphrase", PARAPHRASE_DRAFT, EVIDENCE],
+  ]) {
+    test(`duplicate verdicts ${supported.join("/")} refuse ${label}`, () => {
+      const v = verification(supported.map(value => ({ index: 0, supported: value, cited: value ? [1] : [] })));
+      const { answer, report } = rc.checkChatAnswer(d, evidence, v);
+      assert.equal(answer, rc.CHAT_REFUSAL);
+      assert.equal(report.removed, 1);
+    });
+  }
+}
+
+test("legitimate extraction remains available when no verification is supplied", () => {
+  const d = draft("full", LITERAL_QUOTE, [claim("Receptors bind ligands with high affinity.", [1])]);
+  const { answer, report } = rc.checkChatAnswer(d, EVIDENCE);
   assert.equal(answer, "Receptors bind ligands with high affinity. [1]");
   assert.equal(report.refused, false);
   assert.equal(report.paraphrases, 0);
+});
+
+test("a positive verdict preserves legitimate extraction", () => {
+  const d = draft("full", LITERAL_QUOTE, [claim("Receptors bind ligands with high affinity.", [1])]);
+  const { answer, report } = rc.checkChatAnswer(d, EVIDENCE,
+    verification([{ index: 0, supported: true, cited: [1] }]));
+  assert.equal(answer, "Receptors bind ligands with high affinity. [1]");
+  assert.equal(report.paraphrases, 0);
+});
+
+for (const [label, claims] of [
+  ["missing", []],
+  ["wrong index", [{ index: 9, supported: true, cited: [1] }]],
+  ["empty citations", [{ index: 0, supported: true, cited: [] }]],
+  ["forged citation", [{ index: 0, supported: true, cited: [1, 99] }]],
+  ["unquoted citation", [{ index: 0, supported: true, cited: [2] }]],
+]) {
+  test(`supplied verification with ${label} cannot fall back to extraction`, () => {
+    const d = draft("full", LITERAL_QUOTE, [claim("Receptors bind ligands with high affinity.", [1, 2])]);
+    assert.equal(rc.checkChatAnswer(d, EVIDENCE, verification(claims)).report.refused, true);
+  });
+}
+
+test("a forged draft citation cannot hide beside a real extraction citation", () => {
+  const d = draft("full", LITERAL_QUOTE, [claim("Receptors bind ligands with high affinity.", [1, 99])]);
+  assert.equal(rc.checkChatAnswer(d, EVIDENCE).report.refused, true);
 });
 
 // --- the verifier never overrides a forged quote -----------------------------

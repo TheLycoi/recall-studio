@@ -245,6 +245,6 @@ test("selectionChanged reports a changed source set and ignores order", () => {
 
 test("the evidence message never offers the model a tool or a whole-vault read", () => {
   const msg = rc.buildChatAnswerMessage({ question: "Q?", evidence: EVIDENCE, history: [], standingInstructions: "" });
-  assert.ok(msg.includes("[1]"));
+  assert.deepEqual(JSON.parse(msg).evidence, EVIDENCE);
   assert.equal(/tool|function_call|read the vault|entire vault/i.test(msg), false);
 });
