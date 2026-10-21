@@ -337,8 +337,8 @@ export class QuizView {
       const row = log.createDiv({ cls: `review-chat-turn is-${turn.role}`, text: valid ? turn.text : "Source changed or access was revoked; this earlier study turn is no longer current." });
       if (valid && turn.source) this.sourceLink(row, turn.source);
     }
-    const action = (label: string, fn: () => void | Promise<void>) => {
-      const b = root.createEl("button", { text: label, attr: { type: "button" } });
+    const action = (label: string, fn: () => void | Promise<void>, parent = root) => {
+      const b = parent.createEl("button", { text: label, attr: { type: "button" } });
       b.disabled = this.busy; b.addEventListener("click", fn); return b;
     };
     for (const choice of this.choices) action(choice.path, async () => {
@@ -378,11 +378,12 @@ export class QuizView {
     }
     if (session && !session.current && !session.finished) action("Next question", () => this.advance());
     const form = root.createDiv({ cls: "review-chat-input" });
-    const box = form.createEl("textarea", { attr: { rows: "2", "aria-label": session?.current ? "Your answer" : "Chat message", placeholder: "quiz me on a topic or #tag · make flashcards on a topic" } });
+    const box = form.createEl("textarea", { cls: "review-chat-question", attr: { rows: "2", "aria-label": session?.current ? "Your answer" : "Chat message", placeholder: "quiz me on a topic or #tag · make flashcards on a topic" } });
     box.value = this.draftQuestion; box.disabled = this.busy;
     box.addEventListener("input", () => { this.draftQuestion = box.value; });
-    action(session?.current ? "Submit answer" : "Send", () => this.ask());
-    action("Cancel", () => this.cancel()).disabled = false;
+    const actions = form.createDiv({ cls: "review-chat-input-actions" });
+    action(session?.current ? "Submit answer" : "Send", () => this.ask(), actions);
+    action("Cancel", () => this.cancel(), actions).disabled = false;
     if (this.status) root.createDiv({ cls: "review-chat-status", text: this.status, attr: { role: "status", "aria-live": "polite" } });
   }
 }

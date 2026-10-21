@@ -1006,8 +1006,11 @@ body.wikilm-highlighter-active .textLayer ::selection {
   color: var(--interactive-accent);
 }
 
-.review-chat { display: flex; flex-direction: column; gap: var(--size-4-3); padding: var(--size-4-3); overflow: auto; }
+.review-chat { display: flex; flex-direction: column; gap: var(--size-4-3); padding: var(--size-4-3); min-width: 0; overflow: auto; }
+.review-chat > h3, .review-chat > .review-chat-muted { margin: 0; }
+.review-chat-input { min-width: 0; }
 .review-chat-nav, .review-chat-input-actions { display: flex; flex-wrap: wrap; gap: var(--size-4-2); }
+.review-chat-input-actions > button { max-width: 100%; white-space: normal; height: auto; min-height: var(--input-height); }
 .review-chat-nav-btn.is-active { color: var(--text-on-accent); background: var(--interactive-accent); }
 .review-chat-sources { max-height: 220px; overflow: auto; border: 1px solid var(--background-modifier-border); padding: var(--size-4-2); border-radius: var(--radius-m); }
 .review-chat-source { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-1); overflow-wrap: anywhere; }
@@ -1017,13 +1020,14 @@ body.wikilm-highlighter-active .textLayer ::selection {
 .review-chat-turn.is-user { background: var(--background-secondary); }
 .review-chat-turn > a { display: block; margin-top: var(--size-4-2); font-size: var(--font-smallest); }
 .review-chat-log { flex: 1; overflow: auto; min-height: 80px; }
+.review-chat-log:empty { display: none; }
 .review-chat-turn { margin-block: var(--size-4-3); padding: var(--size-4-3); border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m); }
 .review-chat-q { font-weight: var(--font-semibold); }
 .review-chat-a, .review-chat-source-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .review-chat-source-text { margin-top: var(--size-4-2); padding: var(--size-4-2); background: var(--background-secondary); border-left: 3px solid var(--interactive-accent); }
 .review-chat-grounding, .review-chat-hint, .review-chat-source-page { color: var(--text-muted); font-size: var(--font-smallest); margin-block: var(--size-4-2); }
 .review-chat-error { color: var(--text-error); }
-.review-chat-question { width: 100%; min-height: 80px; resize: vertical; margin-bottom: var(--size-4-2); }
+.review-chat-question { display: block; box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; min-height: 80px; resize: vertical; margin-bottom: var(--size-4-2); }
 .review-chat button:focus-visible, .review-chat a:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 2px; }
 
 /* Passage history is a view overlay, never a mark written to the source. */
