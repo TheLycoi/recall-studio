@@ -7,7 +7,7 @@ Flashcards workflows grounded in your notes and PDFs.
 
 The repository and BRAT target are `TheLycoi/recall-studio`, formerly
 `TheLycoi/review-inbox`. Plugin ID `review-inbox`, default storage
-`Review Inbox/` and command IDs stay unchanged. Version 0.1.6 is a beta release.
+`Review Inbox/` and command IDs stay unchanged. Version 0.1.8 is a beta release.
 It adds no scheduler.
 
 ## What it does
