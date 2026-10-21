@@ -43,6 +43,8 @@ export interface ChatSearchOptions {
    * hints, never evidence: passages always come from the vault.
    */
   terms?: readonly string[];
+  /** Exact source text and current ranked pool; study retains only ranked span provenance. */
+  onSource?: (seeds: readonly ChatSeed[], ranked: readonly ChatSeed[]) => void;
   /** Polled between sources and between PDF pages; a true return stops early. */
   cancelled?: () => boolean;
 }
@@ -101,6 +103,7 @@ export class ChatRetriever {
       const seeds = await this.source(f, skipped);
       if (seeds) {
         pool = selectChatPassages([...pool, ...seeds], question, RESULT_LIMIT, terms);
+        options.onSource?.(seeds, pool);
         searched++;
       }
       await yieldToUi();
