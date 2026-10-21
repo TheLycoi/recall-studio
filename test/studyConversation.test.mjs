@@ -55,8 +55,8 @@ test('Make Flashcards finds a topic inside notes and queues only selected refere
   assert.ok(nodes(h.root).some(n => n.tagName === 'A' && n.options.href === h.file.path));
   assert.match(text(h.root), /queued.*1|1.*queued/i);
 });
-test('topic Quiz uses only selected note excerpts and passes the guide as instructions', async () => {
-  const h = study(); h.setRaw(`${SOURCE}\nAn unrelated planet has an invented property.`);
+test('topic Quiz uses only selected reference passages and passes the guide as instructions', async () => {
+  const h = study(); h.setRaw(`${SOURCE}\n\nAn unrelated planet has an invented property.`);
   h.host.llm.selectStudyEvidence = async args => { h.selections.push(args); return { selections:[{id:args.passages[0].id, quote:SOURCE}], gaps:[] }; };
   await say(h, 'quiz me on affinity');
   await say(h, 'Test the definition. Guide-only claim: unicorns bind receptors.');
@@ -75,6 +75,23 @@ test('topic Quiz uses only selected note excerpts and passes the guide as instru
   assert.match(text(h.root), /Paste a study guide/);
   assert.equal(button(h.root, 'Free response'), undefined);
   assert.equal(h.selections.length, 1, 'a previous guide must not be reused');
+});
+test('topic Quiz never clips a selected passage to its relevance quote', async () => {
+  const h = study();
+  const original = `${SOURCE}\nAn unrelated planet has an invented property.`;
+  h.setRaw(original);
+  h.host.llm.selectStudyEvidence = async args => {
+    h.selections.push(args);
+    return { selections: [{ id: args.passages[0].id, quote: SOURCE }], gaps: [] };
+  };
+  await say(h, 'quiz me on affinity');
+  await say(h, 'Test the definition.');
+  await button(h.root, 'Free response').events.click();
+  assert.equal(h.view.plan.passages[0].text, original, 'The old single-newline fixture stays intact instead of being clipped');
+  assert.deepEqual(h.calls[0][1].points, [SOURCE, 'An unrelated planet has an invented property.']);
+  assert.equal(h.view.plan.passages[0].line, 1);
+  assert.deepEqual(h.rows, []);
+  assert.deepEqual(h.queued, []);
 });
 test('bare study commands ask for a topic, then a fresh guide, and show Experimental', async () => {
   for (const command of ['Make flashcards', 'quiz me']) {
