@@ -61,34 +61,40 @@ const recallSection = {
   ],
 };
 
-test("the question message puts the section first, numbered, then the level, and the task last, omitting the optional lines", () => {
-  const msg = p.buildQuizQuestionMessage({ ...recallSection, level: 1, asked: [], standingInstructions: "", failure: "" });
-  assert.ok(msg.includes("Level: 1 (state it)."), msg);
-  assert.ok(!msg.includes("<already_asked>"), "no empty asked block");
-  assert.ok(msg.startsWith('<section note="Coaching" path="Motivational interviewing › Elicit-provide-elicit" points="3">\n'), msg.slice(0, 120));
-  assert.ok(msg.includes("[2] Elicit: ask permission"), "points are numbered");
-  assert.ok(msg.trimEnd().endsWith("Write the question."), "the task is last");
-  assert.ok(!msg.includes("Standing instructions"), "no empty standing line");
-  assert.ok(!msg.includes("rejected"), "no empty failure line");
+test("the question payload puts the numbered section first, then the level, and the task last", () => {
+  const data = JSON.parse(p.buildQuizQuestionMessage({ ...recallSection, level: 1, asked: [], standingInstructions: "", failure: "" }));
+  assert.deepEqual(data.level, { n: 1, name: "state it" });
+  assert.deepEqual(data.asked, []);
+  assert.deepEqual(data.section, { ...recallSection, points: recallSection.points.map((text, i) => ({ n: i + 1, text })) });
+  assert.deepEqual(Object.keys(data), ["section", "asked", "level", "standingInstructions", "failure", "task"]);
+  assert.match(data.task, /^Write the question/);
+  assert.equal(data.standingInstructions, "");
+  assert.equal(data.failure, "");
 });
 
 test("the question message carries the part of a split section, the questions already asked, the level, the standing instructions and the failure", () => {
-  const msg = p.buildQuizQuestionMessage({ ...recallSection, part: 2, parts: 3, level: 3, asked: ["What is motivational interviewing?"], standingInstructions: "Keep cues short.", failure: "the cue states point 2" });
-  assert.ok(msg.includes("<already_asked>\n- What is motivational interviewing?\n</already_asked>"), msg);
-  assert.ok(msg.includes("Level: 3 (connect it)."), msg);
-  assert.ok(msg.includes('part="2 of 3"'), msg.slice(0, 160));
-  assert.ok(msg.includes("Standing instructions: Keep cues short."));
-  assert.ok(msg.includes("The previous question was rejected: the cue states point 2. Fix that."));
+  const data = JSON.parse(p.buildQuizQuestionMessage({ ...recallSection, part: 2, parts: 3, level: 3, asked: ["What is motivational interviewing?"], standingInstructions: "Keep cues short.", failure: "the cue states point 2" }));
+  assert.deepEqual(data.asked, ["What is motivational interviewing?"]);
+  assert.deepEqual(data.level, { n: 3, name: "connect it" });
+  assert.equal(data.section.part, 2);
+  assert.equal(data.section.parts, 3);
+  assert.equal(data.standingInstructions, "Keep cues short.");
+  assert.equal(data.failure, "the cue states point 2");
+  assert.match(data.task, /avoiding.*previous failure/);
 });
 
 test("the grade message has the section, the question, then the answer directly above the task", () => {
-  const msg = p.buildQuizRecallGradeMessage({ ...recallSection, question: "What does a coach do, in order, when using elicit-provide-elicit?", answer: "ask permission first", cued: false });
-  const order = ["<section", "<question>", "<student_answer>", "Mark every point."].map((k) => msg.indexOf(k));
-  assert.deepEqual([...order].sort((a, b) => a - b), order, "blocks in order");
-  assert.ok(order.every((i) => i >= 0), msg);
-  assert.ok(!msg.includes("second attempt"));
-  const second = p.buildQuizRecallGradeMessage({ ...recallSection, question: "q", answer: "a", cued: true });
-  assert.ok(second.includes("second attempt"), "the cued attempt says so");
+  const question = "What does a coach do, in order, when using elicit-provide-elicit?";
+  const data = JSON.parse(p.buildQuizRecallGradeMessage({ ...recallSection, question, answer: "ask permission first", cued: false }));
+  assert.deepEqual(Object.keys(data), ["section", "question", "cued", "answer", "task"]);
+  assert.equal(data.question, question);
+  assert.equal(data.answer, "ask permission first");
+  assert.equal(data.cued, false);
+  assert.doesNotMatch(data.task, /second attempt/);
+  const second = JSON.parse(p.buildQuizRecallGradeMessage({ ...recallSection, question: "q", answer: "a", cued: true }));
+  assert.equal(second.cued, true);
+  assert.match(second.task, /second attempt/);
+  assert.match(second.task, /only these supplied points/);
 });
 
 test("QuizQuestionOut and QuizRecallGradeOut parse good drafts and serialize strictly", () => {
