@@ -16,6 +16,21 @@ function study() {
   };
   return h;
 }
+test('the shared study surface says Chat and names both experimental activities', async () => {
+  for (const command of ['quiz me on affinity', 'Make flashcards on affinity']) {
+    const h = study(); await h.view.onOpen();
+    assert.equal(nodes(h.root).find(n => n.tagName === 'H3')?.text, 'Chat');
+    assert.match(text(h.root), /Quiz & Make Flashcards · Experimental/);
+    const box = nodes(h.root).find(n => n.tagName === 'TEXTAREA');
+    assert.equal(box.options.attr['aria-label'], 'Chat message');
+    assert.match(box.options.attr.placeholder, /quiz me on/i);
+    assert.match(box.options.attr.placeholder, /make flashcards on/i);
+    await say(h, command);
+    assert.equal(nodes(h.root).find(n => n.tagName === 'H3')?.text, 'Chat');
+    assert.match(text(h.root), /Paste a study guide/);
+    assert.equal(h.selections.length, 0);
+  }
+});
 test('each quiz asks for a fresh coverage-only guide before reading notes or calling a model', async () => {
   const h = study(); let reads = 0;
   h.host.app.vault.read = async () => { reads++; return SOURCE; };

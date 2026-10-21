@@ -7,15 +7,15 @@ const manifest = JSON.parse(readFileSync("manifest.json", "utf8"));
 const pkg = JSON.parse(readFileSync("package.json", "utf8"));
 const versions = JSON.parse(readFileSync("versions.json", "utf8"));
 
-test("Recall Studio 0.1.5 preserves the Review Inbox identity", () => {
+test("Recall Studio 0.1.6 preserves the Review Inbox identity", () => {
   assert.equal(manifest.id, "review-inbox");
   assert.equal(manifest.name, "Recall Studio");
   assert.equal(pkg.name, "review-inbox");
-  assert.equal(manifest.version, "0.1.5");
+  assert.equal(manifest.version, "0.1.6");
   assert.equal(manifest.minAppVersion, "1.7.2");
   assert.equal(manifest.isDesktopOnly, true);
-  assert.equal(pkg.version, "0.1.5");
-  assert.deepEqual(versions, { "0.1.0": "1.7.2", "0.1.1": "1.7.2", "0.1.2": "1.7.2", "0.1.3": "1.7.2", "0.1.4": "1.7.2", "0.1.5": "1.7.2" });
+  assert.equal(pkg.version, "0.1.6");
+  assert.deepEqual(versions, { "0.1.0": "1.7.2", "0.1.1": "1.7.2", "0.1.2": "1.7.2", "0.1.3": "1.7.2", "0.1.4": "1.7.2", "0.1.5": "1.7.2", "0.1.6": "1.7.2" });
 });
 
 test("the plugin id is distinct from the Recall plugin, so settings and data are not overwritten", () => {

@@ -14,7 +14,7 @@ function dom() {
     el.createEl = function (...args) { return extend(create.apply(this, args)); };
     el.show = el.hide = el.toggle = () => {};
     el.querySelector = selector => {
-      if (selector === '.review-chat textarea') return nodes(el).find(n => n.options.attr?.['aria-label'] === 'Quiz request' || n.options.attr?.['aria-label'] === 'Your answer') ?? null;
+      if (selector === '.review-chat textarea') return nodes(el).find(n => n.options.attr?.['aria-label'] === 'Chat message' || n.options.attr?.['aria-label'] === 'Your answer') ?? null;
       const match = selector.match(/^\.wikilm-card\[data-id="([^"]+)"\] \.wikilm-editor$/);
       assert.ok(match, `Unexpected DOM query: ${selector}`);
       const card = nodes(el).find(n => n.hasClass('wikilm-card') && n.dataset.id === match[1]);
@@ -83,7 +83,7 @@ function assertMounted(f, box, draft) {
 
 test('registered Make flashcards preserves a rejected Inbox command through the real plugin', async t => {
   const f = await fixture(t), { view, command } = f;
-  await button(f.root, 'Quiz').events.click();
+  await button(f.root, 'Chat').events.click();
   const box = studyBox(view), draft = 'An unfinished study draft';
   type(box, draft);
   await button(f.root, 'Inbox').events.click();

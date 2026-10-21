@@ -83,7 +83,10 @@ export default class CandidateProbe extends Plugin {
       const button = label => [...root.querySelectorAll('button')].find(b => b.textContent === label);
       ok(view.getDisplayText() === 'Recall Studio', 'Recall Studio display name');
       ok(getComputedStyle(view.chatEl).display === 'none', 'Quiz starts hidden in the real theme');
-      button('Quiz').click();
+      button('Chat').click();
+      ok(button('Chat').getAttribute('aria-label') === 'Chat panel', 'Chat tab has its matching accessible name');
+      ok(view.chatEl.querySelector('h3')?.textContent === 'Chat' && view.chatEl.textContent.includes('Quiz & Make Flashcards · Experimental'), 'Chat heading keeps experimental activities explicit');
+      ok(view.chatEl.querySelector('textarea')?.getAttribute('aria-label') === 'Chat message', 'Shared composer has the Chat accessible name');
       ok(getComputedStyle(view.cardsEl).display === 'none' && getComputedStyle(view.chatEl).display !== 'none', 'Quiz/Inbox panels are mutually exclusive');
       const quiz = view.chat;
       const type = text => { const box = root.querySelector('.review-chat textarea'); box.value = text; box.dispatchEvent(new Event('input')); };
@@ -110,7 +113,7 @@ export default class CandidateProbe extends Plugin {
       ok(quiz.mc?.correctId === 'A' && !view.chatEl.textContent.includes('correctId'), 'Multiple choice keeps answer key internal');
       const beforeGrade = calls.length; button(`A. ${source}`).click();
       ok(calls.length === beforeGrade && quiz.session.results.length === 1, 'Multiple choice grading is local');
-      type('unfinished request'); button('Inbox').click(); button('Quiz').click();
+      type('unfinished request'); button('Inbox').click(); button('Chat').click();
       ok(quiz.draftQuestion === 'unfinished request', 'Panel round trip retains unfinished request');
       button('Inbox').click();
       const command = root.querySelector('textarea[aria-label="Inbox command"]');
@@ -264,7 +267,7 @@ export default class CandidateProbe extends Plugin {
       host.generator.enqueue = h => queued.push(h);
       raw = 'Affinity is the strength with which a drug binds its receptor, and this binding strength describes the interaction between that drug and its receptor. Receptor occupancy is the proportion of receptors occupied by a drug at a given concentration, and occupancy increases as that concentration rises. Efficacy is the capacity of a bound drug to activate its receptor and produce a biological response after binding has occurred.';
       file.stat.mtime++; file.stat.size = raw.length;
-      button('Quiz').click(); type(`quiz me on ${file.path}`); button('Send').click(); await pause();
+      button('Chat').click(); type(`quiz me on ${file.path}`); button('Send').click(); await pause();
       type('Test the stated definitions.'); button('Send').click(); await pause();
       button('Free response').click(); await wait(() => !quiz.busy);
       const splitPoints = quiz.session.items.flatMap(item => item.points);

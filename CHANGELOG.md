@@ -1,13 +1,14 @@
 # Changelog
 
-## Unreleased: experimental study commands
+## Recall Studio 0.1.6 beta
 
+- Rename the shared study tab and heading to Chat. Quiz and Make Flashcards remain experimental activities within it.
 - Add an Inbox command box and conversational `quiz me on …` and `make flashcards on …` entrypoints. Both ask for a fresh study guide or coverage instructions.
 - Find exact note excerpts for the requested topic. Guides define coverage, never facts; earlier answers and general knowledge are not evidence.
 - Queue selected references through the existing Inbox card writer. Quiz misses still require an explicit Send to Inbox action.
 - Add scoped Verify controls beside Export in the Inbox, expanded sources and passages. Verify checks, repairs and rechecks without exporting.
 
-This is source work, not a published or installed release. Plugin identity, stored data and 0.1.5 release metadata stay unchanged.
+Plugin identity, stored data and published 0.1.5 assets stay unchanged. This release adds no scheduler or study-data migration. Source tests and synthetic host checks do not establish real-provider writing quality or live Anki export acceptance.
 
 ## Recall Studio 0.1.5 beta
 

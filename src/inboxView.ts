@@ -310,7 +310,7 @@ export class InboxView extends ItemView {
       return b;
     };
     this.tabInbox = tab("inbox", "Inbox");
-    this.tabChat = tab("chat", "Quiz");
+    this.tabChat = tab("chat", "Chat");
     this.updateTabs();
   }
 

@@ -17,7 +17,7 @@ function dom() {
     el.createEl = function (...args) { return extend(create.apply(this, args)); };
     el.show = el.hide = el.toggle = () => {};
     el.querySelector = selector => {
-      if (selector === '.review-chat textarea') return nodes(el).find(n => n.options.attr?.['aria-label'] === 'Quiz request' || n.options.attr?.['aria-label'] === 'Your answer') ?? null;
+      if (selector === '.review-chat textarea') return nodes(el).find(n => n.options.attr?.['aria-label'] === 'Chat message' || n.options.attr?.['aria-label'] === 'Your answer') ?? null;
       const match = selector.match(/^\.wikilm-card\[data-id="([^"]+)"\] \.wikilm-editor$/);
       assert.ok(match, `Unexpected DOM query: ${selector}`);
       const card = nodes(el).find(n => n.hasClass('wikilm-card') && n.dataset.id === match[1]);
@@ -75,7 +75,7 @@ function snapshot(f) {
 // Acceptance path: rendered Inbox Send command -> startStudy -> public Quiz submit.
 test('Inbox rejects an external command without replacing either mounted draft or the card editor', async t => {
   const f = await fixture(t), { view, command } = f;
-  await button(f.root, 'Quiz').events.click();
+  await button(f.root, 'Chat').events.click();
   const box = studyBox(view), chat = view.chat, cards = view.cardsEl;
   type(box, 'Unsent study draft that must survive a panel switch');
   await button(f.root, 'Inbox').events.click();
@@ -89,7 +89,7 @@ test('Inbox rejects an external command without replacing either mounted draft o
   assert.deepEqual(snapshot(f), before);
   assert.equal(view.chat, chat); assert.equal(view.cardsEl, cards);
   await button(f.root, 'Inbox').events.click();
-  await button(f.root, 'Quiz').events.click();
+  await button(f.root, 'Chat').events.click();
   assert.equal(studyBox(view), box);
   assert.ok(nodes(view.cardsEl).includes(f.editor));
   assert.equal(f.field.value, 'Unsent card question');

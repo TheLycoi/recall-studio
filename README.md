@@ -2,12 +2,12 @@
 
 Recall Studio turns the passages you highlight into flashcards. Cards land in a
 source-linked inbox as drafts. Export accepts the cards you choose and sends
-them to Anki. Quiz in the same panel offers source-grounded free-response
-and multiple-choice practice from the notes you choose.
+them to Anki. Chat in the same panel hosts experimental Quiz and Make
+Flashcards workflows grounded in your notes and PDFs.
 
 The repository and BRAT target are `TheLycoi/recall-studio`, formerly
 `TheLycoi/review-inbox`. Plugin ID `review-inbox`, default storage
-`Review Inbox/` and command IDs stay unchanged. Version 0.1.5 is a beta release.
+`Review Inbox/` and command IDs stay unchanged. Version 0.1.6 is a beta release.
 It adds no scheduler.
 
 ## What it does
@@ -121,7 +121,7 @@ passages, not whether you learned them or completed the whole note.
 
 ## Quiz and Make Flashcards (Experimental)
 
-These additions are in the unreleased source checkpoint, not the installed 0.1.5 beta.
+Open the Chat tab for these experimental study workflows, included in 0.1.6.
 
 Type `quiz me on human growth hormone` or `make flashcards on human growth hormone`
 in the Inbox command box or the study conversation. Bare commands ask for a topic.

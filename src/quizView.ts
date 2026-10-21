@@ -329,7 +329,8 @@ export class QuizView {
 
   private render(): void {
     const root = this.contentEl; root.empty();
-    root.createEl("h3", { text: "Quiz & Make Flashcards · Experimental" });
+    root.createEl("h3", { text: "Chat" });
+    root.createEl("p", { cls: "review-chat-muted", text: "Quiz & Make Flashcards · Experimental" });
     const log = root.createDiv({ cls: "review-chat-log" });
     for (const turn of this.turns) {
       const valid = !turn.current || turn.current();
@@ -377,7 +378,7 @@ export class QuizView {
     }
     if (session && !session.current && !session.finished) action("Next question", () => this.advance());
     const form = root.createDiv({ cls: "review-chat-input" });
-    const box = form.createEl("textarea", { attr: { rows: "2", "aria-label": session?.current ? "Your answer" : "Quiz request", placeholder: "quiz me on Note name or #tag" } });
+    const box = form.createEl("textarea", { attr: { rows: "2", "aria-label": session?.current ? "Your answer" : "Chat message", placeholder: "quiz me on a topic or #tag · make flashcards on a topic" } });
     box.value = this.draftQuestion; box.disabled = this.busy;
     box.addEventListener("input", () => { this.draftQuestion = box.value; });
     action(session?.current ? "Submit answer" : "Send", () => this.ask());

@@ -35,9 +35,10 @@ function harness(){
   view.renderHeader=()=>{};view.rebuildCrossInterference=()=>{};
   return {root,view,host};
 }
-test('the compatible Chat entrypoint mounts Quiz in the same panel',async()=>{
+test('the Chat tab keeps the study view in the same panel',async()=>{
   const {view}=harness();await view.onOpen();
-  assert.equal(view.tabChat.options.text,'Quiz');assert.equal(view.chat.constructor.name,'QuizView');
+  assert.equal(view.tabChat.options.text,'Chat');assert.equal(view.tabChat['aria-label'],'Chat panel');
+  assert.equal(view.chat.constructor.name,'QuizView');
   view.focusChat();assert.equal(view.panel,'chat');
 });
 test('passage Verify checks its visible eligible cards without asking to generate more',async()=>{
