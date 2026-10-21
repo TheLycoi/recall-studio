@@ -43,6 +43,8 @@ export interface ChatSearchOptions {
    * hints, never evidence: passages always come from the vault.
    */
   terms?: readonly string[];
+  /** Study may retain zero-score candidates within explicit paths; never widens scope. */
+  includeUnmatched?: boolean;
   /** Exact source text and current ranked pool; study retains only ranked span provenance. */
   onSource?: (seeds: readonly ChatSeed[], ranked: readonly ChatSeed[]) => void;
   /** Polled between sources and between PDF pages; a true return stops early. */
@@ -97,12 +99,13 @@ export class ChatRetriever {
     const skipped: string[] = [];
     let pool: ChatSeed[] = [];
     const terms = options.terms ?? [];
+    const includeUnmatched = paths !== undefined && options.includeUnmatched === true;
     let searched = 0;
     for (const f of scoped) {
       if (this.cancelled()) break;
       const seeds = await this.source(f, skipped);
       if (seeds) {
-        pool = selectChatPassages([...pool, ...seeds], question, RESULT_LIMIT, terms);
+        pool = selectChatPassages([...pool, ...seeds], question, RESULT_LIMIT, terms, includeUnmatched);
         options.onSource?.(seeds, pool);
         searched++;
       }

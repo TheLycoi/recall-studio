@@ -174,11 +174,11 @@ export function buildChatEvidence(
   return { evidence, truncated, omitted };
 }
 
-/** Rank literal passage windows locally; only the bounded winners reach the model. */
-export function selectChatPassages(seeds: ChatSeed[], question: string, limit = 40, alternatives: readonly string[] = []): ChatSeed[] {
+/** Rank bounded literal windows; explicit study sources may retain unmatched candidates. */
+export function selectChatPassages(seeds: ChatSeed[], question: string, limit = 40, alternatives: readonly string[] = [], includeUnmatched = false): ChatSeed[] {
   const terms = new Set(significantTokens(question));
   const extra = new Set(significantTokens(boundChatQueries([...alternatives]).join(" ")).filter(t => !terms.has(t)));
-  if (!terms.size && !extra.size) return [];
+  if (!terms.size && !extra.size && !includeUnmatched) return [];
   const ranked: Array<{ seed: ChatSeed; score: number }> = [];
   for (const seed of seeds) {
     const title = new Set(significantTokens(seed.title));
@@ -192,13 +192,13 @@ export function selectChatPassages(seeds: ChatSeed[], question: string, limit = 
         for (const term of terms) score += (words.has(term) ? 3 : 0) + (title.has(term) ? 1 : 0);
         // Expansion must never displace literal question matches.
         for (const term of extra) score += (words.has(term) ? 0.5 : title.has(term) ? 0.1 : 0) / Math.max(1, extra.size);
-        if (score) ranked.push({ score, seed: { ...seed, text, line: seed.line + passage.line - 1 + (passage.text.slice(0, offset).match(/\n/g)?.length ?? 0) } });
+        if (score || includeUnmatched) ranked.push({ score, seed: { ...seed, text, line: seed.line + passage.line - 1 + (passage.text.slice(0, offset).match(/\n/g)?.length ?? 0) } });
         if (offset + 1200 >= passage.text.length) break;
       }
     }
   }
   // shortcut: lexical ranking has no synonym expansion; add a local index if
-  // larger vaults need semantic search. Never fall back to sending all text.
+  // larger vaults need semantic search. Free-topic search never falls back to all text.
   return ranked.sort((a, b) => b.score - a.score || a.seed.path.localeCompare(b.seed.path) || a.seed.line - b.seed.line)
     .slice(0, Math.max(0, limit)).map(row => row.seed);
 }

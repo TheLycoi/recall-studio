@@ -150,6 +150,7 @@ export class StudyCoordinator {
     const roots = new Map<string, ChatSeed>();
     const result = await new ChatRetriever(retrievalApp, path => reader.allowed(path)).search(request.topic, {
       paths: snapshots.map(s => s.path), cancelled: () => !authorized(),
+      includeUnmatched: paths !== undefined,
       onSource: (seeds, ranked) => {
         const retained = new Set(ranked.map(s => JSON.stringify([s.path, s.page])));
         for (const key of roots.keys()) if (!retained.has(key)) roots.delete(key);
@@ -179,7 +180,7 @@ export class StudyCoordinator {
       : { passages: [], gaps: studyGuideLines(request.guide) };
     requireCurrent();
     if (!selected.passages.length) selected.gaps = studyGuideLines(request.guide);
-    // Retrieval is a lexical, top-40 / 12,000-character view, not exhaustive guide coverage.
+    // Candidates are bounded to top-40 / 12,000 characters, not exhaustive guide coverage.
     const plan = { request, ...selected, skipped: [...skipped, ...result.skipped], truncated: true };
     this.prepared = { plan, snapshot: structuredClone(plan), fingerprint: JSON.stringify(plan), authorized };
     return plan;
