@@ -1,6 +1,8 @@
 import type { App } from "obsidian";
-import { StudyCoordinator, STUDY_GUIDE_MAX_CHARS, type StudyHost, type StudyPlan, type StudyPassage } from "./study";
+import { StudyCoordinator, STUDY_GUIDE_MAX_CHARS, STUDY_MESSAGE_MAX_CHARS, type StudyHost, type StudyPlan, type StudyPassage } from "./study";
 import { indexPage } from "./pageIndex";
+import { readStudyGuidePdf, StudyGuidePdfError, type StudyGuidePdf } from "./studyGuidePdf";
+import { QUIZ_COVERAGE_PREFIX, QUIZ_COVERAGE_SUFFIX } from "./prompt";
 import { buildItems, startRecall, nextItem, sectionIn, checkQuestion, acceptQuestion, questionPoints, skipRecall, recallMisses, afterFirstAttempt, renderRevealMarkdown, itemById, type RecallSession } from "./recall";
 import type { QuizChoiceDraft, QuizChoiceAudit } from "./quizSchemas";
 import { validatedQuizGrade, validateQuizAudit, validateQuizChoices, validateChoiceAudit } from "./quizValidation";
@@ -44,6 +46,10 @@ export class QuizView {
   private awaitingGuide = false;
   private awaitingTopic = false;
   private guide = "";
+  private guidePdf: StudyGuidePdf | null = null;
+  private pdfRead: { controller: AbortController; name: string } | null = null;
+  private pdfError = "";
+  private pdfEpoch = 0;
   private topic = "";
   private studyMode: "quiz" | "flashcards" = "quiz";
   private study: StudyCoordinator;
@@ -74,6 +80,7 @@ export class QuizView {
   }
   async onClose(): Promise<void> { for (const dispose of this.cleanup.splice(0)) dispose(); this.cancel(); this.cancelled = true; }
   private cancel(): void {
+    this.clearPdf();
     this.epoch++; this.study.cancel(); this.plan = null; this.busy = false; this.session = null; this.unitSources.clear();
     this.target = null; this.choices = []; this.choosingMode = false; this.awaitingTopic = false; this.awaitingGuide = false; this.guide = ""; this.mc = null;
     this.status = "Quiz cancelled. No review schedule changed."; this.render();
@@ -106,12 +113,14 @@ export class QuizView {
 
   private async ask(): Promise<void> {
     const text = this.draftQuestion.trim();
-    if (!text) return;
-    if (text.length > STUDY_GUIDE_MAX_CHARS) { this.status = `Keep the message within ${STUDY_GUIDE_MAX_CHARS} characters; it has not been truncated or sent.`; this.render(); return; }
+    if (!text && !(this.awaitingGuide && this.guidePdf)) return;
+    const limit = this.awaitingGuide ? STUDY_GUIDE_MAX_CHARS : STUDY_MESSAGE_MAX_CHARS;
+    if (text.length > limit) { this.status = `Keep the message within ${limit} characters; it has not been truncated or sent.`; this.render(); return; }
     const flashcards = /^\/?(?:make[\s-]+flashcards|flashcards)(?:\s+(?:on|about)\s+([\s\S]+))?$/i.exec(text);
     const command = parseQuizCommand(text, !!this.session || this.choosingMode || this.awaitingGuide || this.awaitingTopic);
     if (command?.kind === "stop" || /^\/?cancel(?: (?:quiz|study))?$/i.test(text)) { this.draftQuestion = ""; this.cancel(); return; }
     if (command?.kind === "start" || flashcards) {
+      this.clearPdf();
       this.epoch++;
       if (!this.plan) this.study.cancel();
       this.study = new StudyCoordinator(this.host); this.plan = null; this.busy = false; this.unitSources.clear();
@@ -125,14 +134,21 @@ export class QuizView {
       else this.promptGuide();
       this.render(); return;
     }
-    if (this.busy) return;
+    if (this.busy || this.pdfRead) return;
     if (this.awaitingTopic) {
       this.topic = text; this.awaitingTopic = false; this.awaitingGuide = true;
       this.turns.push({ role: "user", text }); this.draftQuestion = ""; this.promptGuide(); this.render(); return;
     }
     if (this.awaitingGuide) {
-      this.guide = text; this.awaitingGuide = false;
-      this.turns.push({ role: "user", text }); this.draftQuestion = "";
+      const pdf = this.guidePdf;
+      const guide = pdf ? [text, pdf.text].filter(Boolean).join("\n\n") : text;
+      if (guide.length > STUDY_GUIDE_MAX_CHARS) {
+        this.status = `Keep the combined coverage within ${STUDY_GUIDE_MAX_CHARS} characters. Nothing was truncated or sent; shorten the instructions or choose a smaller PDF.`;
+        this.render(); return;
+      }
+      this.guide = guide; this.awaitingGuide = false;
+      this.turns.push({ role: "user", text: pdf ? [text, `Attached coverage PDF: ${pdf.name} (${pdf.pages} pages).`].filter(Boolean).join("\n\n") : text });
+      this.draftQuestion = ""; this.clearPdf();
       const sourcePath = this.topic.trim().replace(/^\[\[([\s\S]*)\]\]$/, "$1");
       // Explicit PDF paths cannot fall back to aliases or suggestions for other files.
       const notes = this.notes().filter(note => !/\.pdf$/i.test(sourcePath) || note.path.toLocaleLowerCase() === sourcePath.toLocaleLowerCase());
@@ -177,8 +193,28 @@ export class QuizView {
     finally { if (epoch === this.epoch) { this.busy = false; this.render(); } }
   }
 
+  private clearPdf(): void {
+    this.pdfEpoch++; this.pdfRead?.controller.abort(); this.pdfRead = null;
+    this.guidePdf = null; this.pdfError = "";
+  }
+
+  private async attachGuidePdf(file: File): Promise<void> {
+    if (this.cancelled || this.busy || !this.awaitingGuide || this.studyMode !== "quiz") return;
+    this.clearPdf();
+    const pending = { controller: new AbortController(), name: file.name };
+    this.pdfRead = pending; this.render();
+    try {
+      const pdf = await readStudyGuidePdf(file, STUDY_GUIDE_MAX_CHARS, pending.controller.signal);
+      if (this.pdfRead === pending) this.guidePdf = pdf;
+    } catch (error) {
+      if (this.pdfRead === pending) this.pdfError = error instanceof StudyGuidePdfError ? error.message : "Could not read the PDF. Try another PDF with selectable text.";
+    } finally {
+      if (this.pdfRead === pending) { this.pdfRead = null; this.render(); }
+    }
+  }
+
   private promptGuide(): void {
-    this.status = "Paste a study guide or describe what to focus on. It defines coverage only; all facts must come from your notes.";
+    this.status = "Paste a study guide or describe what to focus on." + (this.studyMode === "quiz" ? " You can also attach a PDF." : "") + " It defines coverage only; all facts must come from your notes.";
     this.turns.push({ role: "assistant", text: this.status });
   }
 
@@ -229,7 +265,7 @@ export class QuizView {
     if (!item || session.finished) { this.status = "Quiz complete."; return; }
     const epoch = this.epoch;
     this.requireCurrent(epoch);
-    const args: QuizQuestionMessageArgs = { ...sectionIn(item), level: 1, asked: [], standingInstructions: `Coverage instructions only, not source evidence:\n${this.guide}\nUse only the supplied note points for facts.`, failure: "", authorized: () => this.authorized(epoch) };
+    const args: QuizQuestionMessageArgs = { ...sectionIn(item), level: 1, asked: [], standingInstructions: QUIZ_COVERAGE_PREFIX + this.guide + QUIZ_COVERAGE_SUFFIX, failure: "", authorized: () => this.authorized(epoch) };
     if (this.mode === "mc") {
       const draft = validateQuizChoices(await this.host.llm.quizMultipleChoice(args), item);
       this.requireCurrent(epoch);
@@ -382,7 +418,25 @@ export class QuizView {
     box.value = this.draftQuestion; box.disabled = this.busy;
     box.addEventListener("input", () => { this.draftQuestion = box.value; });
     const actions = form.createDiv({ cls: "review-chat-input-actions" });
-    action(session?.current ? "Submit answer" : "Send", () => this.ask(), actions);
+    const send = action(session?.current ? "Submit answer" : "Send", () => this.ask(), actions);
+    send.disabled = this.busy || !!this.pdfRead;
+    if (this.awaitingGuide && this.studyMode === "quiz") {
+      const pickerEpoch = this.pdfEpoch;
+      const input = form.createEl("input", { attr: { type: "file", accept: ".pdf,application/pdf", "aria-label": "Attach coverage PDF", hidden: "" } });
+      input.addEventListener("change", async () => {
+        const file = input.files?.[0];
+        if (file && pickerEpoch === this.pdfEpoch) await this.attachGuidePdf(file);
+      });
+      action("Attach PDF", () => input.click(), actions);
+      if (this.pdfRead || this.guidePdf) {
+        const label = this.pdfRead ? `Reading ${this.pdfRead.name}…` : `${this.guidePdf!.name} · ${this.guidePdf!.pages} pages · coverage only`;
+        form.createDiv({ cls: "review-chat-source", text: label, attr: { role: "status", "aria-live": "polite" } });
+        action("Remove PDF", () => { this.clearPdf(); this.render(); }, actions);
+      }
+      if (this.guidePdf?.emptyPages.length) form.createDiv({ cls: "review-chat-muted", text: `Pages without selectable text were not read: ${this.guidePdf.emptyPages.join(", ")}. OCR is not supported.` });
+      form.createDiv({ cls: "review-chat-muted", text: "PDF coverage only; answers come from vault notes. Text goes to your configured model when Quiz starts. Temporary attachment, not copied into the vault. Up to 20 MiB, 200 pages and 64,000 combined coverage characters." });
+      if (this.pdfError) form.createDiv({ cls: "review-chat-error", text: this.pdfError, attr: { role: "alert" } });
+    }
     action("Cancel", () => this.cancel(), actions).disabled = false;
     if (this.status) root.createDiv({ cls: "review-chat-status", text: this.status, attr: { role: "status", "aria-live": "polite" } });
   }

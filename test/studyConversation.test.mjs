@@ -108,8 +108,12 @@ test('a long guide remains intact and oversized input is rejected without provid
   const box = nodes(h.root).find(n => n.tagName === 'TEXTAREA');
   assert.ok(!box.maxLength || box.maxLength < 0, 'native maxLength must not silently truncate pasted guides');
   const guide = 'Guide '.repeat(1400); await say(h, guide);
-  assert.equal(h.view.draftQuestion, guide);
-  assert.match(text(h.root), /8000/); assert.equal(h.selections.length, 0);
+  assert.equal(h.view.guide, guide.trim());
+  assert.ok(button(h.root, 'Free response'));
+  await say(h, 'quiz me on affinity');
+  const oversized = 'g'.repeat(64001); await say(h, oversized);
+  assert.equal(h.view.draftQuestion, oversized);
+  assert.match(text(h.root), /64000/); assert.equal(h.selections.length, 0);
   assert.equal(button(h.root, 'Free response'), undefined);
 });
 test('unsupported guide coverage is reported in both experimental flows', async () => {

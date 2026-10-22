@@ -8,7 +8,7 @@ import { buildChatEvidence, type ChatSeed } from "./reviewChat";
 import { STUDY_GUIDE_MAX_CHARS, studyGuideLines, validateStudyEvidence, type StudyEvidenceArgs, type StudyEvidenceDraft } from "./studySchemas";
 import type { ChatStore, ChatGenerator } from "./reviewChatView";
 
-export { STUDY_GUIDE_MAX_CHARS } from "./studySchemas";
+export { STUDY_GUIDE_MAX_CHARS, STUDY_MESSAGE_MAX_CHARS } from "./studySchemas";
 export interface StudyRequest { mode: "quiz" | "flashcards"; topic: string; guide: string }
 export interface StudyPassage { id: string; path: string; title: string; text: string; line: number; page: number | null }
 export interface StudyPlan { request: StudyRequest; passages: StudyPassage[]; gaps: string[]; skipped: string[]; truncated: boolean }

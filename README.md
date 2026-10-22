@@ -129,6 +129,18 @@ Every run then asks for a fresh study guide or instructions about what to cover.
 The guide is coverage only: all factual evidence must come from eligible vault notes,
 never general model knowledge, guide-only claims or earlier assistant answers.
 
+In this unreleased build, Quiz also offers **Attach PDF** at the coverage prompt.
+Choose one local PDF, optionally add typed instructions, select Send, then choose
+free response or multiple choice. The attachment is temporary and is not imported
+into the vault. Its selectable text goes to your configured model when Quiz starts;
+it never becomes answer evidence or a citation. Remove PDF, Cancel, a new study
+request or closing the view clears the attachment. Make Flashcards keeps its typed-guide flow.
+
+PDFs are limited to 20 MiB and 200 pages. Encrypted, unreadable and image-only PDFs
+are rejected; pages without selectable text are reported before submission. There
+is no OCR. Combined typed and PDF coverage is limited to 64,000 characters and is
+rejected rather than shortened when it exceeds that limit.
+
 Registered actions remain available in Obsidian's command palette. Open writing
 rules opens the rules; Export to Anki keeps the existing export-all behavior.
 Typing Make Flashcards queues references; it does not export cards. Existing command IDs and hotkeys remain compatible.
@@ -155,7 +167,7 @@ and after asynchronous results. Source changes, cancellation or unload invalidat
 late results without aborting unrelated generation. Retrieval is lexical and
 bounded, not an exhaustive vault search: at most 40 candidate passages and 12,000
 evidence characters reach selection. The existing Markdown and PDF reader limits
-still apply. Guides over 8,000 characters are rejected rather than truncated.
+still apply. Ordinary Chat messages retain their 8,000-character limit.
 Exact quotations prove where text came from, not that the text is factually correct.
 
 ## Existing Spaced Repetition cards

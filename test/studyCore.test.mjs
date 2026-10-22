@@ -2,12 +2,13 @@ import { afterEach, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadQuiz } from './quizHarness.mjs';
 
-let StudyCoordinator, STUDY_GUIDE_MAX_CHARS, LlmClient, InboxStore, Generator;
+let StudyCoordinator, STUDY_GUIDE_MAX_CHARS, STUDY_MESSAGE_MAX_CHARS, validateStudyInput, LlmClient, InboxStore, Generator;
 let transport, pdfRuntime;
 const stores = [];
 before(async () => {
   globalThis.window ??= globalThis;
-  ({ StudyCoordinator, STUDY_GUIDE_MAX_CHARS } = await loadQuiz('src/study.ts', { loadPdfJs: () => pdfRuntime() }));
+  ({ StudyCoordinator, STUDY_GUIDE_MAX_CHARS, STUDY_MESSAGE_MAX_CHARS } = await loadQuiz('src/study.ts', { loadPdfJs: () => pdfRuntime() }));
+  ({ validateStudyInput } = await loadQuiz('src/studySchemas.ts'));
   ({ LlmClient } = await loadQuiz('src/llm.ts', { requestUrl: req => transport(req) }));
   ({ InboxStore } = await loadQuiz('src/store.ts', { normalizePath: path => path }));
   ({ Generator } = await loadQuiz('src/generator.ts'));
@@ -122,6 +123,73 @@ test('unsaved text is the source and conflicting open editors skip the note with
   assert.deepEqual(conflict.passages, []);
   assert.match(conflict.skipped.join('\n'), /conflicting editors/);
   assert.deepEqual(f.calls, []);
+});
+test('coverage above the Chat limit passes the real coordinator and model-input validator intact', async () => {
+  const f = fixture();
+  const guide = 'Cover dormancy.\n' + 'g'.repeat(7985);
+  assert.equal(guide.length, 8001);
+  assert.doesNotThrow(() => validateStudyInput({ ...request(), guide, passages: [], authorized: () => true }));
+  const plan = await f.coordinator.prepare({ ...request(), guide });
+  assert.equal(STUDY_MESSAGE_MAX_CHARS, 8000);
+  assert.equal(STUDY_GUIDE_MAX_CHARS, 64000);
+  assert.equal(plan.request.guide, guide);
+  assert.deepEqual(f.calls[0].guide, [{ n: 1, text: 'Cover dormancy.' }, { n: 2, text: 'g'.repeat(7985) }]);
+  assert.deepEqual(plan.passages, f.calls[0].passages);
+});
+test('the exact 64000-character guide reaches selection transport and capture without clipping', async () => {
+  const f = fixture();
+  const tail = '\nFinal-page coverage goal';
+  const guide = 'Cover dormancy.\n'.padEnd(64000 - tail.length, 'g') + tail;
+  assert.equal(guide.length, 64000);
+  assert.doesNotThrow(() => validateStudyInput({ ...request(), guide, passages: [], authorized: () => true }));
+  const plan = await f.coordinator.prepare({ ...request(), guide });
+  assert.equal(plan.request.guide, guide);
+  assert.deepEqual(f.calls[0].guide, guide.split('\n').map((text, i) => ({ n: i + 1, text })));
+  f.coordinator.capture(plan);
+  assert.ok(f.queued[0].instruction.includes(guide));
+  assert.equal(f.queued[0].text, 'Dormancy delays germination.');
+});
+test('64001 characters are rejected before vault enumeration, reads or model dispatch', async () => {
+  const f = fixture();
+  let enumerations = 0;
+  f.host.app.vault.getFiles = () => { enumerations++; return f.files; };
+  const guide = 'g'.repeat(64001);
+  const args = { ...request(), guide, passages: [], authorized: () => true };
+  assert.throws(() => validateStudyInput(args), /Invalid study topic, guide or authorization\./);
+  await assert.rejects(f.host.llm.selectStudyEvidence(args), /Invalid study topic, guide or authorization\./);
+  await assert.rejects(f.coordinator.prepare({ ...request(), guide }), { message: 'Study guide exceeds 64000 characters.' });
+  assert.equal(enumerations, 0);
+  assert.deepEqual(f.reads, []);
+  assert.deepEqual(f.calls, []);
+  assert.deepEqual(f.rows, []);
+  assert.deepEqual(f.queued, []);
+});
+test('a long coverage guide stays instructions and never supplies source or captured factual text', async () => {
+  const f = fixture();
+  const claim = 'Dormancy always promotes immediate germination. Guide-only unicorns power seeds.';
+  const guide = `Cover dormancy.\n${claim}\n`.padEnd(8001, 'g');
+  const plan = await f.coordinator.prepare({ ...request(), guide });
+  assert.equal(f.calls.length, 1);
+  assert.ok(f.calls[0].guide.some(line => line.text === claim));
+  assert.deepEqual(plan.passages, [{ id: '1', path: 'notes/lecture.md', title: 'lecture', text: 'Dormancy delays germination.', line: 3, page: null }]);
+  f.coordinator.capture(plan);
+  assert.equal(f.rows.length, 1);
+  assert.equal(f.queued[0], f.rows[0]);
+  assert.equal(f.rows[0].text, 'Dormancy delays germination.');
+  assert.equal(f.rows[0].sourcePath, 'notes/lecture.md');
+  assert.equal(f.rows[0].sourceTitle, 'lecture');
+  assert.ok(f.rows[0].instruction.includes(`Coverage instructions only, not factual evidence:\n${guide}\nUse only facts stated in this captured passage.`));
+  assert.doesNotMatch(JSON.stringify(f.calls[0].passages), /unicorns|promotes immediate/);
+});
+for (const id of ['1', 'guide-only']) test(`a long guide cannot supply a selected quote or source ID: ${id}`, async () => {
+  const f = fixture();
+  const claim = 'Dormancy always promotes immediate germination.';
+  const guide = `${claim}\n`.padEnd(8001, 'g');
+  f.reply = () => ({ selections: [{ id, quote: claim }], gaps: [] });
+  await assert.rejects(f.coordinator.prepare({ ...request(), guide }), /study.*quote|selection ID/i);
+  assert.equal(f.calls.length, 1);
+  assert.deepEqual(f.rows, []);
+  assert.deepEqual(f.queued, []);
 });
 test('empty topic/oversized guide are errors, while no matches and model refusal create no evidence', async () => {
   const f = fixture();
