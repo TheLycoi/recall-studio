@@ -1,5 +1,17 @@
 # Changelog
 
+## Recall Studio 0.1.11 beta
+
+- Attach a local PDF as study-guide coverage in Chat without importing it into the vault. Coverage instructions still define only what to cover; every fact and citation comes from your notes.
+- Raise the study-guide limit to 64,000 characters while ordinary Chat messages keep their 8,000-character limit, and reject over-limit input instead of truncating it.
+- Recognize inline flashcards in your own notes. Add `#flashcards`, then write cards where you study: `Question::Answer`, `Question:::Answer`, multiline `?` and `??`, and cloze paragraphs using `==highlight==` or `{{curly braces}}`.
+- Scan bullet and numbered list items, including nested ones, so cards written in outline notes are found. Fenced code inside a list and blockquoted prose stay excluded.
+- Treat `#flashcards/Sub deck` as a suggested export deck shown in source history. The Inbox deck picker stays authoritative.
+- Rename recognized-card badges from "Existing SR card" to "Flashcard", since these are your own cards rather than another plugin's.
+- Keep bold `**text**` as ordinary emphasis by default, with a separate opt-in setting for readers who want bold treated as a cloze.
+
+Inline cards coexist with capture. Recall Studio still does not schedule reviews: review happens in Anki, or in the Spaced Repetition plugin if you install it. Plugin identity, stored data and published 0.1.10 assets stay unchanged, and there is no study-data migration.
+
 ## Recall Studio 0.1.10 beta
 
 - Fix card writing failing with "Malformed card fields." The staged writer's output schema again describes which fields belong to which card kind, and a draft that also fills the unused fields is normalized instead of rejected. Empty questions, answers and cloze text are still refused, and the malformed-cloze and grounding checks are unchanged.
