@@ -2,7 +2,8 @@ import { z } from "zod";
 import { locateQuote } from "./util";
 import type { StudyPassage } from "./study";
 
-export const STUDY_GUIDE_MAX_CHARS = 8000;
+export const STUDY_MESSAGE_MAX_CHARS = 8000;
+export const STUDY_GUIDE_MAX_CHARS = 64000;
 const StudyPassageIn = z.object({
   id: z.string().regex(/^[1-9]\d*$/), path: z.string().min(1), title: z.string(), text: z.string().min(1).max(1200),
   line: z.number().int().positive(), page: z.number().int().positive().nullable(),

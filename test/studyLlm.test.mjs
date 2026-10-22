@@ -60,6 +60,15 @@ for (const provider of ['codex', 'deepseek', 'opencode']) {
     assert.ok(prompt.includes(passage.text));
     assert.match(prompt, /coverage|Coverage/);
   });
+  test(`real LLM ${provider}: the complete 64000-character guide reaches selection transport`, async () => {
+    const f = await fixture(provider);
+    const tail = '\nFinal-page coverage goal';
+    const guide = 'Cover dormancy.\n'.padEnd(64000 - tail.length, 'g') + tail;
+    assert.deepEqual(await f.llm.selectStudyEvidence({ ...args(() => true), guide }), valid);
+    assert.equal(f.dispatches.length, 1);
+    const sent = f.dispatches[0].prompt || JSON.parse(f.dispatches[0].body).messages[1].content;
+    assert.ok(sent.includes(JSON.stringify(guide.split('\n').map((text, i) => ({ n: i + 1, text })))));
+  });
   test(`real LLM ${provider}: revoked malformed response cannot retry`, async () => {
     let allowed = true;
     const f = await fixture(provider, { reply: () => { allowed = false; return 'not JSON'; } });
@@ -82,7 +91,7 @@ test('real LLM rejects unbounded inputs before transport', async () => {
   const f = await fixture('deepseek');
   for (const invalid of [
     { ...args(() => true), guide: '' },
-    { ...args(() => true), guide: 'x'.repeat(8001) },
+    { ...args(() => true), guide: 'x'.repeat(64001) },
     { ...args(() => true), passages: Array.from({ length: 41 }, (_, i) => ({ ...passage, id: String(i + 1) })) },
     { ...args(() => true), passages: [{ ...passage, text: 'x'.repeat(1201) }] },
     { ...args(() => true), passages: [{ ...passage, line: 0 }] },

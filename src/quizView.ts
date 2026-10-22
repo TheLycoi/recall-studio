@@ -1,5 +1,5 @@
 import type { App } from "obsidian";
-import { StudyCoordinator, STUDY_GUIDE_MAX_CHARS, type StudyHost, type StudyPlan, type StudyPassage } from "./study";
+import { StudyCoordinator, STUDY_MESSAGE_MAX_CHARS, type StudyHost, type StudyPlan, type StudyPassage } from "./study";
 import { indexPage } from "./pageIndex";
 import { buildItems, startRecall, nextItem, sectionIn, checkQuestion, acceptQuestion, questionPoints, skipRecall, recallMisses, afterFirstAttempt, renderRevealMarkdown, itemById, type RecallSession } from "./recall";
 import type { QuizChoiceDraft, QuizChoiceAudit } from "./quizSchemas";
@@ -107,7 +107,7 @@ export class QuizView {
   private async ask(): Promise<void> {
     const text = this.draftQuestion.trim();
     if (!text) return;
-    if (text.length > STUDY_GUIDE_MAX_CHARS) { this.status = `Keep the message within ${STUDY_GUIDE_MAX_CHARS} characters; it has not been truncated or sent.`; this.render(); return; }
+    if (text.length > STUDY_MESSAGE_MAX_CHARS) { this.status = `Keep the message within ${STUDY_MESSAGE_MAX_CHARS} characters; it has not been truncated or sent.`; this.render(); return; }
     const flashcards = /^\/?(?:make[\s-]+flashcards|flashcards)(?:\s+(?:on|about)\s+([\s\S]+))?$/i.exec(text);
     const command = parseQuizCommand(text, !!this.session || this.choosingMode || this.awaitingGuide || this.awaitingTopic);
     if (command?.kind === "stop" || /^\/?cancel(?: (?:quiz|study))?$/i.test(text)) { this.draftQuestion = ""; this.cancel(); return; }
