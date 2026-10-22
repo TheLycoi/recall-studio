@@ -170,23 +170,35 @@ evidence characters reach selection. The existing Markdown and PDF reader limits
 still apply. Ordinary Chat messages retain their 8,000-character limit.
 Exact quotations prove where text came from, not that the text is factually correct.
 
-## Existing Spaced Repetition cards
+## Inline flashcards in your notes
 
-Recognition is off by default. Configure body tags or exact note paths and the
-separators you use. These are explicit reference settings, not detected SR
-configuration; the SR plugin does not need to be installed.
+Add `#flashcards` to a note, then write cards directly where you study. Cards
+coexist with capture: the Inbox still generates cards from selected passages,
+and inline cards let you see what you already wrote by hand.
 
-Supported syntax: single-line basic/reversed, multiline basic/reversed with an
-optional end marker, and plain `==answer==` cloze paragraphs. Frontmatter-only
-tag scope, hinted/indexed/custom clozes and complex excluded multiline blocks
-are not supported. Code and comments are excluded. Notes over 1,048,576
-characters are not scanned.
+Supported syntax: single-line basic (`Question::Answer`) and reversed
+(`Question:::Answer`), multiline basic `?` and reversed `??` with an optional
+end marker, and cloze paragraphs using `==highlight==` or `{{curly braces}}`.
+Cards work inside plain paragraphs and inside bullet or numbered list items,
+including nested ones, which is how outline notes are usually written. Bold
+`**text**` is ordinary emphasis in most notes, so treating it as a cloze is a
+separate opt-in setting.
 
-**Existing SR card** badges and source-history entries describe only recognized
-card syntax, never adjacent-prose coverage, exported-card counts or mastery.
+`#flashcards/Sub deck` names a suggested export deck for that note. The Inbox
+deck picker stays authoritative: the tag is a hint shown in source history, not
+a silent override. Frontmatter tags, code and comments never supply card syntax
+or deck scope. Notes over 1,048,576 characters are not scanned.
+
+**Flashcard** badges and source-history entries describe only recognized card
+syntax, never adjacent-prose coverage, exported-card counts or mastery.
 Editor/history checks use current editor snapshots. Reading view marks only a
 plain, unambiguous whole-card section; use source history for other rendering.
-Recognition never writes notes, imports scheduling state or creates Inbox records.
+Recognition never writes notes, imports scheduling state or creates Inbox
+records.
+
+Recall Studio does not schedule reviews. Review happens in Anki, or in the
+Spaced Repetition plugin if you install it; that plugin reads the same note text
+and `#flashcards` tags independently.
 
 ## Settings
 

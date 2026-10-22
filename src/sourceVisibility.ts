@@ -13,7 +13,7 @@ function srConfigured(plugin: RecallPlugin): boolean {
   return plugin.settings.srRecognitionEnabled === true && !!(plugin.settings.srRecognitionTags || plugin.settings.srRecognitionNotePaths);
 }
 const srId = (card: SrCard) => `sr:${card.start}:${card.end}:${card.kind}`;
-const srLabel = (card: SrCard) => `Existing SR card · ${card.kind}`;
+const srLabel = (card: SrCard) => `Flashcard · ${card.kind}`;
 
 /** Conflicting open editor snapshots fail closed rather than choosing saved bytes. */
 function editorSnapshot(plugin: RecallPlugin, path: string): string | null | undefined {

@@ -235,12 +235,12 @@ export default class CandidateProbe extends Plugin {
       controller = registerSourceVisibility(host);
       raw = 'Question::Answer <!--SR:!2026-10-20,1,250-->\n\nUntouched nearby prose';
       editor = new EditorView({ parent: mount, state: EditorState.create({ doc: raw, extensions: [editorInfoField.init(() => ({ file })), extension] }) });
-      ok(!editor.dom.textContent.includes('Existing SR card'), 'SR recognition starts off');
+      ok(!editor.dom.textContent.includes('Flashcard'), 'SR recognition starts off');
       settings.srRecognitionEnabled = true; controller.refresh(); await pause();
-      ok(editor.dom.querySelectorAll('.ri-source-mark').length === 1 && editor.dom.textContent.includes('Existing SR card'), 'Real CM6 shows only the existing SR card badge');
+      ok(editor.dom.querySelectorAll('.ri-source-mark').length === 1 && editor.dom.textContent.includes('Flashcard'), 'Real CM6 shows only the existing SR card badge');
       ok(editor.state.doc.toString() === raw, 'SR leaves scheduling and source bytes unchanged');
       editor.dom.querySelector('.ri-source-mark').click();
-      await wait(() => app._probeModals?.at(-1)?.contentEl.textContent.includes('Existing SR card'));
+      await wait(() => app._probeModals?.at(-1)?.contentEl.textContent.includes('Flashcard'));
       const history = app._probeModals.at(-1); mount.appendChild(history.containerEl);
       ok(history.contentEl.textContent.includes('read-only syntax recognition') && !history.contentEl.textContent.includes('<!--SR:'), 'Source history distinguishes existing SR syntax without importing schedules');
       history.close();
@@ -249,9 +249,9 @@ export default class CandidateProbe extends Plugin {
       await pause();
       ok(reading.querySelectorAll('.ri-source-mark').length === 0, 'Reading view declines a section containing scheduling markup');
       editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: 'Plain unsaved prose' } });
-      ok(!editor.dom.textContent.includes('Existing SR card'), 'SR marker disappears after unsaved edit');
+      ok(!editor.dom.textContent.includes('Flashcard'), 'SR marker disappears after unsaved edit');
       controller.destroy(); controller = null;
-      ok(!editor.dom.textContent.includes('Existing SR card'), 'Visibility unload removes markers');
+      ok(!editor.dom.textContent.includes('Flashcard'), 'Visibility unload removes markers');
       // The writer already ran above; these regressions isolate the explicit capture boundary.
       await generator.stop();
       host.generator.enqueue = h => queued.push(h);
