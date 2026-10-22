@@ -60,7 +60,7 @@ async function fixture(t) {
   assert.ok(editor, 'The real card editor must be mounted');
   const field = nodes(editor).find(n => n.options.attr?.['aria-label'] === 'Question');
   field.value = 'Unsent card question';
-  return { ...h, root, view, effects, editor, field, card, command: nodes(root).find(n => n.options.attr?.['aria-label'] === 'Inbox command') };
+  return { ...h, root, view, effects, editor, field, card };
 }
 function snapshot(f) {
   const chat = f.view.chat;
@@ -72,18 +72,15 @@ function snapshot(f) {
   };
 }
 
-// Acceptance path: rendered Inbox Send command -> startStudy -> public Quiz submit.
-test('Inbox rejects an external command without replacing either mounted draft or the card editor', async t => {
-  const f = await fixture(t), { view, command } = f;
+// Palette/programmatic entrypoints must preserve the mounted Chat draft.
+test('external study commands preserve the Chat draft and mounted card editor', async t => {
+  const f = await fixture(t), { view } = f;
   await button(f.root, 'Chat').events.click();
   const box = studyBox(view), chat = view.chat, cards = view.cardsEl;
   type(box, 'Unsent study draft that must survive a panel switch');
   await button(f.root, 'Inbox').events.click();
-  type(command, 'quiz me on affinity');
   const before = snapshot(f);
-  await button(f.root, 'Send command').events.click();
-  assert.equal(command.value, 'quiz me on affinity', 'Rejected Inbox command must remain available for retry');
-  assert.equal(nodes(f.root).find(n => n.options.attr?.['aria-label'] === 'Inbox command'), command);
+  assert.equal(await view.startStudy('quiz me on affinity'), false);
   assert.equal(studyBox(view), box, 'Rejection must not redraw the study composer');
   assert.equal(box.value, 'Unsent study draft that must survive a panel switch');
   assert.deepEqual(snapshot(f), before);
@@ -96,17 +93,16 @@ test('Inbox rejects an external command without replacing either mounted draft o
   assert.equal(f.card.front, 'What is affinity?');
   type(box, '');
   await button(f.root, 'Inbox').events.click();
-  await button(f.root, 'Send command').events.click();
-  assert.equal(command.value, '');
+  assert.equal(await view.startStudy('quiz me on affinity'), true);
   assert.equal(view.chat.awaitingGuide, true);
   assert.match(text(view.chatEl), /Paste a study guide/);
   assert.deepEqual(f.effects, []); assert.equal(f.queued.length, 0);
 });
 
-test('unfinished guide and answer reject direct and Inbox submissions until the user sends the draft', async t => {
+test('unfinished guide and answer reject external submissions until the user sends the draft', async t => {
   for (const phase of ['guide', 'answer']) {
     await t.test(phase, async t => {
-      const f = await fixture(t), { view, command } = f;
+      const f = await fixture(t), { view } = f;
       await view.startStudy('quiz me on Receptors');
       if (phase === 'answer') {
         await say(view, 'Test the definition.');
@@ -120,9 +116,7 @@ test('unfinished guide and answer reject direct and Inbox submissions until the 
       assert.equal(studyBox(view), box); assert.equal(box.value, draft);
       assert.deepEqual(snapshot(f), before);
       await button(f.root, 'Inbox').events.click();
-      type(command, 'quiz me on Receptors');
-      await button(f.root, 'Send command').events.click();
-      assert.equal(command.value, 'quiz me on Receptors');
+      assert.equal(await view.startStudy('quiz me on Receptors'), false);
       assert.equal(studyBox(view), box); assert.equal(box.value, draft);
       assert.deepEqual(snapshot(f), before);
       await button(view.chatEl, phase === 'answer' ? 'Submit answer' : 'Send').events.click();
@@ -131,8 +125,8 @@ test('unfinished guide and answer reject direct and Inbox submissions until the 
       else assert.equal(view.chat.session.results.length, 1);
       const effects = [...f.effects];
       await button(f.root, 'Inbox').events.click();
-      await button(f.root, 'Send command').events.click();
-      assert.equal(command.value, ''); assert.equal(view.chat.guide, '');
+      assert.equal(await view.startStudy('quiz me on Receptors'), true);
+      assert.equal(view.chat.guide, '');
       assert.equal(view.chat.awaitingGuide, true);
       assert.equal(button(view.chatEl, 'Free response'), undefined);
       assert.deepEqual(f.effects, effects, 'Retry must request fresh coverage before further reads or requests');

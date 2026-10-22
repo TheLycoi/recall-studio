@@ -25,7 +25,6 @@ import { findCrossInterference, lintCard, LINT_LABELS, wrapCloze } from "./lint"
 import { DEFAULT_SETTINGS } from "./settings";
 import { beginCardRewrite, cardAuthorization, cardContent, cardReplacement, checkCard, checkAndRepairCard, currentCardCheck } from "./cardActions";
 import { QuizView as ChatView } from "./quizView";
-import { runNamedCommand } from "./commands";
 
 export const VIEW_TYPE_INBOX = "review-inbox";
 
@@ -71,7 +70,6 @@ export class InboxView extends ItemView {
   private chatEl!: HTMLElement;
   private headerEl!: HTMLElement;
   private inboxHeaderEl!: HTMLElement;
-  private commandEl!: HTMLElement;
   private cardsEl!: HTMLElement;
   private unsubscribe: (() => void) | null = null;
   private filter: Filter = "review";
@@ -133,8 +131,6 @@ export class InboxView extends ItemView {
     this.headerEl = this.contentEl.createDiv();
     this.renderTabs(this.headerEl);
     this.inboxHeaderEl = this.headerEl.createDiv();
-    this.commandEl = this.headerEl.createDiv({ cls: "review-inbox-command" });
-    this.renderCommandBox(this.commandEl);
     this.chatEl = this.contentEl.createDiv({ cls: "review-inbox-chat" });
     this.chat = new ChatView(this.chatEl, this.plugin);
     await this.chat.onOpen();
@@ -278,28 +274,6 @@ export class InboxView extends ItemView {
    * panel wiring. `is-active` reuses the sidebar-tab styling already in
    * styles.css.
    */
-  private renderCommandBox(root: HTMLElement): void {
-    const input = root.createEl("textarea", { cls: "review-chat-question", attr: { rows: "1", "aria-label": "Inbox command", placeholder: "Quiz me on… · Make flashcards on… · /command" } });
-    const send = root.createEl("button", { text: "Send command", attr: { type: "button" } });
-    let busy = false;
-    send.disabled = true;
-    input.addEventListener("input", () => { send.disabled = busy || !input.value.trim(); });
-    const submit = async () => {
-      const message = input.value;
-      if (this.closed || busy || !message.trim()) return;
-      busy = true; send.disabled = true;
-      try {
-        const result = await runNamedCommand(this.plugin, message);
-        const accepted = result === null ? await this.startStudy(message) : result;
-        if (accepted && input.value === message) input.value = "";
-        else if (!accepted && !this.closed) new Notice("Recall Studio: finish or cancel the current study request before sending another message. Your draft is still in the Inbox.");
-      } catch { if (!this.closed) new Notice("Recall Studio: the command could not run. Your draft is still in the Inbox."); }
-      finally { busy = false; send.disabled = !input.value.trim(); }
-    };
-    send.addEventListener("click", submit);
-    input.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); e.stopPropagation(); void submit(); } });
-  }
-
   private renderTabs(root: HTMLElement): void {
     const row = root.createDiv({ cls: "wikilm-tabs-row" });
     const tabs = row.createDiv({ cls: "wikilm-tabs" });
@@ -329,7 +303,6 @@ export class InboxView extends ItemView {
     this.chatEl.toggleClass("review-inbox-hidden", !chat);
     this.cardsEl.toggleClass("review-inbox-hidden", chat);
     this.inboxHeaderEl?.toggleClass("review-inbox-hidden", chat);
-    this.commandEl?.toggleClass("review-inbox-hidden", chat);
   }
 
   /**

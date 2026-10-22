@@ -4,6 +4,7 @@ import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { InboxView } from '../src/inboxView';
 import RecallPlugin from '../src/main';
+import { runNamedCommand } from '../src/commands';
 import { LlmClient } from '../src/llm';
 import { InboxStore } from '../src/store';
 import { Generator } from '../src/generator';
@@ -116,38 +117,27 @@ export default class CandidateProbe extends Plugin {
       type('unfinished request'); button('Inbox').click(); button('Chat').click();
       ok(quiz.draftQuestion === 'unfinished request', 'Panel round trip retains unfinished request');
       button('Inbox').click();
-      const command = root.querySelector('textarea[aria-label="Inbox command"]');
-      const enterCommand = async text => { command.value = text; command.dispatchEvent(new Event('input')); button('Send command').click(); await pause(); };
+      ok(!root.querySelector('textarea[aria-label="Inbox command"]') && !button('Send command'), 'Inbox has no message composer');
+      const enterStudy = async text => { button('Chat').click(); type(text); button('Send').click(); await pause(); };
       const chatIdentity = view.chat, cardsIdentity = view.cardsEl;
       const studyTextarea = root.querySelector('.review-chat textarea');
       const beforeRejected = { session: quiz.session, plan: quiz.plan, guide: quiz.guide, turns: JSON.stringify(quiz.turns), sources: JSON.stringify([...quiz.unitSources]), calls: calls.length, reads: reads.length, queued: queued.length, captures: store.all().length };
-      await enterCommand('Make flashcards on Extra');
-      ok(command.value === 'Make flashcards on Extra' && root.querySelector('textarea[aria-label="Inbox command"]') === command
-        && quiz.draftQuestion === 'unfinished request'
+      ok(await host.openChat('Make flashcards on Extra') === false, 'External study command refuses an unfinished Chat draft');
+      ok(quiz.draftQuestion === 'unfinished request'
         && root.querySelector('.review-chat textarea') === studyTextarea && studyTextarea.value === 'unfinished request'
         && view.chat === chatIdentity && view.cardsEl === cardsIdentity,
-      'Inbox rejects an external command and preserves both mounted drafts');
+      'External commands preserve the mounted Chat draft');
       ok(quiz.session === beforeRejected.session && quiz.plan === beforeRejected.plan && quiz.guide === beforeRejected.guide
         && JSON.stringify(quiz.turns) === beforeRejected.turns && JSON.stringify([...quiz.unitSources]) === beforeRejected.sources
         && calls.length === beforeRejected.calls && reads.length === beforeRejected.reads
         && queued.length === beforeRejected.queued && store.all().length === beforeRejected.captures,
       'Rejected command leaves study state, reads, requests and captures unchanged');
-      for (const registered of ['Make flashcards', '/flashcards', '/make-flashcards']) {
-        await enterCommand(registered);
-        ok(command.value === registered && quiz.draftQuestion === 'unfinished request'
-          && root.querySelector('.review-chat textarea') === studyTextarea && studyTextarea.value === 'unfinished request'
-          && quiz.session === beforeRejected.session && quiz.plan === beforeRejected.plan && quiz.guide === beforeRejected.guide
-          && JSON.stringify(quiz.turns) === beforeRejected.turns && JSON.stringify([...quiz.unitSources]) === beforeRejected.sources
-          && calls.length === beforeRejected.calls && reads.length === beforeRejected.reads
-          && queued.length === beforeRejected.queued && store.all().length === beforeRejected.captures,
-        `Registered ${registered} preserves both rejected drafts through actual main.openChat`);
-      }
       type(''); // Explicitly clear the synthetic draft through its normal input event.
-      button('Inbox').click(); button('Send command').click(); await pause();
-      ok(quiz.awaitingTopic && quiz.studyMode === 'flashcards' && quiz.guide === '' && command.value === ''
-        && calls.length === beforeRejected.calls && reads.length === beforeRejected.reads, 'Retained registered command retries once and requires a fresh topic');
+      await enterStudy('Make flashcards');
+      ok(quiz.awaitingTopic && quiz.studyMode === 'flashcards' && quiz.guide === ''
+        && calls.length === beforeRejected.calls && reads.length === beforeRejected.reads, 'Chat Make Flashcards requires a fresh topic');
       type('Extra'); button('Send').click(); await pause();
-      ok(quiz.awaitingGuide && view.chat === chatIdentity && view.cardsEl === cardsIdentity && command.value === '', 'Inbox command opens the mounted study chat and requires a fresh guide');
+      ok(quiz.awaitingGuide && view.chat === chatIdentity && view.cardsEl === cardsIdentity, 'Chat requires a fresh guide without replacing the Inbox');
       type('Test the definition of affinity.'); button('Send').click(); await wait(() => !quiz.busy);
       const extraCapture = store.all().find(h => h.sourcePath === extraFile.path);
       ok(extraCapture?.text === source && queued.length === 2 && extraCapture.instruction.includes('Test the definition'), 'Make Flashcards sends exact notes and coverage instructions to the existing queue');
@@ -155,12 +145,12 @@ export default class CandidateProbe extends Plugin {
       ok(extraCapture.cards.length === 1 && extraCapture.cards[0].generation?.audit.status === 'verified', 'Make Flashcards runs the existing writer and audit');
       ok(view.chatEl.querySelector('a[href="synthetic/Extra.md"]') && /Experimental/.test(view.chatEl.textContent), 'Experimental Flashcards retain clickable source provenance');
       button('Inbox').click();
-      await enterCommand('Make flashcards on Extra');
+      await enterStudy('Make flashcards on Extra');
       type('Test the definition of affinity.'); button('Send').click(); await wait(() => !quiz.busy);
       ok(queued.length === 2 && store.all().length === 2, 'A fresh repeat cannot generate duplicate captures');
       button('Inbox').click();
-      await enterCommand('/export');
-      ok(exports.length === 1 && view.panel === 'inbox', 'Inbox resolves an existing registered command without starting study');
+      ok(await runNamedCommand(host, '/export') === true, 'Registered export command remains available');
+      ok(exports.length === 1 && view.panel === 'inbox', 'Export remains separate from Chat study text');
       const h = makeHighlight({ sourcePath: file.path, sourceTitle: 'Synthetic', text: 'Dormancy delays germination.', status: 'ready' });
       const c = makeCard(h.id, { kind: 'qa', front: 'What does it delay?', back: 'germination' }); h.cards = [c]; store.add(h); view.render();
       root.querySelector(`[data-id="${c.id}"] button[title^="Check card against"]`).click();
@@ -221,16 +211,16 @@ export default class CandidateProbe extends Plugin {
       type('Another unfinished study draft');
       const editorStudyBox = root.querySelector('.review-chat textarea');
       const beforeEditorCommand = { calls: calls.length, reads: reads.length, queued: queued.length, turns: JSON.stringify(quiz.turns) };
-      await enterCommand('/flashcards');
-      ok(command.value === '/flashcards' && quiz.draftQuestion === 'Another unfinished study draft'
+      ok(await runNamedCommand(host, '/flashcards') === false, 'Registered study command refuses unfinished Chat text');
+      ok(quiz.draftQuestion === 'Another unfinished study draft'
         && root.querySelector('.review-chat textarea') === editorStudyBox && editorStudyBox.value === 'Another unfinished study draft'
         && cardRoot().querySelector('.wikilm-editor') === form && form.isConnected
         && question.value === 'My newer unsaved question after Convert' && sentence.value === 'My newer {{c1::unsaved}} sentence'
         && extra.value === 'My newer unsaved annotation' && JSON.stringify(c) === savedCard && JSON.stringify(store.revisions()) === savedHistory
         && calls.length === beforeEditorCommand.calls && reads.length === beforeEditorCommand.reads
         && queued.length === beforeEditorCommand.queued && JSON.stringify(quiz.turns) === beforeEditorCommand.turns,
-      'Rejected registered command preserves the real mounted card editor and both composers');
-      type(''); command.value = ''; command.dispatchEvent(new Event('input')); button('Inbox').click();
+      'Rejected registered command preserves the real mounted card editor and Chat draft');
+      type(''); button('Inbox').click();
       [...currentEditor.querySelectorAll('button')].find(b => b.textContent === 'Cancel').click();
       await wait(() => root.querySelector('.wikilm-schema-chip')?.textContent === '1 card rule suggestion');
       ok(view.editing === null && JSON.stringify(c) === savedCard, 'Cancel releases the proposal header without undoing the accepted rewrite');
@@ -287,7 +277,7 @@ export default class CandidateProbe extends Plugin {
       app.vault.readBinary = async f => { if (f !== pdfFile) throw Error('Unexpected PDF read'); reads.push(f.path); return pdfBytes.buffer.slice(0); };
       button('Inbox').click();
       const beforePdf = { reads: reads.length, calls: calls.length, captures: store.all().length, queued: queued.length };
-      await enterCommand(`Make flashcards on ${pdfFile.path}`);
+      await enterStudy(`Make flashcards on ${pdfFile.path}`);
       ok(quiz.awaitingGuide && reads.length === beforePdf.reads && calls.length === beforePdf.calls, 'Explicit PDF command requires a fresh guide before native extraction');
       type('Test the definition of affinity.'); button('Send').click(); await wait(() => !quiz.busy);
       const pdfCapture = store.all().find(h => h.sourcePath === pdfFile.path);
@@ -313,7 +303,7 @@ export default class CandidateProbe extends Plugin {
       try {
         for (const mode of ['quiz me', 'make flashcards']) for (const requested of ['missing/Private.md', 'ignored/Private.md', '[[Missing.md ]]']) {
           const beforeScope = { reads: reads.length, calls: calls.length, captures: store.all().length, queued: queued.length };
-          await enterCommand(`${mode} on ${requested}`);
+          await enterStudy(`${mode} on ${requested}`);
           ok(quiz.awaitingGuide && reads.length === beforeScope.reads && calls.length === beforeScope.calls, `${mode} ${requested} requests fresh coverage before resolution`);
           type('Test the definition of affinity.'); button('Send').click(); await pause();
           if (button('Free response')) { button('Free response').click(); await wait(() => !quiz.busy); }

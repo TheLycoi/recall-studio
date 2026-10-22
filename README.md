@@ -7,7 +7,7 @@ Flashcards workflows grounded in your notes and PDFs.
 
 The repository and BRAT target are `TheLycoi/recall-studio`, formerly
 `TheLycoi/review-inbox`. Plugin ID `review-inbox`, default storage
-`Review Inbox/` and command IDs stay unchanged. Version 0.1.8 is a beta release.
+`Review Inbox/` and command IDs stay unchanged. Version 0.1.9 is a beta release.
 It adds no scheduler.
 
 ## What it does
@@ -124,15 +124,14 @@ passages, not whether you learned them or completed the whole note.
 Open the Chat tab for these experimental study workflows, included in 0.1.6.
 
 Type `quiz me on human growth hormone` or `make flashcards on human growth hormone`
-in the Inbox command box or the study conversation. Bare commands ask for a topic.
+in the Chat tab. The Inbox has no message box. Bare commands ask for a topic.
 Every run then asks for a fresh study guide or instructions about what to cover.
 The guide is coverage only: all factual evidence must come from eligible vault notes,
 never general model knowledge, guide-only claims or earlier assistant answers.
 
-The Inbox also accepts registered command names and aliases, with or without a
-leading slash. `/rules` opens the writing rules; `/export` keeps the existing
-export-all command behavior. Typing Make Flashcards queues references; it does
-not export cards. Existing command IDs and hotkeys remain compatible.
+Registered actions remain available in Obsidian's command palette. Open writing
+rules opens the rules; Export to Anki keeps the existing export-all behavior.
+Typing Make Flashcards queues references; it does not export cards. Existing command IDs and hotkeys remain compatible.
 
 Topic retrieval searches note contents as well as titles. Explicit note paths,
 aliases and #tags resolve a source scope; ambiguous names require a choice.

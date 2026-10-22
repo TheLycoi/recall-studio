@@ -1014,8 +1014,6 @@ body.wikilm-highlighter-active .textLayer ::selection {
 .review-chat-nav-btn.is-active { color: var(--text-on-accent); background: var(--interactive-accent); }
 .review-chat-sources { max-height: 220px; overflow: auto; border: 1px solid var(--background-modifier-border); padding: var(--size-4-2); border-radius: var(--radius-m); }
 .review-chat-source { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-1); overflow-wrap: anywhere; }
-.review-inbox-command { display: flex; flex-wrap: wrap; gap: var(--size-4-2); padding: var(--size-4-2) 0; }
-.review-inbox-command textarea { flex: 1 1 14rem; min-width: 0; resize: vertical; }
 .review-chat-turn { white-space: pre-wrap; overflow-wrap: anywhere; }
 .review-chat-turn.is-user { background: var(--background-secondary); }
 .review-chat-turn > a { display: block; margin-top: var(--size-4-2); font-size: var(--font-smallest); }
