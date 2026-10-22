@@ -1,5 +1,13 @@
 # Changelog
 
+## Recall Studio 0.1.12 beta
+
+- Stop adding capture badges to your notes. The "N cards created · N awaiting · N Anki confirmed" pill and the "Dismissed · no cards" pill no longer appear next to your prose, so a dismissed or exported passage leaves the note exactly as you wrote it.
+- Mark only cards written in the note itself. Inline `#flashcards` cards keep their **Flashcard** badge; capture receipts and export counts move to the source-history command, where they were already listed in full.
+- Remove the now-unused passage badge widget so a note cannot be marked by capture state at all.
+
+Plugin identity, stored data and published 0.1.11 assets stay unchanged. Capture records are still retained and still visible through source history, so nothing is lost — only the on-note marker is gone. There is no scheduler or study-data migration.
+
 ## Recall Studio 0.1.11 beta
 
 - Attach a local PDF as study-guide coverage in Chat without importing it into the vault. Coverage instructions still define only what to cover; every fact and citation comes from your notes.
