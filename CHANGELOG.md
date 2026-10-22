@@ -1,5 +1,11 @@
 # Changelog
 
+## Recall Studio 0.1.10 beta
+
+- Fix card writing failing with "Malformed card fields." The staged writer's output schema again describes which fields belong to which card kind, and a draft that also fills the unused fields is normalized instead of rejected. Empty questions, answers and cloze text are still refused, and the malformed-cloze and grounding checks are unchanged.
+
+Plugin identity, stored data, prompt contracts and published 0.1.9 assets stay unchanged. This release adds no scheduler or study-data migration.
+
 ## Recall Studio 0.1.6 beta
 
 - Rename the shared study tab and heading to Chat. Quiz and Make Flashcards remain experimental activities within it.
