@@ -3,7 +3,7 @@ import { Decoration, ViewPlugin, WidgetType, type DecorationSet, type EditorView
 import type RecallPlugin from "./main";
 import type { Highlight } from "./model";
 import { passageLabel, passageSummary, resolvePassage } from "./passageHistory";
-import { recognizeSrCards, type SrCard } from "./srRecognition";
+import { recognizeSrCards, srDeckForNote, type SrCard } from "./srRecognition";
 
 type Resource = { path?(): string; snapshot?(): string; refresh(): void; destroy(): void; rename?(oldPath: string, newPath: string): void };
 type Lifecycle = { stopped: boolean; resources: Set<Resource> };
@@ -150,12 +150,14 @@ class SourceHistoryModal extends Modal {
     const latestEditor = this.snapshot?.() ?? editorSnapshot(this.plugin, path);
     const srRaw = latestEditor === undefined ? raw : latestEditor;
     const existing = raw === null || srRaw === null ? [] : recognizeSrCards(srRaw, path, this.plugin.settings);
+    // The tag only suggests a deck; the Inbox picker still decides where cards export.
+    const suggestedDeck = srRaw === null ? null : srDeckForNote(srRaw, path, this.plugin.settings);
     for (const card of existing) {
       const item = root.createDiv({ cls: "ri-history-item" });
       item.createEl("h3", { text: srLabel(card) });
       item.createEl("p", { cls: "ri-history-meta", text: `${path} · line ${card.line} · source offsets ${card.start}–${card.end} · read-only syntax recognition` });
       item.createEl("blockquote", { text: card.text });
-      item.createEl("p", { text: "Existing inline SR syntax. Not an Inbox capture or a confirmed Anki export. Scheduling state is not imported or changed." });
+      item.createEl("p", { text: `Existing inline SR syntax. Not an Inbox capture or a confirmed Anki export. Scheduling state is not imported or changed.${suggestedDeck ? ` Suggested deck from the note tag: ${suggestedDeck}.` : ""}` });
       if (srId(card) === this.selectedId) {
         item.addClass("ri-history-selected");
         item.tabIndex = -1;

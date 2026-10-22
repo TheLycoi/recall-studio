@@ -556,7 +556,7 @@ export class RecallSettingTab extends PluginSettingTab {
       .setName("Recognize existing SR cards")
       .setDesc("Read-only syntax indicators and source history. Off by default; configure eligible tags or exact note paths below. These are explicit settings, not detected SR configuration. No SR installation is required. No scheduling or Inbox records are written.")
       .addToggle(t => t.setValue(s.srRecognitionEnabled).onChange(v => { s.srRecognitionEnabled = v; save(); }));
-    const srText = (name: string, key: keyof Omit<SrRecognitionSettings, "srRecognitionEnabled" | "srHighlightCloze">, desc: string) =>
+    const srText = (name: string, key: keyof Omit<SrRecognitionSettings, "srRecognitionEnabled" | "srHighlightCloze" | "srBoldCloze">, desc: string) =>
       new Setting(containerEl).setName(name).setDesc(desc).addText(t => t.setValue(s[key]).onChange(v => { s[key] = v; save(); }));
     srText("SR body tags", "srRecognitionTags", "Space-separated tags, including # (for example #flashcards). Matching body tags or their subtags enable the note. Frontmatter tags are not used; use an exact note path instead. Empty means no tag scope.");
     new Setting(containerEl).setName("SR note paths")
@@ -568,8 +568,11 @@ export class RecallSettingTab extends PluginSettingTab {
     srText("SR reversed multiline separator", "srMultilineReversedSeparator", "Reference default ??. Separator must occupy its own line.");
     srText("SR multiline end marker", "srMultilineEndMarker", "Reference default is empty (a blank line ends the card). A configured marker occupies its own line and permits blank lines inside cards.");
     new Setting(containerEl).setName("SR plain highlight clozes")
-      .setDesc("Recognize plain ==answer== paragraphs. Indexed/hinted or custom cloze patterns, bold/curly clozes, and complex excluded blocks are unsupported. Syntax recognition does not verify scheduling or learning progress.")
+      .setDesc("Recognize plain ==answer== and {{answer}} paragraphs. Indexed/hinted or custom cloze patterns and complex excluded blocks are unsupported. Syntax recognition does not verify scheduling or learning progress.")
       .addToggle(t => t.setValue(s.srHighlightCloze).onChange(v => { s.srHighlightCloze = v; save(); }));
+    new Setting(containerEl).setName("SR bold clozes")
+      .setDesc("Also treat **bold** spans as cloze deletions. Off by default: bold is ordinary emphasis in most study notes, so enabling this marks emphasised text as a hidden answer. Highlight and curly-brace clozes are unaffected.")
+      .addToggle(t => t.setValue(s.srBoldCloze === true).onChange(v => { s.srBoldCloze = v; save(); }));
 
     new Setting(containerEl).setName("Anki").setHeading();
 

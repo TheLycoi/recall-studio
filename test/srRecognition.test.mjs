@@ -46,7 +46,7 @@ test("multiline and plain highlight cloze paragraphs use blank/end boundaries wi
   assert.equal(api.recognizeSrCards("#cards\n\nThe ==answer==", "a.md", { ...configured, srHighlightCloze: false }).length, 0);
 });
 test("unsupported clozes, empty sides, and mixed excluded multiline blocks fail closed", () => {
-  for (const body of ["::empty front", "empty back::", "?\nempty front", "Front\n?", "==1;;answer==", "==answer;;hint==", "{{answer}}", "**answer**", "`==answer==`", "Front\n?\n```\nBack\n```", "Front\n?\n<!-- hidden -->\nBack", "Front\n?\nBack <!--SR:!2026-10-20,1,250-->\nMore"]) {
+  for (const body of ["::empty front", "empty back::", "?\nempty front", "Front\n?", "==1;;answer==", "==answer;;hint==", "**answer**", "`==answer==`", "Front\n?\n```\nBack\n```", "Front\n?\n<!-- hidden -->\nBack", "Front\n?\nBack <!--SR:!2026-10-20,1,250-->\nMore"]) {
     assert.deepEqual(api.recognizeSrCards(`#cards\n\n${body}`, "a.md", configured), [], body);
   }
   assert.deepEqual(api.recognizeSrCards("#cards\n\nQ::A", "a.md", { ...configured, srRecognitionTags: null }), []);
