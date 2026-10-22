@@ -16,7 +16,12 @@ export const PreparationOut = z.object({
   conflicts: z.array(z.object({ quote: text, reason: text })),
 });
 export const GroundedCardsOut = z.object({ cards: z.array(z.object({
-  planId: text, factIds: ids, kind: z.enum(["qa", "cloze"]), front: z.string(), back: z.string(), text: z.string(),
+  planId: text,
+  factIds: ids,
+  kind: z.enum(["qa", "cloze"]).describe("qa for a question with a short answer; cloze for one sentence with hidden spans"),
+  front: z.string().describe("qa only: the question, naming its subject. Empty string for cloze."),
+  back: z.string().describe("qa only: the answer as a term, number, name, or short phrase. Empty string for cloze."),
+  text: z.string().describe("cloze only: one sentence with {{c1::...}} deletions. Empty string for qa."),
 })) });
 export type GroundedDraft = z.infer<typeof GroundedCardsOut>["cards"][number];
 export const AuditOut = z.object({ verdicts: z.array(z.object({
@@ -65,7 +70,16 @@ export function validateDrafts(raw: unknown, p: GenerationPreparation, _legacyMa
     if (!row || used.has(d.planId)) throw new Error("Unknown or repeated card plan reference.");
     used.add(d.planId);
     if (new Set(d.factIds).size !== d.factIds.length || d.factIds.length !== row.factIds.length || d.factIds.some(id => !row.factIds.includes(id))) throw new Error("Card fact links do not match its plan.");
-    if (d.kind === "qa" ? !d.front.trim() || !d.back.trim() || !!d.text : !d.text.trim() || !!d.front || !!d.back) throw new Error("Malformed card fields.");
+    if (d.kind === "qa") {
+      d.front = d.front.trim();
+      d.back = d.back.trim();
+      d.text = "";
+    } else {
+      d.text = d.text.trim();
+      d.front = "";
+      d.back = "";
+    }
+    if (d.kind === "qa" ? !d.front || !d.back : !d.text) throw new Error("Malformed card fields.");
     if (d.kind === "cloze") {
       // Reuse export syntax and empty-answer checks, not lint's style limits.
       const card = makeCard("", d);
