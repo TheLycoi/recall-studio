@@ -196,25 +196,6 @@ class SourceHistoryModal extends Modal {
   }
 }
 
-class PassageWidget extends WidgetType {
-  private label: string;
-  constructor(private plugin: RecallPlugin, private path: string, private h: Highlight, private snapshot: () => string | null) {
-    super();
-    this.label = passageLabel(h); // Records mutate in place; equality must compare the rendered labels.
-  }
-  eq(other: PassageWidget): boolean { return other.h.id === this.h.id && other.label === this.label && other.path === this.path; }
-  toDOM(view: EditorView): HTMLElement {
-    const button = view.dom.ownerDocument.createElement("button");
-    button.type = "button";
-    button.className = "ri-source-mark";
-    button.textContent = this.label;
-    button.setAttribute("aria-label", `Open source history: ${this.label}`);
-    button.addEventListener("click", () => openSourceHistory(this.plugin, this.path, this.h.id, this.snapshot));
-    return button;
-  }
-  ignoreEvent(): boolean { return true; }
-}
-
 class SrWidget extends WidgetType {
   constructor(private plugin: RecallPlugin, private path: string, private card: SrCard, private snapshot: () => string | null) { super(); }
   eq(other: SrWidget): boolean { return other instanceof SrWidget && other.path === this.path && srId(other.card) === srId(this.card) && other.card.text === this.card.text; }
@@ -246,11 +227,9 @@ export function registerSourceVisibility(plugin: RecallPlugin): { refresh(): voi
     refresh(): void {
       const path = this.view.state.field(editorInfoField, false)?.file?.path ?? "";
       const raw = this.view.state.doc.toString();
-      const marks = !this.stopped && !lifecycle.stopped && /\.md$/i.test(path) && allowed(plugin, path) && plugin.fileAt(path) ? plugin.store.sourceHistory(path).flatMap(h => {
-        const loc = resolvePassage(raw, h);
-        const snapshot = () => !this.stopped && this.view.state.field(editorInfoField, false)?.file?.path === path ? this.view.state.doc.toString() : null;
-        return loc.state === "matched" ? [Decoration.widget({ widget: new PassageWidget(plugin, path, h, snapshot), side: 1 }).range(loc.end)] : [];
-      }) : [];
+      // Capture receipts do not mark the note. Cards are written inline, in the
+      // note itself, so only inline flashcard syntax earns a badge here.
+      const marks: Array<{ from: number; to: number; value: Decoration }> = [];
       if (!this.stopped && !lifecycle.stopped && allowed(plugin, path) && plugin.fileAt(path)) {
         const snapshot = () => !this.stopped && this.view.state.field(editorInfoField, false)?.file?.path === path ? this.view.state.doc.toString() : null;
         for (const card of recognizeSrCards(raw, path, plugin.settings)) marks.push(Decoration.widget({ widget: new SrWidget(plugin, path, card, snapshot), side: 1 }).range(card.end));
@@ -329,20 +308,7 @@ class PassageReadingChild extends MarkdownRenderChild {
       candidates[0].node.appendChild(button);
       this.marks.push(button);
     }
-    for (const h of this.plugin.store.sourceHistory(path)) {
-      const loc = resolvePassage(raw, h);
-      if (loc.state !== "matched" || loc.start < offset || loc.end > end) continue;
-      const candidates = rendered.filter(entry => entry.text.includes(h.text));
-      // shortcut: complex Markdown and repeated DOM text stay command-only; require an unambiguous rendered node.
-      if (candidates.length !== 1 || slice.replace(/==/g, "").split(h.text).length !== 2) continue;
-      const button = this.containerEl.ownerDocument.createElement("button");
-      button.type = "button";
-      button.className = "ri-source-mark";
-      button.textContent = passageLabel(h);
-      button.setAttribute("aria-label", `Open source history: ${button.textContent}`);
-      button.addEventListener("click", () => openSourceHistory(this.plugin, path, h.id));
-      candidates[0].node.appendChild(button);
-      this.marks.push(button);
-    }
+    // Capture receipts stay out of the note: dismissed passages leave no trace,
+    // and exported captures are inspected through the source-history command.
   }
 }

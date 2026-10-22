@@ -67,12 +67,12 @@ before(async () => {
 after(() => { if (dir) rmSync(dir, { recursive: true, force: true }); });
 const h = (over = {}) => ({ id: "h", sourcePath: "a.md", text: "quote", before: "", after: "", heading: "Section", blockId: null, page: null, cards: [], status: "ready", ...over });
 const settle = async () => { await new Promise(r => setImmediate(r)); };
-function setup({ raw = "quote\n", history = [h()], ignored = () => false } = {}) {
+function setup({ raw = "quote\n", history = [h()], ignored = () => false, settings = {} } = {}) {
   const listeners = new Set(), reads = [], events = new Events(), workspace = new Events();
   const files = new Map([["a.md", { path: "a.md", extension: "md" }], ["paper.pdf", { path: "paper.pdf", extension: "pdf" }]]);
   const state = { raw, history, active: files.get("a.md"), markdown: null };
   let extension, processor;
-  const plugin = { settings: { schemaFolder: "Review Inbox", exportFolder: "Review Inbox/exports" },
+  const plugin = { settings: { schemaFolder: "Review Inbox", exportFolder: "Review Inbox/exports", srRecognitionEnabled: false, srRecognitionTags: "", srRecognitionNotePaths: "", ...settings },
     app: { metadataCache: { isUserIgnored: ignored }, vault: Object.assign(events, { configDir: ".obsidian", read: async file => { reads.push(file.path); return state.raw; } }),
       workspace: Object.assign(workspace, { getActiveFile: () => state.active }) },
     activeMarkdown: () => state.markdown,
@@ -103,14 +103,14 @@ function reading(env, { start = 0, end = env.state.raw.split("\n").length - 1, t
   return { root, paragraph, child, ctx };
 }
 
-test("registered CM6 path uses unsaved doc, invalidates on edits, source switches and store refresh", () => {
-  const env = setup({ raw: "changed on disk" });
-  const e = editor(env, "quote");
+test("registered CM6 path uses the unsaved doc and invalidates inline badges on edits and source switches", () => {
+  const env = setup({ raw: "#cards\n\nQ::A\n", settings: { srRecognitionEnabled: true, srRecognitionTags: "#cards" } });
+  const e = editor(env);
   assert.equal(e.marks().length, 1);
   assert.equal(env.reads.length, 0);
-  e.view.dispatch({ changes: { from: 0, to: 5, insert: "altered" } });
+  e.view.dispatch({ changes: { from: 0, to: 6, insert: "#other" } });
   assert.equal(e.marks().length, 0);
-  e.view.dispatch({ changes: { from: 0, to: 7, insert: "quote" } });
+  e.view.dispatch({ changes: { from: 0, to: 6, insert: "#cards" } });
   assert.equal(e.marks().length, 1);
   env.state.active.path = "b.md";
   e.view.dispatch();
@@ -121,18 +121,15 @@ test("registered CM6 path uses unsaved doc, invalidates on edits, source switche
   e.instance.destroy();
   assert.equal(env.listeners.size, 0);
 });
-test("editor button opens exact saved quote and archived card contents with partial export receipts", async () => {
+test("capture receipts add no note badge while the history command still shows archived cards", async () => {
   const env = setup({ history: [h({ archived: true, cards: [
     { kind: "qa", front: "Question <script>", back: "Exact answer", status: "pending" },
     { kind: "cloze", text: "{{c1::answer}}", status: "exported", ankiNoteId: 42 },
     { kind: "qa", front: "Other", back: "Answer", status: "exported" },
   ] })] });
   const e = editor(env);
-  const button = e.marks()[0].widget.toDOM(e.view);
-  assert.equal(button.tagName, "button");
-  assert.equal(button.type, "button");
-  assert.match(button.attributes["aria-label"], /Open source history/);
-  button.click(); await settle();
+  assert.equal(e.marks().length, 0, "a captured or dismissed passage never marks the note");
+  api.openCurrentSourceHistory(env.plugin); await settle();
   const modal = opened.at(-1), text = modal.contentEl.textContent;
   for (const fragment of ["quote", "a.md", "Section", "Archived", "Question <script>", "Exact answer", "{{c1::answer}}", "Partial export", "Anki ID 42", "unconfirmed"]) assert.ok(text.includes(fragment), fragment);
   assert.equal(modal.contentEl.querySelector("script"), null);
@@ -141,8 +138,9 @@ test("editor button opens exact saved quote and archived card contents with part
   assert.equal(env.listeners.size, 0);
 });
 test("reading path maps nonzero line ranges from whole-note section.text", async () => {
-  const env = setup({ raw: "# Heading\n\nquote\n\nOther section", history: [h()] });
-  const r = reading(env, { start: 2, end: 2 });
+  const env = setup({ raw: "# Heading\n\nQ::A\n\nOther section", history: [],
+    settings: { srRecognitionEnabled: true, srRecognitionNotePaths: "a.md" } });
+  const r = reading(env, { start: 2, end: 2, rendered: "Q::A" });
   await settle();
   assert.equal(r.paragraph.querySelectorAll("button").length, 1);
   r.child.unload();
@@ -211,14 +209,16 @@ test("reading and modal async work cannot resurrect after unload or close", asyn
   assert.equal(modal.contentEl.textContent, "");
   assert.equal(env.listeners.size, 0);
 });
-test("widgets compare immutable label snapshots when cards mutate in place", () => {
-  const record = h(); const env = setup({ history: [record] }); const e = editor(env);
-  const original = e.marks()[0].widget;
-  record.cards.push({ status: "pending" }); env.changed();
-  const updated = e.marks()[0].widget;
-  assert.equal(original.eq(updated), false);
-  assert.match(updated.toDOM(e.view).textContent, /1 card/);
-  assert.equal(updated.ignoreEvent(), true, "native button keyboard events must not become editor commands");
+test("capture and export mutations never mark the note", () => {
+  const record = h();
+  const env = setup({ history: [record] });
+  const e = editor(env);
+  assert.equal(e.marks().length, 0, "a live capture does not badge the note");
+  for (const status of ["pending", "approved", "exported", "dismissed"]) {
+    record.cards = [{ kind: "qa", front: "Q", back: "A", status }];
+    env.changed();
+    assert.equal(e.marks().length, 0, `a ${status} capture does not badge the note`);
+  }
   e.instance.destroy();
 });
 test("deleting a source removes editor and reading indicators without erasing retained cards", async () => {
@@ -231,10 +231,11 @@ test("deleting a source removes editor and reading indicators without erasing re
   assert.equal(env.state.history.length, 1);
   opened.at(-1).close(); e.instance.destroy(); r.child.unload();
 });
-test("reading button opens saved history and refreshes a full but unconfirmed export honestly", async () => {
+test("source history refreshes a full but unconfirmed export honestly without marking the note", async () => {
   const record = h({ cards: [{ kind: "qa", front: "Q", back: "A", status: "pending" }] });
   const env = setup({ history: [record] }); const r = reading(env); await settle();
-  r.paragraph.querySelector("button").click(); await settle();
+  assert.equal(r.paragraph.querySelectorAll("button").length, 0, "a capture receipt is not a note badge");
+  api.openCurrentSourceHistory(env.plugin); await settle();
   const modal = opened.at(-1); assert.match(modal.contentEl.textContent, /1 pending draft/);
   record.cards[0].status = "exported"; env.changed(); await settle();
   assert.match(modal.contentEl.textContent, /Full export status recorded; Anki import is unconfirmed/);
@@ -254,12 +255,17 @@ test("open history follows file and folder renames, preserving PDF subpath and s
   assert.match(modal.titleEl.textContent, /renamed\/a.md/);
   modal.close();
 });
-test("multiple reading labels never become matching text for a later passage", async () => {
-  const env = setup({ raw: "quote\n\n1 card", history: [h({ cards: [{ status: "pending" }] }), h({ id: "second", text: "1 card" })] });
+test("dismissed and captured passages leave the note unmarked in reading view", async () => {
+  const env = setup({ raw: "quote\n\n1 card", history: [
+    h({ cards: [{ status: "pending" }] }),
+    h({ id: "second", text: "1 card", status: "dismissed", cards: [] }),
+  ] });
   const root = new Element(); root.createEl("p", { text: "quote" }); root.createEl("p", { text: "1 card" });
   let child;
   env.processor(root, { sourcePath: "a.md", getSectionInfo: () => ({ text: env.state.raw, lineStart: 0, lineEnd: 2 }), addChild: c => { child = c; c.load(); } });
-  await settle(); assert.equal(root.querySelectorAll("button").length, 2); child.unload();
+  await settle();
+  assert.equal(root.querySelectorAll("button").length, 0, "neither a capture nor a dismissal badges the note");
+  child.unload();
 });
 test("a source switch during a pending reading render cannot mark a different note", async () => {
   const env = setup(); let finish;

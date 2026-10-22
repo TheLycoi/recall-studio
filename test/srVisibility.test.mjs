@@ -210,23 +210,23 @@ test("history rechecks unsaved editor content after an asynchronous saved-file r
   assert.doesNotMatch(modal.contentEl.textContent, /Q::A/);
   modal.close(); env.controller.destroy(); e.instance.destroy();
 });
-test("SR scope changes, ignored paths, source deletion and unload leave retained capture counts untouched", async () => {
+test("SR scope changes, ignored paths and source deletion leave a retained capture unmarked in the note", async () => {
   let ignored = false;
   const record = h({ text: "Prose", cards: [{ status: "pending" }] });
   const raw = "#cards\n\nQ::A\n\nProse";
   const env = setup({ raw, settings: sr, history: [record], ignored: () => ignored });
   const e = editor(env);
-  assert.equal(e.marks().length, 2);
-  assert.match(e.marks().find(m => m.from === raw.length).widget.toDOM(e.view).textContent, /1 card created.*1 awaiting.*0 Anki confirmed/);
+  assert.equal(e.marks().length, 1, "only the inline card is marked; the capture receipt is not");
+  assert.ok(e.marks().every(m => m.widget.constructor.name !== "PassageWidget"));
   env.plugin.settings.srRecognitionEnabled = false; env.controller.refresh();
-  assert.equal(e.marks().length, 1);
+  assert.equal(e.marks().length, 0);
   env.plugin.settings.srRecognitionEnabled = true;
   env.plugin.settings.srRecognitionTags = "#other"; env.controller.refresh();
-  assert.equal(e.marks().length, 1);
+  assert.equal(e.marks().length, 0);
   env.plugin.settings.srRecognitionTags = "#cards"; env.controller.refresh();
-  assert.equal(e.marks().length, 2);
+  assert.equal(e.marks().length, 1);
   ignored = true; env.controller.refresh(); assert.equal(e.marks().length, 0);
-  ignored = false; env.controller.refresh(); assert.equal(e.marks().length, 2);
+  ignored = false; env.controller.refresh(); assert.equal(e.marks().length, 1);
   const file = env.files.get("a.md"); env.files.delete("a.md"); env.events.emit("delete", file);
   assert.equal(e.marks().length, 0);
   assert.equal(env.state.history.length, 1); assert.equal(record.cards.length, 1);
