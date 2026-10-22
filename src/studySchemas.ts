@@ -16,7 +16,8 @@ export function validateStudyInput(args: StudyEvidenceArgs): void {
 
 export const StudyEvidenceOut = z.object({
   selections: z.array(z.object({ id: z.string(), quote: z.string() }).strict()).max(40),
-  gaps: z.array(z.number().int().positive()).max(8000),
+  // n nonempty lines need at least 2n - 1 raw guide characters.
+  gaps: z.array(z.number().int().positive()).max(Math.floor((STUDY_GUIDE_MAX_CHARS + 1) / 2)),
 }).strict();
 export type StudyEvidenceDraft = z.infer<typeof StudyEvidenceOut>;
 export interface StudyEvidenceArgs {

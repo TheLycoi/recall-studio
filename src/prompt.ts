@@ -4,6 +4,9 @@
  * of `obsidian` imports.
  */
 
+export const QUIZ_COVERAGE_PREFIX = "Coverage instructions only, not source evidence:\n";
+export const QUIZ_COVERAGE_SUFFIX = "\nUse only the supplied note points for facts.";
+
 /** One section of a note as the quiz sends it: where it sits and its points, in note order. */
 export interface QuizSectionIn {
   noteTitle: string;
