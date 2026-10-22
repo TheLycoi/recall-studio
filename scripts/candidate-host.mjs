@@ -250,8 +250,43 @@ export default class CandidateProbe extends Plugin {
       ok(reading.querySelectorAll('.ri-source-mark').length === 0, 'Reading view declines a section containing scheduling markup');
       editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: 'Plain unsaved prose' } });
       ok(!editor.dom.textContent.includes('Flashcard'), 'SR marker disappears after unsaved edit');
-      controller.destroy(); controller = null;
-      ok(!editor.dom.textContent.includes('Flashcard'), 'Visibility unload removes markers');
+      // Inline cards written in an outline note: bullet items, curved cloze and a subdeck tag.
+      // Reuse the mounted extension: re-registering would not re-decorate this editor.
+      settings.srRecognitionTags = '#flashcards';
+      raw = [
+        '#flashcards/Psychiatry',
+        '',
+        '- What is OCD?::A disorder of repetitive unwanted thoughts',
+        '',
+        '- Nested card',
+        '    - Nested::Deep answer',
+        '',
+        '- OCD is ==repetitive==.',
+        '',
+        '- OCD is {{unwanted}}.',
+        '',
+        '- Example:',
+        '  ```md',
+        '  hidden::answer',
+        '  ```',
+        '',
+        '- OCD is **emphasis only**.',
+      ].join('\n');
+      file.stat.mtime++; file.stat.size = raw.length;
+      editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: raw } });
+      controller.refresh(); await pause();
+      const inlineBadges = [...editor.dom.querySelectorAll('.ri-source-mark')].map(el => el.textContent);
+      ok(inlineBadges.length === 4 && inlineBadges.every(text => text.includes('Flashcard')), 'Real CM6 marks only the four real inline cards in a bulleted note');
+      ok(editor.state.doc.toString().includes('hidden::answer') && editor.dom.textContent.includes('hidden::answer'), 'Fenced example inside a list keeps its bytes and gains no badge');
+      ok(editor.state.doc.toString() === raw, 'Inline card recognition leaves the outline note unchanged');
+      editor.dom.querySelector('.ri-source-mark').click();
+      await wait(() => app._probeModals?.at(-1)?.contentEl.textContent.includes('Flashcard'));
+      const inlineHistory = app._probeModals.at(-1); mount.appendChild(inlineHistory.containerEl);
+      ok(inlineHistory.contentEl.textContent.includes('Suggested deck from the note tag: Psychiatry'), 'Subdeck tag appears only as a suggested deck hint');
+      inlineHistory.close();
+      settings.srBoldCloze = true; controller.refresh(); await pause();
+      ok([...editor.dom.querySelectorAll('.ri-source-mark')].some(el => el.textContent.includes('cloze')), 'Bold becomes a cloze only after the explicit opt-in');
+      settings.srBoldCloze = false; controller.destroy(); controller = null;
       // The writer already ran above; these regressions isolate the explicit capture boundary.
       await generator.stop();
       host.generator.enqueue = h => queued.push(h);
