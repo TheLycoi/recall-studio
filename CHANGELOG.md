@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased: Inbox-only workspace
+
+- Remove the Chat tab and native Quiz/Make Flashcards commands and aliases.
+- Open Inbox directly. Keep source capture, card writing, editing, Verify, Export and source history.
+- Preserve plugin identity and stored cards, transcripts, revisions and export receipts. No data migration or external-quiz bridge is included.
+
+
 ## Recall Studio 0.1.12 beta
 
 - Stop adding capture badges to your notes. The "N cards created · N awaiting · N Anki confirmed" pill and the "Dismissed · no cards" pill no longer appear next to your prose, so a dismissed or exported passage leaves the note exactly as you wrote it.

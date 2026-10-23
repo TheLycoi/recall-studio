@@ -5,6 +5,7 @@ import { EditorView } from '@codemirror/view';
 import { InboxView } from '../src/inboxView';
 import RecallPlugin from '../src/main';
 import { runNamedCommand } from '../src/commands';
+import { captureSelection } from '../src/capture';
 import { LlmClient } from '../src/llm';
 import { InboxStore } from '../src/store';
 import { Generator } from '../src/generator';
@@ -45,16 +46,9 @@ export default class CandidateProbe extends Plugin {
     const keep = { index: 0, verdict: 'keep', reason: '', bloom: 'remember', kind: 'qa', front: '', back: '', text: '' };
     llm.codex = { complete: async req => {
       calls.push(req.label);
-      const value = req.label === 'study evidence' ? { selections: JSON.parse(req.user).passages.map(p => ({ id: p.id, quote: p.text })), gaps: [] }
-        : req.label === 'preparation' ? { facts: [{ id: 'F1', statement: source, quote: source }], plan: [{ id: 'P1', factIds: ['F1'], entity: 'Affinity', aspect: 'definition', value: 'strength', reason: 'Stated in source' }], exclusions: [], omissions: [], conflicts: [] }
+      const value = req.label === 'preparation' ? { facts: [{ id: 'F1', statement: source, quote: source }], plan: [{ id: 'P1', factIds: ['F1'], entity: 'Affinity', aspect: 'definition', value: 'strength', reason: 'Stated in source' }], exclusions: [], omissions: [], conflicts: [] }
         : req.label === 'grounded cards' ? { cards: [{ kind: 'cloze', front: '', back: '', text: source.replace('strength', '{{c1::strength}}'), planId: 'P1', factIds: ['F1'] }] }
         : req.label === 'audit' ? { verdicts: JSON.parse(req.user).cards.map((c, index) => ({ index, cardId: c.id, status: 'verified', reason: 'Supported by source' })) }
-        : req.label === 'quiz cue' ? { question: 'What does affinity mean?', shape: 'concept', expects: [1] }
-        : req.label === 'quiz question audit' ? { supported: true }
-        : req.label === 'grade' ? { points: [{ n: 1, status: 'wrong', said: 'Affinity means mass.', note: '', cue: '' }], feedback: 'UNTRUSTED_FEEDBACK' }
-        : req.label === 'quiz grade audit' ? { points: [{ n: 1, agrees: true }] }
-        : req.label === 'quiz choices' ? { question: 'Which statement describes affinity?', point: 1, choices: [{ id: 'A', text: source }, { id: 'B', text: 'Affinity is mass.' }], correctId: 'A' }
-        : req.label === 'quiz choice audit' ? { choices: [{ id: 'A', supported: true }, { id: 'B', supported: false }] }
         : req.label === 'verdicts' ? { verdicts: [{ ...keep, verdict: req.user.includes('What does it delay?') ? 'revise' : 'keep', reason: 'Name the subject.' }] }
         : req.label === 'card' ? { kind: 'qa', front: 'What does dormancy delay?', back: 'germination', text: '' } : null;
       if (!value) throw Error(`Unexpected provider request: ${req.label}`);
@@ -76,81 +70,35 @@ export default class CandidateProbe extends Plugin {
       view = new InboxView(this.app._probeLeaf, host);
       Object.assign(app.workspace, { getLeavesOfType: kind => kind === 'review-inbox' ? [{ view }] : [], getRightLeaf: () => null, revealLeaf: async () => {} });
       host.openInbox = RecallPlugin.prototype.openInbox.bind(host);
-      host.openChat = RecallPlugin.prototype.openChat.bind(host);
       if (view.containerEl === this.app._probeLeaf.view.containerEl) throw Error('Candidate shares live container');
       mount.appendChild(view.containerEl);
       await view.onOpen();
       const root = view.contentEl;
       const button = label => [...root.querySelectorAll('button')].find(b => b.textContent === label);
       ok(view.getDisplayText() === 'Recall Studio', 'Recall Studio display name');
-      ok(getComputedStyle(view.chatEl).display === 'none', 'Quiz starts hidden in the real theme');
-      button('Chat').click();
-      ok(button('Chat').getAttribute('aria-label') === 'Chat panel', 'Chat tab has its matching accessible name');
-      ok(view.chatEl.querySelector('h3')?.textContent === 'Chat' && view.chatEl.textContent.includes('Quiz & Make Flashcards · Experimental'), 'Chat heading keeps experimental activities explicit');
-      ok(view.chatEl.querySelector('textarea')?.getAttribute('aria-label') === 'Chat message', 'Shared composer has the Chat accessible name');
-      ok(getComputedStyle(view.cardsEl).display === 'none' && getComputedStyle(view.chatEl).display !== 'none', 'Quiz/Inbox panels are mutually exclusive');
-      const quiz = view.chat;
-      const type = text => { const box = root.querySelector('.review-chat textarea'); box.value = text; box.dispatchEvent(new Event('input')); };
-      type('quiz me on Binding sites'); button('Send').click(); await pause();
-      ok(quiz.awaitingGuide && !button('Free response') && !calls.length && !reads.length, 'Alias Quiz asks for a fresh guide before reads or provider calls');
-      type('Test the definition of affinity.'); button('Send').click(); await wait(() => !!button('Free response'));
-      button('Free response').click(); await wait(() => !quiz.busy);
-      ok(!!quiz.session?.current && !view.chatEl.textContent.includes(source), 'Free response hides source answer until attempted');
-      type('Affinity means mass.'); button('Submit answer').click(); await wait(() => !quiz.busy);
-      ok(view.chatEl.textContent.includes(source) && !view.chatEl.textContent.includes('UNTRUSTED_FEEDBACK'), 'Feedback uses literal source, not generated teaching prose');
-      ok(store.all().length === 0 && queued.length === 0, 'A miss creates no cards without consent');
-      button('Send to Inbox').click(); await pause();
-      ok(store.all().length === 1 && queued.length === 1 && store.all()[0].text === source, 'Explicit capture uses source rather than incorrect answer');
-      button('Sent to Inbox').click(); await pause();
-      ok(queued.length === 1, 'Repeated capture does not generate again');
-      await wait(() => store.all()[0].status === 'ready' || store.all()[0].status === 'error');
-      const generated = store.all()[0];
-      ok(generated.cards[0]?.kind === 'cloze' && generated.cards[0].generation?.audit.status === 'verified', 'Quiz capture completes preparation, single-cloze writing and audit');
-      button('Cancel').click(); const beforeNewQuiz = calls.length;
-      type('quiz me on Binding sites'); button('Send').click(); await pause();
-      ok(quiz.awaitingGuide && !button('Multiple choice') && calls.length === beforeNewQuiz, 'A second Quiz cannot reuse the previous guide');
-      type('Test the definition of affinity.'); button('Send').click(); await wait(() => !!button('Multiple choice'));
-      button('Multiple choice').click(); await wait(() => !quiz.busy);
-      ok(quiz.mc?.correctId === 'A' && !view.chatEl.textContent.includes('correctId'), 'Multiple choice keeps answer key internal');
-      const beforeGrade = calls.length; button(`A. ${source}`).click();
-      ok(calls.length === beforeGrade && quiz.session.results.length === 1, 'Multiple choice grading is local');
-      type('unfinished request'); button('Inbox').click(); button('Chat').click();
-      ok(quiz.draftQuestion === 'unfinished request', 'Panel round trip retains unfinished request');
-      button('Inbox').click();
-      ok(!root.querySelector('textarea[aria-label="Inbox command"]') && !button('Send command'), 'Inbox has no message composer');
-      const enterStudy = async text => { button('Chat').click(); type(text); button('Send').click(); await pause(); };
-      const chatIdentity = view.chat, cardsIdentity = view.cardsEl;
-      const studyTextarea = root.querySelector('.review-chat textarea');
-      const beforeRejected = { session: quiz.session, plan: quiz.plan, guide: quiz.guide, turns: JSON.stringify(quiz.turns), sources: JSON.stringify([...quiz.unitSources]), calls: calls.length, reads: reads.length, queued: queued.length, captures: store.all().length };
-      ok(await host.openChat('Make flashcards on Extra') === false, 'External study command refuses an unfinished Chat draft');
-      ok(quiz.draftQuestion === 'unfinished request'
-        && root.querySelector('.review-chat textarea') === studyTextarea && studyTextarea.value === 'unfinished request'
-        && view.chat === chatIdentity && view.cardsEl === cardsIdentity,
-      'External commands preserve the mounted Chat draft');
-      ok(quiz.session === beforeRejected.session && quiz.plan === beforeRejected.plan && quiz.guide === beforeRejected.guide
-        && JSON.stringify(quiz.turns) === beforeRejected.turns && JSON.stringify([...quiz.unitSources]) === beforeRejected.sources
-        && calls.length === beforeRejected.calls && reads.length === beforeRejected.reads
-        && queued.length === beforeRejected.queued && store.all().length === beforeRejected.captures,
-      'Rejected command leaves study state, reads, requests and captures unchanged');
-      type(''); // Explicitly clear the synthetic draft through its normal input event.
-      await enterStudy('Make flashcards');
-      ok(quiz.awaitingTopic && quiz.studyMode === 'flashcards' && quiz.guide === ''
-        && calls.length === beforeRejected.calls && reads.length === beforeRejected.reads, 'Chat Make Flashcards requires a fresh topic');
-      type('Extra'); button('Send').click(); await pause();
-      ok(quiz.awaitingGuide && view.chat === chatIdentity && view.cardsEl === cardsIdentity, 'Chat requires a fresh guide without replacing the Inbox');
-      type('Test the definition of affinity.'); button('Send').click(); await wait(() => !quiz.busy);
-      const extraCapture = store.all().find(h => h.sourcePath === extraFile.path);
-      ok(extraCapture?.text === source && queued.length === 2 && extraCapture.instruction.includes('Test the definition'), 'Make Flashcards sends exact notes and coverage instructions to the existing queue');
+      ok(!button('Chat') && !root.querySelector('.wikilm-tabs, .review-inbox-chat, .review-chat'), 'Only Inbox mounts; no hidden Chat or panel switch');
+      ok(!root.querySelector('textarea') && getComputedStyle(view.cardsEl).display !== 'none', 'Inbox is visible without a message composer');
+      ok(!calls.length && !reads.length, 'Opening Inbox does not start a study request');
+      for (const alias of ['/chat', '/flashcards', '/make-flashcards']) {
+        ok(await runNamedCommand(host, alias) === null, `${alias} is retired rather than opening a hidden study view`);
+      }
+      const capture = async f => captureSelection(host, {
+        getSelection: () => source, getCursor: which => ({ line: 0, ch: which === 'to' ? source.length : 0 }),
+        getValue: () => source, posToOffset: pos => pos.ch, getLine: () => source,
+        replaceRange: () => { throw Error('Source marking is disabled in this fixture'); },
+      }, f, 'Test the definition of affinity.');
+      settings.markMode = 'none';
+      const generated = await capture(file);
+      await wait(() => generated.status === 'ready' || generated.status === 'error');
+      ok(generated.cards[0]?.kind === 'cloze' && generated.cards[0].generation?.audit.status === 'verified', 'Source selection still runs preparation, card writing and audit');
+      ok(generated.sourcePath === file.path && generated.text === source, 'Capture retains original source provenance');
+      await capture(file);
+      ok(queued.length === 1 && store.all().length === 1, 'Repeated source capture does not generate twice');
+      const extraCapture = await capture(extraFile);
       await wait(() => extraCapture.status === 'ready' || extraCapture.status === 'error');
-      ok(extraCapture.cards.length === 1 && extraCapture.cards[0].generation?.audit.status === 'verified', 'Make Flashcards runs the existing writer and audit');
-      ok(view.chatEl.querySelector('a[href="synthetic/Extra.md"]') && /Experimental/.test(view.chatEl.textContent), 'Experimental Flashcards retain clickable source provenance');
-      button('Inbox').click();
-      await enterStudy('Make flashcards on Extra');
-      type('Test the definition of affinity.'); button('Send').click(); await wait(() => !quiz.busy);
-      ok(queued.length === 2 && store.all().length === 2, 'A fresh repeat cannot generate duplicate captures');
-      button('Inbox').click();
-      ok(await runNamedCommand(host, '/export') === true, 'Registered export command remains available');
-      ok(exports.length === 1 && view.panel === 'inbox', 'Export remains separate from Chat study text');
+      ok(extraCapture.cards.length === 1 && queued.length === 2, 'A second source uses the same Inbox writer');
+      ok(exports.length === 0, 'Capture and generation never export automatically');
+      ok(await runNamedCommand(host, '/export') === true && exports.length === 1, 'Registered export remains explicitly available');
       const h = makeHighlight({ sourcePath: file.path, sourceTitle: 'Synthetic', text: 'Dormancy delays germination.', status: 'ready' });
       const c = makeCard(h.id, { kind: 'qa', front: 'What does it delay?', back: 'germination' }); h.cards = [c]; store.add(h); view.render();
       root.querySelector(`[data-id="${c.id}"] button[title^="Check card against"]`).click();
@@ -208,19 +156,13 @@ export default class CandidateProbe extends Plugin {
         && currentEditor.querySelector('textarea[aria-label="Cloze sentence"]').value === 'My newer {{c1::unsaved}} sentence'
         && currentEditor.querySelector('textarea[aria-label="Extra"]').value === 'My newer unsaved annotation', 'Late learning preserves the mounted editor and newer unsaved fields');
       ok(JSON.stringify(c) === savedCard && JSON.stringify(store.revisions()) === savedHistory && !root.querySelector('.wikilm-schema-chip'), 'Learning preserves saved rewrite/history and defers the proposal header while editing');
-      type('Another unfinished study draft');
-      const editorStudyBox = root.querySelector('.review-chat textarea');
-      const beforeEditorCommand = { calls: calls.length, reads: reads.length, queued: queued.length, turns: JSON.stringify(quiz.turns) };
-      ok(await runNamedCommand(host, '/flashcards') === false, 'Registered study command refuses unfinished Chat text');
-      ok(quiz.draftQuestion === 'Another unfinished study draft'
-        && root.querySelector('.review-chat textarea') === editorStudyBox && editorStudyBox.value === 'Another unfinished study draft'
-        && cardRoot().querySelector('.wikilm-editor') === form && form.isConnected
+      const beforeRetired = { calls: calls.length, reads: reads.length, queued: queued.length };
+      ok(await runNamedCommand(host, '/flashcards') === null, 'Retired study command remains unavailable with a card editor open');
+      ok(cardRoot().querySelector('.wikilm-editor') === form && form.isConnected
         && question.value === 'My newer unsaved question after Convert' && sentence.value === 'My newer {{c1::unsaved}} sentence'
         && extra.value === 'My newer unsaved annotation' && JSON.stringify(c) === savedCard && JSON.stringify(store.revisions()) === savedHistory
-        && calls.length === beforeEditorCommand.calls && reads.length === beforeEditorCommand.reads
-        && queued.length === beforeEditorCommand.queued && JSON.stringify(quiz.turns) === beforeEditorCommand.turns,
-      'Rejected registered command preserves the real mounted card editor and Chat draft');
-      type(''); button('Inbox').click();
+        && calls.length === beforeRetired.calls && reads.length === beforeRetired.reads && queued.length === beforeRetired.queued,
+        'Retired command preserves the mounted card editor without reads, writes or generation');
       [...currentEditor.querySelectorAll('button')].find(b => b.textContent === 'Cancel').click();
       await wait(() => root.querySelector('.wikilm-schema-chip')?.textContent === '1 card rule suggestion');
       ok(view.editing === null && JSON.stringify(c) === savedCard, 'Cancel releases the proposal header without undoing the accepted rewrite');
@@ -287,75 +229,12 @@ export default class CandidateProbe extends Plugin {
       settings.srBoldCloze = true; controller.refresh(); await pause();
       ok([...editor.dom.querySelectorAll('.ri-source-mark')].some(el => el.textContent.includes('cloze')), 'Bold becomes a cloze only after the explicit opt-in');
       settings.srBoldCloze = false; controller.destroy(); controller = null;
-      // The writer already ran above; these regressions isolate the explicit capture boundary.
       await generator.stop();
-      host.generator.enqueue = h => queued.push(h);
-      raw = 'Affinity is the strength with which a drug binds its receptor, and this binding strength describes the interaction between that drug and its receptor. Receptor occupancy is the proportion of receptors occupied by a drug at a given concentration, and occupancy increases as that concentration rises. Efficacy is the capacity of a bound drug to activate its receptor and produce a biological response after binding has occurred.';
-      file.stat.mtime++; file.stat.size = raw.length;
-      button('Chat').click(); type(`quiz me on ${file.path}`); button('Send').click(); await pause();
-      type('Test the stated definitions.'); button('Send').click(); await pause();
-      button('Free response').click(); await wait(() => !quiz.busy);
-      const splitPoints = quiz.session.items.flatMap(item => item.points);
-      ok(splitPoints.length > 1 && splitPoints.every(point => /#s\d+$/.test(point.id) && quiz.unitSources.get(point.id)?.path === file.path), 'Split quiz points retain their original passage provenance');
-      const beforeSplit = { captures: store.all().length, queued: queued.length };
-      button('Skip').click(); await pause();
-      ok(store.all().length === beforeSplit.captures && queued.length === beforeSplit.queued, 'Split-point miss alone does not capture or queue');
-      button('Send to Inbox').click(); await pause();
-      const splitCapture = store.all().find(h => h.sourcePath === file.path && h.text === raw);
-      ok(splitCapture && store.all().length === beforeSplit.captures + 1 && queued.length === beforeSplit.queued + 1 && queued.at(-1) === splitCapture, 'Explicit split-point capture keeps the full original passage and queues once');
-      // Two-page synthetic PDF: blank first page, source definition on page 2.
-      const pdfBytes = Uint8Array.from(atob('JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUiA0IDAgUl0gL0NvdW50IDIgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIgNzkyXSAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA1IDAgUiA+PiA+PiAvQ29udGVudHMgNiAwIFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIgNzkyXSAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA1IDAgUiA+PiA+PiAvQ29udGVudHMgNyAwIFIgPj4KZW5kb2JqCjUgMCBvYmoKPDwgL1R5cGUgL0ZvbnQgL1N1YnR5cGUgL1R5cGUxIC9CYXNlRm9udCAvSGVsdmV0aWNhID4+CmVuZG9iago2IDAgb2JqCjw8IC9MZW5ndGggMCA+PgpzdHJlYW0KZW5kc3RyZWFtCmVuZG9iago3IDAgb2JqCjw8IC9MZW5ndGggOTQgPj4Kc3RyZWFtCkJUIC9GMSAxMiBUZiA3MiA3MjAgVGQgKEFmZmluaXR5IGlzIHRoZSBzdHJlbmd0aCB3aXRoIHdoaWNoIGEgZHJ1ZyBiaW5kcyBpdHMgcmVjZXB0b3IuKSBUaiBFVAplbmRzdHJlYW0KZW5kb2JqCnhyZWYKMCA4CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAwMCBuIAowMDAwMDAwMDU4IDAwMDAwIG4gCjAwMDAwMDAxMjEgMDAwMDAgbiAKMDAwMDAwMDI0NyAwMDAwMCBuIAowMDAwMDAwMzczIDAwMDAwIG4gCjAwMDAwMDA0NDMgMDAwMDAgbiAKMDAwMDAwMDQ5MSAwMDAwMCBuIAp0cmFpbGVyCjw8IC9TaXplIDggL1Jvb3QgMSAwIFIgPj4Kc3RhcnR4cmVmCjYzNAolJUVPRgo='), c => c.charCodeAt(0));
-      const pdfFile = { path: 'synthetic/NativeEvidence.pdf', basename: 'NativeEvidence', extension: 'pdf', stat: { mtime: 1, size: pdfBytes.length } };
-      app.vault.getFiles = () => [file, extraFile, pdfFile];
-      app.vault.getAbstractFileByPath = path => app.vault.getFiles().find(f => f.path === path) ?? null;
-      host.fileAt = app.vault.getAbstractFileByPath;
-      app.vault.readBinary = async f => { if (f !== pdfFile) throw Error('Unexpected PDF read'); reads.push(f.path); return pdfBytes.buffer.slice(0); };
-      button('Inbox').click();
-      const beforePdf = { reads: reads.length, calls: calls.length, captures: store.all().length, queued: queued.length };
-      await enterStudy(`Make flashcards on ${pdfFile.path}`);
-      ok(quiz.awaitingGuide && reads.length === beforePdf.reads && calls.length === beforePdf.calls, 'Explicit PDF command requires a fresh guide before native extraction');
-      type('Test the definition of affinity.'); button('Send').click(); await wait(() => !quiz.busy);
-      const pdfCapture = store.all().find(h => h.sourcePath === pdfFile.path);
-      ok(pdfCapture?.page === 2 && pdfCapture.text === source && pdfCapture.origin === 'pdf' && reads.slice(beforePdf.reads).every(path => path === pdfFile.path), 'Native PDF.js extraction preserves exact file, page and source text');
-      ok(store.all().length === beforePdf.captures + 1 && queued.length === beforePdf.queued + 1 && queued.at(-1) === pdfCapture, 'PDF Make Flashcards queues the exact passage through the existing capture boundary');
-      type(`quiz me on ${pdfFile.path}`); button('Send').click(); await pause();
-      ok(quiz.awaitingGuide && !button('Free response'), 'PDF Quiz asks for new coverage instead of reusing Flashcards instructions');
-      type('Test the definition of affinity.'); button('Send').click(); await pause();
-      button('Free response').click(); await wait(() => !quiz.busy);
-      ok(!!quiz.session?.current && quiz.turns.at(-1).source?.page === 2 && quiz.turns.at(-1).source?.path === pdfFile.path && view.chatEl.querySelector(`a[href="${pdfFile.path}#page=2"]`), 'Native PDF Quiz starts with page-linked source provenance');
-      const beforePdfMiss = queued.length;
-      button('Skip').click(); await pause();
-      ok(queued.length === beforePdfMiss, 'PDF Quiz miss still requires deliberate capture');
-      button('Send to Inbox').click(); await pause();
-      ok(queued.length === beforePdfMiss && store.all().filter(h => h.sourcePath === pdfFile.path).length === 1, 'Explicit PDF Quiz capture reuses the existing passage without duplicate queueing');
-      const beforeScopeFunctions = { getFiles: app.vault.getFiles, getAbstractFileByPath: app.vault.getAbstractFileByPath, read: app.vault.read, getFileCache: app.metadataCache.getFileCache, isUserIgnored: app.metadataCache.isUserIgnored };
-      const ignoredFile = { ...file, path: 'ignored/Private.md', basename: 'Private' };
-      app.vault.getFiles = () => [...beforeScopeFunctions.getFiles(), ignoredFile];
-      app.vault.getAbstractFileByPath = path => app.vault.getFiles().find(f => f.path === path) ?? null;
-      app.vault.read = async f => { if (f === ignoredFile) { reads.push(f.path); throw Error('Excluded synthetic note must not be read'); } return beforeScopeFunctions.read(f); };
-      app.metadataCache.isUserIgnored = path => path === ignoredFile.path;
-      app.metadataCache.getFileCache = f => f === file ? { frontmatter: { aliases: ['Binding sites', 'missing/Private', 'ignored/Private', 'Missing'] } } : beforeScopeFunctions.getFileCache(f);
-      try {
-        for (const mode of ['quiz me', 'make flashcards']) for (const requested of ['missing/Private.md', 'ignored/Private.md', '[[Missing.md ]]']) {
-          const beforeScope = { reads: reads.length, calls: calls.length, captures: store.all().length, queued: queued.length };
-          await enterStudy(`${mode} on ${requested}`);
-          ok(quiz.awaitingGuide && reads.length === beforeScope.reads && calls.length === beforeScope.calls, `${mode} ${requested} requests fresh coverage before resolution`);
-          type('Test the definition of affinity.'); button('Send').click(); await pause();
-          if (button('Free response')) { button('Free response').click(); await wait(() => !quiz.busy); }
-          ok(quiz.target === null && !quiz.choices.length && /No eligible note or tag matched/.test(view.chatEl.textContent)
-            && reads.length === beforeScope.reads && calls.length === beforeScope.calls
-            && store.all().length === beforeScope.captures && queued.length === beforeScope.queued,
-          `${mode} ${requested} fails closed before an unrelated alias can read, disclose or capture`);
-        }
-      } finally {
-        Object.assign(app.vault, { getFiles: beforeScopeFunctions.getFiles, getAbstractFileByPath: beforeScopeFunctions.getAbstractFileByPath, read: beforeScopeFunctions.read });
-        Object.assign(app.metadataCache, { getFileCache: beforeScopeFunctions.getFileCache, isUserIgnored: beforeScopeFunctions.isUserIgnored });
-      }
       return { checks, providerRequests: calls, syntheticDiskFiles: files.size, actualNetworkRequests: 0 };
     } finally {
       readingChild?.unload(); controller?.destroy(); editor?.destroy();
       if (view) { await view.onClose(); view.unload(); }
-      store.close(); mount.remove();
+      await generator.stop(); store.close(); mount.remove();
       if (refs.size) throw Error(`Leaked ${refs.size} synthetic subscriptions`);
     }
   }

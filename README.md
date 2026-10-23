@@ -2,12 +2,13 @@
 
 Recall Studio turns the passages you highlight into flashcards. Cards land in a
 source-linked inbox as drafts. Export accepts the cards you choose and sends
-them to Anki. Chat in the same panel hosts experimental Quiz and Make
-Flashcards workflows grounded in your notes and PDFs.
+them to Anki. Inbox is the only workspace. Use an external assistant for
+conversation and quizzing; capture supporting note passages here for card writing.
 
 The repository and BRAT target are `TheLycoi/recall-studio`, formerly
 `TheLycoi/review-inbox`. Plugin ID `review-inbox`, default storage
-`Review Inbox/` and command IDs stay unchanged. Version 0.1.12 is a beta release.
+`Review Inbox/` and retained command IDs stay unchanged. This unreleased change
+is based on beta 0.1.12; it removes the native Chat, Quiz and Make Flashcards entrypoints.
 It adds no scheduler.
 
 ## What it does
@@ -35,8 +36,6 @@ Export accepts the visible drafts in its scope and sends them to Anki with sourc
 | Send selection to inbox with instructions… | `capture-instruct`, `pdf-instruct` | The same, with a one-line instruction for the card writer first. |
 | Open inbox | `inbox` | Opens the flashcard inbox. |
 | Open source history | `source-history` | Shows retained captures and cards for the current note or PDF, with a picker for other captured sources. |
-| Open quiz (Experimental) | `chat` | Focuses the study conversation inside Inbox. The legacy command ID and alias remain compatible. |
-| Make flashcards (Experimental) | `make flashcards`, `flashcards` | Asks for a topic and fresh coverage guide, then queues selected note excerpts for the Inbox card writer. |
 | Export to Anki | `export` | Accepts and exports all eligible drafts. Inbox Export buttons limit this to visible cards in their scope. |
 | Open the card rules note | `rules`, `schema` | Opens your house rules for the card writer, and creates the note if needed. |
 | Review card rule suggestions | `suggestions` | Rules Recall Studio proposes from the edits you keep making. Accept, edit, or dismiss each one. |
@@ -119,56 +118,24 @@ history, without PDF overlays or a claim that the text was reverified.
 These overlays do not edit the source note. Card counts describe captured
 passages, not whether you learned them or completed the whole note.
 
-## Quiz and Make Flashcards (Experimental)
+## External quizzes and source capture
 
-Open the Chat tab for these experimental study workflows, included in 0.1.6.
+Native Chat and its experimental Quiz/Make Flashcards commands are removed.
+Inbox opens directly without a tab switch or message box. Existing captured
+passages, cards, revisions, export receipts and stored legacy transcripts are
+not deleted or migrated.
 
-Type `quiz me on human growth hormone` or `make flashcards on human growth hormone`
-in the Chat tab. The Inbox has no message box. Bare commands ask for a topic.
-Every run then asks for a fresh study guide or instructions about what to cover.
-The guide is coverage only: all factual evidence must come from eligible vault notes,
-never general model knowledge, guide-only claims or earlier assistant answers.
+Use your external assistant to quiz you. For a missed concept, open the original
+supporting note, select the relevant passage, and run **Send selection to inbox
+with instructions…**. Describe the missed concept in the instruction; let the
+existing card writer prepare the draft. Capture the original evidence, not the
+assistant's explanation or your incorrect answer. Review and Verify the result
+before deciding whether to Export. Automatic delivery from an external assistant
+requires a separate supported bridge; this change does not add one.
 
-In this unreleased build, Quiz also offers **Attach PDF** at the coverage prompt.
-Choose one local PDF, optionally add typed instructions, select Send, then choose
-free response or multiple choice. The attachment is temporary and is not imported
-into the vault. Its selectable text goes to your configured model when Quiz starts;
-it never becomes answer evidence or a citation. Remove PDF, Cancel, a new study
-request or closing the view clears the attachment. Make Flashcards keeps its typed-guide flow.
-
-PDFs are limited to 20 MiB and 200 pages. Encrypted, unreadable and image-only PDFs
-are rejected; pages without selectable text are reported before submission. There
-is no OCR. Combined typed and PDF coverage is limited to 64,000 characters and is
-rejected rather than shortened when it exceeds that limit.
-
-Registered actions remain available in Obsidian's command palette. Open writing
-rules opens the rules; Export to Anki keeps the existing export-all behavior.
-Typing Make Flashcards queues references; it does not export cards. Existing command IDs and hotkeys remain compatible.
-
-Topic retrieval searches note contents as well as titles. Explicit note paths,
-aliases and #tags resolve a source scope; ambiguous names require a choice.
-Missing or excluded explicit sources must not broaden into other notes. The
-model selects exact quotations, not composed facts, and the existing card writer
-receives those excerpts with source paths and locators. Duplicate active or
-archived captures never trigger another batch.
-
-Choose free response or multiple choice for Quiz. Questions, learner answers and
-feedback stay in the conversation. Free response checks complete point judgments
-and uses an independent semantic audit. Multiple choice hides its answer key until
-an attempt and grades locally against the checked key. Feedback shows source
-excerpts and links; hints name the source section only. These checks are
-probabilistic, so compare feedback with the source.
-
-Misses become cards only when you select **Send to Inbox**. That action captures
-the original note excerpt, never the incorrect answer. It changes no review schedules.
-
-Notes, unsaved editor content and exclusions are rechecked before provider work
-and after asynchronous results. Source changes, cancellation or unload invalidate
-late results without aborting unrelated generation. Retrieval is lexical and
-bounded, not an exhaustive vault search: at most 40 candidate passages and 12,000
-evidence characters reach selection. The existing Markdown and PDF reader limits
-still apply. Ordinary Chat messages retain their 8,000-character limit.
-Exact quotations prove where text came from, not that the text is factually correct.
+The unmounted legacy study modules and their independent safety tests remain
+for compatibility and possible reuse. Neither chat view is included in the
+production entrypoint. There is no data deletion or scheduler change.
 
 ## Inline flashcards in your notes
 
@@ -206,7 +173,7 @@ and `#flashcards` tags independently.
 - **Recall Studio folder** (under Card writer): where Recall Studio keeps the card rules note, the inbox, and the rule suggestions. Default `Review Inbox/`.
 - **Card quality**: the rules the card writer and the critique pass follow.
 - **Capture**: how a selection or a highlight is queued for a card.
-- **Sources**: the wiki or sources folder protected from capture marking; Quiz resolves the requested eligible notes throughout the vault.
+- **Sources**: the wiki or sources folder protected from capture marking.
 - **Existing Spaced Repetition cards**: read-only, opt-in scope and syntax settings.
 - **Anki**: the deck, note types, and tags used on export.
 
@@ -238,10 +205,9 @@ its JSON event stream, so the model is whatever that CLI is signed in to.
 Card generation sends the captured passage, surrounding context, source title
 and heading, your instructions, house rules and existing cards to the selected
 provider. If history examples are enabled, selected examples also enter those
-requests. Later stages include the saved preparation and drafted cards. Quiz
-sends selected source sections, the question, candidate choices or learner answer,
-and proposed judgments to the configured provider for writing/checking. Old
-conversation is not evidence. Source-history and SR recognition run locally.
+requests. Later stages include the saved preparation and drafted cards.
+Source-history and SR recognition run locally. External assistants have their own
+data-disclosure settings; Recall does not configure or control them.
 
 - **Codex** (default): Recall Studio starts the Codex CLI, and Codex sends the request to OpenAI under your ChatGPT account.
 - **DeepSeek**: Recall Studio posts to `https://api.deepseek.com` with your API key.

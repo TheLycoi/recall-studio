@@ -15,7 +15,7 @@ export type Provider = "codex" | "deepseek" | "opencode";
 
 export interface RecallSettings extends SrRecognitionSettings {
   // LLM
-  /** Which provider writes the cards and grades the quiz. */
+  /** Which provider writes and checks the cards. */
   provider: Provider;
   /** Absolute path to the codex binary; empty = auto-detect (PATH, then the ChatGPT app bundle). */
   codexPath: string;
@@ -67,7 +67,7 @@ export interface RecallSettings extends SrRecognitionSettings {
   exportFolder: string;
 
   // Sources
-  /** The folder other notes live in (a wiki plugin, a sources folder). Recall Studio reads the pages you select from it for chat and never changes it. */
+  /** The wiki or sources folder protected from capture marking. */
   topicFolder: string;
 
   // Card quality
@@ -543,7 +543,7 @@ export class RecallSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Wiki folder")
-      .setDesc("The folder your wiki or sources live in. Capture never marks these pages. Quiz resolves eligible notes throughout the vault from the requested note, alias or tag.")
+      .setDesc("The folder your wiki or sources live in. Capture never marks these pages.")
       .addText((t) =>
         t.setValue(s.topicFolder).onChange((v) => {
           s.topicFolder = v.trim() || DEFAULT_SETTINGS.topicFolder;

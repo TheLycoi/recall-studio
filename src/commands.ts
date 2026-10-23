@@ -96,14 +96,6 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
     available: () => true,
     run: (p) => openCurrentSourceHistory(p),
   },
-  "open-chat": {
-    available: () => true,
-    run: (p) => p.openChat(),
-  },
-  "make-flashcards": {
-    available: () => true,
-    run: (p) => p.openChat("Make flashcards"),
-  },
   "export-reviewed": {
     available: () => true,
     run: (p) => void p.exportHighlights(p.store.all().filter((h) => h.status === "ready")),

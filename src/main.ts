@@ -9,7 +9,6 @@ import { paletteCommands } from "./commandTable";
 import { Generator } from "./generator";
 import { Highlighter } from "./highlighter";
 import { InboxView, VIEW_TYPE_INBOX } from "./inboxView";
-import { VIEW_TYPE_CHAT } from "./reviewChatView";
 import { LlmClient } from "./llm";
 import { askInstruction, pickDeck } from "./modals";
 import type { Card, Highlight } from "./model";
@@ -111,7 +110,7 @@ export default class RecallPlugin extends Plugin {
 
     this.app.workspace.onLayoutReady(() => {
       this.app.workspace.iterateAllLeaves(leaf => {
-        if (leaf.getViewState().type === VIEW_TYPE_CHAT) {
+        if (leaf.getViewState().type === "review-inbox-chat") {
           void leaf.setViewState({ type: VIEW_TYPE_INBOX }).catch(console.error);
         }
       });
@@ -199,18 +198,6 @@ export default class RecallPlugin extends Plugin {
     if (!leaf) return;
     if (!existing[0]) await leaf.setViewState({ type: VIEW_TYPE_INBOX, active: true });
     await this.app.workspace.revealLeaf(leaf);
-  }
-
-  /** Focus Quiz inside the existing Inbox, retaining the entrypoint identity. */
-  async openChat(message?: string): Promise<boolean> {
-    await this.openInbox();
-    const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_INBOX)[0];
-    if (leaf?.view instanceof InboxView) {
-      if (message) return leaf.view.startStudy(message);
-      leaf.view.focusChat();
-      return true;
-    }
-    return false;
   }
 
   async chooseDeck(): Promise<string | null> {

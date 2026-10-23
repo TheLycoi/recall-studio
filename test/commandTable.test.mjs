@@ -23,8 +23,6 @@ test("the command table holds Review Inbox's commands and nothing else", () => {
       "capture-selection-with-instruction",
       "open-inbox",
       "open-source-history",
-      "open-chat",
-      "make-flashcards",
       "export-reviewed",
       "open-schema",
       "review-schema-suggestions",
@@ -34,8 +32,8 @@ test("the command table holds Review Inbox's commands and nothing else", () => {
   );
 });
 
-test("the palette shows nine commands", () => {
-  assert.equal(t.paletteCommands(t.COMMAND_TABLE).length, 9);
+test("the palette shows seven commands", () => {
+  assert.equal(t.paletteCommands(t.COMMAND_TABLE).length, 7);
 });
 
 test("no command name or alias is a wiki verb", () => {
@@ -46,9 +44,8 @@ test("no command name or alias is a wiki verb", () => {
 });
 
 test("there is no quiz or spaced-repetition command", () => {
-  // The Review Inbox identity keeps capture, inbox, chat and Anki export. The
-  // quiz product and the Spaced Repetition export target are gone.
-  for (const gone of ["open-quiz", "export-spaced", "open-dashboard", "open-review", "statistics"]) {
+  // Capture, Inbox and Anki export remain; native study entrypoints are retired.
+  for (const gone of ["open-chat", "make-flashcards", "open-quiz", "export-spaced", "open-dashboard", "open-review", "statistics"]) {
     assert.ok(!t.COMMAND_TABLE.some((c) => c.id === gone), `${gone} should not exist`);
   }
 });

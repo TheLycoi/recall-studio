@@ -27,12 +27,6 @@ function dom() {
   };
   return extend(element());
 }
-const type = (box, value) => { box.value = value; box.events.input(); };
-const studyBox = view => nodes(view.chatEl).find(n => n.tagName === 'TEXTAREA');
-async function say(view, message) {
-  type(studyBox(view), message);
-  await button(view.chatEl, view.chat.session?.current ? 'Submit answer' : 'Send').events.click();
-}
 async function fixture(t) {
   const previousWindow = globalThis.window;
   globalThis.window = { setTimeout: () => 0, clearTimeout() {}, requestAnimationFrame: () => {} };
@@ -62,79 +56,15 @@ async function fixture(t) {
   field.value = 'Unsent card question';
   return { ...h, root, view, effects, editor, field, card };
 }
-function snapshot(f) {
-  const chat = f.view.chat;
-  return {
-    state: JSON.stringify(chat, (key, value) => ['contentEl', 'host', 'study', 'reader', 'cleanup'].includes(key) ? undefined : value),
-    effects: [...f.effects], rows: JSON.stringify(f.rows), queued: [...f.queued],
-    session: chat.session, plan: chat.plan, study: chat.study, sources: [...chat.unitSources],
-    turns: [...chat.turns], guide: chat.guide,
-  };
-}
-
-// Palette/programmatic entrypoints must preserve the mounted Chat draft.
-test('external study commands preserve the Chat draft and mounted card editor', async t => {
-  const f = await fixture(t), { view } = f;
-  await button(f.root, 'Chat').events.click();
-  const box = studyBox(view), chat = view.chat, cards = view.cardsEl;
-  type(box, 'Unsent study draft that must survive a panel switch');
-  await button(f.root, 'Inbox').events.click();
-  const before = snapshot(f);
-  assert.equal(await view.startStudy('quiz me on affinity'), false);
-  assert.equal(studyBox(view), box, 'Rejection must not redraw the study composer');
-  assert.equal(box.value, 'Unsent study draft that must survive a panel switch');
-  assert.deepEqual(snapshot(f), before);
-  assert.equal(view.chat, chat); assert.equal(view.cardsEl, cards);
-  await button(f.root, 'Inbox').events.click();
-  await button(f.root, 'Chat').events.click();
-  assert.equal(studyBox(view), box);
-  assert.ok(nodes(view.cardsEl).includes(f.editor));
+test('background store changes preserve the actual unsaved card editor', async t => {
+  const f = await fixture(t);
+  const before = JSON.stringify(f.rows);
+  f.view.scheduleRender();
+  assert.ok(nodes(f.view.cardsEl).includes(f.editor));
   assert.equal(f.field.value, 'Unsent card question');
-  assert.equal(f.card.front, 'What is affinity?');
-  type(box, '');
-  await button(f.root, 'Inbox').events.click();
-  assert.equal(await view.startStudy('quiz me on affinity'), true);
-  assert.equal(view.chat.awaitingGuide, true);
-  assert.match(text(view.chatEl), /Paste a study guide/);
-  assert.deepEqual(f.effects, []); assert.equal(f.queued.length, 0);
-});
-
-test('unfinished guide and answer reject external submissions until the user sends the draft', async t => {
-  for (const phase of ['guide', 'answer']) {
-    await t.test(phase, async t => {
-      const f = await fixture(t), { view } = f;
-      await view.startStudy('quiz me on Receptors');
-      if (phase === 'answer') {
-        await say(view, 'Test the definition.');
-        await button(view.chatEl, 'Free response').events.click();
-        assert.ok(view.chat.session?.current);
-      }
-      const box = studyBox(view), draft = phase === 'guide' ? 'Focus on binding strength.' : SOURCE;
-      type(box, draft);
-      const before = snapshot(f);
-      assert.equal(await view.chat.submit('Make flashcards on Receptors'), false);
-      assert.equal(studyBox(view), box); assert.equal(box.value, draft);
-      assert.deepEqual(snapshot(f), before);
-      await button(f.root, 'Inbox').events.click();
-      assert.equal(await view.startStudy('quiz me on Receptors'), false);
-      assert.equal(studyBox(view), box); assert.equal(box.value, draft);
-      assert.deepEqual(snapshot(f), before);
-      await button(view.chatEl, phase === 'answer' ? 'Submit answer' : 'Send').events.click();
-      assert.equal(view.chat.draftQuestion, '', 'Internal Send must still consume its own draft');
-      if (phase === 'guide') assert.equal(view.chat.guide, draft);
-      else assert.equal(view.chat.session.results.length, 1);
-      const effects = [...f.effects];
-      await button(f.root, 'Inbox').events.click();
-      assert.equal(await view.startStudy('quiz me on Receptors'), true);
-      assert.equal(view.chat.guide, '');
-      assert.equal(view.chat.awaitingGuide, true);
-      assert.equal(button(view.chatEl, 'Free response'), undefined);
-      assert.deepEqual(f.effects, effects, 'Retry must request fresh coverage before further reads or requests');
-      assert.equal(f.queued.length, 0);
-      assert.ok(nodes(view.cardsEl).includes(f.editor));
-      assert.equal(f.field.value, 'Unsent card question');
-    });
-  }
+  assert.equal(JSON.stringify(f.rows), before);
+  assert.equal(f.view.dirty, true);
+  assert.deepEqual(f.effects, []);
 });
 
 test('public submit still accepts an empty composer and rejects busy or closed study views', async () => {

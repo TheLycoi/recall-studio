@@ -125,7 +125,7 @@ test('Verify exposes a shared busy state, rejects overlapping clicks and snapsho
 for (const [name, revoke] of Object.entries({
   settings: f => { f.settings.writerInstructions = 'New rules'; },
   'client-abort': f => f.host.llm.abort(),
-  panel: f => f.view.tabChat.events.click(),
+  close: f => f.view.onClose(),
 })) test(`Verify retains click-time ${name} authorization between cards`, async t => {
   const f = await fixture(t);
   const touch = f.host.store.touch;
@@ -135,7 +135,7 @@ for (const [name, revoke] of Object.entries({
   assert.equal(f.second.cards[0].userCheck, undefined);
 });
 
-for (const phase of ['rules', 'transport']) for (const hidden of ['source', 'flagged', 'filter', 'panel']) {
+for (const phase of ['rules', 'transport']) for (const hidden of ['source', 'flagged', 'filter', 'close']) {
   test(`Verify stops when its current target becomes hidden by ${hidden} during ${phase}`, async t => {
     const gate = barrier();
     let reached = false;
@@ -152,7 +152,7 @@ for (const phase of ['rules', 'transport']) for (const hidden of ['source', 'fla
     if (hidden === 'source') byClass(f.root, 'wikilm-collapse').events.click();
     else if (hidden === 'flagged') byClass(f.root, 'wikilm-flagged-toggle').events.click();
     else if (hidden === 'filter') { const filter = byClass(f.root, 'wikilm-filter'); filter.value = 'exported'; filter.events.change(); }
-    else f.view.tabChat.events.click();
+    else await f.view.onClose();
     gate.release();
     await run;
     assert.equal(f.requests.length, phase === 'rules' ? 0 : 1, 'Hidden targets cannot authorize more disclosure');
