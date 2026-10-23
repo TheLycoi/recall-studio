@@ -107,6 +107,8 @@ test('assembled requests share retrieval-quality criteria before and after plan 
   assert.match(write.system, /six words/);
   assert.doesNotMatch(write.system, /never framing words/i);
   assert.match(audit.system, /source-supported.*poor retrieval.*failed/i);
+  assert.match(audit.system, /plan grouping.*does not require.*joint retrieval/i);
+  assert.match(audit.system, /condition and consequence.*separate cloze reviews/i);
   assert.match(audit.system, /findings only: never repair cards/);
   assert.deepEqual(f.calls.slice(0, 3).map(c => c.retryInvalidResponse), [false, false, false]);
 });

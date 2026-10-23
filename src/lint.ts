@@ -20,6 +20,13 @@ function words(s: string): string[] {
     .filter((w) => w.length > 0);
 }
 
+function containsAnswer(visible: string, answer: string): boolean {
+  const cue = words(normalizePlain(visible));
+  const target = words(normalizePlain(answer));
+  return target.length > 0 && target.length <= cue.length
+    && cue.some((_, i) => target.every((word, k) => cue[i + k] === word));
+}
+
 /** Cloze markers stripped down to their body content, i.e. what the reader sees. */
 function clozeVisibleText(text: string): string {
   return text.replace(/\{\{c\d+::([\s\S]*?)(?:::[^}]*)?\}\}/g, "$1");
@@ -39,11 +46,28 @@ export function lintCard(card: Card, highlight: Highlight, siblings: Card[]): Li
       failures.push("cloze-not-grounded");
     }
 
-    const deletions: { n: number; body: string }[] = [];
-    for (const m of card.text.matchAll(/\{\{c(\d+)::([\s\S]*?)(?:::[^}]*)?\}\}/g)) {
-      deletions.push({ n: Number(m[1]), body: m[2] });
+    const deletions: { n: number; body: string; hint: string; start: number; end: number }[] = [];
+    for (const m of card.text.matchAll(/\{\{c(\d+)::([\s\S]*?)(?:::([^}]*))?\}\}/g)) {
+      deletions.push({ n: Number(m[1]), body: m[2], hint: m[3] ?? "", start: m.index, end: m.index + m[0].length });
     }
     const distinctNumbers = [...new Set(deletions.map((d) => d.n))].sort((a, b) => a - b);
+
+    // A review hides all spans with its number; hidden slots separate visible phrases.
+    const leaks = distinctNumbers.some(n => {
+      const segments: string[] = [];
+      let visible = "", cursor = 0;
+      for (const d of deletions) {
+        visible += card.text.slice(cursor, d.start);
+        if (d.n === n) {
+          segments.push(visible, d.hint);
+          visible = "";
+        } else visible += d.body;
+        cursor = d.end;
+      }
+      segments.push(visible + card.text.slice(cursor));
+      return deletions.filter(d => d.n === n).some(d => segments.some(segment => containsAnswer(segment, d.body)));
+    });
+    if (leaks) failures.push("answer-in-question");
 
     // A cloze needs an answer to hide; the source determines how many.
     // One deletion is valid. There is no count ceiling or forced Q&A conversion.
@@ -89,13 +113,7 @@ export function lintCard(card: Card, highlight: Highlight, siblings: Card[]): Li
     // normalized question as a whole run of words. A raw substring test
     // false-positives on short answers that merely spell a letter sequence
     // inside a longer word ("on" inside "contemplation").
-    const fWords = words(normalizePlain(card.front));
-    const bWords = words(normalizePlain(card.back));
-    const contains =
-      bWords.length > 0 &&
-      bWords.length <= fWords.length &&
-      fWords.some((_, i) => bWords.every((w, k) => fWords[i + k] === w));
-    if (contains) failures.push("answer-in-question");
+    if (containsAnswer(card.front, card.back)) failures.push("answer-in-question");
   }
 
   // card-long: front + back + text combined <=60 words. Cloze text is
@@ -201,7 +219,7 @@ export const LINT_FIX_INSTRUCTIONS: Record<LintFailureId | LintWarningId, string
   "qa-answer-long": "the answer runs past a short phrase; narrow the question so the answer is a term, number, name, or short phrase",
   "qa-yes-no": "the question can be answered yes or no, which is guessable; ask what, which, how, why, when, or how many instead",
   "card-long": "the card is too long to read at a glance; cut it to the words that carry the retrieval",
-  "answer-in-question": "the question already contains its own answer, so nothing is retrieved; withhold the word the answer turns on",
+  "answer-in-question": "the visible review text already contains the answer; remove the answer leak from the question, cloze framing, visible sibling spans, or hints while preserving a supported cue; do not combine independent targets under one number merely to hide the leak",
   "duplicate-card": "another card on this highlight tests the same fact; either test a genuinely different fact or a different direction",
   "shared-answer": "another card on this highlight has the same answer; add the cue that tells the two apart, or test a different fact",
   "cross-interference": "a card on another highlight has this answer; add a cue naming this subject so the two cannot be confused",
