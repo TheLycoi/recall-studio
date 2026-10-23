@@ -636,11 +636,10 @@ export class InboxView extends ItemView {
         this.editing = this.editing === c.id ? null : c.id;
         this.render();
       });
-      // The star is the button a reader reaches for to improve a card, so when
-      // the pipeline already recorded what is wrong it fixes the card on one
-      // click instead of asking for an instruction that only restates the
-      // critique.
-      btn(RECALL_SPARK_ICON, this.checking.has(c.id) ? "Checking and repairing card…" : "Check card against best practices (repair issues)", () => void this.checkAgainstPractices(h, c));
+      // The star is the reader's AI rewrite: it asks what to change, then runs
+      // the same guarded instruction path as the editor's Rewrite box. The
+      // best-practices check-and-repair transaction now lives on Verify.
+      btn(RECALL_SPARK_ICON, this.checking.has(c.id) ? "Rewriting card…" : "Rewrite card with AI (asks what to change)", () => void this.rewrite(h, c));
       btn(c.kind === "qa" ? RECALL_CLOZE_ICON : RECALL_QA_ICON, c.kind === "qa" ? "Convert to cloze" : "Convert to Q&A", () =>
         void this.rewrite(h, c, c.kind === "qa" ? "Convert this Q&A card into a cloze card." : "Convert this cloze card into a question and answer card."),
       );

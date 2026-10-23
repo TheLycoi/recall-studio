@@ -16,6 +16,7 @@ function fixture() {
   const root = element(), revisions = [], calls = [];
   const settings = { lintMode: 'badge', schemaLearning: false };
   const host = { app: {}, settings, store: { all: () => [h], findCard: id => h.cards.includes(c) && id === c.id ? { highlight: h, card: c } : undefined, touch() {}, recordRevision: r => revisions.push(r) }, llm: {
+    requestAuthorization: () => () => true,
     critiqueCards: async (_h, cards) => { calls.push('check'); return [{ ...keep, verdict: cards[0].front.includes('it delay') ? 'revise' : 'keep', reason: 'Name the subject.' }]; },
     rewriteCard: async () => { calls.push('rewrite'); return { kind: 'qa', front: 'What does dormancy delay?', back: 'germination', text: '' }; },
   } };
@@ -23,9 +24,13 @@ function fixture() {
   return { h, c, root, host, view, calls, revisions };
 }
 async function click(f, batch = false) {
-  f.view[batch ? 'renderHighlight' : 'renderCard'](f.root, f.h, f.c);
-  const b = nodes(f.root).find(n => /Check (?:card|cards) against best practices/.test(n.title ?? ''));
-  assert.ok(b);
+  // Check-and-repair lives on Verify; the card star is now the AI rewrite.
+  f.view.renderHighlight(f.root, f.h);
+  f.root.querySelectorAll = selector => nodes(f.root).filter(n => n.classes.includes(selector.slice(1)));
+  for (const node of nodes(f.root)) node.closest = () => null;
+  f.view.cardIds = () => f.h.cards.map(card => card.id);
+  const b = nodes(f.root).find(n => n.text === 'Verify');
+  assert.ok(b, 'the passage must expose its labeled Verify control');
   b.events.click({ stopPropagation() {} });
   for (let n = 0; n < 30 && f.view.checking.size; n++) await new Promise(r => setImmediate(r));
   assert.equal(f.view.checking.size, 0);

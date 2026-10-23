@@ -95,8 +95,8 @@ for (const [scope, count] of [['source', 2], ['passage', 1]]) test(`${scope} Ver
   await f.verify(scope).events.click();
   assert.equal(f.requests.length, count);
   assert.equal(f.other.cards[0].userCheck, undefined);
-  assert.ok(!buttons(f.group('passage')).some(b => b.title === 'Check cards against best practices (repair issues)'));
-  assert.ok(buttons(f.root).some(b => b.title === 'Check card against best practices (repair issues)'), 'Individual stars stay');
+  assert.ok(!buttons(f.group('passage')).some(b => /best practices/i.test(b.title ?? '')));
+  assert.ok(buttons(f.root).some(b => /Rewrite card with AI/.test(b.title ?? '')), 'Individual rewrite stars stay');
   assert.deepEqual(f.exports, []);
 });
 
@@ -313,12 +313,12 @@ for (const scope of ['inbox', 'source', 'passage']) for (const stage of [1, 2, 3
   });
 }
 
-test('Verify keeps the shared per-card lock while an individual star is clicked', async t => {
+test('Verify keeps the shared per-card lock while an individual rewrite is started', async t => {
   const gate = barrier(); let reached = false;
   const f = await fixture(t, { rules: async () => { reached = true; await gate.promise; return { cards: '' }; } });
   const run = f.verify('passage').events.click(); await until(() => reached);
   const card = f.root.querySelector(`.wikilm-card[data-id="${f.first.cards[0].id}"]`);
-  buttons(card).find(b => b.title === 'Check card against best practices (repair issues)').events.click({ stopPropagation() {} });
+  buttons(card).find(b => /Rewrite card with AI/.test(b.title ?? '')).events.click({ stopPropagation() {} });
   await tick(); gate.release(); await run;
   assert.equal(f.requests.length, 1); assert.deepEqual(f.revisions, []);
 });

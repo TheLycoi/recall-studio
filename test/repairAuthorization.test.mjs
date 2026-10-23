@@ -44,10 +44,14 @@ async function fixture({ stage = 1, knownIssue = true, onRequest = (_user, value
   const host = { app: { vault: { getFiles: () => [], configDir: '.obsidian' }, workspace: {}, metadataCache: {} }, settings, llm, store: { all: () => highlights, onChange: () => () => {}, findCard: id => h.cards.find(card => card.id === id) ? { highlight: h, card: h.cards.find(card => card.id === id) } : undefined, touch() {}, recordRevision: revision => revisions.push(revision) } };
   const view = new InboxView({ contentEl: root }, host);
   const click = () => {
-    view.renderCard(root, h, c);
-    const star = nodes(root).find(n => /Check card against best practices/.test(n.title ?? ''));
-    assert.ok(star, 'The rendered card must expose its repair star');
-    star.events.click({ stopPropagation() {} });
+    // The repair transaction lives on Verify now; the card star is the AI rewrite.
+    view.renderHighlight(root, h);
+    root.querySelectorAll = selector => nodes(root).filter(n => n.classes.includes(selector.slice(1)));
+    for (const node of nodes(root)) node.closest = () => null;
+    view.cardIds = () => h.cards.map(card => card.id);
+    const verify = nodes(root).find(n => n.text === 'Verify');
+    assert.ok(verify, 'The rendered passage must expose its labeled Verify control');
+    verify.events.click({ stopPropagation() {} });
   };
   return { settings, h, c, root, host, view, llm, requests, revisions, highlights, click, pending: () => !!release, release: () => release({ cards: '' }) };
 }
