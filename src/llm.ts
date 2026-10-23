@@ -11,7 +11,7 @@ import { OpenCodeBackend, OpenCodeError } from "./opencode";
 import { DeepSeekError } from "./deepseekError";
 import { buildExamplesBlock } from "./examples";
 import type { BloomLevel, Card, Highlight, GenerationContext, GenerationPreparation } from "./model";
-import { PreparationOut, GroundedCardsOut, AuditOut, PREPARATION_SYSTEM, AUDIT_SYSTEM, type GroundedDraft, type GenerationAudit } from "./generation";
+import { PreparationOut, GroundedCardsOut, AuditOut, PREPARATION_SYSTEM, AUDIT_SYSTEM, RETRIEVAL_QUALITY_RUBRIC, type GroundedDraft, type GenerationAudit } from "./generation";
 import type { QuizQuestionMessageArgs, QuizRecallGradeMessageArgs } from "./prompt";
 import { QUIZ_COVERAGE_PREFIX, QUIZ_COVERAGE_SUFFIX, QUIZ_INPUT_AUTHORITY, QUIZ_GRADE_RUBRIC, buildQuizQuestionMessage, buildQuizRecallGradeMessage } from "./prompt";
 import { QuizQuestionOut as QuizQuestionOutSchema, QuizRecallGradeOut as QuizRecallGradeOutSchema } from "./schemas";
@@ -128,6 +128,8 @@ const WRITER_SYSTEM = `You write spaced-repetition flashcards for a reader who h
 
 ${CARD_INPUT_AUTHORITY}
 
+${RETRIEVAL_QUALITY_RUBRIC}
+
 <what_to_test>
 Test only what the highlight itself states. The surrounding context is there to resolve pronouns, abbreviations, and references and to tell you the subject; it is not a source of answers. Do not add outside knowledge, and keep answers close to the highlight's own wording so the reader can verify each card against the text at a glance.
 
@@ -149,7 +151,7 @@ Run both litmus tests on every card before you return it. False positive: how co
 
 Sets and enumerations. Do not ask for an unordered list of more than three items as a single answer; such cards are nearly unlearnable. Split the list across cards, ask what distinguishes each member, or use overlapping cloze deletions so each number hides one member with the rest visible. Test an ordered sequence with numbers that each hide one step and show its neighbours.
 
-Closed and open lists. A closed list has a fixed, complete membership that the highlight states in full: the stages of a model, the steps of a process, the ingredients of a recipe. The rules above are written for it, because there the list really is the answer. An open list is a category whose members the highlight only samples, signalled by words like "include", "such as", "for example", and "among others"; the sample is not the set, so asking for the list as an answer or clozing its members in turn would teach the reader an arbitrary subset as though it were complete. Ask instead for what generalizes: when the highlight states a criterion for membership, test the criterion, and test each named example in the direction example to category, which has one answer, never category to list.
+Closed and open lists. A closed list has a fixed, complete membership that the highlight states in full: the stages of a model, the steps of a process, the ingredients of a recipe. The rules above are written for it, because there the list really is the answer. An open list is a category whose members the highlight only samples, signalled by words like "include", "such as", "for example", and "among others"; the sample is not the set, so asking for the list as an answer or clozing its members in turn would teach the reader an arbitrary subset as though it were complete. Ask instead for what generalizes: when the highlight states a criterion for membership, test the criterion, and use a useful named example in the direction example to category, which has one answer, never category to list. Do not make a card per example automatically or replace retrieval with a meta-card saying the list is incomplete.
 
 Interference. For an experienced reviewer this is the single greatest cause of forgetting, so it outranks the preferences below it. When the highlight distinguishes similar things (two stages, two processes, two terms), write cards that hinge on the difference, and put a cue in the question that rules out the neighbour. Two cards whose questions read alike but want different answers will be confused with each other, and so will two cards that share an answer unless their questions could never be mistaken for one another; the linter flags a shared answer for the reader regardless.
 
@@ -159,7 +161,7 @@ Card type. Cloze is the default. Use qa when the answer is not a span sitting in
 
 How a cloze card reviews. A cloze card is one sentence from the highlight with {{c1::...}} markers, trimmed, and reworded only as far as resolving a pronoun or grammar needs, so the visible text stays the highlight's own wording; each deletion number becomes its own review: when the reader is tested on c2, the c1 and c3 spans are shown filled in. So a sentence with three numbered deletions is three minimal items sharing one stem, not one compound item, and the sentence is the right unit to work in: when it states short, independent facts, hide each under its own number instead of writing a card per fact on the same stem. An enumeration is the same move, {{c1::alarm}}, {{c2::resistance}}, and {{c3::exhaustion}} giving three reviews that each hide one member with the rest visible in a fixed order. Reuse a number only when two spans are one fact tested in two places. Keep supported deletions on their shared stem when each has a clear cue. Do not split or repeat the sentence solely to meet a deletion count.
 
-Each deletion hides a short span, a term, number, name, or phrase of up to six words (the linter rejects longer) and never framing words; it appears verbatim in the highlight; and it is recoverable from what stays visible, which includes the sibling spans. That last point is where a dense card fails the false-positive test: a visible sibling that all but names the hidden one ("the ___ point on Earth, about 400 m below sea level") has given it away, so hide only what the rest of the sentence cues without spelling out, and leave the rest as framing.
+Each deletion hides a short span, a term, number, name, or meaningful condition of up to six words (the linter rejects longer), not incidental scaffolding; it appears verbatim in the highlight; and it is recoverable from what stays visible, which includes the sibling spans. That last point is where a dense card fails the false-positive test: a visible sibling that all but names the hidden one ("the ___ point on Earth, about 400 m below sea level") has given it away, so hide only what the rest of the sentence cues without spelling out, and leave the rest as framing.
 
 Keep cloze sentences short. A deletion lifted out of a long passage is the format's characteristic failure: the reader learns the shape of the surrounding text and fills the blank from the pattern rather than from memory, and the card keeps scoring correct while teaching nothing. Trim the sentence to the clause the deletions need and cut context that is only there because it was adjacent in the highlight. A short sentence with two deletions beats a long one with the same two.
 
@@ -243,6 +245,8 @@ const CRITIC_SYSTEM = `You grade flashcards that have already been drafted from 
 
 ${CARD_INPUT_AUTHORITY}
 
+${RETRIEVAL_QUALITY_RUBRIC}
+
 Each card is either qa, a question with a short answer, or cloze, one sentence with {{c1::...}} deletions hiding a term, number, name, or short phrase. Each cloze number is its own review, with the other numbered spans shown filled in. The card's extra field belongs to the reader, for the source link and their own notes, and you do not write it: whatever the card teaches has to live in the question and its answer, or in the cloze sentence and the framing left visible around the deletion.
 
 <the_one_rule_that_overrides_everything>
@@ -278,7 +282,7 @@ Cloze form. Only the tested span sits inside a deletion and the framing stays ou
 
 Grouping. Each cloze number is a separate retrieval on a shared stem. Judge its grounding and cue, not how many numbers or cards exist. A single deletion is valid; do not add another just to meet a quota. Do not flag a fourth or later deletion solely for its count. Repeated stems can be a useful consolidation suggestion, but this check only repairs the requested card: never claim sibling cards were merged or deleted. Preserve distinct facts and do not duplicate a sibling's retrieval. Split only when the subject or cue requires it, never to meet a numeric count.
 
-Duplication. If the cards that already exist for this highlight test the same fact, drop the new one. This is advisory, not the authoritative check, so when you are unsure whether it is truly the same fact, keep the card rather than guessing it away.
+Duplication. If the cards that already exist for this highlight test the same retrieval, drop the new one. A genuinely different direction or distinct supported facet can earn another card under the rubric. This is advisory, not the authoritative check, so when you are unsure whether it is truly the same retrieval, keep the card rather than guessing it away.
 </what_to_check>
 
 <verdicts>
@@ -498,7 +502,7 @@ export class LlmClient {
         cards: cards.map((c, index) => ({ index, ...cardData(c) })),
         language: s.language, standingInstructions: s.writerInstructions, examples: criticExamples,
         houseRules: criticRules, highlightInstruction: h.instruction, existing: existing.map(cardData),
-        task: `Return exactly one verdict for each of the ${cards.length} drafted cards, using its index. A new card testing an existing card's fact is a duplicate.`,
+        task: `Return exactly one verdict for each of the ${cards.length} drafted cards, using its index. A new card repeating an existing card's retrieval is a duplicate.`,
       }),
       schema: VerdictsOut,
       label: "verdicts",
