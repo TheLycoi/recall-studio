@@ -25,9 +25,6 @@ function clozeVisibleText(text: string): string {
   return text.replace(/\{\{c\d+::([\s\S]*?)(?:::[^}]*)?\}\}/g, "$1");
 }
 
-/** A linking verb, relative pronoun, or causal connector inside a cloze body marks a clause, not an atom. */
-const FRAMING_MARKERS = /\b(is|are|was|were|which|that|because|since|due to|such as|who)\b/i;
-
 /** A front that starts this way invites a bare yes/no answer instead of recall. */
 const QA_YES_NO_START = /^(is|are|was|were|does|do|did|can|will|should|has|have)\b/i;
 
@@ -64,10 +61,10 @@ export function lintCard(card: Card, highlight: Highlight, siblings: Card[]): Li
     }
     if (!numberingOk) failures.push("cloze-numbering");
 
-    // cloze-framing: each deletion body <=6 words and free of framing markers.
+    // cloze-framing: each deletion body <=6 words; keywords alone cannot judge retrieval quality.
     let framingOk = true;
     for (const d of deletions) {
-      if (words(d.body).length > 6 || FRAMING_MARKERS.test(d.body)) {
+      if (words(d.body).length > 6) {
         framingOk = false;
         break;
       }
@@ -199,7 +196,7 @@ export const LINT_FIX_INSTRUCTIONS: Record<LintFailureId | LintWarningId, string
   "cloze-not-grounded": "a deletion hides text that is not in the highlight; re-word the sentence so every deletion is a span the highlight states verbatim",
   "cloze-count": "the card has no valid deletion; mark the supported answer span without imposing a deletion quota or splitting the sentence to meet a count",
   "cloze-numbering": "the deletion numbers skip or repeat out of order; number them c1, c2, c3 with no gaps",
-  "cloze-framing": "a deletion hides framing words or runs too long; each deletion should hide one short span, a term, number, or name",
+  "cloze-framing": "a deletion exceeds six words; narrow the retrieval to a supported span of at most six words, keeping essential names, negations, and conditions intact; move context outside the deletion or use a focused Q&A without weakening the claim",
   "qa-empty": "the card is missing its question, its answer, or its cloze text; write the missing side from the highlight",
   "qa-answer-long": "the answer runs past a short phrase; narrow the question so the answer is a term, number, name, or short phrase",
   "qa-yes-no": "the question can be answered yes or no, which is guessable; ask what, which, how, why, when, or how many instead",

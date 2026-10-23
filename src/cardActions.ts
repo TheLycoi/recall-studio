@@ -1,5 +1,5 @@
 import type { Card, Highlight } from "./model";
-import { lintCard, LINT_LABELS } from "./lint";
+import { lintCard, LINT_LABELS, LINT_FIX_INSTRUCTIONS } from "./lint";
 
 export interface CardCheck {
   content: string;
@@ -98,7 +98,10 @@ export async function checkAndRepairCard(
     const check = currentCardCheck(card, highlight);
     if (!check) return { status: "cancelled" };
     if (!check.issues.length) return { status: "checked" };
-    const instruction = `Repair this card using the source and card-writing best practices. Fix these findings:\n${check.issues.map(issue => `- ${issue}`).join("\n")}\nKeep only supported facts, avoid repeating sibling cards, and preserve a clear retrieval cue. Return one corrected card, not a critique.`;
+    const siblings = highlight.cards.filter(c => c.id !== card.id && c.status !== "deleted");
+    const { failures, warnings } = lintCard(card, highlight, siblings);
+    const findings = [...failures, ...warnings].map(id => LINT_FIX_INSTRUCTIONS[id]).concat(check.issues);
+    const instruction = `Repair this card using the source and card-writing best practices. Fix these findings:\n${findings.map(issue => `- ${issue}`).join("\n")}\nKeep only supported facts, avoid repeating sibling cards, and preserve a clear retrieval cue. Return one corrected card, not a critique.`;
     const draft = await rewrite(structuredClone(highlight), structuredClone(card), instruction, current);
     if (!current()) return { status: "cancelled" };
     const candidate = cardReplacement(card, highlight, draft);

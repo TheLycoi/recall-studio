@@ -5,7 +5,7 @@ import Module from 'node:module';
 
 let actions;
 before(async () => {
-  const out = await build({ entryPoints: ['src/cardActions.ts'], bundle: true, write: false, format: 'cjs', platform: 'node' });
+  const out = await build({ stdin: { contents: "export * from './src/cardActions'; export { LINT_FIX_INSTRUCTIONS } from './src/lint';", resolveDir: process.cwd() }, bundle: true, write: false, format: 'cjs', platform: 'node' });
   const mod = new Module('repair');
   mod._compile(out.outputFiles[0].text, 'repair');
   actions = mod.exports;
@@ -79,6 +79,51 @@ test('removing a duplicate deletion retains the distinct fact as a single cloze'
 });
 
 const keep = async () => [{ verdict: 'keep', reason: '' }];
+
+test('automatic repair sends actionable current length guidance with model findings and accepts a supported clause', async () => {
+  const { card, highlight } = fixture();
+  highlight.text = 'Matching checksums do not prove who sent the transfer.';
+  Object.assign(card, { kind: 'cloze', front: '', back: '', text: 'Matching checksums {{c1::do not prove who sent the transfer}}.', lintFailures: ['qa-empty'] });
+  const candidate = { kind: 'cloze', front: '', back: '', text: 'Matching checksums do not {{c1::prove who sent the transfer}}.' };
+  const seen = [];
+  const reason = 'Keep the checksum subject and its limitation explicit.';
+  let sent;
+  const result = await actions.checkAndRepairCard(card, highlight, async (_h, cards) => {
+    seen.push(cards[0].text);
+    return [{ verdict: seen.length === 1 ? 'revise' : 'keep', reason: seen.length === 1 ? reason : '' }];
+  }, async (_h, _c, instruction) => {
+    sent = instruction;
+    assert.deepEqual(actions.currentCardCheck(card, highlight).issues, ['cloze framing', reason]);
+    assert.ok(instruction.includes(actions.LINT_FIX_INSTRUCTIONS['cloze-framing']));
+    assert.ok(instruction.includes(reason));
+    assert.ok(!instruction.includes(actions.LINT_FIX_INSTRUCTIONS['qa-empty']), 'stored stale lint must not drive repairs');
+    return candidate;
+  });
+  assert.equal(result.status, 'repaired');
+  assert.equal(result.instruction, sent);
+  assert.equal(card.text, candidate.text);
+  assert.deepEqual(seen, ['Matching checksums {{c1::do not prove who sent the transfer}}.', candidate.text]);
+  assert.deepEqual(actions.currentCardCheck(card, highlight).issues, []);
+});
+
+test('cached model findings still receive recomputed lint guidance and a length-invalid candidate preserves the original', async () => {
+  const { card, highlight } = fixture();
+  highlight.text = 'Matching checksums do not prove who sent the transfer.';
+  Object.assign(card, { kind: 'cloze', front: '', back: '', text: 'Matching checksums {{c1::do not prove who sent the transfer}}.' });
+  knownIssue(card, highlight);
+  const original = structuredClone(card);
+  let checks = 0;
+  await assert.rejects(actions.checkAndRepairCard(card, highlight, async () => {
+    checks++;
+    return [{ verdict: 'keep' }];
+  }, async (_h, _c, instruction) => {
+    assert.ok(instruction.includes(actions.LINT_FIX_INSTRUCTIONS['cloze-framing']));
+    assert.ok(instruction.includes('Test the distinct process.'));
+    return { kind: 'cloze', front: '', back: '', text: '{{c1::Matching checksums do not prove who sent the transfer}}.' };
+  }), /replacement did not pass its check.*cloze framing/i);
+  assert.equal(checks, 1, 'only the candidate needs a fresh model check');
+  assert.deepEqual(card, original);
+});
 
 test('a clean card is checked without rewriting or resetting its state', async () => {
   const { card, highlight } = fixture();

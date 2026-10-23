@@ -130,14 +130,33 @@ test("cloze-numbering: passes for consecutive numbers starting at 1", () => {
   assert.ok(!r.failures.includes("cloze-numbering"), "should not fail cloze-numbering for (1,2)");
 });
 
-// ---- cloze-framing (<=6 words, no framing marker)
+// ---- cloze-framing (<=6 words; keyword presence does not judge retrieval quality)
 
-test("cloze-framing: fails when a deletion body contains a framing marker", () => {
+test("cloze-framing: a short clause is not rejected merely for containing 'is'", () => {
   const card = clozeCard(
     "Contemplation {{c1::is a stage of change}} where the client intends to change within the next six months.",
   );
   const r = l.lintCard(card, highlight, []);
-  assert.ok(r.failures.includes("cloze-framing"), "expected cloze-framing for a body containing 'is'");
+  assert.ok(!r.failures.includes("cloze-framing"), "retrieval quality needs semantic review, not a keyword ban");
+  assert.ok(r.failures.includes("cloze-not-grounded"), "removing the keyword rule must not bypass grounding");
+});
+
+for (const [source, text] of [
+  ["The Who recorded Tommy.", "{{c1::The Who}} recorded Tommy."],
+  ["Simmer gently until the broth is clear.", "Simmer gently {{c1::until the broth is clear}}."],
+  ["Matching checksums do not prove who sent the transfer.", "Matching checksums do not {{c1::prove who sent the transfer}}."],
+  ["The Beatles recorded Abbey Road.", "{{c1::The Beatles}} recorded Abbey Road."],
+]) {
+  test(`short source-exact deletion passes: ${text}`, () => {
+    assert.deepEqual(l.lintCard(clozeCard(text), { ...highlight, text: source }, []).failures, []);
+  });
+}
+
+test("cloze-framing guidance addresses length without banning essential words", () => {
+  const instruction = l.LINT_FIX_INSTRUCTIONS["cloze-framing"];
+  assert.match(instruction, /six words/);
+  assert.match(instruction, /names, negations, and conditions/);
+  assert.doesNotMatch(instruction, /hides framing words/);
 });
 
 test("cloze-framing: fails when a deletion body is more than 6 words", () => {
