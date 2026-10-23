@@ -105,19 +105,15 @@ Clearing exported or dismissed captures archives them instead of deleting their
 cards. Archived records leave the active Inbox but remain available through
 **Open source history**, including after a restart.
 
-In Markdown editing, Live Preview and reading view, a passage label shows how
-many retained cards were created, await export, or have confirmed Anki IDs.
-Select the label to inspect the saved quote and cards. File-export records
-without Anki IDs are marked unconfirmed, not as successful Anki imports.
+Use **Open source history** to inspect saved quotes, cards and export receipts.
+Since 0.1.12, capture receipts do not appear on the note in editing, Live Preview
+or reading view. Inline Flashcard badges describe only card syntax already
+written in the note. Dismissal hides neither the saved history nor its provenance.
 
-Labels require an exact, unambiguous match. Changed text and ambiguous repeats
-remain available in source history without an inline label. Complex rendered
-Markdown may also require the command. Renames update retained source paths;
-deleting a source does not delete its history. PDFs retain page locators in
-history, without PDF overlays or a claim that the text was reverified.
-
-These overlays do not edit the source note. Card counts describe captured
-passages, not whether you learned them or completed the whole note.
+History distinguishes confirmed Anki IDs from unconfirmed file exports. Renames
+update retained source paths; deleting a source does not delete its history.
+PDFs retain page locators without overlays or a claim that their text was reverified.
+Card counts describe captures, not mastery or complete coverage of a note.
 
 ## Quiz and Make Flashcards (Experimental)
 
@@ -129,7 +125,7 @@ Every run then asks for a fresh study guide or instructions about what to cover.
 The guide is coverage only: all factual evidence must come from eligible vault notes,
 never general model knowledge, guide-only claims or earlier assistant answers.
 
-In this unreleased build, Quiz also offers **Attach PDF** at the coverage prompt.
+Since 0.1.11, Quiz also offers **Attach PDF** at the coverage prompt.
 Choose one local PDF, optionally add typed instructions, select Send, then choose
 free response or multiple choice. The attachment is temporary and is not imported
 into the vault. Its selectable text goes to your configured model when Quiz starts;
@@ -175,6 +171,11 @@ Exact quotations prove where text came from, not that the text is factually corr
 Add `#flashcards` to a note, then write cards directly where you study. Cards
 coexist with capture: the Inbox still generates cards from selected passages,
 and inline cards let you see what you already wrote by hand.
+
+**Generated cards are not written back into the source note.** Export sends
+cards to Anki; text-file export creates an Anki import file. Neither converts
+the source passage into inline flashcard syntax or adds `#flashcards`.
+Read-only recognition is not a note-writing workflow.
 
 Supported syntax: single-line basic (`Question::Answer`) and reversed
 (`Question:::Answer`), multiline basic `?` and reversed `??` with an optional

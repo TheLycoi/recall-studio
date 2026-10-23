@@ -6,7 +6,9 @@
 - Mark only cards written in the note itself. Inline `#flashcards` cards keep their **Flashcard** badge; capture receipts and export counts move to the source-history command, where they were already listed in full.
 - Remove the now-unused passage badge widget so a note cannot be marked by capture state at all.
 
-Plugin identity, stored data and published 0.1.11 assets stay unchanged. Capture records are still retained and still visible through source history, so nothing is lost — only the on-note marker is gone. There is no scheduler or study-data migration.
+Plugin identity, stored data and published 0.1.11 assets stay unchanged. Capture records remain available through source history. There is no scheduler or study-data migration.
+
+This release removes capture badges; it does not write generated cards into source notes. Export still sends cards to Anki or an Anki import file. Converting a captured passage into in-note flashcard syntax remains unimplemented.
 
 ## Recall Studio 0.1.11 beta
 
