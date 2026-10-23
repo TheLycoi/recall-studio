@@ -7,8 +7,8 @@ conversation and quizzing; capture supporting note passages here for card writin
 
 The repository and BRAT target are `TheLycoi/recall-studio`, formerly
 `TheLycoi/review-inbox`. Plugin ID `review-inbox`, default storage
-`Review Inbox/` and retained command IDs stay unchanged. This unreleased change
-is based on beta 0.1.12; it removes the native Chat, Quiz and Make Flashcards entrypoints.
+`Review Inbox/` and retained command IDs stay unchanged. Version 0.1.13 is a beta
+release. It removes the native Chat, Quiz and Make Flashcards entrypoints.
 It adds no scheduler.
 
 ## What it does

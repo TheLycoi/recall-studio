@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased: Inbox-only workspace
+## Recall Studio 0.1.13 beta: Inbox-only workspace
 
 - Remove the Chat tab and native Quiz/Make Flashcards commands and aliases.
 - Open Inbox directly. Keep source capture, card writing, editing, Verify, Export and source history.
