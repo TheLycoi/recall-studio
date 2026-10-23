@@ -1,5 +1,11 @@
 # Changelog
 
+## Recall Studio 0.1.14 beta: instruction-driven card rewrite
+
+- Make the card star open a prompt asking what to change, then rewrite that card with AI.
+- Keep check-and-repair on Verify and retain cancellation, authorization, editor and revision safeguards.
+- Preserve the 0.1.13 Inbox-only workspace and all stored data. Multi-card splits are not included.
+
 ## Recall Studio 0.1.13 beta: Inbox-only workspace
 
 - Remove the Chat tab and native Quiz/Make Flashcards commands and aliases.

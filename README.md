@@ -7,8 +7,8 @@ conversation and quizzing; capture supporting note passages here for card writin
 
 The repository and BRAT target are `TheLycoi/recall-studio`, formerly
 `TheLycoi/review-inbox`. Plugin ID `review-inbox`, default storage
-`Review Inbox/` and retained command IDs stay unchanged. Version 0.1.13 is a beta
-release. It removes the native Chat, Quiz and Make Flashcards entrypoints.
+`Review Inbox/` and retained command IDs stay unchanged. Version 0.1.14 is a beta
+release. The card star asks what to change and rewrites that card with AI.
 It adds no scheduler.
 
 ## What it does
@@ -55,12 +55,18 @@ Dismissed passages, deleted cards and already exported cards are excluded.
 
 Verify sits beside Export in the Inbox header, expanded sources and passages.
 It checks the visible eligible cards in that scope, sequentially, without exporting.
-Individual card stars remain. These actions check and repair cards against the
-source and current writing rules. Findings trigger one rewrite and a replacement check.
+Verify checks and repairs cards against the source and current writing rules.
+Findings trigger one rewrite and a replacement check.
 Clean cards stay unchanged; failed or stale replacements preserve the original.
 Save or cancel an open card editor first. Successful repairs are recorded as
 revisions, not learned as new writing preferences, and never export automatically.
 The editor's separate draft Check remains diagnostic until you save.
+
+The star on a card opens **Rewrite card**. Enter the change you want, then Send.
+Cancelling sends no model request and leaves the card unchanged. Rewrites use
+the existing source, writing rules and guarded replacement path, with revision
+history. This release rewrites one card; splitting it into multiple cards is not
+yet supported. Verify remains the separate check-and-repair action.
 
 A `checked` badge applies only to the current wording and source context.
 Background generation audits remain read-only and do not set this badge.

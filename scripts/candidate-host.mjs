@@ -101,9 +101,22 @@ export default class CandidateProbe extends Plugin {
       ok(await runNamedCommand(host, '/export') === true && exports.length === 1, 'Registered export remains explicitly available');
       const h = makeHighlight({ sourcePath: file.path, sourceTitle: 'Synthetic', text: 'Dormancy delays germination.', status: 'ready' });
       const c = makeCard(h.id, { kind: 'qa', front: 'What does it delay?', back: 'germination' }); h.cards = [c]; store.add(h); view.render();
-      root.querySelector(`[data-id="${c.id}"] button[title^="Check card against"]`).click();
+      const star = () => root.querySelector(`[data-id="${c.id}"] button[title^="Rewrite card with AI"]`);
+      const beforePrompt = calls.length, originalCard = JSON.stringify(c);
+      star().click();
+      const prompt = app._probeModals.at(-1);
+      ok(prompt?.contentEl.querySelector('h3')?.textContent === 'Rewrite card' && calls.length === beforePrompt, 'Star opens an instruction prompt without a provider request');
+      [...prompt.contentEl.querySelectorAll('button')].find(b => b.textContent === 'Cancel').click();
       await wait(() => !view.checking.size);
-      ok(c.front === 'What does dormancy delay?' && store.revisions().at(-1)?.via === 'repair', 'Real card star repairs and records history');
+      ok(JSON.stringify(c) === originalCard && calls.length === beforePrompt && !store.revisions().length, 'Cancelling the star leaves the card and history unchanged');
+      star().click();
+      const rewritePrompt = app._probeModals.at(-1), instruction = rewritePrompt.contentEl.querySelector('textarea');
+      instruction.value = 'Name the process rather than saying it.';
+      instruction.dispatchEvent(new Event('input'));
+      [...rewritePrompt.contentEl.querySelectorAll('button')].find(b => b.textContent === 'Send').click();
+      await wait(() => !view.checking.size);
+      ok(c.front === 'What does dormancy delay?' && store.revisions().at(-1)?.via === 'rewrite'
+        && store.revisions().at(-1)?.instruction === instruction.value, 'Star submits the requested change and records a rewrite revision');
       const verifyIn = row => [...row.querySelectorAll('button')].find(b => b.textContent === 'Verify');
       for (const [scope, selector, expected] of [['passage', '.wikilm-hl-actions', 1], ['source', '.wikilm-source-actions', 2], ['inbox', '.wikilm-header-right', 3]]) {
         view.render();
@@ -117,7 +130,7 @@ export default class CandidateProbe extends Plugin {
       }
       await store.flush();
       const restored = new InboxStore(app, 'synthetic-data'); await restored.load();
-      ok(restored.findCard(c.id)?.card.front === c.front && restored.revisions().at(-1)?.via === 'repair', 'Repair survives real store serialization and reload'); restored.close();
+      ok(restored.findCard(c.id)?.card.front === c.front && restored.revisions().at(-1)?.via === 'rewrite', 'Star rewrite survives real store serialization and reload'); restored.close();
       generated.cards[0].status = 'exported'; generated.status = 'exported'; store.clearExported(); await store.flush();
       ok(!store.all().includes(generated) && store.sourceHistory(file.path).includes(generated), 'Archived exported capture retains source history');
       // Optional learning must not redraw over a draft typed after Convert succeeds.
