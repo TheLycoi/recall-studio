@@ -1,5 +1,13 @@
 # Changelog
 
+## Recall Studio 0.1.15 beta: card-quality checks and repair guidance
+
+- Detect answers left visible by other cloze numbers, hints and supported inline formatting, without treating hidden slots as adjacent words.
+- Distinguish meaningful signs and identifier punctuation, so `C++` is not flagged merely because the cue says `C`, and `-5` is not confused with `5`.
+- Stop flagging proper names such as `WHO` and meaningful short conditions solely because they contain question words or verbs.
+- Give Verify actionable repair instructions and share the retrieval-quality rubric across preparation, writing, audit and repair.
+- Preserve the instruction-driven star, guarded Verify behavior, plugin identity and stored data. Existing length caps remain product policy, not research thresholds.
+
 ## Recall Studio 0.1.14 beta: instruction-driven card rewrite
 
 - Make the card star open a prompt asking what to change, then rewrite that card with AI.

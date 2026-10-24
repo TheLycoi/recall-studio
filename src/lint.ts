@@ -4,7 +4,7 @@
 // bundles this module standalone with esbuild, so an `obsidian` import (or an
 // import of anything that pulls one in, e.g. settings.ts) breaks `npm test`
 // loudly at the esbuild resolve step.
-import { normalizePlain, ungroundedClozes } from "./util";
+import { inlineMarkdownToHtml, normalizePlain, ungroundedClozes } from "./util";
 import type { Card, Highlight, LintFailureId, LintWarningId } from "./model";
 
 export interface LintResult {
@@ -20,9 +20,18 @@ function words(s: string): string[] {
     .filter((w) => w.length > 0);
 }
 
+function reviewText(text: string): string {
+  // Strip only tags our exporter adds, before decoding escaped literal source text.
+  return inlineMarkdownToHtml(text).replace(/<\/?(?:b|i|code)>/g, "").replace(/<br>/g, " ")
+    .replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+}
+
 function containsAnswer(visible: string, answer: string): boolean {
-  const cue = words(normalizePlain(visible));
-  const target = words(normalizePlain(answer));
+  // Unlike grounding normalization, leak matching must distinguish C/C++ and 5/-5.
+  const tokens = (text: string) => text.normalize("NFC").toLowerCase()
+    .match(/[\p{L}\p{N}\p{M}\p{S}_*/#%&-]+(?:[.'’][\p{L}\p{N}\p{M}\p{S}_*/#%&-]+)*/gu) ?? [];
+  const cue = tokens(visible);
+  const target = tokens(answer);
   return target.length > 0 && target.length <= cue.length
     && cue.some((_, i) => target.every((word, k) => cue[i + k] === word));
 }
@@ -46,8 +55,9 @@ export function lintCard(card: Card, highlight: Highlight, siblings: Card[]): Li
       failures.push("cloze-not-grounded");
     }
 
+    const rendered = reviewText(card.text);
     const deletions: { n: number; body: string; hint: string; start: number; end: number }[] = [];
-    for (const m of card.text.matchAll(/\{\{c(\d+)::([\s\S]*?)(?:::([^}]*))?\}\}/g)) {
+    for (const m of rendered.matchAll(/\{\{c(\d+)::([\s\S]*?)(?:::([^}]*))?\}\}/g)) {
       deletions.push({ n: Number(m[1]), body: m[2], hint: m[3] ?? "", start: m.index, end: m.index + m[0].length });
     }
     const distinctNumbers = [...new Set(deletions.map((d) => d.n))].sort((a, b) => a - b);
@@ -57,14 +67,14 @@ export function lintCard(card: Card, highlight: Highlight, siblings: Card[]): Li
       const segments: string[] = [];
       let visible = "", cursor = 0;
       for (const d of deletions) {
-        visible += card.text.slice(cursor, d.start);
+        visible += rendered.slice(cursor, d.start);
         if (d.n === n) {
           segments.push(visible, d.hint);
           visible = "";
         } else visible += d.body;
         cursor = d.end;
       }
-      segments.push(visible + card.text.slice(cursor));
+      segments.push(visible + rendered.slice(cursor));
       return deletions.filter(d => d.n === n).some(d => segments.some(segment => containsAnswer(segment, d.body)));
     });
     if (leaks) failures.push("answer-in-question");
@@ -113,7 +123,7 @@ export function lintCard(card: Card, highlight: Highlight, siblings: Card[]): Li
     // normalized question as a whole run of words. A raw substring test
     // false-positives on short answers that merely spell a letter sequence
     // inside a longer word ("on" inside "contemplation").
-    if (containsAnswer(card.front, card.back)) failures.push("answer-in-question");
+    if (containsAnswer(reviewText(card.front), reviewText(card.back))) failures.push("answer-in-question");
   }
 
   // card-long: front + back + text combined <=60 words. Cloze text is

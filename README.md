@@ -7,7 +7,7 @@ conversation and quizzing; capture supporting note passages here for card writin
 
 The repository and BRAT target are `TheLycoi/recall-studio`, formerly
 `TheLycoi/review-inbox`. Plugin ID `review-inbox`, default storage
-`Review Inbox/` and retained command IDs stay unchanged. Version 0.1.14 is a beta
+`Review Inbox/` and retained command IDs stay unchanged. Version 0.1.15 is a beta
 release. The card star asks what to change and rewrites that card with AI.
 It adds no scheduler.
 
