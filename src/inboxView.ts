@@ -21,6 +21,8 @@ import { askInstruction, SchemaSuggestionsModal } from "./modals";
 import { countClozes, fmtDate, locateQuote, splitFrontmatter, plainText } from "./util";
 import { describeError } from "./llm";
 import { cardAuditLabel } from "./generation";
+import { resolveCardEvidence } from "./cardEvidence";
+import { summarizeExport } from "./exportSummary";
 import { findCrossInterference, lintCard, LINT_LABELS, wrapCloze } from "./lint";
 import { DEFAULT_SETTINGS } from "./settings";
 import { beginCardRewrite, cardAuthorization, cardContent, cardReplacement, checkCard, checkAndRepairCard, currentCardCheck } from "./cardActions";
@@ -91,6 +93,7 @@ export class InboxView extends ItemView {
    */
   private crossInterference = new Map<string, string[]>();
   private cardOwner = new Map<string, Highlight>();
+  private exportSummaries: { el: HTMLElement; highlights: () => Highlight[] }[] = [];
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -137,6 +140,8 @@ export class InboxView extends ItemView {
   private scheduleRender() {
     if (this.editorOpen()) {
       this.dirty = true;
+      this.rebuildCrossInterference();
+      this.refreshExportSummaries();
       return;
     }
     if (this.renderScheduled) return;
@@ -191,6 +196,7 @@ export class InboxView extends ItemView {
     this.dirty = false;
 
     const root = this.cardsEl;
+    this.exportSummaries = [];
     root.empty();
     this.inboxHeaderEl.empty();
     this.renderHeader(this.inboxHeaderEl);
@@ -204,12 +210,14 @@ export class InboxView extends ItemView {
         cls: "wikilm-muted",
         text: "Turn on highlighter mode (ribbon pen) and drag across a passage in a note or PDF, or select text and run “Recall Studio: send selection to inbox”. Cards are written in the background and show up here as drafts.",
       });
+      this.refreshExportSummaries();
       return;
     }
 
     const groups = this.groupBySource(hs);
     for (const [path, list] of groups) this.renderSource(root, path, list);
 
+    this.refreshExportSummaries();
     this.contentEl.scrollTop = scrollTop;
   }
 
@@ -327,6 +335,7 @@ export class InboxView extends ItemView {
     exportAll.setAttribute("aria-label", exportAll.title);
     exportAll.addEventListener("click", () => void this.exportHighlights(this.visibleHighlights()));
     this.renderVerify(right, () => this.visibleHighlights(), "inbox");
+    this.addExportSummary(right, () => this.visibleHighlights());
 
     const more = right.createEl("button", { cls: "clickable-icon wikilm-icon-btn" });
     setIcon(more, RECALL_MORE_ICON);
@@ -401,6 +410,7 @@ export class InboxView extends ItemView {
       b.setAttribute("aria-label", b.title);
       b.addEventListener("click", () => void this.exportHighlights(list));
       this.renderVerify(actions, () => list, "source");
+      this.addExportSummary(actions, () => list);
     }
     if (this.collapsed.has(path)) return;
 
@@ -495,6 +505,7 @@ export class InboxView extends ItemView {
       b.setAttribute("aria-label", b.title);
       b.addEventListener("click", () => void this.exportHighlights([h]));
       this.renderVerify(hlActions, () => [h], "passage");
+      this.addExportSummary(hlActions, () => [h]);
     }
     if (h.status === "error") iconBtn(RECALL_RETRY_ICON, "Retry", () => this.plugin.generator.enqueue(h));
     iconBtn(RECALL_ADD_ICON, "Add a card by hand", () => {
@@ -653,12 +664,19 @@ export class InboxView extends ItemView {
       return;
     }
 
-    if (c.generation && !auditLabel.startsWith("Audit verified")) el.createDiv({ cls: "wikilm-card-reason", text: c.generation.audit.reason });
+    const shownReasons = new Set<string>();
+    const showReason = (text: string) => {
+      const key = text.trim().replace(/\s+/g, " ");
+      if (!key || shownReasons.has(key)) return;
+      shownReasons.add(key);
+      el.createDiv({ cls: "wikilm-card-reason", text });
+    };
+    if (c.generation && !auditLabel.startsWith("Audit verified")) showReason(c.generation.audit.reason);
     const userCheck = currentCardCheck(c, h);
-    if (userCheck?.issues.length) el.createDiv({ cls: "wikilm-card-reason", text: userCheck.issues.join(" · ") });
+    if (userCheck?.issues.length) showReason(userCheck.issues.join(" · "));
 
     if (c.critiqueReason && (c.status === "pending" || c.status === "approved" || c.status === "flagged")) {
-      el.createDiv({ cls: "wikilm-card-reason", text: c.critiqueReason });
+      showReason(c.critiqueReason);
     }
 
     const body = el.createDiv({ cls: "wikilm-card-body" });
@@ -671,6 +689,35 @@ export class InboxView extends ItemView {
       const f = body.createDiv({ cls: "wikilm-field wikilm-cloze" });
       this.renderClozeText(f, c.text);
     }
+    this.renderEvidence(el, h, c);
+  }
+
+  private renderEvidence(parent: HTMLElement, h: Highlight, c: Card): void {
+    const details = parent.createEl("details", { cls: "wikilm-evidence" });
+    details.createEl("summary", { text: "Evidence" });
+    const evidence = resolveCardEvidence(h, c);
+    details.createDiv({ text: cardAuditLabel(c, h) });
+    if (c.generation) {
+      details.createDiv({ text: `Batch: ${c.generation.batchId} · Plan: ${c.generation.planId} · Facts: ${c.generation.factIds.join(", ")}` });
+      details.createDiv({ text: `Stored audit (${c.generation.audit.status}): ${c.generation.audit.reason}` });
+    }
+    if (evidence.state !== "resolved") {
+      details.createDiv({ text: evidence.state === "legacy"
+        ? "No staged evidence was saved for this card."
+        : "Stored evidence is missing or ambiguous. No other batch has been substituted." });
+    } else {
+      details.createDiv({ text: `Plan reason: ${evidence.plan!.reason}` });
+      for (const fact of evidence.facts) {
+        details.createDiv({ text: `${fact.id}: ${fact.statement}` });
+        details.createEl("blockquote", { cls: "wikilm-evidence-quote", text: fact.quote });
+      }
+    }
+    details.createDiv({ cls: "wikilm-muted", text: "Saved evidence, not a fresh source check. A model audit is not proof of correctness." });
+    const source = details.createEl("button", { text: "Open source" });
+    source.addEventListener("click", e => {
+      e.stopPropagation();
+      void this.openSource(h);
+    });
   }
 
   private renderClozeText(el: HTMLElement, text: string): void {
@@ -1065,7 +1112,36 @@ export class InboxView extends ItemView {
     }
   }
 
+  private addExportSummary(parent: HTMLElement, highlights: () => Highlight[]): void {
+    const el = parent.createDiv({ cls: "wikilm-export-summary wikilm-muted" });
+    this.exportSummaries.push({ el, highlights });
+  }
+
+  private refreshExportSummaries(): void {
+    if (!this.exportSummaries.length) return;
+    // Resolve visibility after cards mount, using the same IDs as the Export action.
+    const ids = new Set(this.cardIds());
+    for (const { el, highlights } of this.exportSummaries) {
+      const summary = summarizeExport(highlights(), ids, this.crossInterference);
+      el.empty();
+      if (summary.error) {
+        el.createDiv({ text: `Export blocked: ${summary.error}` });
+        continue;
+      }
+      el.createDiv({ text: `${summary.notes} note${summary.notes === 1 ? "" : "s"} · ${summary.tasks} expected retrieval task${summary.tasks === 1 ? "" : "s"} · ${summary.warnings.length} note${summary.warnings.length === 1 ? "" : "s"} with warnings` });
+      el.title = "Notes are selected Anki note records, not source files. Retrieval tasks assume standard Q&A/cloze templates; custom Anki templates may differ. Warnings are advisory, not factual certification.";
+      if (summary.warnings.length) {
+        const details = el.createEl("details");
+        details.createEl("summary", { text: "Warnings" });
+        for (const warning of summary.warnings) {
+          details.createDiv({ text: `${warning.source} · ${warning.cardId}: ${warning.reasons.join(" · ")}` });
+        }
+      }
+    }
+  }
+
   private async exportHighlights(list: Highlight[], ids = new Set(this.cardIds())): Promise<void> {
+    this.refreshExportSummaries();
     await this.plugin.exportHighlights(list, ids);
   }
 
@@ -1142,7 +1218,7 @@ export class InboxView extends ItemView {
   private onKey(e: KeyboardEvent): void {
     if (this.editing) return;
     const target = e.target as HTMLElement | null;
-    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.tagName === "BUTTON" || target.closest?.("button"))) return;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.tagName === "BUTTON" || target.tagName === "SUMMARY" || target.closest?.("button, summary"))) return;
     const ids = this.cardIds();
     const i = this.focusedCard ? ids.indexOf(this.focusedCard) : -1;
     const found = this.focusedCard ? this.plugin.store.findCard(this.focusedCard) : undefined;

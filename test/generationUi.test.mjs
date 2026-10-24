@@ -10,6 +10,54 @@ before(async()=>{
 });
 function element(options={}){return {options,children:[],dataset:{},createDiv(o){return this.createEl('div',o);},createSpan(o){return this.createEl('span',o);},createEl(t,o){const e=element(o);this.children.push(e);return e;},setText(t){this.options.text=t;},setAttribute(){},addEventListener(){},addClass(){},appendText(){}};}
 function labels(e){return [e.options.text??'',...e.children.flatMap(labels)].join('\n');}
+function reasons(e) {
+  return [
+    ...(e.options.cls === 'wikilm-card-reason' ? [e.options.text] : []),
+    ...e.children.flatMap(reasons),
+  ];
+}
+
+test('a failed cloze audit and its mirrored critique appear only once', () => {
+  const {root,h,c,v}=fixture();
+  c.kind='cloze';
+  c.text='Amber stores {{c1::heat}}.';
+  c.status='flagged';
+  const reason='The target is vague and can be supplied from the preceding wording.';
+  c.generation={batchId:'g1',planId:'P1',factIds:['F1'],audit:{status:'failed',reason,content:cardAuditContent(c),sourceKey:generationSourceKey(h)}};
+  c.critiqueReason=reason;
+  const before=structuredClone(h);
+  v.renderCard(root,h,c);
+  assert.deepEqual(reasons(root),[reason]);
+  assert.match(labels(root),/Audit failed/);
+  assert.match(labels(root),/critique/);
+  assert.deepEqual(h,before);
+});
+function batch(id, quote) {
+  return {version:1,id,inputKey:'',instruction:'',phase:'complete',preparation:{
+    facts:[{id:'F1',statement:'Stored fact',quote}],
+    plan:[{id:'P1',factIds:['F1'],entity:'Amber',aspect:'storage',value:'heat',reason:`Reason for ${id}`}],
+    exclusions:[],omissions:[],conflicts:[],
+  }};
+}
+
+test('Evidence displays exact quotes and plan reasons from the card’s own historical batch', () => {
+  const {root,h,c,v}=fixture();
+  h.generation=batch('new','Wrong batch quote');
+  h.generationHistory=[batch('old','Exact <b>quote</b>\nfrom the source.')];
+  c.generation={batchId:'old',planId:'P1',factIds:['F1'],audit:{status:'verified',reason:'Stored audit result',content:cardAuditContent(c),sourceKey:generationSourceKey(h)}};
+  const before=structuredClone(h);
+  v.renderCard(root,h,c);
+  const text=labels(root);
+  assert.match(text,/Evidence/);
+  assert.match(text,/Exact <b>quote<\/b>\nfrom the source\./);
+  assert.match(text,/F1/);
+  assert.match(text,/P1/);
+  assert.match(text,/Reason for old/);
+  assert.match(text,/Stored audit result/);
+  assert.doesNotMatch(text,/Wrong batch quote|Reason for new/);
+  assert.deepEqual(h,before);
+});
+
 function fixture(){const root=element();const h=makeHighlight({sourcePath:'synthetic.md',sourceTitle:'Synthetic',text:'Amber stores heat.',status:'ready'});const c=makeCard(h.id,{kind:'qa',front:'What does Amber store?',back:'heat'});h.cards=[c];const v=new InboxView({contentEl:root},{settings:{lintMode:'badge'},store:{all:()=>[h]},app:{}});return {root,h,c,v};}
 for(const status of ['verified','unverified','failed'])test(`Inbox renders explicit ${status} audit text`,()=>{
   const {root,h,c,v}=fixture();c.generation={batchId:'g1',planId:'P1',factIds:['F1'],audit:{status,reason:'Concrete finding',content:cardAuditContent(c),sourceKey:generationSourceKey(h)}};

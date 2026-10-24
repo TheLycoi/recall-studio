@@ -53,6 +53,14 @@ the header sends the visible drafts across the Inbox. Hidden flagged groups and
 collapsed sources are excluded. The command palette exports all eligible drafts.
 Dismissed passages, deleted cards and already exported cards are excluded.
 
+The export summary beside the header, source and passage controls shows selected
+Anki note records, expected retrieval tasks and notes with warnings. Repeated
+occurrences of the same cloze number count as one task. Counts assume standard
+Q&A/cloze templates; custom Anki templates may create different card counts.
+Expand Warnings for details. The summary uses the existing export validation and
+visible selection. It adds no confirmation or approval step and does not export
+anything by itself. Warnings are advisory; malformed cards still block export.
+
 Verify sits beside Export in the Inbox header, expanded sources and passages.
 It checks the visible eligible cards in that scope, sequentially, without exporting.
 Verify checks and repairs cards against the source and current writing rules.
@@ -97,6 +105,15 @@ unverified and failed findings; missing verdicts, disabled audits and source
 conflicts cannot become a verified pass. Editing a card or its captured source
 invalidates the displayed audit. A model audit is probabilistic, not proof of
 truth or approval to export. You still review the cards and choose Export.
+
+Each card's collapsed Evidence section shows its saved batch, plan and fact IDs,
+exact source quotes, plan reason and stored audit result. Historical cards resolve
+against their own batch, not the newest inventory. Missing or ambiguous references
+are marked unavailable. The current audit label still becomes unverified when
+wording or capture changes; the stored result remains visible as history.
+Opening Evidence makes no model request and changes no stored data. Open source
+uses the existing capture locator. Identical audit, check and critique paragraphs
+appear once in the card body; distinct findings stay visible.
 
 Card and cloze counts are source-driven, with no fixed deletion count or card
 quota. A single cloze stays a cloze; supported deletions can share a stem instead

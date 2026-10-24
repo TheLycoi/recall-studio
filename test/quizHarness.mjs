@@ -7,11 +7,22 @@ export async function loadQuiz(entry='src/quizView.ts',overrides={}) {
   mod.require=id=>id==='obsidian'?new Proxy(host,{get:(o,k)=>o[k]??class{}}):Module.createRequire(import.meta.url)(id);
   mod._compile(out.outputFiles[0].text,'quiz-view');return mod.exports;
 }
+const parents = new WeakMap();
 export function element(tag='div',options={}) {
   return {tagName:tag.toUpperCase(),options,children:[],dataset:{},events:{},scrollTop:0,value:'',text:options.text??'',classes:(options.cls??'').split(/\s+/),
-    createEl(tag,opts){const e=element(tag,opts);this.children.push(e);return e;},createDiv(o){return this.createEl('div',o);},createSpan(o){return this.createEl('span',o);},
+    createEl(tag,opts){const e=element(tag,opts);parents.set(e,this);this.children.push(e);return e;},createDiv(o){return this.createEl('div',o);},createSpan(o){return this.createEl('span',o);},
     addClass(c){this.classes.push(c);},removeClass(c){this.classes=this.classes.filter(x=>x!==c);},hasClass(c){return this.classes.includes(c);},toggleClass(c,on){if(on)this.addClass(c);else this.removeClass(c);},
     setText(s){this.text=s;},appendText(s){this.text+=s;},setAttribute(k,v){this[k]=v;},addEventListener(k,v){this.events[k]=v;},empty(){this.children=[];},querySelector(){return null;},focus(){},
+    querySelectorAll(selector){
+      if(!/^\.[\w.-]+$/.test(selector))throw new Error(`Unsupported fixture selector: ${selector}`);
+      return nodes(this).slice(1).filter(n=>selector.slice(1).split('.').every(c=>n.hasClass(c)));
+    },
+    closest(selector){
+      for(let n=this;n;n=parents.get(n)) {
+        if(selector.split(',').some(s=>s.trim().startsWith('.')?s.trim().slice(1).split('.').every(c=>n.hasClass(c)):n.tagName===s.trim().toUpperCase()))return n;
+      }
+      return null;
+    },
   };
 }
 export const nodes=e=>[e,...e.children.flatMap(nodes)];

@@ -2,21 +2,21 @@ import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import Module from 'node:module';
-let InboxView;
+let InboxView, makeHighlight, makeCard;
 let lastMenu;
 const notices=[];
 before(async () => {
-  const out = await build({entryPoints:['src/inboxView.ts'],bundle:true,write:false,format:'cjs',platform:'node',external:['obsidian'],logLevel:'silent'});
+  const out = await build({stdin:{contents:`export {InboxView} from './src/inboxView'; export {makeHighlight,makeCard} from './src/model';`,resolveDir:process.cwd()},bundle:true,write:false,format:'cjs',platform:'node',external:['obsidian'],logLevel:'silent'});
   const mod = new Module('inbox-view');
   class Menu { constructor(){ this.items=[];lastMenu=this; } addItem(fn){const item={setTitle(t){this.title=t;return this;},setIcon(){return this;},setDisabled(){return this;},onClick(cb){this.click=cb;return this;}};fn(item);this.items.push(item);} showAtMouseEvent(){} }
   const obsidian = new Proxy({ItemView:class {constructor(leaf){this.contentEl=leaf.contentEl;} registerDomEvent(){}},setIcon(){},Menu,Notice:class {constructor(message){notices.push(message);}}}, {get:(o,k)=>o[k] ?? class {}});
   mod.require = id => id === 'obsidian' ? obsidian : Module.createRequire(import.meta.url)(id);
   mod._compile(out.outputFiles[0].text,'inbox-view');
-  InboxView=mod.exports.InboxView;
+  ({InboxView,makeHighlight,makeCard}=mod.exports);
 });
 function element(tag='div', options={}) {
   return {tagName:tag.toUpperCase(),options,children:[],dataset:{},events:{},scrollTop:0,
-    createEl(tag,opts){const e=element(tag,opts);this.children.push(e);return e;},
+    createEl(tag,opts){const e=element(tag,opts);e.parent=this;this.children.push(e);return e;},
     createDiv(opts){return this.createEl('div',opts);},createSpan(opts){return this.createEl('span',opts);},
     classes:(options.cls??'').split(/\s+/).filter(Boolean),setText(text){this.text=text;},
     addClass(cls){if(cls!==undefined)this.classes.push(cls);},
@@ -24,10 +24,44 @@ function element(tag='div', options={}) {
     toggleClass(cls,on){if(on)this.addClass(cls);else this.removeClass(cls);},
     hasClass(cls){return this.classes.includes(cls);},
     setAttribute(k,v){this[k]=v;},
+    appendText(text){this.children.push(element('span',{text}));},
+    closest(selector){for(let e=this;e;e=e.parent){if(selector.split(',').some(s=>s.trim().startsWith('.')?s.trim().slice(1).split('.').every(c=>e.classes.includes(c)):e.tagName===s.trim().toUpperCase()))return e;}return null;},
     addEventListener(k,fn){this.events[k]=fn;},empty(){this.children=[];},querySelector(){return null;},
   };
 }
 function descendants(e){return [e,...e.children.flatMap(descendants)];}
+function summaryHarness() {
+  const {root,view,host}=harness();
+  view.renderHeader=InboxView.prototype.renderHeader;
+  view.rebuildCrossInterference=InboxView.prototype.rebuildCrossInterference;
+  host.store.counts=()=>({toReview:2,queued:0,generating:0,errors:0});
+  host.schema={openCount:()=>0};
+  const h=makeHighlight({sourcePath:'test.md',sourceTitle:'Test',text:'Amber stores heat and releases energy.',status:'ready'});
+  h.cards=[makeCard(h.id,{kind:'qa',front:'What does Amber store?',back:'heat'}),makeCard(h.id,{kind:'cloze',text:'{{c1::Amber}} stores {{c2::heat}}; {{c1::Amber}} releases energy.'})];
+  host.store.all=()=>[h];
+  root.querySelectorAll=selector=>descendants(root).filter(e=>selector.slice(1).split('.').every(c=>e.classes.includes(c)));
+  const exports=[];
+  host.exportHighlights=async(list,ids)=>exports.push({list,ids:[...ids]});
+  return {root,view,host,h,exports};
+}
+
+test('Export summary counts notes and distinct retrieval tasks without an approval step',async()=>{
+  const {root,view,h,exports}=summaryHarness();
+  await view.onOpen();
+  const summaries=descendants(root).filter(e=>e.classes.includes('wikilm-export-summary'));
+  assert.equal(summaries.length,3,'header, source and passage summaries');
+  for(const summary of summaries) {
+    const text=descendants(summary).map(e=>e.text??e.options.text??'').join('\n');
+    assert.match(text,/2 notes · 3 expected retrieval tasks/);
+    assert.match(text,/warning/);
+  }
+  assert.equal(exports.length,0,'rendering never exports');
+  const buttons=descendants(root).filter(e=>e.tagName==='BUTTON');
+  assert.ok(!buttons.some(e=>/approve|confirm/i.test(e.options.text??'')));
+  buttons.find(e=>e.title?.includes('⌘⏎')).events.click();
+  await Promise.resolve();
+  assert.deepEqual(exports[0].ids,h.cards.map(c=>c.id));
+});
 function harness(){
   const root=element();
   const host={app:{workspace:{},metadataCache:{},vault:{getMarkdownFiles:()=>[],getFiles:()=>[],configDir:'.obsidian'}},store:{all:()=>[],onChange:()=>()=>{}},settings:{lintMode:'show'}};
@@ -35,6 +69,60 @@ function harness(){
   view.renderHeader=()=>{};view.rebuildCrossInterference=()=>{};
   return {root,view,host};
 }
+
+function summaryText(root) {
+  const summary=descendants(root).find(e=>e.classes.includes('wikilm-export-summary'));
+  return descendants(summary).map(e=>e.text??e.options.text??'').join('\n');
+}
+
+test('summary follows collapsed sources and hidden flagged groups through real redraws',async()=>{
+  const {root,view,host,h}=summaryHarness();
+  host.settings.lintMode='hide';h.cards[1].status='flagged';
+  await view.onOpen();
+  assert.match(summaryText(root),/1 note · 1 expected retrieval task/);
+  descendants(root).find(e=>e.classes.includes('wikilm-flagged-toggle')).events.click();
+  assert.match(summaryText(root),/2 notes · 3 expected retrieval tasks/);
+  descendants(root).find(e=>e.classes.includes('wikilm-collapse')).events.click();
+  assert.match(summaryText(root),/0 notes · 0 expected retrieval tasks/);
+  descendants(root).find(e=>e.classes.includes('wikilm-collapse')).events.click();
+  assert.match(summaryText(root),/2 notes · 3 expected retrieval tasks/);
+});
+
+test('export recomputes current visible IDs instead of trusting the displayed summary',async()=>{
+  const {root,view,h,exports}=summaryHarness();await view.onOpen();
+  assert.match(summaryText(root),/2 notes/);
+  root.querySelectorAll=()=>[{dataset:{id:h.cards[0].id},closest:()=>null}];
+  descendants(root).find(e=>e.title?.includes('⌘⏎')).events.click();
+  await Promise.resolve();
+  assert.deepEqual(exports[0].ids,[h.cards[0].id]);
+  assert.match(summaryText(root),/1 note · 1 expected retrieval task/);
+});
+
+test('summary refresh does not replace an unsaved editor',async()=>{
+  const {root,view,h}=summaryHarness();await view.onOpen();
+  const editor=element('textarea',{text:'Unsaved wording'});
+  view.editing=h.cards[0].id;
+  root.querySelector=selector=>selector.includes('wikilm-editor')?editor:null;
+  const children=root.children;
+  h.cards[1].status='exported';
+  view.scheduleRender();
+  assert.equal(root.children,children);assert.equal(editor.options.text,'Unsaved wording');
+  assert.match(summaryText(root),/1 note · 1 expected retrieval task/);
+});
+
+test('Evidence is collapsed, reads safely, and opens only the existing source action',async()=>{
+  const {root,view,h,exports}=summaryHarness();await view.onOpen();
+  const details=descendants(root).find(e=>e.classes.includes('wikilm-evidence'));
+  assert.equal(details.tagName,'DETAILS');assert.ok(!details.open);
+  let opened;
+  view.openSource=async(source)=>{opened=source;};
+  descendants(details).find(e=>e.options.text==='Open source').events.click({stopPropagation(){}});
+  assert.equal(opened,h);assert.equal(exports.length,0);
+  let prevented=false;
+  view.focusedCard=h.cards[0].id;
+  view.onKey({target:{tagName:'SUMMARY'},key:'Enter',preventDefault(){prevented=true;}});
+  assert.equal(prevented,false);assert.equal(exports.length,0);
+});
 test('passage Verify checks its visible eligible cards without asking to generate more',async()=>{
   const {root,view,host}=harness();
   const calls=[];view.checkAgainstPractices=async(h,c)=>{calls.push(c.id);return true;};view.renderCard=()=>{};

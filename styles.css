@@ -68,6 +68,7 @@
 }
 .wikilm-header-right {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--size-4-2);
   min-width: 0;
@@ -136,6 +137,41 @@
 .wikilm-icon-btn .svg-icon {
   width: var(--wikilm-icon-md);
   height: var(--wikilm-icon-md);
+}
+
+.wikilm-export-summary {
+  flex-basis: 100%;
+  order: 10;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.wikilm-export-summary details[open] {
+  max-height: 12rem;
+  overflow-y: auto;
+}
+.wikilm-evidence {
+  margin-top: var(--size-4-2);
+  font-size: var(--font-ui-smaller);
+  overflow-wrap: anywhere;
+}
+.wikilm-evidence > div,
+.wikilm-evidence-quote {
+  margin-top: var(--size-4-1);
+}
+.wikilm-evidence-quote {
+  white-space: pre-wrap;
+  margin-inline: 0;
+  padding-left: var(--size-4-2);
+  border-left: 2px solid var(--background-modifier-border);
+}
+.wikilm-evidence summary,
+.wikilm-export-summary summary {
+  cursor: pointer;
+}
+.wikilm-evidence summary:focus-visible,
+.wikilm-export-summary summary:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
 }
 
 /* Source group -------------------------------------------------------- */
