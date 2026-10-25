@@ -295,7 +295,7 @@ async function replaceMediaEmbeds(anki: AnkiClient, html: string, ctx: ExportCon
 export interface ExportResult {
   /** Notes added in this run. */
   added: number;
-  /** Cards whose note already existed under our identity — an idempotent re-send, not a new note. */
+  /** Cards whose matching note already existed under our identity, a verified re-send rather than a new note. */
   alreadyExported: number;
   /** Cards whose content duplicates an unrelated note that is not ours. */
   duplicates: number;
@@ -321,6 +321,25 @@ export function exportToAnki(
   return next;
 }
 
+/** Identity alone cannot receipt content edited locally or in Anki since the first send. */
+async function verifyExistingNote(anki: AnkiClient, ids: number[], note: AnkiNote, identity: string): Promise<number> {
+  if (ids.length !== 1) throw new Error("More than one Anki note has this card identity. Resolve the duplicate before retrying.");
+  const infos = await anki.notesInfo(ids);
+  const info = Array.isArray(infos) && infos.length === 1 ? infos[0] : undefined;
+  if (!info || info.noteId !== ids[0] || typeof info.modelName !== "string" || !info.modelName
+    || !Array.isArray(info.tags) || !info.tags.every(tag => typeof tag === "string") || !info.tags.includes(identity)
+    || !info.fields || typeof info.fields !== "object" || Array.isArray(info.fields)
+    || !Object.values(info.fields).every(field => field && typeof field.value === "string"
+      && Number.isSafeInteger(field.order) && field.order >= 0)) {
+    throw new Error("Cannot verify existing Anki note: missing or invalid note information. The card remains unexported.");
+  }
+  if (info.modelName !== note.modelName || !Object.entries(note.fields).every(([name, value]) =>
+    Object.prototype.hasOwnProperty.call(info.fields, name) && info.fields![name].value === value)) {
+    throw new Error("Anki content conflict: the existing note does not match this draft. Nothing was overwritten; review both versions before retrying.");
+  }
+  return info.noteId;
+}
+
 async function exportToAnkiInner(
   anki: AnkiClient,
   items: Array<{ card: Card; highlight: Highlight }>,
@@ -328,8 +347,10 @@ async function exportToAnkiInner(
 ): Promise<ExportResult> {
   const result: ExportResult = { added: 0, alreadyExported: 0, duplicates: 0, failed: [] };
   if (items.length === 0) return result;
-  const accepted = new Map(items.map(({ card, highlight }) => [card, cardContent(card, highlight)]));
-  const unchanged = (card: Card, highlight: Highlight) => card.status === "approved" && highlight.status === "ready" && accepted.get(card) === cardContent(card, highlight);
+  // Include the rendered model, fields and source links, not only the editable text.
+  const snapshot = (card: Card, highlight: Highlight) => JSON.stringify([cardContent(card, highlight), buildNote(card, highlight, ctx)]);
+  const accepted = new Map(items.map(({ card, highlight }) => [card, snapshot(card, highlight)]));
+  const unchanged = (card: Card, highlight: Highlight) => card.status === "approved" && highlight.status === "ready" && accepted.get(card) === snapshot(card, highlight);
   await anki.createDeck(ctx.deck);
   for (const { card, highlight } of items) {
     if (!unchanged(card, highlight)) {
@@ -340,28 +361,39 @@ async function exportToAnkiInner(
       continue;
     }
     const identity = cardIdentityTag(ctx.vaultName, card.id);
-    // 1. Already sent by us? A tag hit means the note exists under this card's
-    // identity, so a retry (or a re-send after the deck changed) is idempotent.
+    // 1. Find our identity; an existing note must also match the outgoing content.
     const existing = await anki.findNotes(identityQuery(identity));
     if (!unchanged(card, highlight)) {
       result.failed.push({ card, error: "Card changed during export; review this card again." });
       continue;
     }
     if (existing.length > 1) throw new Error("More than one Anki note has this card identity. Resolve the duplicate before retrying.");
+    let note: AnkiNote;
+    try {
+      note = buildNote(card, highlight, ctx);
+      await resolveMediaInFields(anki, note.fields, ctx, highlight.sourcePath);
+      if (!unchanged(card, highlight)) throw new Error("Card changed during export.");
+      note.tags = Array.from(new Set([...note.tags, identity]));
+    } catch (e) {
+      result.failed.push({ card, error: (e as Error).message });
+      continue;
+    }
     if (existing.length > 0) {
-      card.status = "exported";
-      card.ankiNoteId = existing[0];
-      result.alreadyExported++;
+      try {
+        const id = await verifyExistingNote(anki, existing, note, identity);
+        if (!unchanged(card, highlight)) throw new Error("Card changed during export; review this card again.");
+        card.status = "exported";
+        card.ankiNoteId = id;
+        result.alreadyExported++;
+      } catch (e) {
+        result.failed.push({ card, error: (e as Error).message });
+      }
       continue;
     }
 
     let addedId: number | null = null;
     let lastError = "";
     try {
-      const note = buildNote(card, highlight, ctx);
-      await resolveMediaInFields(anki, note.fields, ctx, highlight.sourcePath);
-      if (!unchanged(card, highlight)) throw new Error("Card changed during export.");
-      note.tags = Array.from(new Set([...note.tags, identity]));
       const ids = await anki.addNotes([note]);
       addedId = ids && ids[0] ? ids[0] : null;
     } catch (e) {
@@ -378,22 +410,26 @@ async function exportToAnkiInner(
       continue;
     }
 
-    // No id came back. The response may have been lost after Anki wrote the
-    // note, so look the identity up again before treating this as a failure:
-    // the note is ours and it is already there.
-    let recovered = false;
+    // A lost response may hide a successful write. Verify the exact sent note,
+    // not just its identity, before treating that outcome as a receipt.
+    let found: number[] = [];
     try {
-      const found = await anki.findNotes(identityQuery(identity));
-      if (found.length > 0) {
-        if (unchanged(card, highlight)) card.status = "exported";
-        card.ankiNoteId = found[0];
-        result.alreadyExported++;
-        recovered = true;
-      }
+      found = await anki.findNotes(identityQuery(identity));
     } catch {
-      recovered = false;
+      // Keep the add error when Anki is still unreachable.
     }
-    if (recovered) continue;
+    if (found.length > 0) {
+      try {
+        const id = await verifyExistingNote(anki, found, note, identity);
+        if (!unchanged(card, highlight)) throw new Error("Card changed during export; review this card again.");
+        card.status = "exported";
+        card.ankiNoteId = id;
+        result.alreadyExported++;
+      } catch (e) {
+        result.failed.push({ card, error: (e as Error).message });
+      }
+      continue;
+    }
 
     // Still nothing of ours. Distinguish a genuine content duplicate of a note
     // that is NOT ours (marked duplicate, so the reader sees why) from a real

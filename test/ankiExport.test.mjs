@@ -355,9 +355,33 @@ test("an approved card exports once; a second send adds no duplicate", async () 
 
   // Re-approve so the same card is exportable again, and send it a second time.
   card.status = "approved";
+  h.status = "ready";
   await plugin.exportHighlights([h]);
   assert.equal(fake.notes.size, 1, "the second send duplicated the note");
+  assert.equal(card.status, "exported");
   assert.equal(card.ankiNoteId, noteId, "the note id changed");
+  assert.ok(fake.actions.includes("notesInfo"), "the retry must verify actual Anki content");
+});
+
+test("export reports a visible content conflict without overwriting a note or accepting the edited draft", async () => {
+  fake = freshFake();
+  const plugin = await loadedPlugin();
+  const card = qa({ status: "pending", back: "alpha" });
+  const h = highlight([card]);
+  await plugin.exportHighlights([h]);
+  const remote = structuredClone([...fake.notes.values()][0]);
+  card.back = "beta";
+  card.status = "pending";
+  h.status = "ready";
+  notices.length = 0;
+  await plugin.exportHighlights([h]);
+  assert.equal(card.status, "pending");
+  assert.equal(h.status, "ready");
+  assert.equal(card.back, "beta");
+  assert.deepEqual([...fake.notes.values()], [remote]);
+  assert.ok(notices.some(notice => /content conflict/i.test(notice)));
+  assert.ok(notices.some(notice => /0 added, 1 failed/.test(notice)));
+  assert.equal(fake.actions.filter(action => action === "addNotes").length, 1);
 });
 
 test("a retry after a lost response does not duplicate the note", async () => {
