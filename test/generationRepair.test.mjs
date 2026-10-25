@@ -38,6 +38,64 @@ function fixture({ defect = true, legacyAudit = true, final = 'verified', repair
   return { h, p, poor, good, settings, calls, saves, backend, llm, plugin, g: new m.Generator(plugin) };
 }
 
+for (const missing of [false, true]) for (const duplicate of [false, true]) test(`G2: ${missing ? 'missing' : 'unverified'} partial retry audits the current ${duplicate ? 'conflicting' : 'distinct'} published sibling`, async () => {
+  const f = fixture({ defect: false });
+  let retry = false;
+  const inputs = [];
+  const second = { ...f.good, planId: 'P2', front: 'During Zeta calibration, what precedes cable attachment?', back: 'disconnect power' };
+  f.backend.complete = async req => {
+    f.calls.push(req);
+    const u = JSON.parse(req.user);
+    if (req.label === 'preparation') return req.schema.parse({ ...f.p, plan: [f.p.plan[0], { ...f.p.plan[0], id: 'P2' }] });
+    if (req.label === 'grounded cards') return req.schema.parse({ cards: [f.good, second] });
+    if (req.label === 'generation repair') throw Error('Synthetic repair unavailable');
+    inputs.push(u);
+    const duplicated = u.cards.some((c, i) => u.cards.some((other, j) => i !== j && other.front === c.front) || u.existing.some(other => other.front === c.front));
+    return req.schema.parse({ verdicts: u.cards.flatMap((c, index) => !retry && missing && !index ? [] : [{ index, cardId: c.id,
+      status: !retry && !index ? 'unverified' : duplicated ? 'failed' : 'verified', reason: duplicated ? 'Duplicate current sibling cue' : 'Synthetic distinct cue' }]) });
+  };
+  await f.g.run(f.h);
+  assert.equal(f.h.cards.length, 1);
+  assert.equal(f.h.generation.repairs, undefined);
+  const originals = structuredClone(f.h.generation.drafts);
+  const sibling = f.h.cards[0];
+  sibling.front = duplicate ? f.good.front : 'Zeta sensor calibration: what must happen before cable attachment?';
+  sibling.edited = true; sibling.ankiNoteId = 42; sibling.extra = 'Retained annotation';
+  const saved = structuredClone(sibling);
+  retry = true; f.g.kick = () => {}; f.g.retry(f.h); await f.g.run(f.h);
+  assert.equal(inputs.at(-1).cards.find(c => c.id === sibling.id).front, saved.front, 'audit must see the exact edited sibling');
+  assert.deepEqual(sibling, saved, 'published edits and receipts are not rewritten');
+  assert.deepEqual(f.h.generation.drafts, originals, 'private originals remain evidence');
+  assert.equal(f.h.cards.length, duplicate ? 1 : 2);
+  assert.equal(f.calls.filter(r => r.label === 'grounded cards').length, 1);
+  if (duplicate) assert.match(f.h.generation.blocked[0].reasons.join(' '), /Duplicate current sibling|repair unavailable/);
+  else assert.equal(f.calls.filter(r => r.label === 'generation repair').length, 0, 'a current audit does not require another writer');
+});
+
+test('G3: a procedure accepted by generation can be explicitly reworded without losing its condition', async () => {
+  const f = fixture({ defect: false });
+  const answer = 'disconnect the power, attach the reference cable, and reconnect power only after the indicator turns green';
+  f.h.text = `Zeta sensor calibration uses this ordered procedure: ${answer}.`;
+  f.p.facts[0] = { id: 'F1', statement: f.h.text, quote: f.h.text };
+  f.p.plan[0].value = answer;
+  f.good.front = 'During Zeta sensor calibration, what is the ordered procedure including the reconnection condition?';
+  f.good.back = answer;
+  await f.g.run(f.h);
+  assert.equal(f.h.cards.length, 1);
+  const original = structuredClone(f.h.cards[0]);
+  const replacement = { ...f.good, front: 'Zeta sensor calibration: what ordered actions and reconnection condition apply?' };
+  f.backend.complete = async req => {
+    f.calls.push(req);
+    return req.schema.parse(req.label === 'rewrite cards' ? { cards: [replacement] }
+      : { preservesFacts: true, reason: 'Same complete procedure', verdicts: [{ index: 0, verdict: 'keep', reason: 'Meaningful procedural unit' }] });
+  };
+  const result = await f.llm.rewriteCards(f.h, f.h.cards[0], 'Keep the full procedure and condition; improve the cue.', () => true);
+  assert.equal(result[0].back, answer);
+  assert.equal(f.calls.at(-1).label, 'rewrite audit');
+  assert.equal(JSON.parse(f.calls.at(-1).user).cards[0].checks[0].id, 'qa-answer-long');
+  assert.deepEqual(f.h.cards[0], original, 'client validation does not mutate the original before the caller commits');
+});
+
 test('source-grounded context repair is private, bounded and independently rechecked before publication', async () => {
   const f = fixture();
   await f.g.run(f.h);

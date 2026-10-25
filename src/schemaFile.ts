@@ -11,10 +11,8 @@
  * so a rule promoted while the note is open in another pane cannot overwrite
  * what the reader typed there a second earlier.
  *
- * The other rule: a missing or unwritable schema must never stop a card being
- * written. Every read path here fails to `null` or `[]` and logs once, because
- * house rules are a refinement of the prompts and their absence is a prompt
- * without a refinement, not an error.
+ * Card-writing rules must be available before paid work. An intentionally
+ * empty rules section is valid; an unavailable read must stop the request.
  */
 
 import { TFile, TFolder, normalizePath } from "obsidian";
@@ -54,8 +52,7 @@ export class SchemaFile {
   private cache: { mtime: number; blocks: { cards: string } } | null = null;
   /** The last read of the suggestions file, so the header can ask for a count synchronously. */
   private lastProposals: Proposal[] = [];
-  /** Set once the folder has proved uncreatable, so the console gets one line rather than one per call. */
-  private folderFailed = false;
+
   private mutation: Promise<unknown> = Promise.resolve();
   private closed = false;
   private writes = new Set<Promise<unknown>>();
@@ -96,9 +93,8 @@ export class SchemaFile {
 
   /**
    * The schema note, created from the template on first use and never
-   * overwritten. Throws only when the vault refuses the write; callers that
-   * cannot afford that catch it (`blocks`) and callers the reader asked for it
-   * (the command) let the error surface.
+   * overwritten. Vault failures surface to callers rather than authorizing
+   * a request without the reader's rules.
    */
   async ensure(): Promise<TFile> {
     const path = this.schemaPath();
@@ -119,11 +115,11 @@ export class SchemaFile {
   }
 
   /**
-   * The card house-rule block for the prompts, or null when there is no
-   * schema to read. `cachedRead` rather than `read`, because this runs on the
+   * The card house-rule block for the prompts, empty only after a valid read.
+   * `cachedRead` rather than `read`, because this runs on the
    * path to every model call and the cache is exactly what it is for.
    */
-  async blocks(): Promise<{ cards: string } | null> {
+  async blocks(): Promise<{ cards: string }> {
     try {
       const file = await this.ensure();
       const mtime = file.stat.mtime;
@@ -133,14 +129,8 @@ export class SchemaFile {
       this.cache = { mtime, blocks };
       return blocks;
     } catch (e) {
-      // A card must be written whether or not the reader has a schema, so this
-      // is a log and a null, not a throw. Once, because it will be asked again
-      // on the next highlight and the one after that.
-      if (!this.folderFailed) {
-        this.folderFailed = true;
-        console.error("Recall Studio: could not read the schema note; house rules are not being applied", e);
-      }
-      return null;
+      this.cache = null;
+      throw new Error("Card-writing rules unavailable. Restore the schema note and retry.", { cause: e });
     }
   }
 

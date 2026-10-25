@@ -3,12 +3,11 @@ import { newId, plainText } from "./util";
 import type RecallPlugin from "./main";
 import { makeCard, type Card, type GenerationAuditRecord, type GenerationBatch, type Highlight } from "./model";
 import { describeError } from "./llm";
-import { lintCard, LINT_FIX_INSTRUCTIONS } from "./lint";
+import { lintCard, isHardLintFailure, LINT_FIX_INSTRUCTIONS } from "./lint";
 import { nextInstruction } from "./inboxData";
 import { cardAuditContent, generationKey, generationSource, generationSourceKey, validatePreparation, validateDrafts, validateAudit } from "./generation";
 
 class Interrupted extends Error {}
-const lengthPolicies = new Set(["cloze-framing", "qa-answer-long", "card-long"]);
 
 /** Private writing, bounded repair and independent publication checkpoints. */
 export class Generator {
@@ -172,7 +171,9 @@ export class Generator {
       const authorized = () => { try { checkInputs(); return true; } catch { return false; } };
       const checkContext = async () => {
         checkInputs();
-        const latestContext = await this.plugin.llm.generationContext(batch.id);
+        let latestContext;
+        try { latestContext = await this.plugin.llm.generationContext(batch.id); }
+        catch (e) { throw new Interrupted(`Card-writing rules or examples unavailable: ${describeError(e)}`); }
         checkInputs();
         if (generationKey(h, latestContext, this.plugin.settings, batch.id) !== key) throw new Interrupted("Generation rules or examples changed. Retry to use the current inputs.");
       };
@@ -258,13 +259,13 @@ export class Generator {
         await save();
         return result;
       };
-      const initial = await audit(originals);
       const latestCandidate = (c: Card) => h.cards.find(published => published.id === c.id) ?? [...(batch.repairs ?? [])].reverse().find(r => r.cardId === c.id && r.candidate)?.candidate ?? c;
       let cards = originals.map(latestCandidate);
       validateCards(cards);
+      const initial = await audit(cards);
       const issues = (card: Card, index: number, checked: GenerationAuditRecord): string[] => {
         const lint = lintCard(card, words, [...existing, ...cards.filter(c => c.id !== card.id)]);
-        const hard = lint.failures.filter(id => !lengthPolicies.has(id));
+        const hard = lint.failures.filter(isHardLintFailure);
         const verdict = checked.contents?.[index] === cardAuditContent(card) ? checked.verdicts.find(v => v.index === index && v.cardId === card.id) : undefined;
         return [...hard.map(id => LINT_FIX_INSTRUCTIONS[id]), ...(preparation.conflicts.length ? ["Source conflicts need human review."] : []), ...(verdict?.status === "verified" ? [] : [verdict?.reason ?? checked.reason])];
       };
@@ -272,7 +273,7 @@ export class Generator {
       const targets = cards.map((card, index) => {
         const verdict = initial.verdicts.find(v => v.index === index && v.cardId === card.id);
         const lint = lintCard(card, words, [...existing, ...cards.filter(c => c.id !== card.id)]);
-        const confirmed = (initial.contents?.[index] === cardAuditContent(card) && verdict?.status === "failed") || lint.failures.some(id => !lengthPolicies.has(id));
+        const confirmed = (initial.contents?.[index] === cardAuditContent(card) && verdict?.status === "failed") || lint.failures.some(isHardLintFailure);
         const retry = batch.retryFindings?.find(f => f.cardId === card.id);
         return { card, reasons: retry?.reasons ?? (confirmed ? [...new Set([...issues(card, index, initial), ...[...lint.failures, ...lint.warnings].map(id => LINT_FIX_INSTRUCTIONS[id])])] : []) };
       }).filter(t => t.reasons.length && !h.cards.some(c => c.id === t.card.id));

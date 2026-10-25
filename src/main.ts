@@ -44,7 +44,7 @@ export default class RecallPlugin extends Plugin {
     this.llm = new LlmClient(
       () => this.settings,
       () => this.store.all(),
-      () => this.schema.blocks(),
+      () => this.schema.blocks(), // Strict: an unavailable note cannot authorize empty rules.
     );
     // Not awaited: the inbox header wants a count of waiting proposals, and
     // nothing else on load depends on having one.

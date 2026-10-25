@@ -222,6 +222,7 @@ const PLUGIN_DIR = ".obsidian/plugins/recall";
 const VALID = JSON.stringify({ provider: "opencode", opencodeModel: "deepseek/deepseek-flash", effort: "high" }, null, 2);
 
 let bundlePath;
+let bundleStub;
 before(async () => {
   if (process.env.RECALL_BUNDLE) {
     bundlePath = process.env.RECALL_BUNDLE;
@@ -246,7 +247,7 @@ function load(data) {
   if (data !== null) files.set(`${PLUGIN_DIR}/data.json`, data);
   files.set("Recall/inbox.json", JSON.stringify({ version: 1, highlights: [] }));
 
-  const stub = obsidianStub();
+  const stub = bundleStub ??= obsidianStub();
   const origLoad = Module._load;
   Module._load = function (request, ...rest) {
     if (request === "obsidian") return stub;
@@ -277,7 +278,7 @@ function load(data) {
   } finally {
     Module._load = origLoad;
   }
-  return { mod, evalError, files };
+  return { mod, evalError, files, stub };
 }
 
 /** A plugin instance over the given file map. */
@@ -285,6 +286,85 @@ function instance(mod, files) {
   const Cls = mod.default || mod;
   return new Cls(makeApp(files), { id: "recall", name: "Recall", dir: PLUGIN_DIR, version: "0.3.0" });
 }
+
+// G1: exercise the actual SchemaFile and the callback constructed by main.onload.
+async function rulesFixture() {
+  const { mod, files, stub } = load(JSON.stringify({ provider: 'codex', schemaFolder: 'Recall', notifyWhenReady: false }));
+  const plugin = instance(mod, files);
+  plugin.app.workspace.onLayoutReady = () => {};
+  await plugin.onload();
+  await plugin.schema.refresh();
+  const file = Object.assign(new stub.TFile(), { path: 'Recall/recall-rules.md', stat: { mtime: 1 } });
+  let unavailable = false;
+  plugin.app.vault.getAbstractFileByPath = p => p === file.path ? file : null;
+  plugin.app.vault.cachedRead = async () => {
+    if (unavailable) throw Error('Synthetic inaccessible rules');
+    return '## Card Rules\n'; // Intentionally empty is valid, unlike an unavailable read.
+  };
+  const failRules = () => { file.stat.mtime++; unavailable = true; };
+  const source = 'During Zeta calibration, disconnect power before attaching the reference cable to prevent a false reading.';
+  const h = { id: 'h-rules', sourcePath: 'synthetic.md', sourceTitle: 'Zeta calibration', title: '', text: source,
+    before: '', after: '', instruction: '', status: 'queued', cards: [] };
+  plugin.store.add(h);
+  const draft = { kind: 'qa', front: 'During Zeta calibration, why disconnect power before attaching the reference cable?', back: 'to prevent a false reading', text: '' };
+  const preparation = { facts: [{ id: 'F1', statement: source, quote: source }], plan: [{ id: 'P1', factIds: ['F1'], entity: 'Zeta calibration', aspect: 'rationale', value: draft.back, reason: 'Causal relationship' }], omissions: [], exclusions: [], conflicts: [] };
+  const calls = [];
+  plugin.llm.codex = { async complete(req) {
+    assert.equal(req.authorized(), true);
+    calls.push(req);
+    const u = JSON.parse(req.user);
+    if (req.label === 'preparation') return req.schema.parse(preparation);
+    if (req.label === 'grounded cards') return req.schema.parse({ cards: [{ ...draft, planId: 'P1', factIds: ['F1'] }] });
+    if (req.label === 'rewrite cards') return req.schema.parse({ cards: [draft] });
+    if (req.label === 'rewrite audit') return req.schema.parse({ preservesFacts: true, reason: 'Synthetic', verdicts: [{ index: 0, verdict: 'keep', reason: 'Synthetic' }] });
+    return req.schema.parse({ verdicts: u.cards.map((c, index) => ({ index, cardId: c.id, status: 'verified', reason: 'Synthetic' })) });
+  } };
+  return { plugin, h, draft, calls, failRules, files };
+}
+
+for (const stage of ['initial', 'preparation', 'grounded cards', 'audit', 'publication checkpoint']) test(`G1: main rules callback stops generation on ${stage} read failure`, async () => {
+  const f = await rulesFixture();
+  const complete = f.plugin.llm.codex.complete;
+  f.plugin.llm.codex.complete = async req => { const result = await complete(req); if (req.label === stage) f.failRules(); return result; };
+  if (stage === 'initial') f.failRules();
+  const flush = f.plugin.store.flush.bind(f.plugin.store);
+  f.plugin.store.flush = async () => { await flush(); if (stage === 'publication checkpoint' && f.h.generation?.committed) f.failRules(); };
+  const oldError = console.error; console.error = () => {};
+  try { await f.plugin.generator.run(f.h); } finally { console.error = oldError; f.plugin.store.close(); }
+  assert.equal(f.h.cards.length, 0, 'unavailable rules cannot publish even after the final checkpoint');
+  assert.equal(f.h.status, 'error');
+  assert.match(f.h.error, /rules|schema/i);
+  assert.deepEqual(f.calls.map(r => r.label), stage === 'initial' ? [] : ['preparation', 'grounded cards', 'audit'].slice(0, stage === 'preparation' ? 1 : stage === 'grounded cards' ? 2 : 3));
+  if (stage === 'audit' || stage === 'publication checkpoint') assert.equal(f.h.generation.drafts[0].front, f.draft.front);
+  if (stage === 'publication checkpoint') {
+    const stored = JSON.parse(f.files.get('Recall/inbox.json')).highlights.find(h => h.id === f.h.id);
+    assert.equal(stored.cards.length, 0, 'rollback removes newly appended cards from the durable snapshot too');
+    assert.equal(stored.generation.drafts[0].front, f.draft.front);
+  }
+});
+
+for (const stage of ['initial', 'rewrite cards', 'rewrite audit']) test(`G1: main rules callback refuses explicit rewrite on ${stage} failure and preserves original`, async () => {
+  const f = await rulesFixture();
+  const original = { id: 'c-rules', highlightId: f.h.id, ...f.draft, front: 'Zeta calibration: why disconnect power?', status: 'pending', edited: true, extra: 'Private annotation', ankiNoteId: 42 };
+  f.h.status = 'ready'; f.h.cards.push(original);
+  const saved = structuredClone(original);
+  const complete = f.plugin.llm.codex.complete;
+  f.plugin.llm.codex.complete = async req => { const result = await complete(req); if (req.label === stage) f.failRules(); return result; };
+  if (stage === 'initial') f.failRules();
+  const oldError = console.error; console.error = () => {};
+  try { await assert.rejects(() => f.plugin.llm.rewriteCards(f.h, original, 'Improve cue', () => true), /rules|schema/i); }
+  finally { console.error = oldError; f.plugin.store.close(); }
+  assert.deepEqual(original, saved);
+  assert.equal(f.calls.length, stage === 'initial' ? 0 : stage === 'rewrite cards' ? 1 : 2);
+});
+
+test('G1: main rules callback accepts an intentionally empty rules section', async () => {
+  const f = await rulesFixture();
+  try { await f.plugin.generator.run(f.h); }
+  finally { f.plugin.store.close(); }
+  assert.equal(f.h.cards.length, 1);
+  assert.equal(f.calls.every(req => JSON.parse(req.user).rules === ''), true);
+});
 
 // ------------------------------------------------------------------- tests
 

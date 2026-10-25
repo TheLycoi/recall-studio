@@ -12,6 +12,11 @@ export interface LintResult {
   warnings: LintWarningId[];
 }
 
+/** Length policies need independent adjudication, not automatic loss of meaning. */
+export function isHardLintFailure(id: LintFailureId): boolean {
+  return id !== "cloze-framing" && id !== "qa-answer-long" && id !== "card-long";
+}
+
 /** Split on whitespace after trimming; empty tokens (blank input) are dropped. */
 function words(s: string): string[] {
   return s

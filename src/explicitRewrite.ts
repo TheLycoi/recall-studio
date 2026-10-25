@@ -1,6 +1,6 @@
 import { makeCard, type Card, type CardRevision, type CardSnapshot, type Highlight } from "./model";
 import { cardAuthorization, cardReplacement, cardContent, currentCardCheck } from "./cardActions";
-import { lintCard, LINT_LABELS } from "./lint";
+import { lintCard, isHardLintFailure, LINT_LABELS } from "./lint";
 
 /** Operational response limit, not a card-writing quota. */
 export const MAX_REWRITE_CARDS = 12;
@@ -34,7 +34,8 @@ export function rewriteCandidates(card: Card, highlight: Highlight, drafts: Draf
   const siblings = highlight.cards.filter(c => c.id !== card.id && c.status !== "deleted");
   for (const candidate of candidates) {
     const lint = lintCard(candidate, highlight, [...siblings, ...candidates.filter(c => c !== candidate)]);
-    if (lint.failures.length) throw Error(`The rewrite did not pass validation. The original is unchanged. ${lint.failures.map(id => LINT_LABELS[id]).join(" · ")}`);
+    const hard = lint.failures.filter(isHardLintFailure);
+    if (hard.length) throw Error(`The rewrite did not pass validation. The original is unchanged. ${hard.map(id => LINT_LABELS[id]).join(" · ")}`);
   }
   const contents = candidates.map(c => JSON.stringify([c.kind, c.front, c.back, c.text]));
   if (new Set(contents).size !== contents.length) throw Error("The rewrite repeated a replacement card. The original is unchanged.");

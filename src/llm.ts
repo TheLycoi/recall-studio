@@ -1,6 +1,6 @@
 import { STUDY_GUIDE_MAX_CHARS, StudyEvidenceOut, studyGuideLines, validateStudyInput, validateStudyEvidence, type StudyEvidenceArgs, type StudyEvidenceDraft } from "./studySchemas";
 import { MAX_REWRITE_CARDS, rewriteCandidates } from "./explicitRewrite";
-import { lintCard, LINT_LABELS } from "./lint";
+import { lintCard } from "./lint";
 import { z } from "zod";
 import type { CompletionRequest } from "./backend";
 import { assertAuthorized } from "./backend";
@@ -273,7 +273,7 @@ Judge every card on each of these, then give it one verdict.
 
 Grounding. The answer, and every cloze deletion, is stated in the highlight. A cloze deletion must appear in it word for word.
 
-Minimum information. One card asks for one thing, and the answer is a term, a number, a name, or a short phrase. A paragraph answer is a card that has not been split yet. Long answers are the most common defect, and the linter fails a qa answer over twelve words: if the answer runs past a short phrase and the highlight supports a narrower question, revise; if it does not, drop.
+Minimum information. One review asks for one meaningful retrieval target, not the fewest words. The twelve-word Q&A answer, six-word cloze span and sixty-word card limits are product policies for independent adjudication, not automatic rejection. Adjudicate the actual length findings against focus and necessary meaning: retain essential conditions, causal relationships and short procedures. Revise or drop genuinely unfocused units that combine independent retrieval targets; never shorten away required context merely to satisfy a word count.
 
 Answerable in isolation. The question names its subject. "What does it weigh?" is a card the reader will meet months from now, shuffled among cards from other notes, with nothing to tell them what it is about.
 
@@ -289,7 +289,7 @@ False positive. The general form of the check above: ask how a reader could answ
 
 False negative. The opposite failure, and the one most often missed: ask how a reader who does know the fact could still answer this card wrongly. A question that never names its subject, a deletion with too little visible text to say which fact is wanted, or a cue that fits a sibling card equally well will all be failed by a reader who knew the answer. Missing context is nearly always the cause, and adding it back from the highlight is nearly always the fix.
 
-Cloze form. Only the tested span sits inside a deletion and the framing stays outside. Each deletion is at most six words (the linter rejects longer), deletions are numbered from 1 with no gaps, there is no fixed deletion count or cloze-card quota, and the visible text is enough to recover what is hidden. The sibling spans count as visible text, since they are shown when a number is tested, and a sibling that all but names the hidden span is the false positive to catch here.
+Cloze form. Only the tested span sits inside a deletion and the framing stays outside. Adjudicate longer spans as meaningful retrieval units under the length policy above. Deletions are numbered from 1 with no gaps, there is no fixed deletion count or cloze-card quota, and the visible text is enough to recover what is hidden. The sibling spans count as visible text, since they are shown when a number is tested, and a sibling that all but names the hidden span is the false positive to catch here. Invalid syntax, unsupported deletions and rendered answer leaks remain hard failures regardless of length adjudication.
 
 Grouping. Each cloze number is a separate retrieval on a shared stem. Judge its grounding and cue, not how many numbers or cards exist. A single deletion is valid; do not add another just to meet a quota. Do not flag a fourth or later deletion solely for its count. Repeated stems can be a useful consolidation suggestion, but this check only repairs the requested card: never claim sibling cards were merged or deleted. Preserve distinct facts and do not duplicate a sibling's retrieval. Split only when the subject or cue requires it, never to meet a numeric count.
 
@@ -359,7 +359,7 @@ export class LlmClient {
   constructor(
     private getSettings: () => RecallSettings,
     private getHighlights: () => Highlight[] = () => [],
-    private getSchema: () => Promise<{ cards: string } | null> = async () => null,
+    private getSchema: () => Promise<{ cards: string } | null> = async () => ({ cards: "" }),
   ) {
     this.codex = new CodexBackend(getSettings);
     this.deepseek = new DeepSeekBackend(getSettings);
@@ -402,6 +402,12 @@ export class LlmClient {
     }
   }
 
+  private async requiredRulesBlock(): Promise<string> {
+    const blocks = await this.getSchema();
+    if (!blocks || typeof blocks.cards !== "string") throw Error("Card-writing rules unavailable. Restore the schema note and retry.");
+    return blocks.cards;
+  }
+
   /** One tiny request, so the settings tab can say whether the provider works. */
   probe(model?: string): Promise<{ model: string; via: string }> {
     return this.backend().probe(model);
@@ -435,7 +441,7 @@ export class LlmClient {
       examples: s.historyExamples ? buildExamplesBlock(this.getHighlights().map(h => ({ ...h, cards: h.cards.filter(c => c.generation?.batchId !== excludeBatchId) }))) : "", rules: "",
     };
     // Generation must not silently drop inaccessible house rules.
-    context.rules = (await this.getSchema())?.cards ?? "";
+    context.rules = await this.requiredRulesBlock();
     return context;
   }
 
@@ -583,9 +589,9 @@ export class LlmClient {
     const authorization = { authorized: this.requestAuthorization(() => (!authorized || authorized()) && JSON.stringify(this.getSettings()) === settings) };
     assertAuthorized(authorization);
     const readRules = async () => {
-      const blocks = await this.getSchema();
+      const rules = await this.requiredRulesBlock();
       assertAuthorized(authorization);
-      return blocks?.cards ?? "";
+      return rules;
     };
     const rules = await readRules();
     const currentRules = async () => {
@@ -605,7 +611,7 @@ export class LlmClient {
     const candidates = rewriteCandidates(card, h, result.cards);
     const audit = await this.backend().complete({ system: CRITIC_SYSTEM,
       user: JSON.stringify({ ...context, cards: candidates.map((c, index) => ({ index, ...cardData(c),
-        deterministicWarnings: lintCard(c, h, [...siblings, ...candidates.filter(other => other !== c)]).warnings.map(id => LINT_LABELS[id]) })),
+        checks: (() => { const lint = lintCard(c, h, [...siblings, ...candidates.filter(other => other !== c)]); return [...lint.failures, ...lint.warnings].map(id => ({ id, finding: LINT_FIX_INSTRUCTIONS[id] })); })() })),
         task: "Independently check every replacement against the source, current writing rules, its fellow replacements and existing siblings. Return exactly one indexed verdict per replacement. Separately compare the complete replacement set with currentCard: preservesFacts is true only if no source-supported fact or necessary condition/relationship tested by the original has been lost or changed. For unsupported original facts, require their omission instead of preserving an error. Judge grounding, self-contained context, retrieval quality, cloze syntax/leaks and duplicate retrievals. Any missing fact, unsupported claim, unadjudicated warning or quality failure must not receive keep. Do not write or repair cards in this check." }),
       schema: RewriteAuditOut, label: "rewrite audit", maxTokens: 4000, retryInvalidResponse: false, ...authorization });
     assertAuthorized(authorization);

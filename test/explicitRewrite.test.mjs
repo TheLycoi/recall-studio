@@ -85,6 +85,50 @@ function fixture({ output = { cards: drafts }, audit, pause } = {}) {
     pending: () => pending, release: () => barrier.resolve(), runs, learning: () => learning, rules: value => { rules = value; } };
 }
 
+const procedure = 'disconnect the power, attach the reference cable, and reconnect power only after the indicator turns green';
+for (const kind of ['qa', 'cloze']) for (const focused of [true, false]) test(`G3: ${kind} ${focused ? 'meaningful procedure passes' : 'unfocused unit is held'} only after length adjudication`, async () => {
+  const answer = focused ? procedure : `${procedure}; record the serial number, identify the cable manufacturer, name the room, and list the tools`;
+  const source = `Zeta sensor calibration uses this ordered procedure: ${procedure}. Record the serial number, identify the cable manufacturer, name the room, and list the tools.`;
+  const output = { cards: [kind === 'qa'
+    ? { kind, front: focused ? 'During Zeta sensor calibration, what ordered actions and reconnection condition apply?' : 'Zeta sensor calibration: what actions, identifying details, surroundings and equipment must be recalled?', back: answer, text: '' }
+    : { kind, front: '', back: '', text: focused ? `Zeta sensor calibration requires {{c1::${procedure}}}.` : `Zeta sensor calibration requires {{c1::${procedure}}}; record {{c1::the serial number}}, identify {{c1::the cable manufacturer}}, name {{c1::the room}}, and list {{c1::the tools}}.` }] };
+  const audit = { preservesFacts: true, reason: 'Synthetic source comparison', verdicts: [{ index: 0, verdict: focused ? 'keep' : 'revise', reason: focused ? 'One procedural unit with its essential condition' : 'Combines independent retrieval targets' }] };
+  const f = fixture({ output, audit });
+  f.h.text = source;
+  Object.assign(f.c, { kind: 'qa', front: 'Zeta sensor calibration: what is its procedure?', back: procedure, text: '' });
+  const before = structuredClone(f.h);
+  await f.view.onOpen();
+  f.star('Keep the complete procedure and condition; improve its cue.'); await Promise.all(f.runs); f.draw();
+  assert.deepEqual(f.requests.map(r => r.label), ['rewrite cards', 'rewrite audit'], 'length is adjudicated, not rejected before the independent check');
+  const request = f.requests[1], payload = JSON.parse(request.user);
+  const finding = payload.cards[0].checks.find(c => c.id === (kind === 'qa' ? 'qa-answer-long' : 'cloze-framing'));
+  assert.match(finding.finding, /adjudicate.*meaningful|adjudicate.*meaning/i);
+  assert.match(request.system, /product polic.*independent adjudication/i);
+  assert.doesNotMatch(request.system, /linter fails a qa answer over twelve|Each deletion is at most six words|linter rejects longer/);
+  if (focused) {
+    assert.equal(f.revisions.length, 1);
+    assert.equal(kind === 'qa' ? f.c.back : f.c.text, kind === 'qa' ? procedure : output.cards[0].text);
+    assert.equal(f.c.extra, before.cards[1].extra);
+  } else {
+    assert.deepEqual(f.h, before);
+    assert.deepEqual(f.revisions, []);
+  }
+  await f.view.onClose();
+});
+
+test('G3: over-sixty-word unfocused card reaches audit with its actual findings and remains unchanged', async () => {
+  const back = `${procedure}; ${'record the serial number and list the tools; '.repeat(8)}`;
+  const output = { cards: [{ kind: 'qa', front: 'Zeta calibration: what procedure and independent inventory details apply?', back, text: '' }] };
+  const f = fixture({ output, audit: { preservesFacts: true, reason: 'Synthetic', verdicts: [{ index: 0, verdict: 'revise', reason: 'Unfocused inventory and procedural targets' }] } });
+  f.h.text = back;
+  const before = structuredClone(f.h);
+  await f.view.onOpen(); f.star('Improve the cue'); await Promise.all(f.runs);
+  assert.equal(f.requests.length, 2);
+  assert.deepEqual(JSON.parse(f.requests[1].user).cards[0].checks.map(c => c.id), ['qa-answer-long', 'card-long']);
+  assert.deepEqual(f.h, before); assert.deepEqual(f.revisions, []);
+  await f.view.onClose();
+});
+
 test('rendered star atomically inserts all checked split drafts in the original slot', async () => {
   const f = fixture(); await f.view.onOpen();
   const original = structuredClone(f.c);
