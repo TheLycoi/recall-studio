@@ -76,6 +76,25 @@ test('DeepSeek HTTP status redaction preserves classification and opaque configu
   await assert.rejects(new m.DeepSeekBackend(() => settings('deepseek')).complete(req()), e => safe(e, 'rate-limit'));
 });
 
+test('DeepSeek schema errors never echo opaque provider-controlled properties', async () => {
+  reset();
+  const s = settings('deepseek');
+  http = async () => {
+    s.deepseekApiKey = 'differentSyntheticCredentialAfterDispatch';
+    return { status: 200, json: { choices: [{ message: { content: JSON.stringify({ ready: true, [opaqueKey]: 'unexpected' }) }, finish_reason: 'stop' }] } };
+  };
+  await assert.rejects(new m.DeepSeekBackend(() => s).complete({ ...req(), schema: z.strictObject({ ready: z.boolean() }) }), e => safe(e, 'failed', /wrong shape/));
+  assert.equal(calls, 1);
+});
+
+test('DeepSeek public study caller keeps opaque keys out of serialized schema errors', async () => {
+  reset();
+  http = async () => ({ status: 200, json: { choices: [{ message: { content: JSON.stringify({ selections: [], gaps: [], [opaqueKey]: 'unexpected' }) }, finish_reason: 'stop' }] } });
+  const client = new m.LlmClient(() => settings('deepseek'));
+  await assert.rejects(client.selectStudyEvidence({ topic: 'Synthetic', guide: 'Test Amber', passages: [{ id: '1', path: 'Synthetic.md', title: 'Synthetic', text: 'Amber stores heat.', line: 1, page: null }], authorized: () => true }), e => safe(e, 'failed', /wrong shape/));
+  assert.equal(calls, 1);
+});
+
 test('credential labels redact non-prefixed API keys without hiding benign context', async () => {
   reset(); cli = { code: 1, error: `connection refused; API key: ${opaqueKey}; retry later` };
   await assert.rejects(new m.CodexBackend(() => settings('codex')).complete(req()), e => {

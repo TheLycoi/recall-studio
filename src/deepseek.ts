@@ -206,7 +206,8 @@ export class DeepSeekBackend implements LlmBackend {
     if (!parsed.success) {
       throw new DeepSeekError(
         "failed",
-        `DeepSeek returned ${req.label} in the wrong shape: ${parsed.error.issues[0]?.message ?? "schema mismatch"}.`,
+        // Schema messages can echo arbitrary provider keys/values, including credentials.
+        `DeepSeek returned ${req.label} in the wrong shape: schema validation failed.`,
       );
     }
     return parsed.data;
