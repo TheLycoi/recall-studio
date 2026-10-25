@@ -52,7 +52,7 @@ export class Generator {
       if (b.finalAudit) (b.auditHistory ??= []).push(b.finalAudit);
       delete b.finalAudit;
       delete b.finalAuditRequested;
-      if (!b.audit?.verdicts.length || b.audit.status === "unverified") {
+      if (!b.audit?.verdicts.length || b.audit.status === "unverified" || JSON.stringify(b.audit.contents) !== JSON.stringify(b.drafts?.map(cardAuditContent))) {
         if (b.audit) (b.auditHistory ??= []).push(b.audit);
         delete b.audit;
         delete b.auditRequested;
@@ -313,6 +313,8 @@ export class Generator {
         const published = structuredClone(card);
         published.generation!.audit = { status: "verified", reason: final.verdicts.find(v => v.index === index && v.cardId === card.id)!.reason, content: cardAuditContent(card), sourceKey: generationSourceKey(h) };
         published.critiqueRan = true;
+        delete published.lintFailures;
+        delete published.critiqueReason;
         published.lintWarnings = lint.warnings;
         published.status = "pending";
         h.cards.push(published);

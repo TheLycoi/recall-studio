@@ -340,3 +340,24 @@ test('a stale repair exposes retained draft count and reasons for source-level r
   assert.equal(f.h.generation.blocked[0].cardId, f.h.generation.drafts[0].id);
   assert.ok(f.h.generation.blocked[0].reasons.length);
 });
+
+
+test('explicit retry independently audits a legacy private draft and clears stale lint metadata', async () => {
+  const f = fixture({ defect: false });
+  await f.g.run(f.h);
+  f.h.cards = [];
+  f.h.generation.committed = false;
+  f.h.generation.phase = 'auditing';
+  delete f.h.generation.audit.contents;
+  f.h.generation.drafts[0].lintFailures = ['qa-answer-long'];
+  f.h.generation.drafts[0].critiqueReason = 'An obsolete draft finding';
+  f.h.status = 'error';
+  f.g.kick = () => {};
+  f.g.retry(f.h);
+  await f.g.run(f.h);
+  assert.equal(f.calls.filter(r => r.label === 'audit').length, 2);
+  assert.equal(f.calls.filter(r => r.label === 'generation repair').length, 0);
+  assert.equal(f.h.cards.length, 1);
+  assert.equal(f.h.cards[0].lintFailures, undefined);
+  assert.equal(f.h.cards[0].critiqueReason, undefined);
+});
