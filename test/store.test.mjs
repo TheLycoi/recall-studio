@@ -225,6 +225,123 @@ test("two quick flushes write the later snapshot last", async () => {
   store.close();
 });
 
+test("failed legacy migration cannot create a competing inbox and restart retries the intact history", async () => {
+  const legacy = ".obsidian/plugins/recall/inbox.json";
+  const history = {
+    ...JSON.parse(REAL), futureInbox: { preserved: true },
+    revisions: [{
+      cardId: "retained-card", at: "2026-10-24", via: "edit", instruction: "",
+      before: { kind: "qa", front: "Question?", back: "Original", text: "", extra: "" },
+      after: { kind: "qa", front: "Question?", back: "Saved", text: "", extra: "" },
+      futureRevision: "retained",
+    }],
+  };
+  const original = JSON.stringify(history, null, 2) + "\n";
+  const v = memoryVault({ [legacy]: original });
+  const adapter = v.app.vault.adapter, rename = adapter.rename;
+  adapter.rename = async (from, to) => {
+    if (from === legacy) throw Error("synthetic transient migration failure");
+    return rename(from, to);
+  };
+  const store = new s.InboxStore(v.app, "wiki/_schema", ".obsidian/plugins/recall");
+  const before = s.notices.length;
+  try {
+    await quiet(() => store.load());
+    store.add(highlight("must-not-compete", "queued"));
+    await store.flush();
+    assert.deepEqual([...v.files.entries()], [[legacy, original]], "a new capture must not suppress migration on restart");
+    assert.equal(store.readOnly, true);
+    assert.ok(s.notices.slice(before).some(message => /migration|move/i.test(message) && /read-only/.test(message)));
+    // A transient failure stays closed in this instance; loading again cannot bless its empty state.
+    adapter.rename = rename;
+    await store.load();
+    await store.flush();
+    assert.deepEqual([...v.files.entries()], [[legacy, original]]);
+  } finally { store.close(); adapter.rename = rename; }
+  const restarted = new s.InboxStore(v.app, "wiki/_schema", ".obsidian/plugins/recall");
+  try {
+    await restarted.load();
+    assert.equal(restarted.readOnly, false);
+    assert.deepEqual(restarted.allHistory(), history.highlights);
+    assert.deepEqual(restarted.revisions(), history.revisions);
+    assert.equal(v.files.get(INBOX), original, "migration moves the exact original bytes");
+    assert.equal(v.files.has(legacy), false);
+    restarted.add(highlight("new-after-recovery", "ready"));
+    await restarted.flush();
+    const saved = JSON.parse(v.files.get(INBOX));
+    assert.deepEqual(saved.highlights.map(h => h.id), ["new-after-recovery", "h1"]);
+    assert.deepEqual(saved.revisions, history.revisions);
+    assert.deepEqual(saved.futureInbox, history.futureInbox);
+  } finally { restarted.close(); }
+});
+
+test("migration failures at each adapter boundary preserve legacy bytes until a fresh load retries", async t => {
+  const legacy = ".obsidian/plugins/recall/inbox.json";
+  for (const boundary of ["folder lookup", "folder creation", "destination lookup", "legacy lookup"]) {
+    await t.test(boundary, async () => {
+      const v = memoryVault({ [legacy]: REAL });
+      const adapter = v.app.vault.adapter, { exists, mkdir } = adapter;
+      adapter.exists = async path => {
+        if ((boundary === "folder lookup" && path === "wiki/_schema") ||
+            (boundary === "destination lookup" && path === INBOX) ||
+            (boundary === "legacy lookup" && path === legacy)) throw Error(boundary);
+        return exists(path);
+      };
+      adapter.mkdir = async path => {
+        if (boundary === "folder creation") throw Error(boundary);
+        return mkdir(path);
+      };
+      const old = new s.InboxStore(v.app, "wiki/_schema", ".obsidian/plugins/recall");
+      try {
+        await quiet(() => old.load());
+        assert.equal(old.readOnly, true);
+        old.add(highlight("not-durable", "queued"));
+        await old.flush();
+        assert.deepEqual([...v.files.entries()], [[legacy, REAL]]);
+      } finally { old.close(); Object.assign(adapter, { exists, mkdir }); }
+      const restarted = new s.InboxStore(v.app, "wiki/_schema", ".obsidian/plugins/recall");
+      try {
+        await restarted.load();
+        assert.equal(restarted.get("h1").text, "kept");
+        assert.equal(restarted.readOnly, false);
+        assert.deepEqual([...v.files.entries()], [[INBOX, REAL]]);
+      } finally { restarted.close(); }
+    });
+  }
+});
+
+test("a missing legacy inbox still permits first creation", async () => {
+  const v = memoryVault({});
+  const store = new s.InboxStore(v.app, "wiki/_schema", ".obsidian/plugins/recall");
+  try {
+    await store.load();
+    store.add(highlight("first", "ready"));
+    await store.flush();
+    assert.equal(store.readOnly, false);
+    assert.equal(JSON.parse(v.files.get(INBOX)).highlights[0].id, "first");
+  } finally { store.close(); }
+});
+
+test("existing destination and recovered backup take precedence without changing legacy history", async t => {
+  const legacy = ".obsidian/plugins/recall/inbox.json";
+  for (const recovery of [false, true]) await t.test(recovery ? "backup" : "destination", async () => {
+    const original = REAL.replace("kept", "legacy");
+    const v = memoryVault({ [legacy]: original, [recovery ? `${INBOX}.backup` : INBOX]: REAL });
+    const store = new s.InboxStore(v.app, "wiki/_schema", ".obsidian/plugins/recall");
+    try {
+      await store.load();
+      assert.equal(store.get("h1").text, "kept");
+      assert.equal(store.readOnly, false);
+      assert.equal(v.files.get(legacy), original);
+      assert.equal(v.files.get(INBOX), REAL);
+      store.touch();
+      await store.flush();
+      assert.equal(v.files.get(legacy), original);
+      assert.equal(JSON.parse(v.files.get(INBOX)).highlights[0].text, "kept");
+    } finally { store.close(); }
+  });
+});
+
 test("first save creates an inbox under the strict no-overwrite adapter", async () => {
   const v = memoryVault({});
   const store = new s.InboxStore(v.app, "wiki/_schema");

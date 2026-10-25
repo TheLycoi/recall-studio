@@ -109,12 +109,14 @@ export default class RecallPlugin extends Plugin {
     );
 
     this.app.workspace.onLayoutReady(() => {
+      if (this.unloading) return;
       this.app.workspace.iterateAllLeaves(leaf => {
+        if (this.unloading) return;
         if (leaf.getViewState().type === "review-inbox-chat") {
           void leaf.setViewState({ type: VIEW_TYPE_INBOX }).catch(console.error);
         }
       });
-      this.generator.start();
+      if (!this.unloading) this.generator.start();
     });
   }
 

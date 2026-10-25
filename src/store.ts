@@ -74,10 +74,19 @@ export class InboxStore {
 
   /** Move a plugin-folder inbox.json into the Recall folder, once, when no inbox is there yet. */
   private async migrate(): Promise<void> {
+    if (this.closed) return;
     const adapter = this.app.vault.adapter;
     const dir = this.path.slice(0, this.path.lastIndexOf("/"));
-    if (dir && !(await adapter.exists(dir))) await adapter.mkdir(dir);
-    if (!this.legacyPath || (await adapter.exists(this.path)) || !(await adapter.exists(this.legacyPath))) return;
+    if (dir) {
+      const exists = await adapter.exists(dir);
+      if (this.closed) return;
+      if (!exists) await adapter.mkdir(dir);
+    }
+    if (this.closed || !this.legacyPath) return;
+    const destinationExists = await adapter.exists(this.path);
+    if (this.closed || destinationExists) return;
+    const legacyExists = await adapter.exists(this.legacyPath);
+    if (this.closed || !legacyExists) return;
     await adapter.rename(this.legacyPath, this.path);
     console.debug(`Recall Studio: inbox moved from the plugin folder to ${this.path}`);
   }
@@ -128,10 +137,15 @@ export class InboxStore {
       new Notice("Recall Studio: inbox.json backup could not be recovered; storage is read-only until restart.", 0);
       return;
     }
+    if (this.closed) return;
     try {
       await this.migrate();
+      if (this.closed) return;
     } catch (e) {
       console.error("Recall Studio: could not move the inbox into the Recall Studio folder", e);
+      this.readOnly = true;
+      new Notice("Recall Studio: inbox migration failed; the original file is kept and storage is read-only until restart.", 0);
+      return;
     }
     try {
       if (!loaded && await this.app.vault.adapter.exists(this.path)) {

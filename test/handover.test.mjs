@@ -29,6 +29,8 @@ class NativeLifecycle {
     }
   }
 }
+class TFile { constructor(path) { this.path = path; this.stat = { mtime: 1 }; } }
+class TFolder { constructor(path) { this.path = path; } }
 const notices = [];
 before(async () => {
   globalThis.window ??= globalThis;
@@ -38,7 +40,7 @@ before(async () => {
       stdin: { contents: `export {default as RecallPlugin} from './src/main'; export {InboxStore} from './src/store'; export {Generator} from './src/generator'; export {LlmClient} from './src/llm'; export {makeHighlight} from './src/model';`, resolveDir: root },
       bundle: true, write: false, platform: 'node', format: 'cjs', external: ['obsidian', '@codemirror/view'], logLevel: 'silent',
     });
-    const stub = new Proxy({ Plugin: NativeLifecycle, Notice: class { constructor(message) { notices.push(message); } hide() {} }, normalizePath: p => p, addIcon() {}, editorInfoField: {} }, { get: (o, k) => k in o ? o[k] : class {} });
+    const stub = new Proxy({ Plugin: NativeLifecycle, TFile, TFolder, Notice: class { constructor(message) { notices.push(message); } hide() {} }, normalizePath: p => p, addIcon() {}, editorInfoField: {} }, { get: (o, k) => k in o ? o[k] : class {} });
     const cm = { WidgetType: class {}, Decoration: { none: [], widget: () => ({ range: () => ({ from: 0 }) }), set: xs => xs }, ViewPlugin: { fromClass: c => c } };
     const m = new Module(`handover-${i}`);
     m.require = id => id === 'obsidian' ? stub : id === '@codemirror/view' ? cm : Module.createRequire(import.meta.url)(id);
@@ -84,6 +86,230 @@ async function fixture() {
   const g = plugin.generator = new Generator(plugin);
   return { files, adapter, app, store, h, llm, plugin, g };
 }
+
+function withRulesVault(f) {
+  f.app.vault.getAbstractFileByPath = path => f.files.has(path) ? new TFile(path) : path === 'study' ? new TFolder(path) : null;
+  f.app.vault.create = async (path, text) => {
+    assert.equal(f.files.has(path), false);
+    f.files.set(path, text);
+    return new TFile(path);
+  };
+  f.app.vault.cachedRead = file => f.adapter.read(file.path);
+}
+
+test('saved layout-ready callback cannot restart work after native synchronous unload', async () => {
+  const f = await fixture(), callbacks = [], migrations = [], dispatches = [];
+  f.store.close();
+  f.app.workspace.onLayoutReady = callback => callbacks.push(callback);
+  f.app.workspace.iterateAllLeaves = visit => visit({
+    getViewState: () => ({ type: 'review-inbox-chat' }),
+    setViewState: async state => { migrations.push(state); },
+  });
+  // Use real rules-note creation, with only the vault boundary substituted.
+  withRulesVault(f);
+  const next = new bundles[1].RecallPlugin(f.app);
+  let starts = 0;
+  try {
+    await next.onload();
+    assert.equal(callbacks.length, 1);
+    const start = next.generator.start.bind(next.generator);
+    next.generator.start = () => { starts++; start(); };
+    next.llm.codex.complete = async request => { dispatches.push(request.label); throw Error('unexpected synthetic dispatch'); };
+    assert.equal(next.unload(), undefined, 'native unload discards its asynchronous hook');
+    const before = new Map(f.files);
+    callbacks[0]();
+    assert.equal(starts, 0, 'saved callback must not restart a stopped generator');
+    await next.onunload();
+    await next.generator.stop();
+    callbacks[0](); // The callback also stays inert after cleanup has fully settled.
+    assert.equal(starts, 0);
+    assert.equal(next.generator.stopped, true);
+    assert.deepEqual(migrations, []);
+    assert.deepEqual(dispatches, []);
+    assert.equal(f.files.has('study/recall-rules.md'), false);
+    assert.deepEqual(f.files, before);
+    assert.equal(next.store.closed, true);
+  } finally {
+    await next.generator?.stop();
+    await Promise.allSettled([next.onunload()]);
+    next.store?.close();
+  }
+});
+
+test('live layout startup migrates only retired leaves and completes the real generation queue', async () => {
+  const f = await fixture(), callbacks = [], migrations = [], dispatches = [];
+  f.store.close();
+  withRulesVault(f);
+  f.app.workspace.onLayoutReady = callback => callbacks.push(callback);
+  f.app.workspace.iterateAllLeaves = visit => {
+    for (const type of ['review-inbox-chat', 'markdown']) visit({
+      getViewState: () => ({ type }),
+      setViewState: async state => { migrations.push([type, state.type]); },
+    });
+  };
+  const next = new bundles[1].RecallPlugin(f.app);
+  try {
+    await next.onload();
+    Object.assign(next.settings, { provider: 'codex', critiquePass: true, historyExamples: false, notifyWhenReady: false });
+    next.llm.codex.complete = async request => {
+      dispatches.push(request.label);
+      if (request.label !== 'audit') return f.llm.codex.complete(request);
+      const { cards } = JSON.parse(request.user);
+      return request.schema.parse({ verdicts: cards.map((card, index) => ({ index, cardId: card.id, status: 'verified', reason: 'Synthetic supported card' })) });
+    };
+    assert.deepEqual(dispatches, []);
+    assert.equal(f.files.has('study/recall-rules.md'), false);
+    callbacks[0]();
+    await until(() => dispatches.length > 0 && next.generator.running.size === 0);
+    assert.deepEqual(migrations, [['review-inbox-chat', 'review-inbox']]);
+    assert.equal(f.files.has('study/recall-rules.md'), true);
+    assert.ok(dispatches.includes('preparation'));
+    assert.ok(dispatches.includes('grounded cards'));
+    assert.ok(dispatches.includes('audit'));
+    assert.equal(next.store.get(f.h.id).status, 'ready');
+    assert.equal(next.store.get(f.h.id).cards.length, 1);
+    next.unload();
+    await next.onunload();
+    const disk = JSON.parse(f.files.get('study/inbox.json')).highlights[0];
+    assert.equal(disk.id, f.h.id);
+    assert.equal(disk.cards.length, 1);
+  } finally { await Promise.allSettled([next.onunload()]); next.store?.close(); }
+});
+
+test('layout migration stops if unloading begins while visiting saved leaves', async () => {
+  const f = await fixture(), callbacks = [], migrations = [];
+  f.store.close();
+  f.app.workspace.onLayoutReady = callback => callbacks.push(callback);
+  const next = new bundles[1].RecallPlugin(f.app);
+  f.app.workspace.iterateAllLeaves = visit => {
+    for (const id of ['first', 'second']) visit({
+      getViewState: () => ({ type: 'review-inbox-chat' }),
+      setViewState: async () => { migrations.push(id); next.unload(); },
+    });
+  };
+  try {
+    await next.onload();
+    let starts = 0;
+    next.generator.start = () => { starts++; };
+    callbacks[0]();
+    await next.onunload();
+    assert.deepEqual(migrations, ['first'], 'later leaves must not migrate after unload');
+    assert.equal(starts, 0, 'unload during leaf migration cannot start generation');
+  } finally { await Promise.allSettled([next.onunload()]); next.store?.close(); }
+});
+
+for (const boundary of ['backup-exists', 'folder-exists', 'folder-create', 'destination-exists', 'legacy-exists']) {
+  test(`native unload during startup ${boundary} cannot continue legacy migration`, async () => {
+    const f = await fixture(), entered = deferred(), release = deferred();
+    f.store.close();
+    const legacy = '.obsidian/plugins/review-inbox/inbox.json';
+    const original = f.files.get('study/inbox.json');
+    f.files.delete('study/inbox.json');
+    f.files.set(legacy, original);
+    const exists = f.adapter.exists, mkdir = f.adapter.mkdir;
+    let paused = false, loading;
+    const pause = async () => { paused = true; entered.resolve(); await release.promise; };
+    f.adapter.exists = async path => {
+      if (!paused && ((boundary === 'backup-exists' && path === 'study/inbox.json.backup') ||
+          (boundary === 'folder-exists' && path === 'study') ||
+          (boundary === 'destination-exists' && path === 'study/inbox.json') ||
+          (boundary === 'legacy-exists' && path === legacy))) await pause();
+      if (path === 'study') return false;
+      return exists(path);
+    };
+    f.adapter.mkdir = async path => {
+      if (boundary === 'folder-create' && !paused) await pause();
+      return mkdir(path);
+    };
+    const next = new bundles[1].RecallPlugin(f.app);
+    try {
+      loading = next.onload();
+      await entered.promise;
+      next.unload();
+      await until(() => next.store.closed);
+      release.resolve();
+      await Promise.all([loading, next.onunload()]);
+      assert.deepEqual([...f.files], [[legacy, original]], 'unloaded startup cannot move or replace the retained history');
+      assert.equal(next.generator, undefined);
+      assert.equal(next.store.closed, true);
+      Object.assign(f.adapter, { exists, mkdir });
+      const restarted = new bundles[0].InboxStore(f.app, 'study', '.obsidian/plugins/review-inbox');
+      try {
+        await restarted.load();
+        assert.equal(restarted.all()[0].id, f.h.id, 'a live successor can still migrate normally');
+      } finally { restarted.close(); }
+    } finally {
+      release.resolve();
+      await Promise.allSettled([loading, next.onunload()]);
+      next.store?.close();
+    }
+  });
+}
+
+test('a clean native reload retries failed migration on the same adapter', async () => {
+  const f = await fixture();
+  f.store.close();
+  const legacy = '.obsidian/plugins/review-inbox/inbox.json';
+  const original = f.files.get('study/inbox.json');
+  f.files.delete('study/inbox.json');
+  f.files.set(legacy, original);
+  const rename = f.adapter.rename, error = console.error;
+  f.adapter.rename = async (from, to) => {
+    if (from === legacy) throw Error('synthetic migration unavailable');
+    return rename(from, to);
+  };
+  console.error = () => {};
+  const old = new bundles[0].RecallPlugin(f.app), next = new bundles[1].RecallPlugin(f.app);
+  try {
+    await old.onload();
+    assert.equal(old.store.readOnly, true);
+    assert.equal(old.store.hasUnsavedChanges, false);
+    old.unload();
+    f.adapter.rename = rename;
+    await next.onload();
+    await old.onunload();
+    assert.equal(next.store.get(f.h.id).text, f.h.text);
+    assert.equal(next.store.readOnly, false);
+    assert.deepEqual([...f.files], [['study/inbox.json', original]]);
+  } finally {
+    f.adapter.rename = rename;
+    await Promise.allSettled([old.onunload(), next.onunload()]);
+    old.store?.close(); next.store?.close(); console.error = error;
+  }
+});
+
+test('an already-dispatched migration settles before native handover releases its successor', async () => {
+  const f = await fixture(), entered = deferred(), release = deferred();
+  f.store.close();
+  const legacy = '.obsidian/plugins/review-inbox/inbox.json';
+  const original = f.files.get('study/inbox.json');
+  f.files.delete('study/inbox.json'); f.files.set(legacy, original);
+  const rename = f.adapter.rename;
+  f.adapter.rename = async (from, to) => {
+    if (from === legacy) { entered.resolve(); await release.promise; }
+    return rename(from, to);
+  };
+  const old = new bundles[0].RecallPlugin(f.app), next = new bundles[1].RecallPlugin(f.app);
+  let loading, successor;
+  try {
+    loading = old.onload();
+    await entered.promise;
+    old.unload();
+    successor = next.onload();
+    await until(() => old.store.closed && next.store);
+    assert.equal(next.generator, undefined, 'the successor must wait for the dispatched rename to settle');
+    assert.deepEqual([...f.files], [[legacy, original]]);
+    release.resolve();
+    await Promise.all([loading, successor, old.onunload()]);
+    assert.equal(old.generator, undefined);
+    assert.equal(next.store.get(f.h.id).text, f.h.text);
+    assert.deepEqual([...f.files], [['study/inbox.json', original]]);
+  } finally {
+    release.resolve();
+    await Promise.allSettled([loading, successor, old.onunload(), next.onunload()]);
+    old.store?.close(); next.store?.close();
+  }
+});
 
 for (const boundary of ['write', 'backup-rename', 'commit-rename']) {
   test(`native unload hands over rollback before a fresh bundle loads at ${boundary}`, async () => {
