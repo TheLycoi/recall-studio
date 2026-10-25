@@ -22,6 +22,96 @@ async function fixture(){
   const plugin={settings,store,llm,refreshStatusBar(){}};
   return {...v,store,h,calls,backend,plugin,g:new Generator(plugin)};
 }
+test('P5 runtime build identity and source/context fingerprints survive the real store round trip', async () => {
+  const f = await fixture();
+  const buildIdentity = { release: 'synthetic-release', commit: 'synthetic-build-commit' };
+  let reloaded;
+  try {
+    f.g = new Generator(f.plugin, buildIdentity);
+    await f.g.run(f.h);
+    const batch = structuredClone(f.h.generation);
+    const audit = structuredClone(f.h.cards[0].generation.audit);
+    assert.deepEqual(batch.provenance.build, buildIdentity);
+    assert.deepEqual(batch.audit.provenance, batch.provenance);
+    assert.deepEqual(audit.provenance, batch.provenance);
+    assert.equal(batch.provenance.inputKey, batch.inputKey);
+    assert.equal(batch.provenance.sourceKey, audit.sourceKey);
+    assert.match(batch.provenance.inputKey, /^[a-f0-9]{64}$/);
+    assert.match(batch.provenance.sourceKey, /^[a-f0-9]{64}$/);
+    assert.equal(batch.version, 1, 'schema version is not the plugin release');
+    await f.store.flush();
+    f.store.close();
+    reloaded = new InboxStore(f.app, 'study');
+    await reloaded.load();
+    const h = reloaded.all()[0];
+    assert.deepEqual(h.generation, batch);
+    assert.deepEqual(h.cards[0].generation.audit, audit);
+    f.plugin.store = reloaded;
+    await new Generator(f.plugin, { release: 'later-release' }).run(h);
+    assert.deepEqual(h.generation, batch, 'resuming completed work must not backfill a later release identity');
+    assert.deepEqual(h.cards[0].generation.audit, audit);
+    assert.deepEqual(f.calls, ['preparation', 'grounded cards', 'audit']);
+  } finally { f.store.close(); reloaded?.close(); }
+});
+
+test('P5 a release identity works without a commit, and new audit identity records the actual resumed runtime', async () => {
+  const f = await fixture();
+  const complete = f.backend.complete;
+  let fail = true;
+  f.backend.complete = async req => {
+    if (req.label === 'audit' && fail) throw Error('synthetic audit unavailable');
+    return complete(req);
+  };
+  try {
+    await new Generator(f.plugin, { release: 'batch-start-release' }).run(f.h);
+    assert.equal(f.h.cards.length, 0);
+    assert.equal(f.h.generation.provenance.build.release, 'batch-start-release');
+    fail = false;
+    const retry = new Generator(f.plugin, { release: 'audit-runtime-release' });
+    retry.kick = () => {};
+    retry.retry(f.h);
+    await retry.run(f.h);
+    assert.equal(f.h.cards[0].generation.audit.provenance.build.release, 'audit-runtime-release');
+    assert.equal(f.h.cards[0].generation.audit.provenance.build.commit, undefined);
+    assert.equal(f.h.generation.provenance.build.release, 'batch-start-release', 'the batch start is historical, the new audit names its own runtime');
+  } finally { f.store.close(); }
+});
+
+test('P5 unavailable build identity is unknown and legacy records are not backfilled', async () => {
+  const f = await fixture();
+  try {
+    await f.g.run(f.h);
+    assert.ok(f.h.generation.provenance.sourceKey);
+    assert.equal(f.h.generation.provenance.build, undefined);
+    delete f.h.generation.provenance;
+    delete f.h.generation.audit.provenance;
+    delete f.h.cards[0].generation.audit.provenance;
+    const legacy = structuredClone(f.h);
+    await new Generator(f.plugin, { release: 'current-release' }).run(f.h);
+    assert.deepEqual(f.h.generation, legacy.generation);
+    assert.deepEqual(f.h.cards, legacy.cards);
+    assert.equal(f.h.generation.provenance, undefined);
+    assert.equal(f.h.cards[0].generation.audit.provenance, undefined);
+  } finally { f.store.close(); }
+});
+
+test('P5 changed source or writing context gets a new fingerprint without rewriting prior provenance', async () => {
+  for (const change of ['source', 'context']) {
+    const f = await fixture();
+    try {
+      const g = new Generator(f.plugin, { release: 'synthetic-release' });
+      await g.run(f.h);
+      const original = structuredClone(f.h.generation);
+      if (change === 'source') f.h.before = 'Revised surrounding context';
+      else f.plugin.settings.writerInstructions = 'Revised writing context';
+      await g.run(f.h);
+      assert.notEqual(f.h.generation.provenance.inputKey, original.provenance.inputKey);
+      assert.equal(f.h.generation.provenance.sourceKey === original.provenance.sourceKey, change !== 'source');
+      assert.deepEqual(f.h.generationHistory.find(g => g.id === original.id), original);
+    } finally { f.store.close(); }
+  }
+});
+
 test('the real queue preserves concurrent batches without confusing another checkpoint with an unsaved no-op',{timeout:2000},async()=>{
   const f=await fixture();const second=makeHighlight({sourcePath:'second.md',sourceTitle:'Second synthetic',text:'Amber stores heat.'});f.store.add(second);f.plugin.settings.concurrency=2;
   const done=new Promise(resolve=>{f.plugin.refreshStatusBar=()=>{if(f.g.running.size===0&&f.store.all().every(h=>h.status!=='queued'))resolve();};});

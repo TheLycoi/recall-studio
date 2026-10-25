@@ -25,7 +25,7 @@ function words(s: string): string[] {
     .filter((w) => w.length > 0);
 }
 
-function reviewText(text: string): string {
+export function reviewText(text: string): string {
   // Strip only tags our exporter adds, before decoding escaped literal source text.
   return inlineMarkdownToHtml(text).replace(/<\/?(?:b|i|code)>/g, "").replace(/<br>/g, " ")
     .replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");

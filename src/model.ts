@@ -45,7 +45,8 @@ export interface GenerationPreparation {
   plan: { id: string; factIds: string[]; entity: string; aspect: string; value: string; reason: string }[];
   exclusions: { factIds: string[]; reason: string }[];
   omissions: { factIds: string[]; reason: string }[];
-  conflicts: { quote: string; reason: string }[];
+  /** Conflicting or insufficient source evidence, separate from prompt quality. Empty or legacy absent factIds holds the whole capture. */
+  conflicts: { quote: string; reason: string; factIds?: string[] }[];
 }
 export interface GenerationContext {
   /** Legacy saved batches may carry this field; it no longer limits writing. */
@@ -55,10 +56,23 @@ export interface GenerationContext {
   rules: string;
   examples: string;
 }
+/** Runtime release identity, distinct from every persisted schema version. */
+export interface GenerationBuild {
+  release: string;
+  commit?: string;
+}
+export interface GenerationProvenance {
+  /** Absent means unknown, including historical records; never inferred from timestamps. */
+  build?: GenerationBuild;
+  sourceKey: string;
+  /** Reuses the generation input key for source, authorized writing context and settings. */
+  inputKey: string;
+}
 export interface GenerationAuditRecord {
+  provenance?: GenerationProvenance;
   status: GenerationAuditStatus;
   reason: string;
-  verdicts: { index: number; cardId: string; status: GenerationAuditStatus; reason: string }[];
+  verdicts: { index: number; cardId: string; status: GenerationAuditStatus; reason: string; conflicts?: { quote: string; reason: string }[] }[];
   /** A verdict applies only to the exact candidate wording checked. */
   contents?: string[];
 }
@@ -75,6 +89,8 @@ export interface GenerationRepair {
 }
 export interface GenerationBatch {
   version: 1;
+  /** New batch start only. Individual audit records retain their own runtime identity. */
+  provenance?: GenerationProvenance;
   id: string;
   /** One-off request, retained across reloads; never replaces the capture instruction. */
   instruction: string;
@@ -138,7 +154,7 @@ export interface Card {
     batchId: string;
     planId: string;
     factIds: string[];
-    audit: { status: GenerationAuditStatus; reason: string; content: string; sourceKey?: string };
+    audit: { status: GenerationAuditStatus; reason: string; content: string; sourceKey?: string; provenance?: GenerationProvenance };
   };
   /** Present only after a user-requested check of this exact content. */
   userCheck?: { content: string; at: string; issues: string[] };

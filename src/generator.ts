@@ -1,11 +1,11 @@
 import { Notice } from "obsidian";
 import { newId, plainText } from "./util";
 import type RecallPlugin from "./main";
-import { makeCard, type Card, type GenerationAuditRecord, type GenerationBatch, type Highlight } from "./model";
+import { makeCard, type Card, type GenerationAuditRecord, type GenerationBatch, type GenerationBuild, type GenerationProvenance, type Highlight } from "./model";
 import { describeError } from "./llm";
 import { lintCard, isHardLintFailure, LINT_FIX_INSTRUCTIONS } from "./lint";
 import { nextInstruction } from "./inboxData";
-import { cardAuditContent, generationKey, generationSource, generationSourceKey, validatePreparation, validateDrafts, validateAudit } from "./generation";
+import { cardAuditContent, generationKey, generationSource, generationSourceKey, sourceConflictsForCard, validatePreparation, validateDrafts, validateAudit } from "./generation";
 
 class Interrupted extends Error {}
 
@@ -19,7 +19,7 @@ export class Generator {
   /** Only checkpoints serialize; independent model requests remain concurrent. */
   private saving: Promise<void> = Promise.resolve();
 
-  constructor(private plugin: RecallPlugin) {}
+  constructor(private plugin: RecallPlugin, private build?: GenerationBuild) {}
 
   start(): void { this.stopped = false; this.kick(); }
   /** Invalidate synchronously; abort providers before awaiting this drain. */
@@ -76,8 +76,12 @@ export class Generator {
     this.enqueue(h);
   }
 
-  private batch(instruction = ""): GenerationBatch {
-    return { version: 1, id: newId("g"), instruction, inputKey: "", phase: "preparing" };
+  private provenance(h: Highlight, inputKey: string): GenerationProvenance {
+    return { ...(this.build ? { build: { ...this.build } } : {}), sourceKey: generationSourceKey(h), inputKey };
+  }
+
+  private batch(h: Highlight, instruction = ""): GenerationBatch {
+    return { version: 1, id: newId("g"), instruction, inputKey: "", phase: "preparing", provenance: this.provenance(h, "") };
   }
 
   private replaceBatch(h: Highlight, instruction: string): GenerationBatch {
@@ -86,7 +90,7 @@ export class Generator {
       h.generationHistory ??= [];
       if (!h.generationHistory.some(g => g.id === old.id)) h.generationHistory.push(old);
     }
-    return h.generation = this.batch(instruction);
+    return h.generation = this.batch(h, instruction);
   }
 
   /** Intentional new generation, unlike enqueue's retry of a saved batch. */
@@ -122,7 +126,7 @@ export class Generator {
     const source = generationSource(h);
     const appended: Card[] = [];
     const appendedContents = new Map<Card, string>();
-    let batch = h.generation ?? this.batch();
+    let batch = h.generation ?? this.batch(h);
     h.generation = batch;
     h.status = "generating";
     h.error = null;
@@ -161,6 +165,7 @@ export class Generator {
         key = generationKey(h, context, this.plugin.settings, batch.id);
       }
       batch.inputKey = key;
+      if (batch.provenance) batch.provenance.inputKey = key;
       const staged = () => JSON.stringify([batch.preparation, batch.writerOutput, batch.drafts, batch.repairs, batch.audit, batch.finalAudit]);
       let expected = staged();
       const changed = () => { expected = staged(); };
@@ -196,14 +201,14 @@ export class Generator {
         if (batch.preparationRequested) throw new Error("The prior preparation outcome is unknown. Use Retry held drafts to authorize another request.");
         batch.preparationRequested = true;
         await save();
-        const raw = await this.plugin.llm.prepareGeneration(words, structuredClone(existing), context, authorized);
+        const raw = await this.plugin.llm.prepareGeneration(words, structuredClone(existing), context, authorized, h.text);
         await checkContext();
-        batch.preparation = validatePreparation(raw, words.text, context.maxCards);
+        batch.preparation = validatePreparation(raw, h.text, context.maxCards);
         batch.phase = "writing";
         changed();
         await save();
       }
-      const preparation = validatePreparation(batch.preparation, words.text, context.maxCards);
+      const preparation = validatePreparation(batch.preparation, h.text, context.maxCards, batch.provenance ? undefined : words.text);
       if (!batch.drafts) {
         if (!batch.writerOutput) {
           if (batch.writingRequested) throw new Error("The prior writer outcome is unknown. Use Retry held drafts to authorize another request.");
@@ -231,10 +236,15 @@ export class Generator {
         if (new Set(cards.map(c => c.id)).size !== cards.length || cards.some(c => c.highlightId !== h.id || c.generation?.batchId !== batch.id)) throw new Error("Invalid saved draft identity.");
       };
       validateCards(originals);
+      const sourceIssues = (card: Card, checked: Pick<GenerationAuditRecord, "verdicts">) => [
+        ...sourceConflictsForCard(preparation, card),
+        // Rechecking repaired siblings cannot erase an earlier source hold in this attempt.
+        ...[batch.audit, checked].flatMap(a => a?.verdicts.find(v => v.cardId === card.id)?.conflicts ?? []),
+      ];
       const audit = async (cards: Card[], final = false): Promise<GenerationAuditRecord> => {
         const saved = final ? batch.finalAudit : batch.audit;
         if (saved) {
-          validateAudit(saved, cards);
+          validateAudit(saved, cards, h.text, saved.provenance ? undefined : words.text);
           if (JSON.stringify(saved.contents) !== JSON.stringify(cards.map(cardAuditContent))) return { status: "unverified", reason: "Saved audit does not match the exact candidates; explicit retry is required.", verdicts: [], contents: cards.map(cardAuditContent) };
           return saved;
         }
@@ -245,14 +255,15 @@ export class Generator {
         await save();
         let result: GenerationAuditRecord;
         try {
-          const raw = cards.length ? await this.plugin.llm.auditGeneration(words, structuredClone(cards), structuredClone(existing.filter(c => !cards.some(candidate => candidate.id === c.id))), preparation, context, authorized, final) : { verdicts: [] };
+          const raw = cards.length ? await this.plugin.llm.auditGeneration(words, structuredClone(cards), structuredClone(existing.filter(c => !cards.some(candidate => candidate.id === c.id))), preparation, context, authorized, final, h.text) : { verdicts: [] };
           await checkContext();
-          const checked = validateAudit(raw, cards);
-          result = { status: checked.verdicts.some(v => v.status === "failed") ? "failed" : checked.verdicts.length === cards.length && checked.verdicts.every(v => v.status === "verified") && !preparation.conflicts.length ? "verified" : "unverified", reason: checked.verdicts.length === cards.length ? "Independent audit completed; see each candidate's verdict." : "Independent audit omitted verdicts; affected candidates are held.", verdicts: checked.verdicts, contents: cards.map(cardAuditContent) };
+          const checked = validateAudit(raw, cards, h.text);
+          result = { status: checked.verdicts.some(v => v.status === "failed") ? "failed" : checked.verdicts.length === cards.length && checked.verdicts.every(v => v.status === "verified") && !cards.some(c => sourceIssues(c, checked).length) ? "verified" : "unverified", reason: checked.verdicts.length === cards.length ? "Independent audit completed; see each candidate's verdict." : "Independent audit omitted verdicts; affected candidates are held.", verdicts: checked.verdicts, contents: cards.map(cardAuditContent) };
         } catch (e) {
           await checkContext();
           result = { status: "unverified", reason: `Independent audit unavailable: ${describeError(e)}`, verdicts: [], contents: cards.map(cardAuditContent) };
         }
+        result.provenance = this.provenance(h, key);
         if (final) batch.finalAudit = result;
         else batch.audit = result;
         changed();
@@ -267,7 +278,7 @@ export class Generator {
         const lint = lintCard(card, words, [...existing, ...cards.filter(c => c.id !== card.id)]);
         const hard = lint.failures.filter(isHardLintFailure);
         const verdict = checked.contents?.[index] === cardAuditContent(card) ? checked.verdicts.find(v => v.index === index && v.cardId === card.id) : undefined;
-        return [...hard.map(id => LINT_FIX_INSTRUCTIONS[id]), ...(preparation.conflicts.length ? ["Source conflicts need human review."] : []), ...(verdict?.status === "verified" ? [] : [verdict?.reason ?? checked.reason])];
+        return [...hard.map(id => LINT_FIX_INSTRUCTIONS[id]), ...sourceIssues(card, checked).map(c => `Source conflicts or insufficient evidence need human review: ${c.reason} Quote: “${c.quote}”`), ...(verdict?.status === "verified" ? [] : [verdict?.reason ?? checked.reason])];
       };
       const round = batch.repairRound ?? 0;
       const targets = cards.map((card, index) => {
@@ -275,7 +286,7 @@ export class Generator {
         const lint = lintCard(card, words, [...existing, ...cards.filter(c => c.id !== card.id)]);
         const confirmed = (initial.contents?.[index] === cardAuditContent(card) && verdict?.status === "failed") || lint.failures.some(isHardLintFailure);
         const retry = batch.retryFindings?.find(f => f.cardId === card.id);
-        return { card, reasons: retry?.reasons ?? (confirmed ? [...new Set([...issues(card, index, initial), ...[...lint.failures, ...lint.warnings].map(id => LINT_FIX_INSTRUCTIONS[id])])] : []) };
+        return { card, reasons: sourceIssues(card, initial).length ? [] : retry?.reasons ?? (confirmed ? [...new Set([...issues(card, index, initial), ...[...lint.failures, ...lint.warnings].map(id => LINT_FIX_INSTRUCTIONS[id])])] : []) };
       }).filter(t => t.reasons.length && !h.cards.some(c => c.id === t.card.id));
       for (const target of targets) {
         if (batch.repairs?.some(r => r.round === round && r.cardId === target.card.id)) continue;
@@ -319,7 +330,7 @@ export class Generator {
         if (reasons.length) { batch.blocked.push({ cardId: card.id, reasons: [...new Set(reasons)] }); continue; }
         const lint = lintCard(card, words, [...existing, ...cards.filter(c => c.id !== card.id)]);
         const published = structuredClone(card);
-        published.generation!.audit = { status: "verified", reason: final.verdicts.find(v => v.index === index && v.cardId === card.id)!.reason, content: cardAuditContent(card), sourceKey: generationSourceKey(h) };
+        published.generation!.audit = { status: "verified", reason: final.verdicts.find(v => v.index === index && v.cardId === card.id)!.reason, content: cardAuditContent(card), sourceKey: generationSourceKey(h), ...(final.provenance ? { provenance: structuredClone(final.provenance) } : {}) };
         published.critiqueRan = true;
         delete published.lintFailures;
         delete published.critiqueReason;

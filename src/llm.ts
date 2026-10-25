@@ -14,7 +14,7 @@ import { DeepSeekError } from "./deepseekError";
 import { buildExamplesBlock } from "./examples";
 import { LINT_FIX_INSTRUCTIONS } from "./lint";
 import type { BloomLevel, Card, Highlight, GenerationContext, GenerationPreparation } from "./model";
-import { PreparationOut, GroundedCardsOut, AuditOut, PREPARATION_SYSTEM, AUDIT_SYSTEM, RETRIEVAL_QUALITY_RUBRIC, type GroundedDraft, type GenerationAudit } from "./generation";
+import { PreparationOut, GroundedCardsOut, AuditOut, PREPARATION_SYSTEM, AUDIT_SYSTEM, RETRIEVAL_QUALITY_RUBRIC, renderedCardReviews, type GroundedDraft, type GenerationAudit } from "./generation";
 import type { QuizQuestionMessageArgs, QuizRecallGradeMessageArgs } from "./prompt";
 import { QUIZ_COVERAGE_PREFIX, QUIZ_COVERAGE_SUFFIX, QUIZ_INPUT_AUTHORITY, QUIZ_GRADE_RUBRIC, buildQuizQuestionMessage, buildQuizRecallGradeMessage } from "./prompt";
 import { QuizQuestionOut as QuizQuestionOutSchema, QuizRecallGradeOut as QuizRecallGradeOutSchema } from "./schemas";
@@ -160,7 +160,7 @@ Tractable and effortful. A card should be almost always answerable by a reader w
 
 Run both litmus tests on every card before you return it. False positive: how could a reader produce the right answer without knowing the fact? Grammar is the usual leak — an article, a singular or plural verb, or a number word left visible next to the blank hands over the answer. So does a deletion whose length or capitalisation is the only candidate the sentence admits, and so does any card whose answer is already sitting in its own question. False negative: how could a reader who knows the fact still answer wrongly? This is nearly always missing context — a question that does not name its subject, a deletion with too little left visible to say which of several facts is wanted, or a cue that fits the neighbouring card just as well. Fix the card, or drop it; a card that fails either test is worse than no card, because it will be reviewed for years.
 
-Sets and enumerations. Do not ask for an unordered list of more than three items as a single answer; such cards are nearly unlearnable. Split the list across cards, ask what distinguishes each member, or use overlapping cloze deletions so each number hides one member with the rest visible. Test an ordered sequence with numbers that each hide one step and show its neighbours.
+Sets and enumerations. Do not turn an unordered list into arbitrary numbered slots, even when it is short. Printed order alone is not a retrieval cue. Plan supported distinguishing relationships or a focused, tractable complete-list retrieval. For a genuinely source-ordered sequence, each step may have its own number with neighbours visible; preserve its actions and essential conditions.
 
 Closed and open lists. A closed list has a fixed, complete membership that the highlight states in full: the stages of a model, the steps of a process, the ingredients of a recipe. The rules above are written for it, because there the list really is the answer. An open list is a category whose members the highlight only samples, signalled by words like "include", "such as", "for example", and "among others"; the sample is not the set, so asking for the list as an answer or clozing its members in turn would teach the reader an arbitrary subset as though it were complete. Ask instead for what generalizes: when the highlight states a criterion for membership, test the criterion, and use a useful named example in the direction example to category, which has one answer, never category to list. Do not make a card per example automatically or replace retrieval with a meta-card saying the list is incomplete.
 
@@ -170,7 +170,7 @@ Context cue. When a question or a cloze sentence would be ambiguous outside its 
 
 Card type. Cloze is the default. Use qa when the answer is not a span sitting in a sentence but something the reader must produce (a reason, a mechanism, a comparison), or when the cue has to be phrased to rule out a confusable neighbour. The reader can convert either kind from the inbox, so prefer cloze and let them switch. A single deletion is a valid cloze. There is no fixed number of deletions or cloze cards; choose grouping from the source and retrieval goal, not a quota.
 
-How a cloze card reviews. A cloze card is one sentence from the highlight with {{c1::...}} markers, trimmed, and reworded only as far as resolving a pronoun or grammar needs, so the visible text stays the highlight's own wording; each deletion number becomes its own review: when the reader is tested on c2, the c1 and c3 spans are shown filled in. So a sentence with three numbered deletions is three minimal items sharing one stem, not one compound item, and the sentence is the right unit to work in: when it states short, independent facts, hide each under its own number instead of writing a card per fact on the same stem. An enumeration is the same move, {{c1::alarm}}, {{c2::resistance}}, and {{c3::exhaustion}} giving three reviews that each hide one member with the rest visible in a fixed order. Reuse a number only when two spans are one fact tested in two places. Keep supported deletions on their shared stem when each has a clear cue. Do not split or repeat the sentence solely to meet a deletion count.
+How a cloze card reviews. A cloze card is one sentence from the highlight with {{c1::...}} markers, trimmed, and reworded only as far as resolving a pronoun or grammar needs, so the visible text stays the highlight's own wording; each deletion number becomes its own review: when the reader is tested on c2, the c1 and c3 spans are shown filled in. So a sentence with three numbered deletions is three minimal items sharing one stem, not one compound item, and the sentence is the right unit to work in: when it states short, independent facts, hide each under its own number instead of writing a card per fact on the same stem. A source-ordered sequence is the same move, {{c1::alarm}}, {{c2::resistance}}, and {{c3::exhaustion}} giving three reviews cued by their stated stage order, not merely their printed positions. Reuse a number only for one meaningful joint retrieval, such as a supported contrast whose opposite spans would otherwise reveal each other, not a bundle of unrelated facts. Keep supported deletions on their shared stem when each has a clear cue. Do not split or repeat the sentence solely to meet a deletion count.
 
 Each deletion hides a focused span, a term, number, name, meaningful condition or short procedural unit, not incidental scaffolding; it appears verbatim in the highlight; and it is recoverable from what stays visible, which includes the sibling spans. That last point is where a dense card fails the false-positive test: a visible sibling that all but names the hidden one ("the ___ point on Earth, about 400 m below sea level") has given it away, so hide only what the rest of the sentence cues without spelling out, and leave the rest as framing.
 
@@ -204,7 +204,7 @@ qa | Dead Sea: what can survive its salinity? | only simple organisms
 cloze | The three stages of the general adaptation syndrome are {{c1::alarm}}, {{c2::resistance}}, and {{c3::exhaustion}}.
 qa | How many stages does the general adaptation syndrome have? | three
 </cards>
-<note>One cloze card, three reviews: each number hides one member with the other two visible in their fixed order, which is what an enumeration needs. Three cards each hiding one member under c1 would review the same sentence three times and drift apart as soon as one was edited. The count card stays: reading "three" in the framing of every review is exposure, not retrieval.</note>
+<note>One cloze card, three reviews: the source states that these stages unfold in order, so the visible neighbouring stages supply a meaningful cue. A generic unordered list would not gain independent cues by being printed the same way. Three cards each hiding one member under c1 would review the same sentence three times and drift apart as soon as one was edited. The count card stays: reading "three" in the framing of every review is exposure, not retrieval.</note>
 </example>
 <example>
 <highlight>A set is an unordered collection, while an enumeration is ordered. Enumerations are easier to learn than sets because the fixed order gives each item a stable cue.</highlight>
@@ -445,14 +445,14 @@ export class LlmClient {
     return context;
   }
 
-  async prepareGeneration(h: Highlight, existing: Card[], context: GenerationContext, authorized?: () => boolean): Promise<GenerationPreparation> {
+  async prepareGeneration(h: Highlight, existing: Card[], context: GenerationContext, authorized?: () => boolean, capturedOriginal = h.text): Promise<GenerationPreparation> {
     const authorization = { authorized: this.requestAuthorization(authorized) };
     assertAuthorized(authorization);
     const { maxCards: _legacyQuota, ...writingContext } = context;
     const result = await this.backend().complete({
       ...authorization,
       system: PREPARATION_SYSTEM + "\n\n" + CARD_INPUT_AUTHORITY,
-      user: JSON.stringify({ captured: h.text, sourceTitle: h.sourceTitle, heading: h.heading, contextBefore: h.before, contextAfter: h.after, instruction: h.instruction, ...writingContext, existing }),
+      user: JSON.stringify({ captured: h.text, sourceTitle: h.sourceTitle, heading: h.heading, contextBefore: h.before, contextAfter: h.after, instruction: h.instruction, ...writingContext, capturedOriginal, existing }),
       schema: PreparationOut, label: "preparation", maxTokens: 8000, retryInvalidResponse: false,
     });
     assertAuthorized(authorization);
@@ -488,14 +488,14 @@ export class LlmClient {
     return result.cards;
   }
 
-  async auditGeneration(h: Highlight, cards: Card[], existing: Card[], preparation: GenerationPreparation, context: GenerationContext, authorized?: () => boolean, final = false): Promise<GenerationAudit> {
+  async auditGeneration(h: Highlight, cards: Card[], existing: Card[], preparation: GenerationPreparation, context: GenerationContext, authorized?: () => boolean, final = false, capturedOriginal = h.text): Promise<GenerationAudit> {
     const authorization = { authorized: this.requestAuthorization(authorized) };
     assertAuthorized(authorization);
     const { maxCards: _legacyQuota, ...writingContext } = context;
     const result = await this.backend().complete({
       ...authorization,
       system: AUDIT_SYSTEM + "\n\n" + CARD_INPUT_AUTHORITY + "\n\nAdjudicate every deterministic warning and length-policy flag explicitly in the reason: retain necessary context and meaningful procedures, not blind shortening. A verified verdict may resolve a style or sibling warning, but can never override invalid syntax, unsupported deletions or a rendered answer leak. Check all candidates together, including unchanged siblings after repairs.",
-      user: JSON.stringify({ captured: h.text, sourceTitle: h.sourceTitle, heading: h.heading, contextBefore: h.before, contextAfter: h.after, instruction: h.instruction, ...writingContext, preparation, cards: cards.map((c, index) => ({ index, ...cardData(c), planId: c.generation?.planId, factIds: c.generation?.factIds, checks: (() => { const lint = lintCard(c, h, [...existing, ...cards.filter(s => s.id !== c.id)]); return [...lint.failures, ...lint.warnings].map(id => ({ id, finding: LINT_FIX_INSTRUCTIONS[id] })); })() })), existing }),
+      user: JSON.stringify({ captured: h.text, sourceTitle: h.sourceTitle, heading: h.heading, contextBefore: h.before, contextAfter: h.after, instruction: h.instruction, ...writingContext, capturedOriginal, preparation, cards: cards.map((c, index) => ({ index, ...cardData(c), planId: c.generation?.planId, factIds: c.generation?.factIds, reviews: renderedCardReviews(c), targetContext: (() => { const row = preparation.plan.find(p => p.id === c.generation?.planId); return row ? { entity: row.entity, aspect: row.aspect } : null; })(), checks: (() => { const lint = lintCard(c, h, [...existing, ...cards.filter(s => s.id !== c.id)]); return [...lint.failures, ...lint.warnings].map(id => ({ id, finding: LINT_FIX_INSTRUCTIONS[id] })); })() })), existing }),
       schema: AuditOut, label: final ? "final audit" : "audit", maxTokens: 8000, retryInvalidResponse: false,
     });
     assertAuthorized(authorization);

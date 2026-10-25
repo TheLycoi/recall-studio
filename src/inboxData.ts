@@ -4,7 +4,7 @@
 // and so cannot be.
 import type { CardRevision, InboxData } from "./model";
 import { z } from "zod";
-import { PreparationOut, AuditOut } from "./generation";
+import { PreparationOut, AuditOut, GenerationProvenanceOut } from "./generation";
 
 const AuditStatus = z.enum(["verified", "unverified", "failed"]);
 
@@ -18,16 +18,17 @@ const CardRecord = z.object({
   userCheck: z.object({ content: z.string(), at: z.string(), issues: z.array(z.string()) }).optional(),
   generation: z.object({
     batchId: z.string(), planId: z.string(), factIds: z.array(z.string()),
-    audit: z.object({ status: AuditStatus, reason: z.string(), content: z.string(), sourceKey: z.string().optional() }),
+    audit: z.object({ status: AuditStatus, reason: z.string(), content: z.string(), sourceKey: z.string().optional(), provenance: GenerationProvenanceOut.optional() }),
   }).optional(),
 });
 const AuditRecord = z.object({
   status: AuditStatus, reason: z.string(), verdicts: AuditOut.shape.verdicts,
-  contents: z.array(z.string()).optional(),
+  contents: z.array(z.string()).optional(), provenance: GenerationProvenanceOut.optional(),
 });
 const HeldFindings = z.array(z.object({ cardId: z.string(), reasons: z.array(z.string()) }));
 const BatchRecord = z.object({
   version: z.literal(1), id: z.string(), instruction: z.string(), inputKey: z.string(),
+  provenance: GenerationProvenanceOut.optional(),
   phase: z.enum(["preparing", "writing", "auditing", "repairing", "rechecking", "blocked", "complete"]),
   preparation: PreparationOut.optional(), drafts: z.array(CardRecord).optional(),
   preparationRequested: z.boolean().optional(), writingRequested: z.boolean().optional(),
