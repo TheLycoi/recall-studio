@@ -508,12 +508,59 @@ test("text exports in the same instant use unique paths without overwriting", as
   assert.equal(files.get(original[0]), original[1]);
 });
 
+for (const clozeExtraField of ["", "Text"]) {
+  for (const method of ["exportHighlights", "exportAsTextFile"]) {
+    test(`${method} rejects unsafe Cloze Extra mapping ${JSON.stringify(clozeExtraField)} before transport or file writes`, async () => {
+      fake = freshFake();
+      const plugin = await loadedPlugin({ clozeExtraField });
+      const card = cloze({ status: "pending" });
+      const h = highlight([card]);
+      const original = structuredClone(h);
+      notices.length = 0;
+      await plugin[method]([h]);
+      assert.deepEqual(h, original, "failed configuration must preserve the draft and source");
+      assert.equal(fake.actions.length, 0, "unsafe payloads must fail before any Anki endpoint");
+      assert.equal(fake.notes.size, 0);
+      assert.equal([...plugin.__app.__files.keys()].filter(p => p.endsWith(".txt")).length, 0);
+      assert.ok(notices.some(message => /Cloze extra field.*separate.*back.*Cloze text field/i.test(message)));
+    });
+  }
+}
+
+for (const method of ["exportHighlights", "exportAsTextFile"]) {
+  test(`${method} keeps mapped Cloze citations separate from the final Text payload`, async () => {
+    fake = freshFake();
+    const plugin = await loadedPlugin();
+    const card = cloze({ status: "pending", extra: "Recall the interval." });
+    const h = highlight([card]);
+    await plugin[method]([h]);
+    if (method === "exportHighlights") {
+      const note = [...fake.notes.values()][0];
+      assert.equal(note.fields.Text, card.text);
+      assert.match(note.fields["Back Extra"], /Recall the interval\..*reviewinbox-highlight.*Source:.*obsidian:\/\/open/);
+    } else {
+      const file = [...plugin.__app.__files.entries()].find(([p]) => p.endsWith(".txt"));
+      assert.ok(file);
+      const row = file[1].split("\n").find(line => line.startsWith("Cloze\t"));
+      assert.ok(row);
+      const fields = row.split("\t");
+      assert.ok(fields.includes(card.text), "Text must be its own column, unchanged");
+      const extra = fields.find(field => field.includes("reviewinbox-highlight"));
+      assert.match(extra, /Recall the interval\..*Source:.*obsidian:\/\/open/);
+      assert.notEqual(extra, card.text);
+    }
+    assert.equal(card.status, "exported");
+    assert.equal(h.status, "exported");
+  });
+}
+
 test("a text export splits a one-field cloze model from Q&A rows by note type", async () => {
   fake = freshFake();
   // The reader's Cloze model has no Extra field, so a cloze row carries one
-  // column while a Q&A row carries two. Anki's importer needs one shape per
-  // file, so they must not be written to the same one.
-  const plugin = await loadedPlugin({ basicExtraField: "", clozeExtraField: "" });
+  // column while a Q&A row carries two. Source inclusion is explicitly off:
+  // a one-field Cloze cannot safely carry source quotes. Anki's importer needs
+  // one shape per file, so they must not be written to the same one.
+  const plugin = await loadedPlugin({ basicExtraField: "", clozeExtraField: "", includeExtra: false });
   const qaCard = qa({ id: "c-qa" });
   const clozeCard = cloze({ id: "c-cloze", highlightId: "h2" });
   const draft = qa({ id: "c-draft", highlightId: "h1", status: "pending", front: "Draft question?" });

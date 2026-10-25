@@ -114,10 +114,114 @@ test("a Basic card with NO Extra field still carries the source backlink (append
   assert.ok(!("Extra" in n.fields) || n.fields.Extra === undefined);
 });
 
-test("a Cloze card with NO Extra field still carries the backlink (appended to Text)", () => {
-  const n = a.buildNote(clozeCard(), hl(), { settings: settings({ clozeExtraField: "" }), vaultName: "V", deck: "D" });
-  assert.match(n.fields.Text, /\{\{c1::interval\}\}/);
-  assert.match(n.fields.Text, /Source:.*Spacing/);
+const clozeMappingError = /Cloze extra field.*separate.*back.*Cloze text field/i;
+
+// Model the stock front template {{cloze:Text}} using the FINAL field payload.
+// Custom/live templates are checked separately before release.
+function clozeQuestions(note, textField = "Text") {
+  const text = note.fields[textField];
+  const ordinals = [...new Set([...text.matchAll(/\{\{c(\d+)::/g)].map(m => Number(m[1])))];
+  return ordinals.map(ordinal => ({
+    ordinal,
+    question: text.replace(/\{\{c(\d+)::([^{}]*?)(?:::(.*?))?\}\}/g,
+      (_, n, answer, hint) => Number(n) === ordinal ? `[${hint || "..."}]` : answer),
+  }));
+}
+
+const provenanceCard = () => clozeCard({ text: "First target: {{c1::alpha}}. Second target: {{c2::beta::label}}." });
+const provenanceHighlight = () => hl({ text: "The first target is alpha; the second target is beta." });
+
+function assertNoProvenanceOnQuestion(note) {
+  const questions = clozeQuestions(note);
+  assert.deepEqual(questions.map(q => q.ordinal), [1, 2]);
+  for (const { ordinal, question } of questions) {
+    assert.doesNotMatch(question, new RegExp(ordinal === 1 ? "alpha" : "beta"), `c${ordinal}: ${question}`);
+    assert.doesNotMatch(question, /reviewinbox-highlight|Source:|obsidian:\/\/open/);
+  }
+}
+
+test("a Cloze card with NO Extra field refuses provenance instead of exposing it on each question", () => {
+  const ctx = { settings: settings({ clozeExtraField: "" }), vaultName: "V", deck: "D" };
+  // If construction succeeds, inspect every rendered question before failing:
+  // this exposes the original answer leak, not only a missing exception.
+  let note;
+  try {
+    note = a.buildNote(provenanceCard(), provenanceHighlight(), ctx);
+  } catch (error) {
+    assert.match(error.message, clozeMappingError);
+    return;
+  }
+  assertNoProvenanceOnQuestion(note);
+  assert.fail("Cloze provenance without a separate back-only Extra mapping must be rejected, not silently dropped.");
+});
+
+for (const includeExtra of [true, false]) {
+  test(`Cloze Text-equals-Extra mapping is refused without overwriting Text (includeExtra=${includeExtra})`, () => {
+    assert.throws(() => a.buildNote(provenanceCard(), provenanceHighlight(), {
+      settings: settings({ clozeExtraField: "Text", includeExtra }), vaultName: "V", deck: "D",
+    }), clozeMappingError);
+  });
+}
+
+test("mapped Cloze provenance stays on the answer while every final question hides its own target", () => {
+  const h = provenanceHighlight();
+  h.subpath = "page=3&selection=abc";
+  h.topicPath = "topics/Targets.md";
+  const note = a.buildNote({ ...provenanceCard(), extra: "**Explanation:** alpha and beta." }, h, {
+    settings: settings(), vaultName: "Test Vault", deck: "D",
+  });
+  assert.equal(note.fields.Text, provenanceCard().text);
+  assertNoProvenanceOnQuestion(note);
+  assert.deepEqual(clozeQuestions(note), [
+    { ordinal: 1, question: "First target: [...]. Second target: beta." },
+    { ordinal: 2, question: "First target: alpha. Second target: [label]." },
+  ]);
+  assert.match(note.fields["Back Extra"], /<b>Explanation:<\/b> alpha and beta\./);
+  assert.ok(note.fields["Back Extra"].includes(`<blockquote class="reviewinbox-highlight">${h.text}</blockquote>`));
+  assert.match(note.fields["Back Extra"], /Source:.*obsidian:\/\/open\?vault=Test%20Vault&file=wiki%2FSpacing%23page%3D3%26selection%3Dabc/);
+  assert.match(note.fields["Back Extra"], /Topic:.*topics%2FTargets/);
+});
+
+for (const clozeExtraField of ["", "   "]) {
+  test(`Cloze extras require a mapping even with source inclusion disabled (${JSON.stringify(clozeExtraField)})`, () => {
+    assert.throws(() => a.buildNote({ ...provenanceCard(), extra: "The targets are alpha and beta." }, provenanceHighlight(), {
+      settings: settings({ clozeExtraField, includeExtra: false }), vaultName: "V", deck: "D",
+    }), clozeMappingError);
+  });
+}
+
+test("a whitespace-only Cloze extra field cannot receive required source provenance", () => {
+  assert.throws(() => a.buildNote(provenanceCard(), provenanceHighlight(), {
+    settings: settings({ clozeExtraField: "   " }), vaultName: "V", deck: "D",
+  }), clozeMappingError);
+});
+
+test("a one-field Cloze remains valid when neither source nor card extras are requested", () => {
+  const note = a.buildNote(provenanceCard(), provenanceHighlight(), {
+    settings: settings({ clozeExtraField: "", includeExtra: false }), vaultName: "V", deck: "D",
+  });
+  assert.deepEqual(note.fields, { Text: provenanceCard().text });
+  assertNoProvenanceOnQuestion(note);
+});
+
+test("a mapped Cloze keeps card extras when only source inclusion is disabled", () => {
+  const note = a.buildNote({ ...provenanceCard(), extra: "The targets are alpha and beta." }, provenanceHighlight(), {
+    settings: settings({ includeExtra: false }), vaultName: "V", deck: "D",
+  });
+  assertNoProvenanceOnQuestion(note);
+  assert.equal(note.fields["Back Extra"], "The targets are alpha and beta.");
+});
+
+test("Basic keeps source and card extras off the question with or without a separate Extra field", () => {
+  for (const basicExtraField of ["Extra", ""]) {
+    const note = a.buildNote(qaCard({ extra: "**Answer note**" }), hl(), {
+      settings: settings({ basicExtraField }), vaultName: "V", deck: "D",
+    });
+    assert.equal(note.fields.Front, "What is the interval?");
+    assert.match(note.fields[basicExtraField || "Back"], /<b>Answer note<\/b>/);
+    assert.match(note.fields[basicExtraField || "Back"], /reviewinbox-highlight.*Source:.*Spacing/);
+    assert.match(note.fields.Back, /^the gap between reviews/);
+  }
 });
 
 test("the source backlink uses the exact PDF++ subpath when the highlight has one", () => {

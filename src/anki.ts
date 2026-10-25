@@ -173,11 +173,9 @@ export function buildTags(h: Highlight, ctx: ExportContext): string[] {
 }
 
 /**
- * Build the note for one card. The source backlink is placed in the model's
- * Extra field when there is one. When the Basic or Cloze model has no Extra
- * field — a real configuration, since the field is optional — the backlink is
- * appended to the answer (Back) or Text field instead, so a card always links
- * home rather than silently dropping the source.
+ * Build the note for one card. Basic can append extras to its answer (Back).
+ * Cloze extras require a separate field displayed only on the answer template:
+ * appending the captured quote to Text would expose answers on the question.
  */
 export function buildNote(card: Card, h: Highlight, ctx: ExportContext): AnkiNote {
   const s = ctx.settings;
@@ -197,12 +195,11 @@ export function buildNote(card: Card, h: Highlight, ctx: ExportContext): AnkiNot
   } else {
     modelName = s.clozeModel;
     const textHtml = inlineMarkdownToHtml(card.text);
-    if (s.clozeExtraField) {
-      fields[s.clozeTextField] = textHtml;
-      fields[s.clozeExtraField] = extraHtml;
-    } else {
-      fields[s.clozeTextField] = [textHtml, extraHtml].filter(Boolean).join("<br>");
+    if ((extraHtml && !s.clozeExtraField.trim()) || s.clozeExtraField === s.clozeTextField) {
+      throw new Error("Configure Recall Studio's Cloze extra field as a separate field shown only on the back of the Anki template, distinct from the Cloze text field. Source quotes and extras cannot be appended to the question.");
     }
+    fields[s.clozeTextField] = textHtml;
+    if (s.clozeExtraField) fields[s.clozeExtraField] = extraHtml;
   }
   return {
     deckName: ctx.deck,
