@@ -74,6 +74,15 @@ const criteria = [
   /(?:who.*is|is.*who).*invalid/i,
   /(?:never|do not) invent.*mnemonics.*personal facts.*media/i,
   /no (?:fixed )?card.*quota/i,
+  /prefer one to three distinct cloze numbers per note/i,
+  /coherent lists and enumerations may exceed three/i,
+  /never reject.*solely.*cloze count/i,
+  /optional hints.*one to three words/i,
+  /omit.*hint.*already clear/i,
+  /never reject.*missing.*hint/i,
+  /do not omit useful foundational facts merely because they seem obvious/i,
+  /independent attributes.*separate.*groups/i,
+  /heading.*front.*class label/i,
 ];
 
 test('assembled requests share retrieval-quality criteria before and after plan lock', async t => {
@@ -106,12 +115,27 @@ test('assembled requests share retrieval-quality criteria before and after plan 
   assert.match(write.system, /exactly one card per supplied plan row/);
   assert.match(write.system, /twelve words/);
   assert.match(write.system, /six words/);
+  assert.doesNotMatch(write.system, /hide each under its own number instead of writing a card per fact/);
   assert.doesNotMatch(write.system, /never framing words/i);
   assert.match(audit.system, /source-supported.*poor retrieval.*failed/i);
   assert.match(audit.system, /plan grouping.*does not require.*joint retrieval/i);
   assert.match(audit.system, /condition and consequence.*separate cloze reviews/i);
   assert.match(audit.system, /findings only: never repair cards/);
   assert.deepEqual(f.calls.slice(0, 3).map(c => c.retryInvalidResponse), [false, false, false]);
+});
+
+test('soft cloze and hint preferences do not become validation gates', () => {
+  const f = fixture();
+  const source = 'Zeta calibration proceeds in order: disconnect power, attach cable, set zero, reconnect power.';
+  const preparation = { facts: [{ id: 'F1', statement: source, quote: source }], plan: [{ id: 'P1', factIds: ['F1'], entity: 'Zeta calibration', aspect: 'sequence', value: source, reason: 'Preserve a coherent procedure.' }], exclusions: [], omissions: [], conflicts: [] };
+  for (const hint of ['', '::first action to take safely']) {
+    const text = `Zeta calibration proceeds in order: {{c1::disconnect power${hint}}}, {{c2::attach cable}}, {{c3::set zero}}, {{c4::reconnect power}}.`;
+    const draft = { planId: 'P1', factIds: ['F1'], kind: 'cloze', front: '', back: '', text };
+    assert.equal(m.validateDrafts({ cards: [draft] }, m.validatePreparation(preparation, source))[0].text, text);
+    const card = m.makeCard(f.h.id, draft);
+    assert.deepEqual(m.lintCard(card, { ...f.h, text: source }, []).failures, []);
+    assert.equal(m.renderedCardReviews(card).length, 4);
+  }
 });
 
 test('supported ordered procedure and rationale survive preparation, draft and audit validators', async () => {
