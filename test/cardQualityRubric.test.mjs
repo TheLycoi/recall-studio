@@ -41,7 +41,8 @@ function fixture(status = 'verified', poorCue = false) {
     const payload = JSON.parse(req.user);
     if (req.label === 'preparation') return JSON.stringify(preparation);
     if (req.label === 'grounded cards') return JSON.stringify({ cards: drafts });
-    if (req.label === 'audit') return JSON.stringify({ verdicts: payload.cards.map((c, index) => ({ index, cardId: c.id, status, reason: status === 'failed' ? 'The source supports the answer, but the cue does not identify its subject.' : 'Synthetic transport verdict, not a model quality judgment.' })) });
+    if (req.label === 'generation repair') return JSON.stringify({ cards: payload.candidates.map(c => ({ ...drafts.find(d => d.planId === c.planId), ...(c.planId === 'P2' ? rationale : {}) })) });
+    if (req.label === 'audit' || req.label === 'final audit') return JSON.stringify({ verdicts: payload.cards.map((c, index) => ({ index, cardId: c.id, status, reason: status === 'failed' ? 'The source supports the answer, but the cue does not identify its subject.' : 'Synthetic transport verdict, not a model quality judgment.' })) });
     if (req.label === 'cards') return JSON.stringify({ cards: [rationale] });
     if (req.label === 'verdicts') return JSON.stringify({ verdicts: payload.cards.map((c, index) => ({ index, verdict: ['keep', 'revise', 'drop'][index], reason: 'Synthetic verdict for schema compatibility.', bloom: 'remember', kind: 'qa', ...(index === 1 ? rationale : { front: '', back: '', text: '' }) })) });
     if (req.label === 'card') return JSON.stringify(rationale);
@@ -125,20 +126,20 @@ test('supported ordered procedure and rationale survive preparation, draft and a
   for (const card of f.h.cards) assert.deepEqual(m.lintCard(card, f.h, f.h.cards.filter(c => c !== card)).failures, []);
 });
 
-for (const status of ['verified', 'unverified', 'failed']) test(`staged audit retains ${status} without repair, deletion or another round`, async () => {
+for (const status of ['verified', 'unverified', 'failed']) test(`staged audit holds ${status} unless independently accepted`, async () => {
   const f = fixture(status, status === 'failed');
   await f.g.run(f.h);
-  assert.equal(f.h.status, 'ready');
-  assert.deepEqual(f.calls.map(c => c.label), ['preparation', 'grounded cards', 'audit']);
+  assert.equal(f.h.status, status === 'verified' ? 'ready' : 'error');
+  assert.deepEqual(f.calls.map(c => c.label), ['preparation', 'grounded cards', 'audit', ...(status === 'failed' ? ['generation repair', 'generation repair', 'final audit'] : [])]);
   assert.equal(f.h.generation.audit.status, status);
-  assert.deepEqual(f.h.cards.map(c => c.generation.audit.status), [status, status]);
-  assert.deepEqual(f.h.cards.map(c => c.status), [status === 'failed' ? 'flagged' : 'pending', status === 'failed' ? 'flagged' : 'pending']);
-  assert.equal(f.h.cards[0].text, procedure);
-  assert.equal(f.h.cards[1].front, status === 'failed' ? 'What does it prevent?' : rationale.front);
-  assert.equal(f.h.cards[1].back, rationale.back);
-  const cards = structuredClone(f.h.cards);
+  assert.equal(f.h.cards.length, status === 'verified' ? 2 : 0);
+  assert.equal(f.h.generation.phase, status === 'verified' ? 'complete' : 'blocked');
+  assert.equal(f.h.generation.drafts[0].text, procedure);
+  assert.equal(f.h.generation.drafts[1].front, status === 'failed' ? 'What does it prevent?' : rationale.front);
+  assert.equal(f.h.generation.drafts[1].back, rationale.back);
+  const calls = f.calls.length, cards = structuredClone(f.h.cards);
   await f.g.run(f.h);
-  assert.equal(f.calls.length, 3);
+  assert.equal(f.calls.length, calls);
   assert.deepEqual(f.h.cards, cards);
   saveRequests(`audit-${status}`, f.calls);
 });

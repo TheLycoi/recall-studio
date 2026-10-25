@@ -82,13 +82,13 @@ for(const [provider,Backend] of [['codex',()=>CodexBackend],['opencode',()=>Open
 test('partial multi-card audit verifies only the exact addressed card',async()=>{
   const f=fixture();const original=f.backend.complete;
   f.backend.complete=async req=>{f.calls.push(req);const user=JSON.parse(req.user);if(req.label==='preparation'){const p=preparation();p.plan.push({id:'P2',factIds:['F2'],entity:'Cobalt',aspect:'',value:'reflects light',reason:'Stated property'});p.omissions=[];return req.schema.parse(p);}if(req.label==='grounded cards'){const d=draft();d.cards.push({planId:'P2',factIds:['F2'],kind:'qa',front:'What does Cobalt reflect?',back:'light',text:''});return req.schema.parse(d);}assert.equal(user.cards.length,2);assert.deepEqual(user.cards.map(c=>c.index),[0,1]);return req.schema.parse({verdicts:[{index:1,cardId:user.cards[1].id,status:'verified',reason:'The second card is supported'}]});};
-  await f.g.run(f.h);assert.equal(f.h.generation.audit.status,'unverified');assert.equal(f.h.cards[0].generation.audit.status,'unverified');assert.equal(f.h.cards[1].generation.audit.status,'verified');
+  await f.g.run(f.h);assert.equal(f.h.generation.audit.status,'unverified');assert.equal(f.h.cards.length,1);assert.equal(f.h.cards[0].back,'light');assert.equal(f.h.cards[0].generation.audit.status,'verified');assert.equal(f.h.generation.blocked.length,1);assert.equal(f.h.generation.phase,'blocked');
 });
 
-test('ungrounded cloze content is still linted and flagged even with a positive model audit',async()=>{
+test('ungrounded cloze content stays private even with a positive model audit',async()=>{
   const f=fixture({lintMode:'hide'});const original=f.backend.complete;
   f.backend.complete=async req=>req.label==='grounded cards'?(f.calls.push(req),req.schema.parse({cards:[{planId:'P1',factIds:['F1'],kind:'cloze',front:'',back:'',text:'{{c1::Amber}} stores {{c2::invented radiation}}.'}]})):original(req);
-  await f.g.run(f.h);assert.equal(f.h.cards[0].status,'flagged');assert.ok(f.h.cards[0].lintFailures.includes('cloze-not-grounded'));assert.notEqual(f.h.cards[0].generation.audit.status,'verified');
+  await f.g.run(f.h);assert.equal(f.h.cards.length,0);assert.equal(f.h.generation.phase,'blocked');assert.match(f.h.generation.blocked[0].reasons.join(' '),/not in the highlight/);assert.match(f.h.generation.drafts[0].text,/invented radiation/);
 });
 
 test('a single cloze stays cloze with evidence links and a stable export identity on retry',async()=>{
@@ -174,7 +174,7 @@ test('failed writer resumes checkpointed preparation after JSON reload',async()=
   await f.g.run(f.h);assert.equal(f.h.status,'error');assert.ok(f.h.generation.preparation);
   const raw=JSON.stringify({version:1,highlights:[f.h]});const parsed=parseInboxJson(raw);assert.equal(parsed.ok,true);
   Object.assign(f.h,parsed.data.highlights[0]); fail=false;
-  await new Generator(f.plugin).run(f.h);
+  const retry=new Generator(f.plugin);retry.kick=()=>{};retry.retry(f.h);await retry.run(f.h);
   assert.deepEqual(f.calls.map(c=>c.label),['preparation','grounded cards','grounded cards','audit']);assert.equal(f.h.status,'ready');
 });
 
@@ -200,11 +200,11 @@ for(const change of ['text','instruction','before','provider','writerInstruction
   if(change==='rules') f.llm.getSchema=async()=>({cards:'new rules'});
   else if(change in f.settings)f.settings[change]=change==='provider'?'deepseek':change==='maxCardsPerHighlight'?4:'changed';
   else f.h[change]+=' changed';
-  await new Generator(f.plugin).run(f.h);
+  const retry=new Generator(f.plugin);retry.kick=()=>{};retry.retry(f.h);await retry.run(f.h);
   assert.notEqual(f.h.generation.id,old);assert.equal(f.calls.filter(c=>c.label==='preparation').length,2);
 });
 
-for(const mode of ['disabled','throws','partial','unknown-id','wrong-index','duplicate']) test(`audit ${mode} never becomes a green pass`,async()=>{
+for(const mode of ['throws','partial','unknown-id','wrong-index','duplicate']) test(`audit ${mode} never becomes a green pass`,async()=>{
   const f=fixture({critiquePass:mode!=='disabled'});const original=f.backend.complete;
   f.backend.complete=async req=>{
     if(req.label!=='audit')return original(req);f.calls.push(req);
@@ -214,14 +214,14 @@ for(const mode of ['disabled','throws','partial','unknown-id','wrong-index','dup
     return req.schema.parse({verdicts:mode==='partial'?[]:mode==='duplicate'?[v,v]:[v]});
   };
   await f.g.run(f.h);
-  assert.equal(f.h.status,'ready');assert.equal(f.h.cards.length,1);assert.equal(f.h.cards[0].generation.audit.status,'unverified');
+  assert.equal(f.h.status,'error');assert.equal(f.h.cards.length,0);assert.equal(f.h.generation.phase,'blocked');assert.equal(f.h.generation.blocked.length,1);
   assert.notEqual(f.h.generation.audit.status,'verified');const count=f.calls.length;await f.g.run(f.h);assert.equal(f.calls.length,count,'no hidden retry of a terminal audit');
 });
 
-test('a failed finding flags rather than deletes or rewrites a card',async()=>{
+test('a failed finding attempts one repair and retains unresolved originals privately',async()=>{
   const f=fixture();const original=f.backend.complete;
   f.backend.complete=async req=>req.label==='audit'?(f.calls.push(req),req.schema.parse({verdicts:[{index:0,cardId:JSON.parse(req.user).cards[0].id,status:'failed',reason:'Unsupported qualifier'}]})):original(req);
-  await f.g.run(f.h);assert.equal(f.h.cards[0].status,'flagged');assert.equal(f.h.cards[0].back,'heat');assert.equal(f.h.cards[0].generation.audit.status,'failed');
+  await f.g.run(f.h);assert.equal(f.h.cards.length,0);assert.equal(f.h.generation.drafts[0].back,'heat');assert.equal(f.h.generation.audit.status,'failed');assert.equal(f.calls.filter(c=>c.label==='generation repair').length,1);assert.equal(f.h.generation.phase,'blocked');
 });
 
 for(const stage of ['preparation','grounded cards','audit']) for(const action of ['stop','dismiss','archive','source','instruction','settings']) test(`${action} during ${stage} prevents stale publish`,async()=>{
@@ -238,14 +238,14 @@ test('a read-only no-op flush is not a persisted checkpoint',async()=>{
 test('source conflict remains visible and cannot acquire verified status',async()=>{
   const f=fixture();const original=f.backend.complete;
   f.backend.complete=async req=>{if(req.label!=='preparation')return original(req);f.calls.push(req);const p=preparation();p.conflicts=[{quote:'Amber stores heat.',reason:'Source conflicts require review'}];return req.schema.parse(p);};
-  await f.g.run(f.h);assert.equal(f.h.cards[0].generation.audit.status,'unverified');assert.equal(f.h.generation.preparation.conflicts.length,1);
+  await f.g.run(f.h);assert.equal(f.h.cards.length,0);assert.match(f.h.generation.blocked[0].reasons.join(' '),/conflicts/);assert.equal(f.h.generation.preparation.conflicts.length,1);
 });
 
 test('an interrupted audit is not re-spent after restart',async()=>{
   const f=fixture();const original=f.backend.complete;
   f.backend.complete=async req=>{const out=await original(req);if(req.label==='audit')f.g.stop();return out;};
   await f.g.run(f.h);assert.equal(f.h.cards.length,0);assert.equal(f.h.status,'queued');
-  await new Generator(f.plugin).run(f.h);assert.equal(f.calls.filter(c=>c.label==='audit').length,1);assert.equal(f.h.cards[0].generation.audit.status,'unverified');
+  await new Generator(f.plugin).run(f.h);assert.equal(f.calls.filter(c=>c.label==='audit').length,1);assert.equal(f.h.cards.length,0);assert.equal(f.h.generation.phase,'blocked');
 });
 
 test('changed instructions after a completed batch include the old accepted history on the first retry',async()=>{
@@ -277,7 +277,7 @@ test('more starts a distinct bounded batch and retains its one-off instruction o
   const original=f.backend.complete;let fail=true;
   f.backend.complete=async req=>{if(req.label==='grounded cards'&&fail){f.calls.push(req);throw Error('transient');}return original(req);};
   await f.g.run(f.h);assert.equal(f.h.generation.instruction,'Focus on mechanism');fail=false;
-  await new Generator(f.plugin).run(f.h);assert.equal(f.h.cards.length,2);assert.equal(f.h.cards[0].id,id);assert.equal(f.h.instruction,'');assert.notEqual(f.h.generatedAt,'2000-01-01T00:00:00.000Z');
+  const retry=new Generator(f.plugin);retry.kick=()=>{};retry.retry(f.h);await retry.run(f.h);assert.equal(f.h.cards.length,2);assert.equal(f.h.cards[0].id,id);assert.equal(f.h.instruction,'');assert.notEqual(f.h.generatedAt,'2000-01-01T00:00:00.000Z');
   assert.equal(f.calls.filter(c=>c.label==='preparation').length,2);assert.equal(f.calls.filter(c=>c.label==='audit').length,2);
   assert.match(f.calls.filter(c=>c.label==='grounded cards').at(-1).user,/Focus on mechanism/);
 });

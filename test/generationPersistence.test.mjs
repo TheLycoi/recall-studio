@@ -32,7 +32,7 @@ test('real store reload resumes durable preparation without repeating it',async(
   const f=await fixture();const complete=f.backend.complete;f.backend.complete=async req=>{if(req.label==='grounded cards')throw Error('writer unavailable');return complete(req);};
   await f.g.run(f.h);await f.store.flush();const saved=JSON.parse(f.files.get(f.store.filePath));assert.ok(saved.highlights[0].generation.preparation);f.store.close();
   const reloaded=new InboxStore(f.app,'study');await reloaded.load();f.plugin.store=reloaded;f.backend.complete=complete;
-  try{await new Generator(f.plugin).run(reloaded.all()[0]);assert.deepEqual(f.calls,['preparation','grounded cards','audit']);const durable=JSON.parse(f.files.get(reloaded.filePath)).highlights[0];assert.equal(durable.cards.length,1);assert.equal(durable.cards[0].generation.audit.status,'verified');}finally{reloaded.close();}
+  try{const retry=new Generator(f.plugin);retry.kick=()=>{};retry.retry(reloaded.all()[0]);await retry.run(reloaded.all()[0]);assert.deepEqual(f.calls,['preparation','grounded cards','audit']);const durable=JSON.parse(f.files.get(reloaded.filePath)).highlights[0];assert.equal(durable.cards.length,1);assert.equal(durable.cards[0].generation.audit.status,'verified');}finally{reloaded.close();}
 });
 test('real store preparation checkpoint failure stops calls and retains retryable memory',async()=>{
   const f=await fixture(),write=f.adapter.write;f.adapter.write=async(p,s)=>{if(JSON.parse(s).highlights[0].generation?.preparation)throw Error('synthetic disk full');return write(p,s);};

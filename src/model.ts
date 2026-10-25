@@ -55,19 +55,49 @@ export interface GenerationContext {
   rules: string;
   examples: string;
 }
+export interface GenerationAuditRecord {
+  status: GenerationAuditStatus;
+  reason: string;
+  verdicts: { index: number; cardId: string; status: GenerationAuditStatus; reason: string }[];
+  /** A verdict applies only to the exact candidate wording checked. */
+  contents?: string[];
+}
+export interface GenerationRepair {
+  cardId: string;
+  round: number;
+  content: string;
+  findings: string[];
+  requested: boolean;
+  /** Retain even a rejected response without changing the original draft. */
+  output?: unknown;
+  candidate?: Card;
+  error?: string;
+}
 export interface GenerationBatch {
   version: 1;
   id: string;
   /** One-off request, retained across reloads; never replaces the capture instruction. */
   instruction: string;
   inputKey: string;
-  phase: "preparing" | "writing" | "auditing" | "complete";
+  phase: "preparing" | "writing" | "auditing" | "repairing" | "rechecking" | "blocked" | "complete";
   preparation?: GenerationPreparation;
-  /** Stable card IDs, checkpointed before audit; not published until the chain completes. */
+  preparationRequested?: boolean;
+  writingRequested?: boolean;
+  writerOutput?: unknown;
+  writerHistory?: unknown[];
+  /** Stable original IDs and wording, retained privately even after repair. */
   drafts?: Card[];
-  audit?: { status: GenerationAuditStatus; reason: string; verdicts: { index: number; cardId: string; status: GenerationAuditStatus; reason: string }[] };
-  /** Persist before calling so an interrupted audit is never silently re-spent. */
+  audit?: GenerationAuditRecord;
   auditRequested?: boolean;
+  repairs?: GenerationRepair[];
+  repairRound?: number;
+  finalAudit?: GenerationAuditRecord;
+  finalAuditRequested?: boolean;
+  auditHistory?: GenerationAuditRecord[];
+  /** Held drafts are not Inbox cards and cannot be edited or exported. */
+  blocked?: { cardId: string; reasons: string[] }[];
+  /** Findings explicitly authorized for one additional bounded retry. */
+  retryFindings?: { cardId: string; reasons: string[] }[];
   committed?: boolean;
 }
 
@@ -142,7 +172,7 @@ export interface Highlight {
   /** Optional staged-generation checkpoints; legacy captures have none. */
   generation?: GenerationBatch;
   /** Prior inventories/audits keep older cards’ fact IDs resolvable without a second card store. */
-  generationHistory?: Omit<GenerationBatch, "drafts">[];
+  generationHistory?: GenerationBatch[];
   origin: "selection" | "markdown-highlight" | "ai" | "highlighter" | "pdf" | "quiz" | "ask";
   /** PDF++ subpath (page=…&selection=…|annotation=…|rect=…) when the highlight came from a PDF++ link; lets the inbox open the exact highlight. */
   subpath?: string;

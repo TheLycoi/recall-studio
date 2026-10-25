@@ -45,9 +45,10 @@ test('a synthetic positive audit cannot verify a cloze token fragment', async ()
   const f = fixture('Heat cannot leave the vessel.', 'Heat {{c1::can}} leave the vessel.');
   await f.g.run(f.h);
   assert.equal(f.h.status, 'ready');
-  assert.ok(f.h.cards[1].lintFailures?.includes('cloze-not-grounded'));
-  assert.equal(f.h.cards[1].generation.audit.status, 'unverified');
-  assert.equal(f.h.generation.audit.status, 'unverified');
+  assert.equal(f.h.cards.length, 1, 'only the existing card is visible');
+  assert.equal(f.h.cards[0], f.old);
+  assert.equal(f.h.generation.phase, 'blocked');
+  assert.match(f.h.generation.blocked[0].reasons.join(' '), /not in the highlight/);
 });
 
 for (const [body, source, missing] of [
