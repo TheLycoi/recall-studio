@@ -1,6 +1,6 @@
 import { build } from 'esbuild';
 import Module from 'node:module';
-export async function loadQuiz(entry='src/quizView.ts',overrides={}) {
+export async function loadQuiz(entry='src/inboxView.ts',overrides={}) {
   const out=await build({entryPoints:[entry],bundle:true,write:false,format:'cjs',platform:'node',external:['obsidian'],logLevel:'silent'});
   const mod=new Module('quiz-view');
   const host={ItemView:class {constructor(leaf){this.contentEl=leaf.contentEl;}registerDomEvent(){}registerEvent(){}},MarkdownView:class {},Notice:class {},setIcon(){},...overrides};

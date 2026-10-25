@@ -4,8 +4,9 @@ import { build } from 'esbuild';
 import Module from 'node:module';
 import { element, nodes, button } from './quizHarness.mjs';
 
-let InboxView, InboxStore, LlmClient, makeHighlight, makeCard, parseInboxJson, observe, schemaJson;
+let InboxView, InboxStore, LlmClient, makeHighlight, makeCard, parseInboxJson, schemaJson;
 const notices = [], modals = [], frames = [];
+let transport;
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 const turn = () => new Promise(r => setImmediate(r));
 async function until(check) { for (let i = 0; i < 100 && !check(); i++) await turn(); assert.ok(check(), 'Operation reached its barrier'); }
@@ -24,17 +25,17 @@ function dom() {
   return extend(element());
 }
 before(async () => {
-  const out = await build({ stdin: { contents: `export { InboxView } from './src/inboxView'; export { LlmClient } from './src/llm'; export { makeCard, makeHighlight } from './src/model'; export { parseInboxJson } from './src/inboxData'; export { observe } from './src/preferences'; export { schemaJson } from './src/jsonOut'; export { InboxStore } from './src/store';`, resolveDir: process.cwd() }, bundle: true, write: false, format: 'cjs', platform: 'node', external: ['obsidian'], logLevel: 'silent' });
+  const out = await build({ stdin: { contents: `export { InboxView } from './src/inboxView'; export { LlmClient } from './src/llm'; export { makeCard, makeHighlight } from './src/model'; export { parseInboxJson } from './src/inboxData'; export { schemaJson } from './src/jsonOut'; export { InboxStore } from './src/store';`, resolveDir: process.cwd() }, bundle: true, write: false, format: 'cjs', platform: 'node', external: ['obsidian'], logLevel: 'silent' });
   const mod = new Module('explicit-rewrite');
   const obsidian = new Proxy({
     ItemView: class { constructor(leaf) { this.contentEl = leaf.contentEl; } registerDomEvent() {} },
     Notice: class { constructor(message) { notices.push(message); } hide() {} },
     Modal: class { constructor() { this.contentEl = dom(); } open() { modals.push(this); } close() { this.onClose(); } },
-    setIcon() {}, normalizePath: path => path, requestUrl() { throw Error('Network forbidden'); },
+    setIcon() {}, normalizePath: path => path, requestUrl(req) { return transport(req); },
   }, { get: (o, k) => o[k] ?? class {} });
   mod.require = id => id === 'obsidian' ? obsidian : Module.createRequire(import.meta.url)(id);
   mod._compile(out.outputFiles[0].text, 'explicit-rewrite');
-  ({ InboxView, InboxStore, LlmClient, makeHighlight, makeCard, parseInboxJson, observe, schemaJson } = mod.exports);
+  ({ InboxView, InboxStore, LlmClient, makeHighlight, makeCard, parseInboxJson, schemaJson } = mod.exports);
 });
 const fixtureAudit = cards => ({ preservesFacts: true, reason: 'All supported original facts retained.', verdicts: cards.map((_, index) => ({ index, verdict: 'keep', reason: '' })) });
 const drafts = [
@@ -51,20 +52,28 @@ function fixture({ output = { cards: drafts }, audit, pause } = {}) {
   h.cards = [left, c, right];
   const highlights = [h], requests = [], revisions = [], root = dom(), barrier = deferred();
   let pending = false, learning = 0, rules = 'Keep the subject visible.';
-  const settings = { provider: 'deepseek', deepseekModel: 'synthetic', language: 'English', writerInstructions: '', historyExamples: false, schemaLearning: true };
+  const settings = { provider: 'deepseek', deepseekApiKey: 'synthetic-test-key', deepseekModel: 'synthetic', language: 'English', writerInstructions: '', historyExamples: false, schemaLearning: true };
   const llm = new LlmClient(() => settings, () => [], async () => {
-    if (pause === 'rules') { pending = true; await barrier.promise; }
-    return { cards: rules };
+    assert.fail('Retired rule callbacks must never be read');
   });
-  llm.deepseek = { async complete(req) {
-    assert.equal(req.authorized(), true, 'Check authorization at transport');
+  // Gate the actual backend entry, then let its own checks authorize disclosure.
+  const complete = llm.deepseek.complete.bind(llm.deepseek), post = llm.deepseek.post.bind(llm.deepseek);
+  let currentRequest;
+  llm.deepseek.complete = req => { currentRequest = req; return complete(req); };
+  llm.deepseek.post = async (...args) => {
+    if (pause === 'before-dispatch') { pending = true; await barrier.promise; }
+    return post(...args);
+  };
+  transport = async () => {
+    const req = currentRequest;
     requests.push(req);
+    assert.equal(req.authorized(), true, 'Check authorization at transport');
     if (pause === req.label) { pending = true; await barrier.promise; }
     const value = req.label === 'rewrite audit'
       ? audit ?? { preservesFacts: true, reason: 'Both original facts retained.', verdicts: drafts.map((_, index) => ({ index, verdict: 'keep', reason: '' })) }
       : typeof output === 'function' ? output(req) : output;
-    return req.schema.parse(value);
-  }, async abort() {} };
+    return { status: 200, json: { choices: [{ message: { content: JSON.stringify(value) }, finish_reason: 'stop' }] } };
+  };
   const host = { app: { vault: { getFiles: () => [], configDir: '.obsidian' }, workspace: {}, metadataCache: {} }, settings, llm,
     schema: { openCount: () => 0, learn: async () => { learning++; return 0; } },
     exportHighlights() { assert.fail('Rewrite must never export'); },
@@ -103,7 +112,7 @@ for (const kind of ['qa', 'cloze']) for (const focused of [true, false]) test(`G
   const request = f.requests[1], payload = JSON.parse(request.user);
   const finding = payload.cards[0].checks.find(c => c.id === (kind === 'qa' ? 'qa-answer-long' : 'cloze-framing'));
   assert.match(finding.finding, /adjudicate.*meaningful|adjudicate.*meaning/i);
-  assert.match(request.system, /product polic.*independent adjudication/i);
+  assert.match(request.system, /split independent targets.*not useful meaning by word count/i);
   assert.doesNotMatch(request.system, /linter fails a qa answer over twelve|Each deletion is at most six words|linter rejects longer/);
   if (focused) {
     assert.equal(f.revisions.length, 1);
@@ -184,11 +193,10 @@ for (const action of ['star', 'Save']) test(`${action} split preserves receipts 
   assert.ok(parsed.ok);
   assert.deepEqual(parsed.data.highlights[0].cards, f.h.cards);
   assert.deepEqual(parsed.data.revisions, f.revisions);
-  assert.deepEqual(observe(f.revisions), [], 'A split is not a fabricated per-child shortening or format preference');
   assert.equal(f.learning(), 0);
   const request = JSON.parse(f.requests[0].user);
   assert.equal(request.rewriteInstruction, 'Split the two facts');
-  assert.equal(request.houseRules, 'Keep the subject visible.');
+  assert.equal(request.houseRules, undefined, 'Legacy house rules stay retired');
   assert.equal(request.siblings.length, 2);
   assert.match(JSON.parse(f.requests[1].user).task, /no source-supported fact/);
   await f.view.onClose();
@@ -246,7 +254,7 @@ const invalidations = {
   abort: f => f.llm.abort(),
   remove: f => { f.highlights.length = 0; },
 };
-for (const action of ['star', 'Save']) for (const pause of ['rules', 'rewrite cards', 'rewrite audit']) {
+for (const action of ['star', 'Save']) for (const pause of ['before-dispatch', 'rewrite cards', 'rewrite audit']) {
   for (const [name, invalidate] of Object.entries(invalidations)) test(`${action} cancels ${name} during ${pause} without later disclosure or replacement`, async () => {
     const f = fixture({ pause }); await f.view.onOpen();
     const editor = action === 'Save' ? f.save('Split the facts') : undefined;
@@ -257,7 +265,7 @@ for (const action of ['star', 'Save']) for (const pause of ['rules', 'rewrite ca
     const expected = structuredClone(f.h), history = structuredClone(f.revisions);
     f.release(); await Promise.all(f.runs); f.draw();
     assert.deepEqual(f.h, expected); assert.deepEqual(f.revisions, history);
-    assert.equal(f.requests.length, pause === 'rules' ? 0 : pause === 'rewrite cards' ? 1 : 2);
+    assert.equal(f.requests.length, pause === 'before-dispatch' ? 0 : pause === 'rewrite cards' ? 1 : 2);
     if (editor && name !== 'view-close') {
       assert.equal(f.fields().form, editor.form);
       assert.equal(f.fields().fields[4].value, 'Split the facts');
@@ -267,13 +275,14 @@ for (const action of ['star', 'Save']) for (const pause of ['rules', 'rewrite ca
   });
 }
 
-for (const pause of ['rewrite cards', 'rewrite audit']) test(`rules changed during ${pause} prevent acceptance and the next dispatch`, async () => {
+for (const pause of ['rewrite cards', 'rewrite audit']) test(`retired rules changed during ${pause} cannot affect the request or result`, async () => {
   const f = fixture({ pause }); await f.view.onOpen();
-  const before = structuredClone(f.h);
   f.star('Split into cards'); await until(f.pending);
   f.rules('Changed rules'); f.release(); await Promise.all(f.runs);
-  assert.deepEqual(f.h, before); assert.deepEqual(f.revisions, []);
-  assert.equal(f.requests.length, pause === 'rewrite cards' ? 1 : 2);
+  assert.equal(f.h.cards.filter(c => c.rewrite).length, 2);
+  assert.equal(f.revisions.length, 1);
+  assert.equal(f.requests.length, 2);
+  for (const req of f.requests) assert.doesNotMatch(req.user, /Changed rules|Keep the subject visible/);
   await f.view.onClose();
 });
 

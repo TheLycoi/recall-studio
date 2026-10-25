@@ -87,11 +87,13 @@ test('DeepSeek schema errors never echo opaque provider-controlled properties', 
   assert.equal(calls, 1);
 });
 
-test('DeepSeek public study caller keeps opaque keys out of serialized schema errors', async () => {
+test('DeepSeek public flashcard caller keeps opaque keys out of schema errors', async () => {
   reset();
-  http = async () => ({ status: 200, json: { choices: [{ message: { content: JSON.stringify({ selections: [], gaps: [], [opaqueKey]: 'unexpected' }) }, finish_reason: 'stop' }] } });
+  http = async () => ({ status: 200, json: { choices: [{ message: { content: JSON.stringify({ kind: opaqueKey, front: '', back: '', text: '' }) }, finish_reason: 'stop' }] } });
   const client = new m.LlmClient(() => settings('deepseek'));
-  await assert.rejects(client.selectStudyEvidence({ topic: 'Synthetic', guide: 'Test Amber', passages: [{ id: '1', path: 'Synthetic.md', title: 'Synthetic', text: 'Amber stores heat.', line: 1, page: null }], authorized: () => true }), e => safe(e, 'failed', /wrong shape/));
+  const h = m.makeHighlight({ sourcePath: 'Synthetic.md', sourceTitle: 'Synthetic', text: 'Amber stores heat.' });
+  const card = { id: 'c', kind: 'qa', front: 'What does Amber store?', back: 'heat', text: '', status: 'pending' };
+  await assert.rejects(client.rewriteCard(h, card, 'Improve the cue', () => true), e => safe(e, 'failed', /wrong shape/));
   assert.equal(calls, 1);
 });
 

@@ -2,9 +2,9 @@ import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadQuiz, harness, element, nodes, button, text, SOURCE } from './quizHarness.mjs';
 
-let RecallPlugin, InboxView, QuizView, runNamedCommand, makeHighlight, makeCard, DEFAULT_SETTINGS;
+let RecallPlugin, InboxView, runNamedCommand, makeHighlight, makeCard, DEFAULT_SETTINGS;
 before(async () => {
-  ({ RecallPlugin, InboxView, QuizView, runNamedCommand, makeHighlight, makeCard, DEFAULT_SETTINGS } = await loadQuiz('test/fixtures/studyRegistryEntry.ts'));
+  ({ RecallPlugin, InboxView, runNamedCommand, makeHighlight, makeCard, DEFAULT_SETTINGS } = await loadQuiz('test/fixtures/studyRegistryEntry.ts'));
 });
 
 // Supply only the Obsidian DOM operations missing from the shared host double.
@@ -28,7 +28,7 @@ async function fixture(t) {
   const previousWindow = globalThis.window;
   globalThis.window = { setTimeout: () => 0, clearTimeout() {}, requestAnimationFrame: () => {} };
   t.after(() => { if (previousWindow === undefined) delete globalThis.window; else globalThis.window = previousWindow; });
-  const h = harness(QuizView), root = dom();
+  const h = harness(class {}), root = dom();
   delete h.host.openInbox;
   const plugin = Object.assign(new RecallPlugin(), h.host);
   plugin.settings = { ...DEFAULT_SETTINGS };

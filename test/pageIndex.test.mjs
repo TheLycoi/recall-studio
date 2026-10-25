@@ -1,4 +1,4 @@
-// Run with: npm test  (bundles src/pageIndex.ts and src/recall.ts, then exercises them with node:test)
+// Run with: npm test (bundles the shared page indexer).
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
@@ -7,14 +7,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-let p, r;
+let p;
 before(async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "recall-test-"));
-  for (const name of ["pageIndex", "recall"]) {
+  for (const name of ["pageIndex"]) {
     await build({ entryPoints: [`src/${name}.ts`], bundle: true, format: "esm", platform: "node", outfile: path.join(dir, `${name}.mjs`), logLevel: "silent" });
   }
   p = await import(pathToFileURL(path.join(dir, "pageIndex.mjs")).href);
-  r = await import(pathToFileURL(path.join(dir, "recall.mjs")).href);
 });
 
 // The shape Karpathy LLM Wiki writes: frontmatter, an H1, fixed ## sections.
@@ -80,16 +79,6 @@ test("frontmatter is never indexed and the file name is the title when there is 
   const units = p.indexPage("wiki/concepts/no-heading.md", md);
   assert.equal(units.length, 1);
   assert.equal(units[0].noteTitle, "no-heading");
-});
-
-test("the quiz builds questions from a Karpathy page, none from link lists", () => {
-  const units = p.indexPage("wiki/concepts/litmus-tests-for-prompts.md", KARPATHY);
-  const pool = r.resolveRecallPool("all", "", units, null, () => 1, 20);
-  const asked = pool.items.map((i) => i.section);
-  assert.ok(asked.includes("Definition"));
-  assert.ok(asked.includes("Key Characteristics"));
-  assert.equal(asked.includes("Related Concepts"), false);
-  assert.equal(asked.includes("Related Entities"), false);
 });
 
 test("significantTokens drops stopwords and short words", () => {

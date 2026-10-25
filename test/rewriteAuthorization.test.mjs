@@ -14,7 +14,7 @@ async function until(predicate) {
   for (let i = 0; i < 100 && !predicate(); i++) await new Promise(resolve => setImmediate(resolve));
   assert.ok(predicate(), 'Expected the pending operation to reach its barrier');
 }
-async function fixture({ pause = 'rules', output = converted } = {}) {
+async function fixture({ pause = 'before-dispatch', output = converted } = {}) {
   const settings = { provider: 'deepseek', deepseekApiKey: 'synth...ey', deepseekModel: 'synthetic-model', effort: 'low', writerInstructions: '', language: '', historyExamples: false, schemaFolder: 'rules', schemaLearning: false };
   const h = makeHighlight({ sourcePath: 'seeds.md', sourceTitle: 'Seeds', text: 'Dormancy delays germination.', status: 'ready' });
   const c = makeCard(h.id, { kind: 'qa', front: 'What does dormancy delay?', back: 'germination' });
@@ -35,9 +35,14 @@ async function fixture({ pause = 'rules', output = converted } = {}) {
     return result;
   } });
   const llm = new LlmClient(() => settings, () => [], async () => {
-    if (pause === 'rules') { pending = true; await barrier.promise; }
-    return { cards: '' };
+    assert.fail('Retired rule callbacks must never be read');
   });
+  // Hold the real backend's entry before its production authorization checks.
+  const post = llm.deepseek.post.bind(llm.deepseek);
+  llm.deepseek.post = async (...args) => {
+    if (pause === 'before-dispatch') { pending = true; await barrier.promise; }
+    return post(...args);
+  };
   const root = element();
   const host = { app: { vault: { getFiles: () => [], configDir: '.obsidian' }, workspace: {}, metadataCache: {} }, settings, llm,
     store: { all: () => highlights, onChange: () => () => {}, touch() {}, recordRevision: r => revisions.push(r) } };
@@ -51,7 +56,7 @@ async function fixture({ pause = 'rules', output = converted } = {}) {
     click: () => convert.events.click({ stopPropagation() {} }), pending: () => pending, release: () => barrier.resolve() };
 }
 
-for (const invalidation of ['settings', 'view-close', 'newer-edit']) test(`rendered Convert cancels ${invalidation} while reading rules`, async () => {
+for (const invalidation of ['settings', 'view-close', 'newer-edit']) test(`rendered Convert cancels ${invalidation} before backend dispatch`, async () => {
   const f = await fixture();
   f.click();
   await until(f.pending);
@@ -110,7 +115,7 @@ test('Save with instruction saves typed wording then rewrites it once', async ()
   assert.equal(f.revisions[1].before.front, e.front.value);
 });
 
-for (const action of ['Convert', 'Save']) for (const pause of ['rules', 'transport']) {
+for (const action of ['Convert', 'Save']) for (const pause of ['before-dispatch', 'transport']) {
   test(`${action} preserves unsaved fields typed during ${pause}`, async () => {
     const f = await fixture({ pause });
     const e = openEditor(f);
@@ -122,7 +127,7 @@ for (const action of ['Convert', 'Save']) for (const pause of ['rules', 'transpo
     e.extra.value = 'New unsaved annotation';
     const expected = structuredClone(f.c);
     f.release(); await Promise.all(f.runs);
-    assert.equal(f.requests.length, pause === 'rules' ? 0 : 1);
+    assert.equal(f.requests.length, pause === 'before-dispatch' ? 0 : 1);
     assert.deepEqual(f.c, expected);
     assert.equal(f.view.editing, f.c.id, 'The newer draft must remain open');
     assert.equal(e.front.value, 'New unsaved question');
@@ -303,7 +308,7 @@ for (const name of ['settings', 'view-close', 'client-abort', 'archive', 'delete
   });
 }
 
-for (const action of ['Convert', 'Save']) for (const pause of ['rules', 'transport']) {
+for (const action of ['Convert', 'Save']) for (const pause of ['before-dispatch', 'transport']) {
   for (const [name, revoke] of Object.entries(invalidations)) test(`${action} revokes ${name} at ${pause}`, async () => {
     const f = await fixture({ pause });
     const e = action === 'Save' ? openEditor(f) : undefined;
@@ -316,7 +321,7 @@ for (const action of ['Convert', 'Save']) for (const pause of ['rules', 'transpo
     await revoke(f);
     const expected = structuredClone(f.c), history = structuredClone(f.revisions);
     f.release(); await Promise.all(f.runs);
-    assert.equal(f.requests.length, pause === 'rules' ? 0 : 1, 'Revocation must prevent every later dispatch');
+    assert.equal(f.requests.length, pause === 'before-dispatch' ? 0 : 1, 'Revocation must prevent every later dispatch');
     assert.deepEqual(f.c, expected);
     assert.deepEqual(f.revisions, history, 'Already saved manual edits stay in history, never a stale rewrite');
     if (e) {

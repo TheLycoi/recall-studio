@@ -1,0 +1,5 @@
+{
+  "producer": "bcb4099a37a992ccc475121004df6ddc6565e473:src/recall.ts#renderRevealMarkdown",
+  "markdown": "Recalled 0 of 1\n\nCompare with the source, not model claims.\n\n- ✗ The fictional Zeta sensor stores <script>alert(1)</script> as literal calibration text. — Literal <img onerror=alert(1)> annotation.\n\n[[synthetic/Zeta#Calibration|Zeta › Calibration]]",
+  "sourceText": "The fictional Zeta sensor stores <script>alert(1)</script> as literal calibration text."
+}
