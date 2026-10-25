@@ -8,7 +8,7 @@ import type RecallPlugin from "./main";
 import { COMMAND_TABLE, type CommandSpec } from "./commandTable";
 import { captureMarkdownHighlights, capturePdfSelection, captureReadingSelection, captureSelection } from "./capture";
 import { isPdfFile, readPdfSelection } from "./pdf";
-import { askInstruction, SchemaSuggestionsModal } from "./modals";
+import { askInstruction } from "./modals";
 import { openCurrentSourceHistory } from "./sourceVisibility";
 
 export interface RecallCommand extends CommandSpec {
@@ -106,22 +106,6 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
       let n = 0;
       for (const h of p.store.all()) if (p.generator.canRetry(h)) (p.generator.retry(h), n++);
       new Notice(`Recall Studio: retrying ${n}.`);
-    },
-  },
-  "open-schema": {
-    available: () => true,
-    // `ensure` writes the note from the template when it is not there yet, so
-    // this is also how a reader first meets the file: they ask to see their
-    // house rules and are shown the ones the plugin is already following.
-    run: async (p) => {
-      const file = await p.schema.ensure();
-      await p.app.workspace.getLeaf(false).openFile(file);
-    },
-  },
-  "review-schema-suggestions": {
-    available: () => true,
-    run: (p) => {
-      new SchemaSuggestionsModal(p.app, p.schema).open();
     },
   },
 };

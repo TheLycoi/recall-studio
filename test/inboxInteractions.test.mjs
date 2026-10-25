@@ -248,19 +248,6 @@ test('Evidence is collapsed, reads safely, and opens only the existing source ac
   view.onKey({target:{tagName:'SUMMARY'},key:'Enter',preventDefault(){prevented=true;}});
   assert.equal(prevented,false);assert.equal(exports.length,0);
 });
-test('passage Verify checks its visible eligible cards without asking to generate more',async()=>{
-  const {root,view,host}=harness();
-  const calls=[];view.checkAgainstPractices=async(h,c)=>{calls.push(c.id);return true;};view.renderCard=()=>{};
-  const h={id:'h',status:'ready',text:'Source.',createdAt:new Date().toISOString(),cards:[{id:'a',status:'pending'},{id:'b',status:'flagged'},{id:'c',status:'deleted'},{id:'d',status:'approved'},{id:'e',status:'duplicate'},{id:'f',status:'exported'}]};
-  host.store.all=()=>[h];host.llm={requestAuthorization:active=>active};
-  view.cardIds=()=>h.cards.filter(c=>c.status!=='deleted').map(c=>c.id);
-  root.querySelectorAll=()=>[];
-  view.renderHighlight(root,h);
-  const button=descendants(root).find(e=>e.options.text==='Verify');
-  assert.ok(button,'passage must offer a labeled Verify control');
-  await button.events.click();
-  assert.deepEqual(calls,['a','b','d']);
-});
 test('collision warnings cover draft and flagged cards that Export accepts',()=>{
   const {view,host}=harness();
   host.store.all=()=>['pending','flagged'].map((status,i)=>({id:`h${i}`,status:'ready',cards:[{id:`c${i}`,kind:'qa',front:`Question ${i}?`,back:'The same answer',status}]}));

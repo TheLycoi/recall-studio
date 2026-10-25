@@ -287,83 +287,35 @@ function instance(mod, files) {
   return new Cls(makeApp(files), { id: "recall", name: "Recall", dir: PLUGIN_DIR, version: "0.3.0" });
 }
 
-// G1: exercise the actual SchemaFile and the callback constructed by main.onload.
-async function rulesFixture() {
-  const { mod, files, stub } = load(JSON.stringify({ provider: 'codex', schemaFolder: 'Recall', notifyWhenReady: false }));
-  const plugin = instance(mod, files);
+test('legacy true settings cannot restore schema startup work or rules commands, and files survive', async () => {
+  const saved = { provider: 'codex', schemaFolder: 'Recall', schemaLearning: true, historyExamples: true,
+    writerInstructions: 'Legacy global instruction', unknownFutureField: { preserve: ['all', 'values'] } };
+  const { mod, files } = load(JSON.stringify(saved));
+  for (const name of ['recall-rules.md', 'recall-suggestions.md', 'history.json']) files.set(`Recall/${name}`, `Original ${name}`);
+  files.set('Recall', ''); // The store may ensure its data directory, not rule files.
+  const before = new Map(files), plugin = instance(mod, files), reads = [];
+  const read = plugin.app.vault.adapter.read;
+  plugin.app.vault.adapter.read = async path => { reads.push(path); return read(path); };
   plugin.app.workspace.onLayoutReady = () => {};
   await plugin.onload();
-  await plugin.schema.refresh();
-  const file = Object.assign(new stub.TFile(), { path: 'Recall/recall-rules.md', stat: { mtime: 1 } });
-  let unavailable = false;
-  plugin.app.vault.getAbstractFileByPath = p => p === file.path ? file : null;
-  plugin.app.vault.cachedRead = async () => {
-    if (unavailable) throw Error('Synthetic inaccessible rules');
-    return '## Card Rules\n'; // Intentionally empty is valid, unlike an unavailable read.
-  };
-  const failRules = () => { file.stat.mtime++; unavailable = true; };
-  const source = 'During Zeta calibration, disconnect power before attaching the reference cable to prevent a false reading.';
-  const h = { id: 'h-rules', sourcePath: 'synthetic.md', sourceTitle: 'Zeta calibration', title: '', text: source,
-    before: '', after: '', instruction: '', status: 'queued', cards: [] };
-  plugin.store.add(h);
-  const draft = { kind: 'qa', front: 'During Zeta calibration, why disconnect power before attaching the reference cable?', back: 'to prevent a false reading', text: '' };
-  const preparation = { facts: [{ id: 'F1', statement: source, quote: source }], plan: [{ id: 'P1', factIds: ['F1'], entity: 'Zeta calibration', aspect: 'rationale', value: draft.back, reason: 'Causal relationship' }], omissions: [], exclusions: [], conflicts: [] };
-  const calls = [];
-  plugin.llm.codex = { async complete(req) {
-    assert.equal(req.authorized(), true);
-    calls.push(req);
-    const u = JSON.parse(req.user);
-    if (req.label === 'preparation') return req.schema.parse(preparation);
-    if (req.label === 'grounded cards') return req.schema.parse({ cards: [{ ...draft, planId: 'P1', factIds: ['F1'] }] });
-    if (req.label === 'rewrite cards') return req.schema.parse({ cards: [draft] });
-    if (req.label === 'rewrite audit') return req.schema.parse({ preservesFacts: true, reason: 'Synthetic', verdicts: [{ index: 0, verdict: 'keep', reason: 'Synthetic' }] });
-    return req.schema.parse({ verdicts: u.cards.map((c, index) => ({ index, cardId: c.id, status: 'verified', reason: 'Synthetic' })) });
-  } };
-  return { plugin, h, draft, calls, failRules, files };
-}
-
-for (const stage of ['initial', 'preparation', 'grounded cards', 'audit', 'publication checkpoint']) test(`G1: main rules callback stops generation on ${stage} read failure`, async () => {
-  const f = await rulesFixture();
-  const complete = f.plugin.llm.codex.complete;
-  f.plugin.llm.codex.complete = async req => { const result = await complete(req); if (req.label === stage) f.failRules(); return result; };
-  if (stage === 'initial') f.failRules();
-  const flush = f.plugin.store.flush.bind(f.plugin.store);
-  f.plugin.store.flush = async () => { await flush(); if (stage === 'publication checkpoint' && f.h.generation?.committed) f.failRules(); };
-  const oldError = console.error; console.error = () => {};
-  try { await f.plugin.generator.run(f.h); } finally { console.error = oldError; f.plugin.store.close(); }
-  assert.equal(f.h.cards.length, 0, 'unavailable rules cannot publish even after the final checkpoint');
-  assert.equal(f.h.status, 'error');
-  assert.match(f.h.error, /rules|schema/i);
-  assert.deepEqual(f.calls.map(r => r.label), stage === 'initial' ? [] : ['preparation', 'grounded cards', 'audit'].slice(0, stage === 'preparation' ? 1 : stage === 'grounded cards' ? 2 : 3));
-  if (stage === 'audit' || stage === 'publication checkpoint') assert.equal(f.h.generation.drafts[0].front, f.draft.front);
-  if (stage === 'publication checkpoint') {
-    const stored = JSON.parse(f.files.get('Recall/inbox.json')).highlights.find(h => h.id === f.h.id);
-    assert.equal(stored.cards.length, 0, 'rollback removes newly appended cards from the durable snapshot too');
-    assert.equal(stored.generation.drafts[0].front, f.draft.front);
-  }
+  try {
+    assert.equal(plugin.schema, undefined, 'No rules collaborator is instantiated');
+    assert.deepEqual(reads.filter(p => /rules|suggestions|history/.test(p)), []);
+    assert.deepEqual(files, before, 'Loading must neither create nor change legacy files');
+    assert.ok(!plugin.commands.some(c => /schema/.test(c.id)));
+    await plugin.saveSettings();
+    const roundtrip = JSON.parse(files.get(`${PLUGIN_DIR}/data.json`));
+    for (const [key, value] of Object.entries(saved)) assert.deepEqual(roundtrip[key], value, key);
+    for (const [path, value] of before) if (!path.endsWith('/data.json')) assert.equal(files.get(path), value);
+  } finally { await plugin.onunload(); }
 });
 
-for (const stage of ['initial', 'rewrite cards', 'rewrite audit']) test(`G1: main rules callback refuses explicit rewrite on ${stage} failure and preserves original`, async () => {
-  const f = await rulesFixture();
-  const original = { id: 'c-rules', highlightId: f.h.id, ...f.draft, front: 'Zeta calibration: why disconnect power?', status: 'pending', edited: true, extra: 'Private annotation', ankiNoteId: 42 };
-  f.h.status = 'ready'; f.h.cards.push(original);
-  const saved = structuredClone(original);
-  const complete = f.plugin.llm.codex.complete;
-  f.plugin.llm.codex.complete = async req => { const result = await complete(req); if (req.label === stage) f.failRules(); return result; };
-  if (stage === 'initial') f.failRules();
-  const oldError = console.error; console.error = () => {};
-  try { await assert.rejects(() => f.plugin.llm.rewriteCards(f.h, original, 'Improve cue', () => true), /rules|schema/i); }
-  finally { console.error = oldError; f.plugin.store.close(); }
-  assert.deepEqual(original, saved);
-  assert.equal(f.calls.length, stage === 'initial' ? 0 : stage === 'rewrite cards' ? 1 : 2);
-});
-
-test('G1: main rules callback accepts an intentionally empty rules section', async () => {
-  const f = await rulesFixture();
-  try { await f.plugin.generator.run(f.h); }
-  finally { f.plugin.store.close(); }
-  assert.equal(f.h.cards.length, 1);
-  assert.equal(f.calls.every(req => JSON.parse(req.user).rules === ''), true);
+test('fresh startup creates no rule or suggestions files', async () => {
+  const { mod, files } = load(null), plugin = instance(mod, files);
+  plugin.app.workspace.onLayoutReady = () => {};
+  await plugin.onload();
+  try { assert.deepEqual([...files.keys()].filter(p => /rules|suggestions/.test(p)), []); }
+  finally { await plugin.onunload(); }
 });
 
 // ------------------------------------------------------------------- tests
@@ -382,7 +334,7 @@ test("onload resolves with a valid data.json, and builds every collaborator", as
 
   // A half-run onload leaves the instance present with these missing, which a
   // bare "is recall in app.plugins.plugins" check would call healthy.
-  for (const field of ["store", "llm", "schema", "anki", "generator", "highlighter"]) {
+  for (const field of ["store", "llm", "anki", "generator", "highlighter"]) {
     assert.ok(plugin[field], `onload did not build ${field}`);
   }
   assert.equal(plugin.settings.provider, "opencode", "the saved provider was not read");

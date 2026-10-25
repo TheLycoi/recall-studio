@@ -23,46 +23,6 @@ function fixture() {
   const view = new InboxView({ contentEl: root }, host);
   return { h, c, root, host, view, calls, revisions };
 }
-async function click(f, batch = false) {
-  // Check-and-repair lives on Verify; the card star is now the AI rewrite.
-  f.view.renderHighlight(f.root, f.h);
-  f.root.querySelectorAll = selector => nodes(f.root).filter(n => n.classes.includes(selector.slice(1)));
-  for (const node of nodes(f.root)) node.closest = () => null;
-  f.view.cardIds = () => f.h.cards.map(card => card.id);
-  const b = nodes(f.root).find(n => n.text === 'Verify');
-  assert.ok(b, 'the passage must expose its labeled Verify control');
-  b.events.click({ stopPropagation() {} });
-  for (let n = 0; n < 30 && f.view.checking.size; n++) await new Promise(r => setImmediate(r));
-  assert.equal(f.view.checking.size, 0);
-}
-for (const batch of [false, true]) test(`real ${batch ? 'passage' : 'card'} star repairs and records an accepted revision`, async () => {
-  const f = fixture(); await click(f, batch);
-  assert.equal(f.c.front, 'What does dormancy delay?');
-  assert.deepEqual(f.calls, ['check', 'rewrite', 'check']);
-  assert.equal(f.revisions.length, 1);
-  assert.equal(f.revisions[0].via, 'repair');
-  assert.equal(f.revisions[0].before.front, 'What does it delay?');
-  assert.equal(f.revisions[0].after.front, f.c.front);
-  assert.equal(f.c.status, 'pending');
-  assert.deepEqual(f.c.userCheck.issues, []);
-});
-for (const change of ['editor', 'settings', 'membership', 'unload']) test(`pending repair preserves original after ${change} changes`, async () => {
-  const f = fixture();
-  f.host.llm.rewriteCard = async () => {
-    if (change === 'editor') f.view.editing = f.c.id;
-    if (change === 'settings') f.host.settings.writerInstructions = 'New preference';
-    if (change === 'membership') f.h.cards = [];
-    if (change === 'unload') f.view.closed = true;
-    return { kind: 'qa', front: 'What does dormancy delay?', back: 'germination', text: '' };
-  };
-  await f.view.checkAgainstPractices(f.h, f.c);
-  assert.equal(f.c.front, 'What does it delay?'); assert.equal(f.revisions.length, 0);
-});
-test('an open unsaved editor prevents a competing star repair', async () => {
-  const f = fixture(); f.view.editing = f.c.id;
-  await f.view.checkAgainstPractices(f.h, f.c);
-  assert.deepEqual(f.calls, []); assert.equal(f.c.front, 'What does it delay?');
-});
 test('valid clozes suppress obsolete saved count-only warnings without mutating records', () => {
   const f = fixture(); Object.assign(f.c, { kind: 'cloze', text: '{{c1::Dormancy}} delays germination.', front: '', back: '', lintFailures: ['cloze-count'] });
   f.view.renderCard(f.root, f.h, f.c);

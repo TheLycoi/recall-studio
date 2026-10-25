@@ -156,7 +156,7 @@ test('rendered star atomically inserts all checked split drafts in the original 
   }
   assert.equal(f.revisions.length, 1, 'A split is one user action, never one preference vote per child');
   assert.equal(f.revisions[0].replacements.length, 2);
-  assert.equal(f.learning(), 1);
+  assert.equal(f.learning(), 0);
   await f.view.onClose();
 });
 
@@ -185,7 +185,7 @@ for (const action of ['star', 'Save']) test(`${action} split preserves receipts 
   assert.deepEqual(parsed.data.highlights[0].cards, f.h.cards);
   assert.deepEqual(parsed.data.revisions, f.revisions);
   assert.deepEqual(observe(f.revisions), [], 'A split is not a fabricated per-child shortening or format preference');
-  assert.equal(f.learning(), 1);
+  assert.equal(f.learning(), 0);
   const request = JSON.parse(f.requests[0].user);
   assert.equal(request.rewriteInstruction, 'Split the two facts');
   assert.equal(request.houseRules, 'Keep the subject visible.');
@@ -298,7 +298,7 @@ for (const changed of [true, false]) test(`one-card explicit response ${changed 
     for (const key of ['lintFailures', 'lintWarnings', 'critiqueReason', 'bloom', 'critiqueRan']) assert.equal(f.c[key], undefined);
   }
   assert.equal(f.revisions.length, changed ? 1 : 0);
-  assert.equal(f.learning(), changed ? 1 : 0);
+  assert.equal(f.learning(), 0);
   await f.view.onClose();
 });
 

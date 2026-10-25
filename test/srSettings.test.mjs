@@ -35,6 +35,21 @@ before(async () => {
   mod._compile(readFileSync(out, "utf8"), out); api = mod.exports;
 });
 after(() => { if (dir) rmSync(dir, { recursive: true, force: true }); });
+test('real settings hide retired writing and quality controls even with legacy true values', () => {
+  const plugin = { settings: { ...api.DEFAULT_SETTINGS, writerInstructions: 'Legacy instruction', historyExamples: true,
+    schemaLearning: true, critiquePass: false, lintMode: 'hide' }, saveSettings: async () => {} };
+  new api.RecallSettingTab({}, plugin).display();
+  for (const name of ['Standing instructions for the card writer', 'Independent audit', 'Lint mode',
+    'Learn from my decisions', 'Propose card rules from my edits', 'Card quality']) {
+    assert.equal(rows.some(r => r.name === name), false, name);
+  }
+  const folder = rows.find(r => r.name === 'Recall data folder');
+  assert.ok(folder); assert.equal(folder.value, plugin.settings.schemaFolder);
+  assert.ok(rows.some(r => r.name === 'Card language'));
+  assert.equal(api.DEFAULT_SETTINGS.historyExamples, false);
+  assert.equal(api.DEFAULT_SETTINGS.schemaLearning, false);
+});
+
 test("real settings tab exposes default-off explicit scope and all recognized syntax, without an SR installation", () => {
   let saved = 0;
   const plugin = { settings: { ...api.DEFAULT_SETTINGS }, saveSettings() { saved++; return Promise.resolve(); } };

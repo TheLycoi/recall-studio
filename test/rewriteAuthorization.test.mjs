@@ -220,7 +220,7 @@ test('plain Save refuses stale wording without losing the mounted draft or learn
   assert.ok(nodes(e.root).includes(e.front), 'Keep the same mounted input on conflict');
 });
 
-for (const outcome of ['failed', 'unchanged', 'changed']) test(`a saved manual correction is learned exactly once after an optional ${outcome} rewrite`, async () => {
+for (const outcome of ['failed', 'unchanged', 'changed']) test(`a saved manual correction survives an optional ${outcome} rewrite without learning`, async () => {
   const f = await fixture({ pause: null, output: outcome === 'failed'
     ? () => { throw Error('Synthetic failure'); }
     : outcome === 'unchanged'
@@ -234,7 +234,7 @@ for (const outcome of ['failed', 'unchanged', 'changed']) test(`a saved manual c
   e.instruction.value = 'Convert to cloze';
   e.save(); await Promise.all(f.runs);
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(learning, 1);
+  assert.equal(learning, 0);
   assert.equal(f.revisions[0].via, 'edit');
   assert.deepEqual(f.revisions.map(r => r.via), outcome === 'changed' ? ['edit', 'rewrite'] : ['edit']);
 });

@@ -17,7 +17,7 @@ import {
   RECALL_STACK_ICON,
 } from "./icon";
 import { isPdfHighlight, liveCards, makeCard, pendingCards, type Card, type CardSnapshot, type Highlight } from "./model";
-import { askInstruction, SchemaSuggestionsModal } from "./modals";
+import { askInstruction } from "./modals";
 import { countClozes, fmtDate, locateQuote, splitFrontmatter, plainText } from "./util";
 import { describeError } from "./llm";
 import { cardAuditLabel } from "./generation";
@@ -26,7 +26,7 @@ import { summarizeExport } from "./exportSummary";
 import { findCrossInterference, lintCard, LINT_LABELS, wrapCloze } from "./lint";
 import { DEFAULT_SETTINGS } from "./settings";
 import { applyExplicitRewrite, explicitRewriteAuthorization, rewriteCandidates } from "./explicitRewrite";
-import { beginCardRewrite, cardAuthorization, cardContent, cardReplacement, checkCard, checkAndRepairCard, currentCardCheck } from "./cardActions";
+import { beginCardRewrite, cardAuthorization, cardContent, cardReplacement, currentCardCheck } from "./cardActions";
 
 export const VIEW_TYPE_INBOX = "review-inbox";
 
@@ -70,7 +70,6 @@ export class InboxView extends ItemView {
   private unsubscribe: (() => void) | null = null;
   private filter: Filter = "review";
   private checking = new Set<string>();
-  private verifying = false;
   private closed = false;
   private checkEpoch = 0;
   private collapsed = new Set<string>();
@@ -325,24 +324,11 @@ export class InboxView extends ItemView {
       }
     });
 
-    const suggestions = this.plugin.schema.openCount();
-    if (suggestions > 0) {
-      const chip = right.createEl("button", {
-        cls: "wikilm-schema-chip",
-        text: `${suggestions} card rule suggestion${suggestions === 1 ? "" : "s"}`,
-      });
-      chip.title = "Rules Recall Studio noticed in your own edits, waiting for your decision";
-      chip.addEventListener("click", () => {
-        new SchemaSuggestionsModal(this.plugin.app, this.plugin.schema, () => this.scheduleRender()).open();
-      });
-    }
-
     // The export action is the explicit acceptance of the visible batch.
     const exportAll = right.createEl("button", { cls: "mod-cta", text: "Export" });
     exportAll.title = "Accept and export visible draft cards to Anki (⌘⏎)";
     exportAll.setAttribute("aria-label", exportAll.title);
     exportAll.addEventListener("click", () => void this.exportHighlights(this.visibleHighlights()));
-    this.renderVerify(right, () => this.visibleHighlights(), "inbox");
     this.addExportSummary(right, () => this.visibleHighlights());
 
     const more = right.createEl("button", { cls: "clickable-icon wikilm-icon-btn" });
@@ -423,7 +409,6 @@ export class InboxView extends ItemView {
       b.title = "Accept and export visible draft cards from this note to Anki";
       b.setAttribute("aria-label", b.title);
       b.addEventListener("click", () => void this.exportHighlights(list));
-      this.renderVerify(actions, () => list, "source");
       this.addExportSummary(actions, () => list);
     }
     if (this.collapsed.has(path)) return;
@@ -525,7 +510,6 @@ export class InboxView extends ItemView {
       b.title = "Accept and export visible draft cards from this passage to Anki";
       b.setAttribute("aria-label", b.title);
       b.addEventListener("click", () => void this.exportHighlights([h]));
-      this.renderVerify(hlActions, () => [h], "passage");
       this.addExportSummary(hlActions, () => [h]);
     }
     if (this.plugin.generator?.canRetry(h)) iconBtn(RECALL_RETRY_ICON, "Retry", () => this.retryFailedHighlights([h]));
@@ -668,9 +652,7 @@ export class InboxView extends ItemView {
         this.editing = this.editing === c.id ? null : c.id;
         this.render();
       });
-      // The star is the reader's AI rewrite: it asks what to change, then runs
-      // the same guarded instruction path as the editor's Rewrite box. The
-      // best-practices check-and-repair transaction now lives on Verify.
+      // The star asks what to change before the guarded AI rewrite.
       btn(RECALL_SPARK_ICON, this.checking.has(c.id) ? "Rewriting card…" : "Rewrite card with AI (asks what to change)", () => void this.rewrite(h, c));
       btn(c.kind === "qa" ? RECALL_CLOZE_ICON : RECALL_QA_ICON, c.kind === "qa" ? "Convert to cloze" : "Convert to Q&A", () =>
         void this.rewrite(h, c, c.kind === "qa" ? "Convert this Q&A card into a cloze card." : "Convert this cloze card into a question and answer card."),
@@ -780,12 +762,6 @@ export class InboxView extends ItemView {
       attr: { rows: "1", placeholder: "Instruction for the model (optional) — e.g. shorten the answer, ask about the date", "aria-label": "Rewrite instruction" },
     });
 
-    // Where "Check" writes its verdict. Kept out of the card's own lint fields
-    // so a check on an unsaved draft never overwrites what the pipeline
-    // recorded about the card as it currently stands on disk.
-    const report = form.createDiv({ cls: "wikilm-editor-report" });
-    report.hide();
-
     const sync = () => {
       const isQa = kindSel.value === "qa";
       front.toggle(isQa);
@@ -794,16 +770,6 @@ export class InboxView extends ItemView {
     };
     kindSel.addEventListener("change", sync);
     sync();
-
-    /** The card as currently typed, without touching the stored one. */
-    const draft = (): Card => ({
-      ...c,
-      kind: kindSel.value as Card["kind"],
-      front: kindSel.value === "qa" ? front.value.trim() : "",
-      back: kindSel.value === "qa" ? back.value.trim() : "",
-      text: kindSel.value === "qa" ? "" : text.value.trim(),
-      extra: extra.value.trim(),
-    });
 
     const editor = this.editorDraft = {
       content: () => JSON.stringify([kindSel.value, front.value, back.value, text.value, extra.value, instruction.value]),
@@ -820,36 +786,6 @@ export class InboxView extends ItemView {
     let originalCurrent = cardAuthorization(c, h, editorActive);
     let savedContent = cardContent(c, h);
     let savedStatus = c.status;
-
-    let checkedDraft: Card | undefined;
-    const check = async (btn: HTMLButtonElement) => {
-      const d = draft();
-      const original = cardContent(c, h);
-      const status = c.status;
-      const settings = JSON.stringify(this.plugin.settings);
-      const epoch = this.checkEpoch;
-      checkedDraft = undefined;
-      report.empty();
-      report.show();
-      report.setText("Checking card against best practices…");
-      btn.disabled = true;
-      try {
-        await checkCard(d, h, (source, cards, siblings, authorized) => this.plugin.llm.critiqueCards(source, cards, siblings, authorized),
-          () => !this.closed && this.checkEpoch === epoch && this.editing === c.id
-            && JSON.stringify(this.plugin.settings) === settings
-            && this.plugin.store.all().includes(h) && h.cards.includes(c)
-            && c.status === status && cardContent(c, h) === original
-            && cardContent(draft(), h) === cardContent(d, h));
-        const result = currentCardCheck(d, h);
-        if (!result) { report.setText("Draft changed or check cancelled. Check it again."); return; }
-        checkedDraft = d;
-        report.setText(result.issues.length ? result.issues.join(" · ") : "Check completed; no issues found.");
-      } catch (e) {
-        report.setText(describeError(e));
-      } finally {
-        btn.disabled = false;
-      }
-    };
 
     const save = async () => {
       if (this.checking.has(c.id) || this.closed || this.editing !== c.id || this.editorDraft !== editor) return;
@@ -885,7 +821,6 @@ export class InboxView extends ItemView {
         delete c.critiqueReason;
         delete c.userCheck;
       }
-      if (checkedDraft && cardContent(c, h) === cardContent(checkedDraft, h)) c.userCheck = currentCardCheck(checkedDraft, h);
       if (!ask || c.status === "deleted") this.editing = null;
       if (edited) {
         // What the reader typed, as one revision. Recorded before the
@@ -903,9 +838,7 @@ export class InboxView extends ItemView {
       savedContent = cardContent(c, h);
       savedStatus = c.status;
       this.plugin.store.touch();
-      // Learn the saved correction even if its optional rewrite fails or is unchanged.
-      const rewritten = ask && c.status !== "deleted" ? await this.rewrite(h, c, ask, originalCurrent, false) : false;
-      if (edited || rewritten) await this.learnFromEdits();
+      if (ask && c.status !== "deleted") await this.rewrite(h, c, ask, originalCurrent);
     };
     const cancel = () => {
       const empty = c.kind === "qa" ? !c.front || !c.back : !c.text;
@@ -952,9 +885,6 @@ export class InboxView extends ItemView {
     kindSel.addEventListener("change", syncCloze);
     syncCloze();
     btns.createEl("button", { text: "Cancel" }).addEventListener("click", cancel);
-    const checkBtn = btns.createEl("button", { text: "Check" });
-    checkBtn.title = "Run the card rules and the critique against what you have typed, without saving.";
-    checkBtn.addEventListener("click", () => void check(checkBtn));
     btns.createEl("button", { text: "Save", cls: "mod-cta" }).addEventListener("click", () => void save());
     btns.createSpan({ cls: "wikilm-muted", text: "⌘⏎ save · esc cancel · ⌘⇧C cloze" });
     window.setTimeout(() => (c.kind === "qa" ? front : text).focus(), 10);
@@ -970,83 +900,7 @@ export class InboxView extends ItemView {
     this.plugin.store.touch();
   }
 
-  private renderVerify(row: HTMLElement, highlights: () => Highlight[], scope: string): void {
-    const button = row.createEl("button", { cls: "wikilm-verify", text: "Verify", attr: { type: "button" } });
-    button.title = `Check visible drafts in this ${scope} against the captured source and writing rules, repair issues and recheck. Does not guarantee factual accuracy or export cards.`;
-    button.setAttribute("aria-label", `Verify visible drafts in this ${scope}`);
-    button.disabled = this.verifying;
-    button.setAttribute("aria-busy", String(this.verifying));
-    button.addEventListener("click", () => this.verifyHighlights(highlights()));
-  }
-
-  private updateVerifyButtons(): void {
-    for (const button of Array.from(this.contentEl.querySelectorAll<HTMLButtonElement>(".wikilm-verify"))) {
-      button.disabled = this.verifying;
-      button.setAttribute("aria-busy", String(this.verifying));
-    }
-  }
-
-  private async verifyHighlights(list: Highlight[]): Promise<void> {
-    if (this.verifying) return;
-    const visible = new Set(this.cardIds());
-    const targets = list.flatMap(h => h.status === "ready" && !h.archived
-      ? h.cards.filter(c => visible.has(c.id) && ["pending", "flagged", "approved"].includes(c.status)).map(c => ({ h, c }))
-      : []);
-    if (!targets.length) { new Notice("Recall Studio: no visible draft cards to verify."); return; }
-    const settings = JSON.stringify(this.plugin.settings);
-    const epoch = this.checkEpoch;
-    const active = this.plugin.llm.requestAuthorization(() => !this.closed && this.checkEpoch === epoch
-      && JSON.stringify(this.plugin.settings) === settings);
-    this.verifying = true;
-    this.updateVerifyButtons();
-    try {
-      for (const { h, c } of targets) {
-        const current = () => active() && this.visibleHighlights().includes(h) && !this.collapsed.has(h.sourcePath)
-          && !(this.plugin.settings.lintMode === "hide" && c.status === "flagged" && !this.expandedFlagged.has(h.id))
-          && this.cardIds().includes(c.id);
-        if (!current()) { new Notice("Recall Studio: Verify stopped because its scope or authorization changed."); break; }
-        if (!await this.checkAgainstPractices(h, c, current) || !current()) break;
-      }
-    } finally {
-      this.verifying = false;
-      this.updateVerifyButtons();
-    }
-  }
-
-  private async checkAgainstPractices(h: Highlight, c: Card, batchActive: () => boolean = () => true): Promise<boolean> {
-    if (this.checking.has(c.id)) return false;
-    if (this.editing === c.id) { new Notice("Save or cancel this card's edits before checking and repairing it."); return false; }
-    this.checking.add(c.id);
-    const notice = new Notice("Recall Studio: checking and repairing card…", 0);
-    const settings = JSON.stringify(this.plugin.settings);
-    const epoch = this.checkEpoch;
-    const was = snapshot(c);
-    const active = () => batchActive() && !this.closed && this.checkEpoch === epoch && this.editing !== c.id
-      && JSON.stringify(this.plugin.settings) === settings
-      && this.plugin.store.all().includes(h) && h.cards.includes(c);
-    try {
-      const result = await checkAndRepairCard(c, h,
-        (source, cards, siblings, authorized) => this.plugin.llm.critiqueCards(source, cards, siblings, authorized),
-        (source, card, instruction, authorized) => this.plugin.llm.rewriteCard(source, card, instruction, authorized), active);
-      if (result.status === "repaired") {
-        this.plugin.store.recordRevision({ cardId: c.id, at: new Date().toISOString(), via: "repair",
-          instruction: result.instruction!, before: was, after: snapshot(c) });
-        new Notice("Card repaired and rechecked. It remains a draft until you export it.");
-      } else if (result.status === "cancelled" && !this.closed) {
-        new Notice("Card or source changed; the repair was cancelled without replacing it.");
-      }
-      return result.status === "checked" || result.status === "repaired";
-    } catch (e) {
-      new Notice(`Recall Studio: check or repair failed. ${describeError(e)}`);
-      return false;
-    } finally {
-      this.checking.delete(c.id);
-      this.plugin.store.touch();
-      notice.hide();
-    }
-  }
-
-  private async rewrite(h: Highlight, c: Card, preset?: string, savedEditor?: () => boolean, learn = true): Promise<boolean | void> {
+  private async rewrite(h: Highlight, c: Card, preset?: string, savedEditor?: () => boolean): Promise<boolean | void> {
     const epoch = this.checkEpoch;
     const settings = JSON.stringify(this.plugin.settings);
     const editing = this.editing;
@@ -1083,7 +937,6 @@ export class InboxView extends ItemView {
         if (savedEditor || c.status === "deleted") this.editing = null;
         this.plugin.store.touch();
         if (this.editing === c.id) this.render();
-        if (learn) await this.learnFromEdits();
         return true;
       }
       const d = await this.plugin.llm.rewriteCard(source, structuredClone(c), instruction, current);
@@ -1121,7 +974,6 @@ export class InboxView extends ItemView {
           before: was,
           after: now,
         });
-        if (learn) await this.learnFromEdits();
         return true;
       }
     } catch (e) {
@@ -1130,28 +982,6 @@ export class InboxView extends ItemView {
       this.checking.delete(c.id);
       release();
       notice?.hide();
-    }
-  }
-
-  /**
-   * Look at the edits so far and propose any rule they now imply.
-   *
-   * Runs after a recorded revision and only with the setting on. The notice is
-   * the only announcement: a proposal is a question, and the chip in the header
-   * is where it waits until the reader has time for it.
-   */
-  private async learnFromEdits(): Promise<void> {
-    if (!this.plugin.settings.schemaLearning) return;
-    try {
-      const n = await this.plugin.schema.learn(new Date().toISOString().slice(0, 10));
-      if (n > 0) {
-        new Notice(`Recall Studio: ${n} new card rule suggestion${n === 1 ? "" : "s"}. See the inbox header.`);
-        this.scheduleRender();
-      }
-    } catch (e) {
-      // Learning is a nicety on top of an edit that already succeeded; a
-      // failure here must not look to the reader like the edit failed.
-      console.error("Recall Studio: could not write a schema suggestion", e);
     }
   }
 

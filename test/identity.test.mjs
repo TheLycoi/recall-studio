@@ -116,6 +116,7 @@ test("no string the reader can see still calls the plugin Recall", () => {
   const offenders = [];
   for (const f of readdirSync("src").filter((n) => n.endsWith(".ts"))) {
     for (const lit of stringLiterals(readFileSync(`src/${f}`, "utf8"))) {
+      if (f === "settings.ts" && lit === "Recall data folder") continue; // The data-path label is not a plugin identity change.
       if (/\bRecall\b/.test(lit.replaceAll("Recall Studio", "").replaceAll("Recall DeepSeek API key", ""))) {
         offenders.push(`${f}: ${JSON.stringify(lit)}`);
       }

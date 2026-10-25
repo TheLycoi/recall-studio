@@ -38,6 +38,15 @@ test("every command's aliases are documented", () => {
   }
 });
 
+test('README describes the authoring workflow and discloses retired prompt inputs', () => {
+  assert.match(readme, /one built-in writing method/i);
+  assert.match(readme, /legacy.*(?:rules|rule).*files.*(?:ignored|not read)/i);
+  assert.match(readme, /(?:not proof of truth|not truth verification)/i);
+  assert.match(readme, /(?:no hidden global prompts|does not use global standing instructions)/i);
+  for (const command of ['Open the card rules note', 'Review card rule suggestions']) assert.ok(!readme.includes(command));
+  assert.doesNotMatch(readme, /Verify sits beside Export|editor's separate draft Check/);
+});
+
 test("the README has a Network and data section", () => {
   // What leaves the machine is the first question a stranger installing the
   // plugin asks; the answer has to stay in the README, under this heading.

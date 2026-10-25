@@ -24,7 +24,7 @@ export interface CommandSpec {
   hidden?: boolean;
 }
 
-// The palette follows capture, Inbox, export and card rules.
+// The palette follows capture, Inbox, source history and export.
 // The two hidden commands are run by name.
 export const COMMAND_TABLE: CommandSpec[] = [
   {
@@ -55,18 +55,6 @@ export const COMMAND_TABLE: CommandSpec[] = [
     id: "export-reviewed",
     name: "Export to Anki",
     aliases: ["export"],
-    hint: "always",
-  },
-  {
-    id: "open-schema",
-    name: "Open the card rules note",
-    aliases: ["rules", "schema"],
-    hint: "always",
-  },
-  {
-    id: "review-schema-suggestions",
-    name: "Review card rule suggestions",
-    aliases: ["suggestions"],
     hint: "always",
   },
   {

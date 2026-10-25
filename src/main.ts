@@ -15,7 +15,6 @@ import { summarizeExport, exportSelectionKey } from "./exportSummary";
 import { findCrossInterference } from "./lint";
 import type { Card, Highlight } from "./model";
 import { DEFAULT_SETTINGS, RecallSettingTab, type RecallSettings } from "./settings";
-import { SchemaFile } from "./schemaFile";
 import { InboxStore } from "./store";
 import { registerSourceVisibility } from "./sourceVisibility";
 import { buildAnkiTextImport } from "./util";
@@ -25,7 +24,6 @@ export default class RecallPlugin extends Plugin {
   store!: InboxStore;
   generator!: Generator;
   llm!: LlmClient;
-  schema!: SchemaFile;
   anki!: AnkiClient;
   highlighter!: Highlighter;
   private statusBar: HTMLElement | null = null;
@@ -40,17 +38,7 @@ export default class RecallPlugin extends Plugin {
     this.store = new InboxStore(this.app, this.settings.schemaFolder, this.manifest.dir ?? `${this.app.vault.configDir}/plugins/review-inbox`);
     await this.store.load();
     if (this.unloading) return;
-    // Before the client, which holds a callback into it: the reader's house
-    // rules are read on the way to every model call (src/schemaFile.ts).
-    this.schema = new SchemaFile(this);
-    this.llm = new LlmClient(
-      () => this.settings,
-      () => this.store.all(),
-      () => this.schema.blocks(), // Strict: an unavailable note cannot authorize empty rules.
-    );
-    // Not awaited: the inbox header wants a count of waiting proposals, and
-    // nothing else on load depends on having one.
-    void this.schema.refresh().catch(e => console.error("Recall Studio: schema startup recovery failed", e));
+    this.llm = new LlmClient(() => this.settings);
     this.anki = new AnkiClient(() => this.settings.ankiConnectUrl);
     this.generator = new Generator(this, { release: this.manifest.version });
 
@@ -130,10 +118,6 @@ export default class RecallPlugin extends Plugin {
 
   private async finishUnload(): Promise<void> {
     let failure: unknown;
-    const schemaStopped = Promise.resolve(this.schema?.stop()).catch(e => {
-      console.error("Recall Studio: schema cleanup failed during unload", e);
-      failure ??= e;
-    });
     const stopped = Promise.resolve(this.generator?.stop()).catch(e => {
       console.error("Recall Studio: generation cleanup failed during unload", e);
       failure ??= e;
@@ -157,7 +141,7 @@ export default class RecallPlugin extends Plugin {
       failure = e;
     }
     // A cancelled run can still roll back cards after its final write resumes.
-    await Promise.all([stopped, schemaStopped]);
+    await stopped;
     // A dispatched export can still record receipts or restore draft statuses.
     await this.exportTransport?.catch(() => {});
     try {

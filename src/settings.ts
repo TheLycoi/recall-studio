@@ -36,10 +36,11 @@ export interface RecallSettings extends SrRecognitionSettings {
   maxCardsPerHighlight: number;
   contextChars: number;
   language: string;
+  /** Legacy saved field; ignored by card requests. */
   writerInstructions: string;
   concurrency: number;
   notifyWhenReady: boolean;
-  /** Recall Studio's own folder: the card rules note, the inbox, and the rule suggestions note. Keep it outside the wiki folder. */
+  /** Recall data folder: inbox, captured passages and revision history. */
   schemaFolder: string;
 
   // Capture
@@ -71,13 +72,13 @@ export interface RecallSettings extends SrRecognitionSettings {
   topicFolder: string;
 
   // Card quality
-  /** Independent source audit after preparation, writing and deterministic lint. */
+  /** Legacy saved field; automatic generation checks cannot be disabled. */
   critiquePass: boolean;
   /** What happens to a card that fails a deterministic lint check. */
   lintMode: LintMode;
-  /** Show the card writer examples from cards you kept, edited, or deleted, drawn from the local inbox. */
+  /** Legacy saved field; card requests do not use edit-history examples. */
   historyExamples: boolean;
-  /** Propose a schema rule when the same correction turns up in three or four card edits. */
+  /** Legacy saved field; rule learning is retired. */
   schemaLearning: boolean;
 }
 
@@ -125,8 +126,8 @@ export const DEFAULT_SETTINGS: RecallSettings = {
 
   critiquePass: true,
   lintMode: "badge",
-  historyExamples: true,
-  schemaLearning: true,
+  historyExamples: false,
+  schemaLearning: false,
 };
 
 export class RecallSettingTab extends PluginSettingTab {
@@ -384,21 +385,9 @@ export class RecallSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Standing instructions for the card writer")
-      .setDesc("Appended to every request, e.g. 'Prefer cloze for numbers and dates.'")
-      .addTextArea((t) => {
-        t.inputEl.rows = 3;
-        t.inputEl.cols = 50;
-        t.setValue(s.writerInstructions).onChange((v) => {
-          s.writerInstructions = v;
-          save();
-        });
-      });
-
-    new Setting(containerEl)
-      .setName("Recall Studio folder")
+      .setName("Recall data folder")
       .setDesc(
-        "Where Recall Studio keeps its own files: the card rules note, your inbox, and the rule suggestions. Keep it outside the wiki folder. Reload Recall Studio after you change it. Files already in the old folder stay there. Move them by hand if you want to keep them.",
+        "Where Recall Studio keeps the inbox, captures and revision history. Keep it outside the wiki folder. Reload Recall Studio after changing it. Existing files stay in the old folder; changing this path does not move them.",
       )
       .addText((t) =>
         t.setValue(s.schemaFolder).onChange((v) => {
@@ -407,62 +396,8 @@ export class RecallSettingTab extends PluginSettingTab {
         }),
       );
 
-    new Setting(containerEl).setName("Card quality").setHeading();
-
-    new Setting(containerEl)
-      .setName("Independent audit")
-      .setDesc(
-        "New cards always receive an independent source audit, one bounded repair attempt when needed, and a separate recheck after repair. Unresolved drafts stay held for explicit Retry; this legacy toggle cannot bypass that gate. Verify remains optional for older or hand-written cards. Auditing is not export approval; you decide what to export.",
-      )
-      .addToggle((t) =>
-        t.setValue(s.critiquePass).onChange((v) => {
-          s.critiquePass = v;
-          save();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Lint mode")
-      .setDesc(
-        "The deterministic checks (cloze grounding, card length, yes/no questions) always run. This only decides what happens to a card that fails one.",
-      )
-      .addDropdown((d) =>
-        d
-          .addOptions({
-            badge: "Badge only — flag problems, keep the card",
-            hide: "Collapse — tuck flagged cards behind a toggle",
-            drop: "Flag — mark them flagged so they cannot be exported",
-          })
-          .setValue(s.lintMode)
-          .onChange((v) => {
-            s.lintMode = v as LintMode;
-            save();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Learn from my decisions")
-      .setDesc(
-        "Shows the card writer a few cards you kept or edited, and a few you deleted, as examples of how you like cards worded. On by default and free: it reads the local inbox only and sends nothing anywhere new. It has no effect until you have triaged some cards, and improves as you do.",
-      )
-      .addToggle((t) =>
-        t.setValue(s.historyExamples).onChange((v) => {
-          s.historyExamples = v;
-          save();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName("Propose card rules from my edits")
-      .setDesc(
-        "When the same correction shows up in three or four of your card edits, Recall Studio writes a proposed rule to `recall-suggestions.md` and shows a chip in the inbox. Nothing enters the card rules note until you accept it.",
-      )
-      .addToggle((t) =>
-        t.setValue(s.schemaLearning).onChange((v) => {
-          s.schemaLearning = v;
-          save();
-        }),
-      );
+    new Setting(containerEl).setName("Automatic source checks")
+      .setDesc("New cards receive automatic source checks, one bounded repair attempt and a recheck when needed. Unresolved drafts stay held for explicit Retry. These checks are not proof of truth; review your cards before exporting.");
 
     new Setting(containerEl)
       .setName("Parallel requests")
