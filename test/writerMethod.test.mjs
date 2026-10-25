@@ -72,6 +72,15 @@ for (const stage of ['prepareGeneration', 'writeGroundedCards', 'repairGeneratio
   }
 });
 
+test('assembled planner request distinguishes scoped source holds from whole-capture holds', async () => {
+  const f = fixture();
+  await f.llm.prepareGeneration(f.h, [], await f.llm.generationContext());
+  const req = f.calls.find(r => r.label === 'preparation');
+  assert.match(req.system, /nonempty factIds hold only the affected targets, not unrelated facts/i);
+  assert.match(req.system, /empty factIds hold the whole capture/i);
+  assert.doesNotMatch(req.system, /empty factIds hold the whole capture, not unrelated facts/i);
+});
+
 test('generationContext preserves its stored shape without consulting missing rule files', async () => {
   const f = fixture(), c = await f.llm.generationContext('old-batch');
   assert.deepEqual(f.reads, []);
@@ -117,12 +126,14 @@ test('fingerprint uses the built-in method and active settings, never retired pr
   assert.notEqual(m.generationKey(f.h, { ...c, language: 'French' }, f.settings, 'batch'), key, 'caller-supplied language is fingerprinted');
 });
 
-test('a saved old-method batch is replaced before its preparation or drafts can be certified', async () => {
+for (const fingerprint of ['old method', 'empty', 'absent']) test(`a saved ${fingerprint} fingerprint batch is replaced before its preparation or drafts can be certified`, async () => {
   const f = fixture(), c = { language: 'English', instructions: old.instructions, examples: old.examples, rules: old.rules };
   const batch = { id: 'old-batch', version: 1, instruction: '', phase: 'auditing', preparation: structuredClone(f.preparation), writerOutput: [f.draft], drafts: [f.card] };
   f.h.generation = batch;
   // Exact pre-consolidation fingerprint shape. Its audit may not certify a new method.
   batch.inputKey = createHash('sha256').update(JSON.stringify({ version: 1, source: m.generationSource(f.h), instruction: '', context: c, provider: 'codex', routing: [f.settings.codexModel, f.settings.codexPath], effort: f.settings.effort, audit: f.settings.critiquePass, lint: f.settings.lintMode, liveInstructions: [f.settings.writerInstructions, f.settings.language, f.settings.maxCardsPerHighlight, f.settings.historyExamples, f.settings.schemaFolder], existing: [] })).digest('hex');
+  if (fingerprint === 'empty') batch.inputKey = '';
+  if (fingerprint === 'absent') delete batch.inputKey;
   const store = { all: () => [f.h], touch() {}, async flush() {}, hasUnsavedChanges: false };
   await new m.Generator({ settings: f.settings, llm: f.llm, store, refreshStatusBar() {} }).run(f.h);
   assert.notEqual(f.h.generation.id, batch.id);
