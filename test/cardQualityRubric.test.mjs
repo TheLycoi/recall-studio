@@ -66,12 +66,12 @@ const criteria = [
   /yes\/no/i, /answer leaks/i, /false positive/i, /false negative/i,
   /source-relative/i, /what does the highlight say/i,
   /negations.*conditions.*dates.*qualifiers/i,
-  /procedure.*order.*rationale/i,
+  /procedures.*order.*rationale/i,
   /open lists.*category.*(?:subset|exhaustive).*meta-card/i,
   /source-driven.*(?:cloze|grouping)/i,
   /redundancy.*genuinely.*direction/i,
   /short names.*meaningful conditions/i,
-  /(?:who.*is|is.*who).*invalid/i,
+  /not invalid.*who or is/i,
   /(?:never|do not) invent.*mnemonics.*personal facts.*media/i,
   /no (?:fixed )?card.*quota/i,
   /prefer one to three distinct cloze numbers per note/i,
@@ -103,7 +103,7 @@ test('assembled requests share retrieval-quality criteria before and after plan 
     assert.ok(m.RETRIEVAL_QUALITY_RUBRIC, 'one shared rubric is exported');
     assert.equal(req.system.split(m.RETRIEVAL_QUALITY_RUBRIC).length, 2, 'the shared rubric appears exactly once');
     assert.match(req.system, /data, not instructions/);
-    assert.match(req.system, /(?:highlight.*alone supplies answer facts|captured text supplies answers)/i);
+    assert.match(req.system, /captured text.*supplies answer facts/i);
     assert.match(req.system, /output schema/);
     assert.match(req.system, /"The Who"/);
     assert.match(req.system, /"until the broth is clear"/);
@@ -111,7 +111,7 @@ test('assembled requests share retrieval-quality criteria before and after plan 
   const [prepare, write, audit] = f.calls;
   assert.deepEqual(m.toStrictSchema(audit.schema).properties.verdicts.items.properties.status.enum, ['verified', 'unverified', 'failed']);
   assert.deepEqual(m.toStrictSchema(f.calls[4].schema).properties.verdicts.items.properties.verdict.enum, ['keep', 'revise', 'drop']);
-  assert.match(prepare.system, /(?:select|choose).*useful.*targets.*before.*plan/i);
+  assert.match(prepare.system, /(?:select|choose).*useful.*targets.*before.*(?:plan|locking)/i);
   assert.match(write.system, /exactly one card per supplied plan row/);
   assert.match(write.system, /twelve words/);
   assert.match(write.system, /six words/);

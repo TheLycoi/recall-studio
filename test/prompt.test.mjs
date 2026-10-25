@@ -7,6 +7,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { loadQuiz } from './quizHarness.mjs';
 
 let p;
 // The quiz schemas live in src/schemas.ts (zod only, no backends and so no
@@ -128,16 +129,25 @@ test("the quiz prompts ask free-response questions with an answer key and a leve
   assert.equal(body("QUIZ_GRADE_SYSTEM"), "", "the passage grade prompt is gone");
 });
 
-test("the card schema says which kind of card leaves each field empty", () => {
-  const src = readFileSync("src/llm.ts", "utf8");
-  for (const line of [
-    'qa only: the question, naming its subject so it is answerable without the source. Empty string for cloze.',
-    'qa only: the answer as a term, number, name, or short phrase. Empty string for cloze.',
-    'cloze only: one sentence from the highlight with {{c1::...}} deletions. Empty string for qa.',
-    'revise + qa only: the corrected question. Empty string otherwise.',
-    'revise + qa only: the corrected answer. Empty string otherwise.',
-    'revise + cloze only: the corrected sentence with {{c1::...}} deletions. Empty string otherwise.',
-  ]) {
-    assert.ok(src.includes(`"${line}"`), line);
+test("assembled card schemas retain strict variants and empty-field sentinels", async () => {
+  const { LlmClient } = await loadQuiz('src/llm.ts');
+  const { makeHighlight, makeCard } = await loadQuiz('src/model.ts');
+  const h = makeHighlight({ sourcePath: 'synthetic.md', sourceTitle: 'Zeta', text: 'Zeta stores heat.' });
+  const c = makeCard(h.id, { kind: 'qa', front: 'What does Zeta store?', back: 'heat' });
+  const requests = [], client = new LlmClient(() => ({ provider: 'codex', language: '' }));
+  client.codex = { complete: async req => {
+    requests.push(req);
+    return req.schema.parse(req.label === 'cards' ? { cards: [] } : req.label === 'verdicts' ? { verdicts: [] } : { kind: 'qa', front: c.front, back: c.back, text: '' });
+  } };
+  await client.writeCards(h);
+  await client.critiqueCards(h, [c]);
+  await client.rewriteCard(h, c, 'Keep the supported fact.');
+  for (const req of requests) {
+    const schema = z.toJSONSchema(req.schema);
+    assertStrict(schema, req.label);
+    const fields = schema.properties.cards?.items?.properties ?? schema.properties.verdicts?.items?.properties ?? schema.properties;
+    for (const field of ['front', 'back', 'text']) assert.match(fields[field].description, /Empty string/);
+    assert.deepEqual(fields.kind.enum, ['qa', 'cloze']);
+    if (req.label !== 'verdicts') assert.match(fields.back.description, /explanation.*procedure/);
   }
 });

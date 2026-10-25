@@ -103,7 +103,7 @@ test('P5 changed source or writing context gets a new fingerprint without rewrit
       await g.run(f.h);
       const original = structuredClone(f.h.generation);
       if (change === 'source') f.h.before = 'Revised surrounding context';
-      else f.plugin.settings.writerInstructions = 'Revised writing context';
+      else f.plugin.settings.language = 'Revised writing context';
       await g.run(f.h);
       assert.notEqual(f.h.generation.provenance.inputKey, original.provenance.inputKey);
       assert.equal(f.h.generation.provenance.sourceKey === original.provenance.sourceKey, change !== 'source');

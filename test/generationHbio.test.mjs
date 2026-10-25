@@ -222,7 +222,7 @@ for (const variant of ['initial', 'final verified', 'final failed']) test(`P4 ${
   }
 });
 
-for (const [read, mutation] of [['initial', 'remove'], ['initial', 'nested quote'], ['initial', 'unchanged'], ['replacement', 'append'], ['replacement', 'unchanged']]) test(`P4 ${read} rules read: history ${mutation}`, async () => {
+for (const [read, mutation] of [['initial', 'remove'], ['initial', 'nested quote'], ['initial', 'unchanged'], ['replacement', 'append'], ['replacement', 'unchanged']]) test(`P4 ${read} context preparation: history ${mutation}`, async () => {
   const f = fixture(sourceCases[0]);
   f.g.kick = () => {};
   await f.g.run(f.h);
@@ -235,15 +235,17 @@ for (const [read, mutation] of [['initial', 'remove'], ['initial', 'nested quote
     f.calls.push(req);
     return req.schema.parse({ verdicts: JSON.parse(req.user).cards.map((c, index) => ({ index, cardId: c.id, status: 'verified', reason: 'Synthetic positive quality verdict.', conflicts: [] })) });
   };
-  if (read === 'replacement') f.settings.writerInstructions = 'New authorized writing context.';
+  if (read === 'replacement') f.settings.language = 'New authorized writing context.';
   let entered, resume;
   const reading = new Promise(resolve => { entered = resolve; });
   const pendingRules = new Promise(resolve => { resume = resolve; });
   let reads = 0;
-  // Pause only the external reader; keep production context and rules validation.
-  f.llm.getSchema = async () => {
+  // Pause the real asynchronous context boundary, not the retired file reader.
+  const context = f.llm.generationContext.bind(f.llm);
+  f.llm.generationContext = async (...args) => {
+    const result = await context(...args);
     if (++reads === (read === 'replacement' ? 2 : 1)) { entered(); await pendingRules; }
-    return { cards: '' };
+    return result;
   };
   const persisted = [];
   f.plugin.store.flush = async () => { persisted.push(structuredClone(f.h)); };
@@ -328,7 +330,7 @@ for (const revision of ['source context', 'writing context', 'explicit new batch
     return req.schema.parse({ verdicts: JSON.parse(req.user).cards.map((c, index) => ({ index, cardId: c.id, status: 'verified', reason: 'Synthetic reconsideration in a new evidence batch.', conflicts: [] })) });
   };
   if (revision === 'source context') f.h.before = 'New source context supplied for reconsideration.';
-  else if (revision === 'writing context') f.settings.writerInstructions = 'New authorized writing context.';
+  else if (revision === 'writing context') f.settings.language = 'New authorized writing context.';
   else f.g.more(f.h, 'Reconsider in a new batch.');
   await f.g.run(f.h);
   assert.notEqual(f.h.generation.id, old.id);
@@ -399,10 +401,10 @@ test('P4 a qualified course fact remains capture-supported, not universally fact
   assert.match(m.cardAuditLabel(f.h.cards[0], f.h), /against captured source/);
   assert.doesNotMatch(m.cardAuditLabel(f.h.cards[0], f.h), /factually verified/);
   for (const req of f.calls.filter(r => ['preparation', 'audit'].includes(r.label))) {
-    assert.match(req.system, /faithful copying.*factual truth/i);
-    assert.match(req.system, /qualified course.*universal/i);
-    assert.match(req.system, /grammar.*factual correction/i);
-    assert.match(req.system, /(?:external|outside).*authority/i);
+    assert.match(req.system, /source fidelity.*not factual truth/i);
+    assert.match(req.system, /never universal factual.*verification/i);
+    assert.match(req.system, /grammar leaves meaning.*hold the affected target/i);
+    assert.match(req.system, /not silently correct from outside knowledge/i);
   }
 });
 
@@ -454,11 +456,11 @@ test('P3 rubric distinguishes source order from arbitrary slots and requires nam
   await f.g.run(f.h);
   for (const req of f.calls) {
     assert.match(req.system, /unordered.*(?:slot|position)/i);
-    assert.match(req.system, /ordered sequence.*source/i);
+    assert.match(req.system, /ordered neighbours.*source supports that order/i);
     assert.match(req.system, /shared vocabulary.*not.*(?:leak|reject)/i);
   }
   const audit = f.calls.find(r => r.label === 'audit');
-  assert.match(audit.system, /ordinal.*visible cue.*hidden target/i);
-  assert.match(audit.system, /equivalent.*visible.*answer/i);
-  assert.match(audit.system, /required subject.*conditions/i);
+  assert.match(audit.system, /ordinal.*missing subject\/conditions/i);
+  assert.match(audit.system, /visible answer\/echo.*hidden target/i);
+  assert.match(audit.system, /missing subject\/conditions/i);
 });

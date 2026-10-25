@@ -118,11 +118,11 @@ test('source-grounded context repair is private, bounded and independently reche
   assert.match(JSON.stringify(payload), /Extra does not fix/);
   for (const label of ['grounded cards', 'generation repair', 'final audit']) {
     const req = f.calls.find(r => r.label === label);
-    assert.match(req.system, /one meaningful retrieval target/i);
-    assert.match(req.system, /front.*subject.*conditions/i);
-    assert.match(req.system, /Extra.*source link.*not/i);
+    assert.match(req.system, /one focused retrieval target per review/i);
+    assert.match(req.system, /subject.*conditions.*visible cue/i);
+    assert.match(req.system, /Extra\/source links cannot supply/i);
     assert.match(req.system, /causal relationships.*short procedures/i);
-    assert.match(req.system, /word.*product polic/i);
+    assert.match(req.system, /word.*product.policy/i);
     assert.equal(req.retryInvalidResponse, false);
     assert.equal(typeof req.authorized, 'function');
   }
@@ -184,7 +184,7 @@ test('explicit retry retains identity and original while authorizing one new rep
 });
 
 
-for (const action of ['settings', 'sibling']) test(`${action} change during initial rules read prevents disclosure`, async () => {
+for (const action of ['settings', 'sibling']) test(`${action} change during initial context preparation prevents disclosure`, async () => {
   const f = fixture({ defect: false });
   const context = f.llm.generationContext.bind(f.llm);
   let first = true;
@@ -192,7 +192,7 @@ for (const action of ['settings', 'sibling']) test(`${action} change during init
     const result = await context(...args);
     if (first) {
       first = false;
-      if (action === 'settings') f.settings.writerInstructions = 'Changed during rules read';
+      if (action === 'settings') f.settings.language = 'Changed during rules read';
       else f.h.cards.push(m.makeCard(f.h.id, { kind: 'qa', front: 'Other current cue', back: 'Other answer' }));
     }
     return result;
@@ -202,7 +202,7 @@ for (const action of ['settings', 'sibling']) test(`${action} change during init
   assert.equal(f.h.status, 'error');
 });
 
-for (const stage of ['generation repair', 'final audit']) for (const action of ['stop', 'source', 'rules', 'settings', 'sibling', 'archive', 'delete']) test(`${action} during ${stage} blocks stale acceptance and later dispatch`, async () => {
+for (const stage of ['generation repair', 'final audit']) for (const action of ['stop', 'source', 'settings', 'sibling', 'archive', 'delete']) test(`${action} during ${stage} blocks stale acceptance and later dispatch`, async () => {
   const f = fixture();
   const complete = f.backend.complete;
   f.backend.complete = async req => {
@@ -210,8 +210,7 @@ for (const stage of ['generation repair', 'final audit']) for (const action of [
     if (req.label === stage) {
       if (action === 'stop') f.g.stop();
       else if (action === 'source') f.h.text += ' Changed';
-      else if (action === 'rules') f.llm.getSchema = async () => ({ cards: 'Changed rules' });
-      else if (action === 'settings') f.settings.writerInstructions = 'Changed rules';
+      else if (action === 'settings') f.settings.language = 'Changed rules';
       else if (action === 'sibling') f.h.cards.push(m.makeCard(f.h.id, { kind: 'qa', front: 'New sibling', back: 'New user answer' }));
       else if (action === 'archive') f.h.archived = true;
       else f.plugin.store.all = () => [];
@@ -322,7 +321,7 @@ test('changed inputs on restart cannot silently repeat an unknown paid writer ou
     return result;
   };
   await f.g.run(f.h);
-  f.settings.writerInstructions = 'New wording after interruption';
+  f.settings.language = 'New wording after interruption';
   await new m.Generator(f.plugin).run(f.h);
   assert.equal(f.calls.filter(r => r.label === 'grounded cards').length, 1);
   assert.equal(f.calls.filter(r => r.label === 'preparation').length, 1);

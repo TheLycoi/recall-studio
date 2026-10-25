@@ -193,12 +193,11 @@ test('retrying a completed batch never duplicates its stored cards or calls',asy
   assert.equal(f.calls.length,3);assert.deepEqual(f.h.cards.map(c=>c.id),[id]);
 });
 
-for(const change of ['text','instruction','before','provider','writerInstructions','language','maxCardsPerHighlight','rules']) test(`retry invalidates saved stages after ${change} changes`,async()=>{
+for(const change of ['text','instruction','before','provider','language']) test(`retry invalidates saved stages after ${change} changes`,async()=>{
   const f=fixture();const original=f.backend.complete;let fail=true;
   f.backend.complete=async req=>{if(req.label==='grounded cards'&&fail){f.calls.push(req);throw Error('writer unavailable');}return original(req);};
   await f.g.run(f.h);const old=f.h.generation.id;fail=false;
-  if(change==='rules') f.llm.getSchema=async()=>({cards:'new rules'});
-  else if(change in f.settings)f.settings[change]=change==='provider'?'deepseek':change==='maxCardsPerHighlight'?4:'changed';
+  if(change in f.settings)f.settings[change]=change==='provider'?'deepseek':'changed';
   else f.h[change]+=' changed';
   const retry=new Generator(f.plugin);retry.kick=()=>{};retry.retry(f.h);await retry.run(f.h);
   assert.notEqual(f.h.generation.id,old);assert.equal(f.calls.filter(c=>c.label==='preparation').length,2);
@@ -226,7 +225,7 @@ test('a failed finding attempts one repair and retains unresolved originals priv
 
 for(const stage of ['preparation','grounded cards','audit']) for(const action of ['stop','dismiss','archive','source','instruction','settings']) test(`${action} during ${stage} prevents stale publish`,async()=>{
   const f=fixture();const original=f.backend.complete;
-  f.backend.complete=async req=>{const result=await original(req);if(req.label===stage){if(action==='stop')f.g.stop();else if(action==='dismiss')f.h.status='dismissed';else if(action==='archive')f.h.archived=true;else if(action==='source')f.h.text+=' changed';else if(action==='instruction')f.h.instruction='changed';else f.settings.writerInstructions='changed';}return result;};
+  f.backend.complete=async req=>{const result=await original(req);if(req.label===stage){if(action==='stop')f.g.stop();else if(action==='dismiss')f.h.status='dismissed';else if(action==='archive')f.h.archived=true;else if(action==='source')f.h.text+=' changed';else if(action==='instruction')f.h.instruction='changed';else f.settings.language='changed';}return result;};
   await f.g.run(f.h);assert.equal(f.h.cards.length,0);assert.equal(f.calls.length,['preparation','grounded cards','audit'].indexOf(stage)+1);
 });
 
@@ -248,21 +247,31 @@ test('an interrupted audit is not re-spent after restart',async()=>{
   await new Generator(f.plugin).run(f.h);assert.equal(f.calls.filter(c=>c.label==='audit').length,1);assert.equal(f.h.cards.length,0);assert.equal(f.h.generation.phase,'blocked');
 });
 
-test('changed instructions after a completed batch include the old accepted history on the first retry',async()=>{
+test('changed capture instructions start a fresh batch while retaining accepted cards, not injecting history',async()=>{
   const f=fixture({historyExamples:true});f.llm.getHighlights=()=>[f.h];
   await f.g.run(f.h);f.h.cards[0].status='approved';f.h.instruction='Changed instruction';
   await new Generator(f.plugin).run(f.h);assert.equal(f.h.status,'ready');assert.equal(f.h.cards.length,2);
+  assert.equal(JSON.parse(f.calls.find(c=>c.label==='preparation').user).examples,'');
 });
 
-test('house rules changed during the writer prevent stale publication',async()=>{
+for(const stage of ['preparation','grounded cards','audit']) for(const setting of ['writerInstructions','historyExamples','schemaFolder','maxCardsPerHighlight']) test(`retired ${setting} changed during ${stage} cannot influence generation`,async()=>{
+  const f=fixture();const complete=f.backend.complete;
+  f.backend.complete=async req=>{const result=await complete(req);if(req.label===stage)f.settings[setting]=setting==='historyExamples'?true:setting==='maxCardsPerHighlight'?1:'LEGACY_RETIRED';return result;};
+  await f.g.run(f.h);
+  assert.equal(f.h.status,'ready');assert.equal(f.h.cards.length,1);
+  assert.deepEqual(f.calls.map(c=>c.label),['preparation','grounded cards','audit']);
+  for(const req of f.calls)assert.doesNotMatch(req.user,/LEGACY_RETIRED/);
+});
+
+test('retired house rules changed during the writer cannot affect publication',async()=>{
   const f=fixture();const original=f.backend.complete;
   f.backend.complete=async req=>{const out=await original(req);if(req.label==='grounded cards')f.llm.getSchema=async()=>({cards:'Changed house rule'});return out;};
-  await f.g.run(f.h);assert.equal(f.h.cards.length,0);assert.equal(f.h.status,'error');
+  await f.g.run(f.h);assert.equal(f.h.cards.length,1);assert.equal(f.h.status,'ready');
 });
 
-test('house rules changed during the final checkpoint cannot leave a stale published batch',async()=>{
+test('retired house rules changed during the final checkpoint cannot affect publication',async()=>{
   const f=fixture();f.plugin.store.flush=async()=>{if(f.h.generation?.committed)f.llm.getSchema=async()=>({cards:'Changed while saving'});};
-  await f.g.run(f.h);assert.equal(f.h.cards.length,0);assert.equal(f.h.status,'error');
+  await f.g.run(f.h);assert.equal(f.h.cards.length,1);assert.equal(f.h.status,'ready');
 });
 
 test('source changed during the final store flush cannot leave a stale published batch',async()=>{
