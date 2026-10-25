@@ -135,11 +135,11 @@ function makeAnki() {
 // --------------------------------------------------------------- the stub
 
 class Stub {}
-let exportDecision = modal => { modal.resolve(true); modal.close(); };
+let exportDecision = modal => clickExportButton(modal, 'Export despite warnings');
 const exportDialogs = [];
 class ExportModalStub {
   constructor(app) { this.app = app; this.contentEl = el(); }
-  open() { exportDialogs.push(this); exportDecision(this); }
+  open() { exportDialogs.push(this); this.onOpen(); exportDecision(this); }
   close() { this.onClose?.(); }
 }
 class Notice {
@@ -190,14 +190,34 @@ class ItemView {
   }
 }
 
-function el() {
+function el(tag = 'root', options = {}) {
   return {
+    tag, text: options.text ?? '', buttons: [],
     addClass() {}, removeClass() {}, toggleClass() {}, setAttribute() {}, getAttribute() { return null; },
-    addEventListener() {}, removeEventListener() {}, setText() {}, empty() {}, remove() {}, appendChild() {},
-    createEl() { return el(); }, createDiv() { return el(); }, createSpan() { return el(); },
+    addEventListener() {}, removeEventListener() {}, setText(text) { this.text = text; }, empty() { this.children = []; }, remove() {}, appendChild(child) { this.children.push(child); },
+    createEl(tag, options) { const child = el(tag, options); this.children.push(child); return child; },
+    createDiv(options) { return this.createEl('div', options); }, createSpan(options) { return this.createEl('span', options); },
     querySelector() { return null; }, querySelectorAll() { return []; }, contains() { return false; }, closest() { return null; },
     style: {}, classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } }, children: [], dataset: {},
   };
+}
+class ExportSettingStub {
+  constructor(container) { this.container = container; }
+  addButton(configure) {
+    const button = { text: '', setButtonText(text) { this.text = text; return this; }, onClick(fn) { this.click = fn; return this; } };
+    configure(button); this.container.buttons.push(button); return this;
+  }
+}
+function clickExportButton(modal, text) {
+  const button = modal.contentEl.buttons.find(button => button.text === text);
+  assert.ok(button, `Missing export button: ${text}`);
+  button.click();
+}
+function visibleText(node) { return [node.text, ...node.children.map(visibleText)].filter(Boolean).join('\n'); }
+async function decideExport(decision, run) {
+  const previous = exportDecision;
+  exportDecision = decision;
+  try { return await run(); } finally { exportDecision = previous; }
 }
 
 const notices = [];
@@ -210,7 +230,7 @@ let requestUrlImpl = async (opts) => {
 
 const obsidian = {
   App: Stub, ButtonComponent: Stub, Editor: Stub, FileView: Stub, ItemView, MarkdownRenderer: Stub, MarkdownView: ItemView,
-  Menu: Stub, Modal: ExportModalStub, Notice, Plugin, PluginSettingTab, Setting: Stub, SuggestModal: Stub,
+  Menu: Stub, Modal: ExportModalStub, Notice, Plugin, PluginSettingTab, Setting: ExportSettingStub, SuggestModal: Stub,
   MarkdownRenderChild: Stub, editorInfoField: {},
   TAbstractFile: Stub, TFile, TFolder: Stub, WorkspaceLeaf: Stub, WorkspaceWindow: Stub,
   addIcon() {}, setIcon() {}, loadPdfJs: async () => ({}),
@@ -325,6 +345,7 @@ async function loadedPlugin(over = {}) {
   const plugin = new PluginClass(app, { id: "review-inbox", name: "Review Inbox", dir: PLUGIN_DIR, version: "0.1.0" });
   await plugin.onload();
   plugin.settings = settings(over);
+  plugin.__realStore = plugin.store;
   plugin.store = { all: () => [], touch() {}, async flush() {} };
   plugin.__app = app;
   return plugin;
@@ -650,3 +671,263 @@ test('P2 cancelled text export writes no files and records no acceptance', async
   try{await plugin.exportAsTextFile([h]);}finally{exportDecision=prior;}
   assert.deepEqual([...plugin.__app.__files],before);assert.equal(c.exportAcceptance,undefined);
 });
+
+let production;
+before(async () => {
+  const output = await build({ stdin: { contents: `export * from './src/cardActions'; export * from './src/generation'; export * from './src/anki';`, resolveDir: process.cwd() }, bundle: true, write: false, format: 'cjs', platform: 'node', external: ['obsidian'] });
+  const module = new Module('export-helpers');
+  module.require = name => name === 'obsidian' ? obsidian : Module.createRequire(import.meta.url)(name);
+  module._compile(output.outputFiles[0].text, 'export-helpers.cjs');
+  production = module.exports;
+});
+function verifiedFixture(overrides = {}, sourceOverrides = {}) {
+  const card = qa({ status: 'pending', front: 'Spacing practice: what separates reviews?', back: 'interval', ...overrides });
+  const source = highlight([card], sourceOverrides);
+  card.generation = { batchId: 'batch', planId: 'plan', factIds: ['fact'], audit: { status: 'verified', reason: 'Supported', content: production.cardAuditContent(card), sourceKey: production.generationSourceKey(source) } };
+  return { card, source };
+}
+function crossSourceFixture(plugin) {
+  const selected = verifiedFixture();
+  const partner = verifiedFixture({ id: 'partner', highlightId: 'h-partner', front: 'Learning practice: which delay divides repetitions?' }, { id: 'h-partner', sourcePath: 'wiki/Other.md', sourceTitle: 'Other' });
+  const stored = [selected.source, partner.source];
+  plugin.store.all = () => stored;
+  return { ...selected, partner, stored };
+}
+
+for (const method of ['exportHighlights', 'exportAsTextFile']) {
+  for (const decision of ['Cancel', 'Export despite warnings']) {
+    test(`B2 ${method}: ${decision} sees cross-source warnings without widening selection`, async () => {
+      fake = makeAnki();
+      const plugin = await loadedPlugin();
+      const { card, source, partner } = crossSourceFixture(plugin);
+      const before = structuredClone(partner.source), dialogs = exportDialogs.length;
+      let touches = 0, flushes = 0;
+      plugin.store.touch = () => touches++;
+      plugin.store.flush = async () => { assert.ok(card.exportAcceptance); flushes++; };
+      await decideExport(modal => {
+        assert.match(visibleText(modal.contentEl), /1 notes \/ 1 reviews selected. 1 notes need your review/);
+        assert.ok(visibleText(modal.contentEl).includes('answer used elsewhere'));
+        assert.ok(visibleText(modal.contentEl).includes(card.front));
+        assert.ok(!visibleText(modal.contentEl).includes(partner.card.front));
+        assert.deepEqual(modal.summary.warnings.map(warning => warning.cardId), [card.id]);
+        clickExportButton(modal, decision);
+      }, () => plugin[method]([source], new Set([card.id])));
+      assert.equal(exportDialogs.length, dialogs + 1);
+      assert.deepEqual(partner.source, before);
+      const files = [...plugin.__app.__files.keys()].filter(path => path.endsWith('.txt'));
+      if (decision === 'Cancel') {
+        assert.equal(card.exportAcceptance, undefined);
+        assert.equal(card.status, 'pending');
+        assert.equal(fake.actions.length, 0);
+        assert.equal(files.length, 0);
+        assert.equal(touches, 0);
+        assert.equal(flushes, 0);
+      } else {
+        assert.equal(card.status, 'exported');
+        assert.deepEqual(card.exportAcceptance.issues, ['answer used elsewhere']);
+        assert.equal(card.generation.audit.status, 'verified');
+        assert.equal(flushes, 1);
+        assert.equal(fake.notes.size, method === 'exportHighlights' ? 1 : 0);
+        assert.equal(files.length, method === 'exportAsTextFile' ? 1 : 0);
+        if (files.length) assert.ok(!plugin.__app.__files.get(files[0]).includes(partner.card.front));
+      }
+    });
+  }
+
+  for (const phase of ['dialog', 'flush']) {
+    for (const change of ['new-finding', 'removed-finding', 'changed-partner']) {
+      test(`B2 ${method}: ${phase} ${change} invalidates acceptance`, async () => {
+        fake = makeAnki();
+        const plugin = await loadedPlugin();
+        const { card, source, partner, stored } = crossSourceFixture(plugin);
+        if (change === 'new-finding') {
+          partner.card.back = 'different';
+          card.critiqueReason = 'Initial warning to open the dialog';
+        }
+        const mutate = () => {
+          if (change === 'new-finding') partner.card.back = 'interval';
+          else if (change === 'removed-finding') partner.source.archived = true;
+          else stored.splice(1, 1, { ...partner.source, id: 'replacement-source', cards: [{ ...partner.card, id: 'replacement-card' }] });
+        };
+        const started = barrier(), release = barrier();
+        if (phase === 'flush') plugin.store.flush = async () => { started.resolve(); await release.promise; };
+        let touches = 0;
+        plugin.store.touch = () => touches++;
+        const exporting = decideExport(modal => {
+          if (phase === 'dialog') mutate();
+          clickExportButton(modal, 'Export despite warnings');
+        }, () => plugin[method]([source], new Set([card.id])));
+        if (phase === 'flush') { await started.promise; mutate(); release.resolve(); }
+        await exporting;
+        assert.equal(fake.actions.length, 0);
+        assert.equal([...plugin.__app.__files.keys()].filter(path => path.endsWith('.txt')).length, 0);
+        assert.equal(card.status, 'pending');
+        if (phase === 'dialog') { assert.equal(card.exportAcceptance, undefined); assert.equal(touches, 0); }
+      });
+    }
+  }
+}
+
+for (const method of ['exportHighlights', 'exportAsTextFile']) {
+  for (const phase of ['dialog', 'flush']) {
+    for (const change of ['topic-added', 'topic-changed', 'topic-removed', 'vault-name']) {
+      test(`B3 ${method}: ${phase} ${change} invalidates changed outgoing provenance`, async () => {
+        fake = makeAnki();
+        const plugin = await loadedPlugin();
+        const card = qa({ status: 'pending' }), source = highlight([card], { topicPath: change === 'topic-added' ? undefined : 'topics/Original.md' });
+        const payload = () => production.buildNote(card, source, { settings: plugin.settings, vaultName: plugin.__app.vault.getName(), deck: plugin.settings.defaultDeck });
+        const initial = payload(), started = barrier(), release = barrier();
+        const mutate = () => {
+          if (change === 'vault-name') plugin.__app.vault.getName = () => 'Renamed Vault';
+          else source.topicPath = change === 'topic-removed' ? undefined : 'topics/Changed.md';
+        };
+        let touches = 0;
+        plugin.store.touch = () => touches++;
+        if (phase === 'flush') plugin.store.flush = async () => { started.resolve(); await release.promise; };
+        const exporting = decideExport(modal => {
+          if (phase === 'dialog') mutate();
+          clickExportButton(modal, 'Export despite warnings');
+        }, () => plugin[method]([source]));
+        if (phase === 'flush') { await started.promise; mutate(); release.resolve(); }
+        await exporting;
+        assert.notDeepEqual(initial, payload(), 'The changed provenance affects the actual final note');
+        assert.equal(fake.actions.length, 0);
+        assert.equal([...plugin.__app.__files.keys()].filter(path => path.endsWith('.txt')).length, 0);
+        assert.equal(card.status, 'pending');
+        if (phase === 'dialog') { assert.equal(card.exportAcceptance, undefined); assert.equal(touches, 0); }
+      });
+    }
+  }
+}
+
+function barrier() {
+  let resolve;
+  const promise = new Promise(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+function realStoreFixture(plugin) {
+  plugin.store = plugin.__realStore;
+  const card = qa({ status: 'pending', front: 'Spacing practice: what separates reviews?', back: 'interval' });
+  const source = highlight([card]);
+  plugin.store.data.highlights.push(source);
+  const adapter = plugin.__app.vault.adapter;
+  const rename = adapter.rename;
+  adapter.rename = async (from, to) => {
+    assert.ok(!plugin.__app.__files.has(to), 'The real adapter does not overwrite rename destinations');
+    return rename(from, to);
+  };
+  return { card, source };
+}
+
+test('B1 unload preserves a partial receipt and restores the failed draft before its final flush', async () => {
+  fake = makeAnki();
+  const plugin = await loadedPlugin();
+  const { card, source } = realStoreFixture(plugin);
+  const failed = qa({ id: 'failed-card', status: 'flagged', front: 'Second unsupported cue?', back: 'other answer', critiqueReason: 'Keep this adverse finding' });
+  source.cards.push(failed);
+  const started = barrier(), release = barrier(), request = requestUrlImpl;
+  let adds = 0, unloading;
+  requestUrlImpl = async options => {
+    if (JSON.parse(options.body).action === 'addNotes' && ++adds === 2) {
+      started.resolve(); await release.promise; throw new Error('Second note refused');
+    }
+    return request(options);
+  };
+  try {
+    const exporting = plugin.exportHighlights([source]);
+    await started.promise;
+    unloading = plugin.onunload();
+    release.resolve();
+    await exporting;
+    await unloading;
+    assert.equal(fake.notes.size, 1);
+    assert.equal(card.status, 'exported');
+    assert.ok(card.ankiNoteId);
+    assert.equal(failed.status, 'flagged');
+    assert.equal(failed.ankiNoteId, undefined);
+    assert.ok(failed.exportAcceptance.issues.includes(failed.critiqueReason));
+    assert.equal(plugin.store.hasUnsavedChanges, false);
+    assert.equal(plugin.__app.__files.get('Review Inbox/inbox.json'), JSON.stringify(plugin.store.data, null, 2));
+  } finally {
+    release.resolve();
+    await unloading;
+    requestUrlImpl = request;
+    plugin.store.close();
+  }
+});
+
+for (const method of ['exportHighlights', 'exportAsTextFile']) {
+  test(`B1 ${method}: unload during acceptance flush leaves the real store durable`, async () => {
+    fake = makeAnki();
+    const plugin = await loadedPlugin();
+    const { card, source } = realStoreFixture(plugin);
+    const started = barrier(), release = barrier();
+    const adapter = plugin.__app.vault.adapter, write = adapter.write;
+    let first = true;
+    adapter.write = async (path, data) => {
+      if (first) { first = false; started.resolve(); await release.promise; }
+      return write(path, data);
+    };
+    const exporting = plugin[method]([source]);
+    await started.promise;
+    const unloading = plugin.onunload();
+    release.resolve();
+    await exporting;
+    await unloading;
+    assert.equal(fake.actions.length, 0);
+    assert.equal([...plugin.__app.__files.keys()].filter(path => path.endsWith('.txt')).length, 0);
+    assert.equal(card.status, 'pending');
+    assert.ok(card.exportAcceptance);
+    assert.equal(plugin.store.hasUnsavedChanges, false);
+    assert.equal(plugin.store.closed, true);
+    assert.equal(plugin.__app.__files.get('Review Inbox/inbox.json'), JSON.stringify(plugin.store.data, null, 2));
+  });
+
+  test(`B1 ${method}: unload drains transport and persists receipts and concurrent edits`, async () => {
+    fake = makeAnki();
+    const plugin = await loadedPlugin();
+    const { card, source } = realStoreFixture(plugin);
+    const started = barrier(), release = barrier();
+    const request = requestUrlImpl, create = plugin.__app.vault.create;
+    if (method === 'exportHighlights') {
+      requestUrlImpl = async options => {
+        if (JSON.parse(options.body).action === 'addNotes') {
+          started.resolve(); await release.promise;
+        }
+        return request(options);
+      };
+    } else {
+      plugin.__app.vault.create = async (...args) => {
+        started.resolve(); await release.promise;
+        return create(...args);
+      };
+    }
+    let unloading, settled = false, failure;
+    try {
+      const exporting = plugin[method]([source]);
+      await started.promise;
+      source.title = 'Edited while transport was running';
+      plugin.store.touch();
+      unloading = plugin.onunload().then(() => { settled = true; }, error => { settled = true; failure = error; });
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(settled, false, 'Unload must not close storage while transport can still mutate cards');
+      release.resolve();
+      await exporting;
+      await unloading;
+      assert.equal(failure, undefined);
+      assert.equal(card.status, 'exported');
+      if (method === 'exportHighlights') assert.ok(card.ankiNoteId);
+      assert.equal(plugin.store.hasUnsavedChanges, false);
+      assert.equal(plugin.store.closed, true);
+      const saved = JSON.parse(plugin.__app.__files.get('Review Inbox/inbox.json'));
+      assert.equal(saved.highlights[0].title, source.title);
+      assert.deepEqual(saved.highlights[0].cards[0], card);
+    } finally {
+      release.resolve();
+      await unloading;
+      requestUrlImpl = request;
+      plugin.store.close();
+    }
+  });
+}

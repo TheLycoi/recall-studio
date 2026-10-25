@@ -5,10 +5,11 @@ import { lintCard, LINT_LABELS } from "./lint";
 import { countClozes } from "./util";
 
 /** Invalidate an open confirmation on changes to wording, evidence, checks or destination. */
-export function exportSelectionKey(items: ExportItem[], settings: unknown): string {
+export function exportSelectionKey(items: ExportItem[], settings: unknown, crossInterference: ReadonlyMap<string, string[]> = new Map()): string {
   return JSON.stringify([settings, items.map(({ card, highlight }) => [
     card.id, highlight.id, cardContent(card, highlight), generationSourceKey(highlight),
     card.status, highlight.status, highlight.archived, card.generation, card.userCheck, card.critiqueReason,
+    [...(crossInterference.get(card.id) ?? [])].sort(),
   ])]);
 }
 
