@@ -1,5 +1,13 @@
 # Changelog
 
+## Recall Studio 0.1.18 beta: optional writer guidance
+
+- Prefer one to three distinct cloze numbers per note, with coherent list and sequence exceptions. Keep all supported targets; this is not a hard count gate.
+- Use short hints only when they clarify the requested answer without revealing it. Hints remain optional.
+- Reconcile planning and writing guidance, retain useful foundational facts, and make missing-subject context explicit on the front.
+- Preserve the notes, highlight, Inbox review and Anki-export workflow. No storage migration or existing-card rewrite.
+- Known limits: live samples still produced unordered slots and an underspecified procedural cue, also present in the baseline. Hint-selection benefit is not yet demonstrated. Human Inbox review remains necessary.
+
 ## Recall Studio 0.1.16 beta: repair before Inbox
 
 - Audit new drafts, repair flagged candidates within a bounded round, independently recheck them, and show only passing cards. Keep unresolved drafts private with reasons and explicit Retry, including partial batches.
