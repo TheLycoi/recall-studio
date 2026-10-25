@@ -25,6 +25,7 @@ import { resolveCardEvidence } from "./cardEvidence";
 import { summarizeExport } from "./exportSummary";
 import { findCrossInterference, lintCard, LINT_LABELS, wrapCloze } from "./lint";
 import { DEFAULT_SETTINGS } from "./settings";
+import { applyExplicitRewrite, explicitRewriteAuthorization, rewriteCandidates } from "./explicitRewrite";
 import { beginCardRewrite, cardAuthorization, cardContent, cardReplacement, checkCard, checkAndRepairCard, currentCardCheck } from "./cardActions";
 
 export const VIEW_TYPE_INBOX = "review-inbox";
@@ -797,6 +798,8 @@ export class InboxView extends ItemView {
       && JSON.stringify(this.plugin.settings) === editorSettings
       && this.plugin.store.all().includes(h) && h.cards.includes(c));
     let originalCurrent = cardAuthorization(c, h, editorActive);
+    let savedContent = cardContent(c, h);
+    let savedStatus = c.status;
 
     let checkedDraft: Card | undefined;
     const check = async (btn: HTMLButtonElement) => {
@@ -831,7 +834,12 @@ export class InboxView extends ItemView {
     const save = async () => {
       if (this.checking.has(c.id) || this.closed || this.editing !== c.id || this.editorDraft !== editor) return;
       const ask = instruction.value.trim();
-      if (ask && !originalCurrent()) { new Notice("Card or source changed. Your draft is unchanged; reopen the card before saving."); return; }
+      // Manual saves need the same conflict protection, not the model's ready-state gate.
+      if (!this.plugin.store.all().includes(h) || !h.cards.includes(c)
+        || cardContent(c, h) !== savedContent || c.status !== savedStatus || (ask && !originalCurrent())) {
+        new Notice("Card or source changed. Your draft is unchanged; reopen the card before saving.");
+        return;
+      }
       const was = snapshot(c);
       let edited = false;
       const before = JSON.stringify([c.kind, c.front, c.back, c.text, c.extra]);
@@ -872,11 +880,12 @@ export class InboxView extends ItemView {
         });
       }
       originalCurrent = cardAuthorization(c, h, editorActive);
+      savedContent = cardContent(c, h);
+      savedStatus = c.status;
       this.plugin.store.touch();
-      // The instruction runs against the just-saved text, so a hand edit and a
-      // "now shorten it" land in one pass rather than fighting each other.
-      if (ask && c.status !== "deleted") await this.rewrite(h, c, ask, originalCurrent);
-      else if (edited) await this.learnFromEdits();
+      // Learn the saved correction even if its optional rewrite fails or is unchanged.
+      const rewritten = ask && c.status !== "deleted" ? await this.rewrite(h, c, ask, originalCurrent, false) : false;
+      if (edited || rewritten) await this.learnFromEdits();
     };
     const cancel = () => {
       const empty = c.kind === "qa" ? !c.front || !c.back : !c.text;
@@ -1017,7 +1026,7 @@ export class InboxView extends ItemView {
     }
   }
 
-  private async rewrite(h: Highlight, c: Card, preset?: string, savedEditor?: () => boolean): Promise<void> {
+  private async rewrite(h: Highlight, c: Card, preset?: string, savedEditor?: () => boolean, learn = true): Promise<boolean | void> {
     const epoch = this.checkEpoch;
     const settings = JSON.stringify(this.plugin.settings);
     const editing = this.editing;
@@ -1027,7 +1036,7 @@ export class InboxView extends ItemView {
       return;
     }
     const draftContent = editor?.content();
-    const current = this.plugin.llm.requestAuthorization(cardAuthorization(c, h, () => !this.closed && this.checkEpoch === epoch
+    const current = this.plugin.llm.requestAuthorization(explicitRewriteAuthorization(c, h, () => !this.closed && this.checkEpoch === epoch
       && (!savedEditor || savedEditor())
       && this.editing === editing && (!editor || (this.editorDraft === editor && editor.content() === draftContent))
       && JSON.stringify(this.plugin.settings) === settings
@@ -1044,6 +1053,19 @@ export class InboxView extends ItemView {
       const was = snapshot(c);
       const source = structuredClone(h);
       source.text = plainText(source.text);
+      if (!preset || savedEditor) {
+        const drafts = await this.plugin.llm.rewriteCards(source, structuredClone(c), instruction, current);
+        if (!current()) return;
+        const candidates = rewriteCandidates(c, h, drafts);
+        const revision = applyExplicitRewrite(c, h, candidates, instruction);
+        if (!revision) return;
+        this.plugin.store.recordRevision(revision);
+        if (savedEditor || c.status === "deleted") this.editing = null;
+        this.plugin.store.touch();
+        if (this.editing === c.id) this.render();
+        if (learn) await this.learnFromEdits();
+        return true;
+      }
       const d = await this.plugin.llm.rewriteCard(source, structuredClone(c), instruction, current);
       if (!current()) return;
       const candidate = cardReplacement(c, h, d);
@@ -1079,7 +1101,8 @@ export class InboxView extends ItemView {
           before: was,
           after: now,
         });
-        await this.learnFromEdits();
+        if (learn) await this.learnFromEdits();
+        return true;
       }
     } catch (e) {
       if (current()) new Notice(`Recall Studio: ${describeError(e)}`);

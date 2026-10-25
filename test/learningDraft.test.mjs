@@ -2,12 +2,13 @@ import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadQuiz, element, nodes, button } from './quizHarness.mjs';
 
-let InboxView, InboxStore, makeHighlight, makeCard, DEFAULT_SETTINGS;
+let InboxView, InboxStore, makeHighlight, makeCard, DEFAULT_SETTINGS, observe;
 before(async () => {
   ({ InboxView } = await loadQuiz('src/inboxView.ts', { Notice: class { hide() {} } }));
   ({ InboxStore } = await loadQuiz('src/store.ts', { normalizePath: path => path }));
   ({ makeHighlight, makeCard } = await loadQuiz('src/model.ts'));
   ({ DEFAULT_SETTINGS } = await loadQuiz('src/settings.ts'));
+  ({ observe } = await loadQuiz('src/preferences.ts'));
 });
 const rewritten = { kind: 'cloze', front: '', back: '', text: 'Dormancy delays {{c1::germination}}.' };
 const deferred = () => {
@@ -36,7 +37,7 @@ function dom() {
   };
   return extend(element());
 }
-async function fixture(t) {
+async function fixture(t, { rewriteOutput = rewritten } = {}) {
   const previousWindow = globalThis.window, frames = [];
   globalThis.window = { requestAnimationFrame: fn => frames.push(fn), setTimeout: () => 0, clearTimeout() {} };
   const draw = () => { while (frames.length) frames.shift()(); };
@@ -50,8 +51,13 @@ async function fixture(t) {
   const settings = { ...DEFAULT_SETTINGS, provider: 'deepseek', deepseekApiKey: 'synthetic-test-key', schemaLearning: true };
   const requests = [];
   const { LlmClient } = await loadQuiz('src/llm.ts', { requestUrl: async req => {
-    requests.push(JSON.parse(req.body));
-    return { status: 200, json: { choices: [{ message: { content: JSON.stringify(rewritten) }, finish_reason: 'stop' }] } };
+    const body = JSON.parse(req.body), payload = JSON.parse(body.messages[1].content);
+    requests.push(body);
+    const output = payload.task.startsWith('Independently check every replacement')
+      ? { preservesFacts: true, reason: '', verdicts: [{ index: 0, verdict: 'keep', reason: '' }] }
+      : typeof rewriteOutput === 'function' ? rewriteOutput() : rewriteOutput;
+    const result = payload.task.startsWith('Rewrite the requested card') ? { cards: [output] } : output;
+    return { status: 200, json: { choices: [{ message: { content: JSON.stringify(result) }, finish_reason: 'stop' }] } };
   } });
   const llm = new LlmClient(() => settings, () => [], async () => ({ cards: '' }));
   const store = new InboxStore(app, 'synthetic-data');
@@ -91,7 +97,7 @@ async function fixture(t) {
     await new Promise(resolve => setImmediate(resolve));
     draw();
   };
-  return { root, view, store, settings, files, h, c, requests, learning, learningCalls, runs, card, fields, click, draw, settle };
+  return { root, view, host, store, settings, files, h, c, requests, learning, learningCalls, runs, card, fields, click, draw, settle };
 }
 
 test('late learning after rendered Convert preserves the current draft and refreshes proposals after Cancel', async t => {
@@ -231,6 +237,81 @@ test('learning updates the proposal header when no editor is open', async t => {
   assert.equal(f.c.text, rewritten.text);
   assert.deepEqual(f.store.revisions().map(r => r.via), ['rewrite']);
   assert.ok(button(f.root, '2 card rule suggestions'));
+});
+
+test('two mounted panes preserve a conflicting manual draft and the newer durable correction', async t => {
+  const f = await fixture(t);
+  f.click('Edit (e)');
+  const old = f.fields(); old.front.value = 'Older unsaved draft';
+  const otherRoot = dom(), other = new InboxView({ contentEl: otherRoot }, f.host);
+  await other.onOpen();
+  t.after(() => other.onClose());
+  nodes(otherRoot).find(n => n.title === 'Edit (e)').events.click({ stopPropagation() {} });
+  const otherForm = nodes(otherRoot).find(n => n.hasClass('wikilm-editor'));
+  nodes(otherForm).find(n => n.tagName === 'TEXTAREA').value = 'Which process does dormancy delay?';
+  button(otherForm, 'Save').events.click();
+  assert.equal(f.c.front, 'Which process does dormancy delay?');
+  assert.equal(f.fields().form, old.form);
+  button(old.form, 'Save').events.click();
+  assert.equal(f.c.front, 'Which process does dormancy delay?');
+  assert.equal(f.fields().front.value, 'Older unsaved draft');
+  assert.equal(f.fields().form, old.form);
+  assert.equal(f.store.revisions().length, 1);
+  assert.equal(f.learningCalls.length, 1);
+  await f.settle(); await f.store.flush();
+  const disk = JSON.parse(f.files.get('synthetic-data/inbox.json'));
+  assert.equal(disk.highlights[0].cards[0].front, 'Which process does dormancy delay?');
+  assert.equal(disk.revisions.length, 1);
+});
+
+test('a saved fourth shortening edit reaches the real observer even when the optional rewrite fails', async t => {
+  const f = await fixture(t, { rewriteOutput: () => { throw Error('Synthetic offline'); } });
+  const long = 'one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty';
+  const snapshot = back => ({ kind: 'qa', front: 'What does dormancy delay?', back, text: '', extra: '' });
+  for (let i = 0; i < 3; i++) f.store.recordRevision({ cardId: `prior-${i}`, at: '2026-10-24T00:00:00.000Z', via: 'edit', instruction: '', before: snapshot(long), after: snapshot('germination') });
+  f.c.back = long; f.store.touch(); f.draw();
+  let calls = 0, observations;
+  f.host.schema.learn = async () => { calls++; observations = observe(f.store.revisions()); return observations.length; };
+  f.click('Edit (e)');
+  const e = f.fields(); e.back.value = 'germination'; e.instruction.value = 'Make the wording clearer';
+  button(e.form, 'Save').events.click();
+  await until(() => calls === 1);
+  assert.equal(f.store.revisions().length, 4);
+  assert.equal(f.c.back, 'germination');
+  const shortening = observations.find(o => o.pattern === 'shorter-answers');
+  assert.ok(shortening, 'The actual production observer must see the qualifying saved revision');
+  assert.equal(shortening.count, 4);
+  await f.store.flush();
+  assert.equal(JSON.parse(f.files.get('synthetic-data/inbox.json')).revisions.length, 4);
+});
+
+for (const outcome of ['failed', 'unchanged', 'changed']) test(`optional ${outcome} rewrite learns its saved edit once and preserves newer mounted inputs`, async t => {
+  const unchanged = { kind: 'qa', front: 'Which process does dormancy delay?', back: 'germination', text: '' };
+  const f = await fixture(t, { rewriteOutput: outcome === 'failed' ? () => { throw Error('Synthetic rewrite offline'); } : outcome === 'unchanged' ? unchanged : rewritten });
+  f.click('Edit (e)');
+  const original = f.fields();
+  original.front.value = unchanged.front;
+  original.instruction.value = 'Keep the subject clear';
+  button(original.form, 'Save').events.click();
+  await until(() => f.learningCalls.length === 1);
+  f.draw();
+  if (!f.view.editing) f.click('Edit (e)');
+  const e = f.fields(), identity = f.view.editorDraft;
+  e.front.value = 'My newer question'; e.extra.value = 'My newer annotation';
+  e.instruction.value = 'My newer request';
+  const saved = structuredClone(f.c), revisions = structuredClone(f.store.revisions());
+  await f.settle();
+  assert.equal(f.fields().form, e.form);
+  assert.equal(f.view.editorDraft, identity);
+  assert.equal(f.fields().front.value, 'My newer question');
+  assert.equal(f.fields().extra.value, 'My newer annotation');
+  assert.equal(f.fields().instruction.value, 'My newer request');
+  assert.equal(f.learningCalls.length, 1);
+  assert.deepEqual(f.store.revisions(), revisions);
+  assert.deepEqual(revisions.map(r => r.via), outcome === 'changed' ? ['edit', 'rewrite'] : ['edit']);
+  assert.deepEqual(f.c, saved);
+  await f.store.flush();
+  assert.deepEqual(JSON.parse(f.files.get('synthetic-data/inbox.json')).highlights[0].cards[0], saved);
 });
 
 test('a new editor opened before the scheduled learning frame also keeps its draft', async t => {

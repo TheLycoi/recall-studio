@@ -22,9 +22,17 @@ async function fixture({ pause = 'rules', output = converted } = {}) {
   const barrier = deferred(), requests = [], revisions = [], highlights = [h];
   let pending = false;
   const { LlmClient } = await loadQuiz('src/llm.ts', { requestUrl: async req => {
-    requests.push(JSON.parse(req.body));
+    const body = JSON.parse(req.body), payload = JSON.parse(body.messages[1].content);
+    requests.push(body);
     if (pause === 'transport') { pending = true; await barrier.promise; }
-    return typeof output === 'function' ? output(req) : response(output);
+    if (payload.task.startsWith('Independently check every replacement')) return response({ preservesFacts: true, reason: '',
+      verdicts: payload.cards.map((_, index) => ({ index, verdict: 'keep', reason: '' })) });
+    const result = typeof output === 'function' ? output(req) : response(output);
+    if (payload.task.startsWith('Rewrite the requested card') && result?.json?.choices?.[0]?.message) {
+      const message = result.json.choices[0].message;
+      try { message.content = JSON.stringify({ cards: [JSON.parse(message.content)] }); } catch { /* Leave malformed JSON for the real parser. */ }
+    }
+    return result;
   } });
   const llm = new LlmClient(() => settings, () => [], async () => {
     if (pause === 'rules') { pending = true; await barrier.promise; }
@@ -94,7 +102,7 @@ test('Save with instruction saves typed wording then rewrites it once', async ()
   e.front.value = 'Which process does dormancy delay?';
   e.instruction.value = 'Convert to cloze';
   e.save(); await Promise.all(f.runs);
-  assert.equal(f.requests.length, 1);
+  assert.equal(f.requests.length, 2, 'Explicit Save writes, then independently audits the replacement');
   assert.match(f.requests[0].messages[1].content, /Which process does dormancy delay/);
   assert.equal(f.c.text, converted.text);
   assert.equal(f.view.editing, null);
@@ -192,6 +200,43 @@ test('plain manual Save still works on a capture that is not ready for model rew
   assert.equal(f.requests.length, 0);
   assert.equal(f.view.editing, null);
   assert.deepEqual(f.revisions.map(r => r.via), ['edit']);
+});
+
+test('plain Save refuses stale wording without losing the mounted draft or learning it', async () => {
+  const f = await fixture({ pause: null });
+  let learning = 0;
+  f.host.settings.schemaLearning = true;
+  f.host.schema = { learn: async () => { learning++; return 0; } };
+  const e = openEditor(f);
+  e.front.value = 'Older unsaved wording';
+  f.c.front = 'Newer saved wording from another pane';
+  const expected = structuredClone(f.c);
+  e.save(); await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(f.c, expected);
+  assert.deepEqual(f.revisions, []);
+  assert.equal(learning, 0);
+  assert.equal(e.front.value, 'Older unsaved wording');
+  assert.equal(f.view.editing, f.c.id);
+  assert.ok(nodes(e.root).includes(e.front), 'Keep the same mounted input on conflict');
+});
+
+for (const outcome of ['failed', 'unchanged', 'changed']) test(`a saved manual correction is learned exactly once after an optional ${outcome} rewrite`, async () => {
+  const f = await fixture({ pause: null, output: outcome === 'failed'
+    ? () => { throw Error('Synthetic failure'); }
+    : outcome === 'unchanged'
+      ? { kind: 'qa', front: 'Which process does dormancy delay?', back: 'germination', text: '' }
+      : converted });
+  let learning = 0;
+  f.host.settings.schemaLearning = true;
+  f.host.schema = { learn: async () => { learning++; return 0; } };
+  const e = openEditor(f);
+  e.front.value = 'Which process does dormancy delay?';
+  e.instruction.value = 'Convert to cloze';
+  e.save(); await Promise.all(f.runs);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(learning, 1);
+  assert.equal(f.revisions[0].via, 'edit');
+  assert.deepEqual(f.revisions.map(r => r.via), outcome === 'changed' ? ['edit', 'rewrite'] : ['edit']);
 });
 
 test('Save with instruction refuses a card changed since this editor was opened', async () => {

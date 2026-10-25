@@ -33,7 +33,8 @@ function fixture({ output = revised } = {}) {
   const llm = new LlmClient(() => settings, () => [], async () => ({ cards: '' }));
   llm.codex = { complete: async req => {
     requests.push(req);
-    if (req.label === 'card') return req.schema.parse(output);
+    if (req.label === 'rewrite cards') return req.schema.parse({ cards: [typeof output === 'function' ? output() : output] });
+    if (req.label === 'rewrite audit') return req.schema.parse({ preservesFacts: true, reason: '', verdicts: [{ index: 0, verdict: 'keep', reason: '' }] });
     if (req.label === 'verdicts') return req.schema.parse(verdict);
     throw Error(`Unexpected provider request: ${req.label}`);
   } };
@@ -65,8 +66,8 @@ test('submitting the star instruction rewrites the card and records a rewrite re
   modal.value = 'ask about the process, not "it"';
   modal.submit();
   await until(() => f.view.checking.size === 0);
-  assert.equal(f.requests.length, 1);
-  assert.equal(f.requests[0].label, 'card');
+  assert.equal(f.requests.length, 2);
+  assert.deepEqual(f.requests.map(r => r.label), ['rewrite cards', 'rewrite audit']);
   assert.equal(f.c.front, 'What does dormancy delay?');
   assert.equal(f.revisions.length, 1);
   assert.equal(f.revisions[0].via, 'rewrite');

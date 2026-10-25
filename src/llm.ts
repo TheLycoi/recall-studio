@@ -1,4 +1,6 @@
 import { STUDY_GUIDE_MAX_CHARS, StudyEvidenceOut, studyGuideLines, validateStudyInput, validateStudyEvidence, type StudyEvidenceArgs, type StudyEvidenceDraft } from "./studySchemas";
+import { MAX_REWRITE_CARDS, rewriteCandidates } from "./explicitRewrite";
+import { lintCard, LINT_LABELS } from "./lint";
 import { z } from "zod";
 import type { CompletionRequest } from "./backend";
 import { assertAuthorized } from "./backend";
@@ -45,6 +47,14 @@ const CardOut = z.object({
     .describe("cloze only: one sentence from the highlight with {{c1::...}} deletions. Empty string for qa."),
 });
 const CardsOut = z.object({ cards: z.array(CardOut) });
+const RewriteCardsOut = z.object({ cards: z.array(CardOut.extend({
+  front: CardOut.shape.front.max(4000), back: CardOut.shape.back.max(4000), text: CardOut.shape.text.max(4000),
+})).min(1).max(MAX_REWRITE_CARDS) });
+const RewriteAuditOut = z.object({
+  preservesFacts: z.boolean().describe("True only when the replacement set retains every supported fact tested by the original, with its conditions and relationships."),
+  reason: z.string(),
+  verdicts: z.array(z.object({ index: z.number().int(), verdict: z.enum(["keep", "revise", "drop"]), reason: z.string() })).max(MAX_REWRITE_CARDS),
+});
 
 export type CardDraft = z.infer<typeof CardOut>;
 
@@ -565,6 +575,47 @@ export class LlmClient {
     });
     assertAuthorized(authorization);
     return result;
+  }
+
+  /** Explicit user rewrites may split. Repairs and Convert keep rewriteCard's single-card contract. */
+  async rewriteCards(h: Highlight, card: Card, instruction: string, authorized?: () => boolean): Promise<CardDraft[]> {
+    const settings = JSON.stringify(this.getSettings());
+    const authorization = { authorized: this.requestAuthorization(() => (!authorized || authorized()) && JSON.stringify(this.getSettings()) === settings) };
+    assertAuthorized(authorization);
+    const readRules = async () => {
+      const blocks = await this.getSchema();
+      assertAuthorized(authorization);
+      return blocks?.cards ?? "";
+    };
+    const rules = await readRules();
+    const currentRules = async () => {
+      if (await readRules() !== rules) throw Error("Card-writing rules changed. The original is unchanged.");
+    };
+    const s = this.getSettings();
+    const siblings = h.cards.filter(c => c.id !== card.id && c.status !== "deleted");
+    const source = { title: h.sourceTitle, heading: h.heading, contextBefore: h.before, highlight: h.text, contextAfter: h.after };
+    const context = { source, currentCard: cardData(card), rewriteInstruction: instruction, siblings: siblings.map(cardData),
+      language: s.language, standingInstructions: s.writerInstructions, houseRules: rules, highlightInstruction: h.instruction };
+    await currentRules();
+    const result = await this.backend().complete({ system: WRITER_SYSTEM,
+      user: JSON.stringify({ ...context, task: `Rewrite the requested card as one card, or split it into focused cards when requested or necessary. Return 1 to ${MAX_REWRITE_CARDS} cards; this is an operational bound, not a quota. Retain every source-supported fact tested by the original, including necessary conditions and relationships. Do not silently drop facts or duplicate siblings. If the request cannot fit safely, fail rather than truncate.` }),
+      schema: RewriteCardsOut, label: "rewrite cards", maxTokens: 8000, retryInvalidResponse: false, ...authorization });
+    assertAuthorized(authorization);
+    await currentRules();
+    const candidates = rewriteCandidates(card, h, result.cards);
+    const audit = await this.backend().complete({ system: CRITIC_SYSTEM,
+      user: JSON.stringify({ ...context, cards: candidates.map((c, index) => ({ index, ...cardData(c),
+        deterministicWarnings: lintCard(c, h, [...siblings, ...candidates.filter(other => other !== c)]).warnings.map(id => LINT_LABELS[id]) })),
+        task: "Independently check every replacement against the source, current writing rules, its fellow replacements and existing siblings. Return exactly one indexed verdict per replacement. Separately compare the complete replacement set with currentCard: preservesFacts is true only if no source-supported fact or necessary condition/relationship tested by the original has been lost or changed. For unsupported original facts, require their omission instead of preserving an error. Judge grounding, self-contained context, retrieval quality, cloze syntax/leaks and duplicate retrievals. Any missing fact, unsupported claim, unadjudicated warning or quality failure must not receive keep. Do not write or repair cards in this check." }),
+      schema: RewriteAuditOut, label: "rewrite audit", maxTokens: 4000, retryInvalidResponse: false, ...authorization });
+    assertAuthorized(authorization);
+    await currentRules();
+    if (!audit.preservesFacts || audit.verdicts.length !== candidates.length
+      || new Set(audit.verdicts.map(v => v.index)).size !== candidates.length
+      || audit.verdicts.some(v => v.index < 0 || v.index >= candidates.length || v.verdict !== "keep")) {
+      throw Error("The replacement set did not pass its independent source, coverage and quality check. The original is unchanged.");
+    }
+    return result.cards;
   }
 
   /**
