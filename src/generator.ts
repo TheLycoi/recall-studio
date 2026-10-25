@@ -150,25 +150,26 @@ export class Generator {
       const emptyContext = { language: "", instructions: "", rules: "", examples: "" };
       const initialKey = generationKey(h, emptyContext, this.plugin.settings, batch.id);
       const published = JSON.stringify(h.cards);
+      const staged = () => JSON.stringify([batch.preparation, batch.writerOutput, batch.drafts, batch.repairs, batch.audit, batch.finalAudit, batch.auditHistory]);
+      let expected = staged();
+      const changed = () => { expected = staged(); };
       let context = await this.plugin.llm.generationContext(batch.id);
       assertCurrent();
-      if (generationKey(h, emptyContext, this.plugin.settings, batch.id) !== initialKey || JSON.stringify(h.cards) !== published) throw new Interrupted("Generation inputs changed while reading rules. Retry explicitly.");
+      if (generationKey(h, emptyContext, this.plugin.settings, batch.id) !== initialKey || staged() !== expected || JSON.stringify(h.cards) !== published) throw new Interrupted("Generation inputs changed while reading rules. Retry explicitly.");
       let key = generationKey(h, context, this.plugin.settings, batch.id);
       if (batch.version !== 1 || (batch.inputKey && batch.inputKey !== key)) {
         const unknown = (batch.preparationRequested && !batch.preparation) || (batch.writingRequested && !batch.writerOutput) || (batch.auditRequested && !batch.audit) || (batch.finalAuditRequested && !batch.finalAudit) || batch.repairs?.some(r => r.round === (batch.repairRound ?? 0) && r.requested && !r.output && !r.error);
         if (unknown) throw new Error("A prior paid outcome is unknown; changed inputs require explicit retry.");
         batch = this.replaceBatch(h, batch.instruction);
+        changed();
         const replacementKey = generationKey(h, emptyContext, this.plugin.settings, batch.id);
         context = await this.plugin.llm.generationContext(batch.id);
         assertCurrent();
-        if (generationKey(h, emptyContext, this.plugin.settings, batch.id) !== replacementKey || JSON.stringify(h.cards) !== published) throw new Interrupted("Generation inputs changed while reading rules. Retry explicitly.");
+        if (generationKey(h, emptyContext, this.plugin.settings, batch.id) !== replacementKey || staged() !== expected || JSON.stringify(h.cards) !== published) throw new Interrupted("Generation inputs changed while reading rules. Retry explicitly.");
         key = generationKey(h, context, this.plugin.settings, batch.id);
       }
       batch.inputKey = key;
       if (batch.provenance) batch.provenance.inputKey = key;
-      const staged = () => JSON.stringify([batch.preparation, batch.writerOutput, batch.drafts, batch.repairs, batch.audit, batch.finalAudit, batch.auditHistory]);
-      let expected = staged();
-      const changed = () => { expected = staged(); };
       const checkInputs = () => {
         assertCurrent();
         if (generationKey(h, context, this.plugin.settings, batch.id) !== key || staged() !== expected || JSON.stringify(h.cards.filter(c => !appended.includes(c))) !== published || appended.some(c => JSON.stringify(c) !== appendedContents.get(c))) throw new Interrupted("Generation inputs changed. Retry to use the current settings or cards.");

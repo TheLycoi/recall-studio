@@ -222,6 +222,60 @@ for (const variant of ['initial', 'final verified', 'final failed']) test(`P4 ${
   }
 });
 
+for (const [read, mutation] of [['initial', 'remove'], ['initial', 'nested quote'], ['initial', 'unchanged'], ['replacement', 'append'], ['replacement', 'unchanged']]) test(`P4 ${read} rules read: history ${mutation}`, async () => {
+  const f = fixture(sourceCases[0]);
+  f.g.kick = () => {};
+  await f.g.run(f.h);
+  f.g.retry(f.h);
+  const old = structuredClone(f.h.generation);
+  const callsBefore = f.calls.length;
+  const complete = f.backend.complete;
+  f.backend.complete = async req => {
+    if (req.label !== 'audit') return complete(req);
+    f.calls.push(req);
+    return req.schema.parse({ verdicts: JSON.parse(req.user).cards.map((c, index) => ({ index, cardId: c.id, status: 'verified', reason: 'Synthetic positive quality verdict.', conflicts: [] })) });
+  };
+  if (read === 'replacement') f.settings.writerInstructions = 'New authorized writing context.';
+  let entered, resume;
+  const reading = new Promise(resolve => { entered = resolve; });
+  const pendingRules = new Promise(resolve => { resume = resolve; });
+  let reads = 0;
+  // Pause only the external reader; keep production context and rules validation.
+  f.llm.getSchema = async () => {
+    if (++reads === (read === 'replacement' ? 2 : 1)) { entered(); await pendingRules; }
+    return { cards: '' };
+  };
+  const persisted = [];
+  f.plugin.store.flush = async () => { persisted.push(structuredClone(f.h)); };
+  const run = f.g.run(f.h);
+  await reading;
+  assert.equal(f.h.status, 'generating');
+  if (mutation === 'remove') f.h.generation.auditHistory = [];
+  if (mutation === 'nested quote') f.h.generation.auditHistory[0].verdicts[0].conflicts[0].quote += ' changed';
+  if (mutation === 'append') f.h.generation.auditHistory = structuredClone(old.auditHistory);
+  resume();
+  await run;
+  if (mutation !== 'unchanged') {
+    assert.equal(f.h.cards.length, 0, 'in-flight history mutation revokes publication');
+    assert.match(f.h.error, /inputs changed/i);
+    assert.equal(f.h.status, 'error');
+    assert.equal(f.h.generation.audit, undefined);
+    assert.deepEqual(f.calls.slice(callsBefore), [], 'cancel before any additional paid work');
+    assert.ok(persisted.every(h => h.cards.length === 0), 'never persist a published card');
+  } else if (read === 'initial') {
+    assert.equal(f.h.cards.length, 0, 'an unchanged retry retains the source hold');
+    assert.deepEqual(f.h.generation.auditHistory, old.auditHistory);
+    assert.equal(f.h.generation.id, old.id);
+    assert.deepEqual(f.calls.slice(callsBefore).map(r => r.label), ['audit']);
+  } else {
+    assert.equal(f.h.cards.length, 1, 'changed inputs deliberately start a fresh batch');
+    assert.notEqual(f.h.generation.id, old.id);
+    assert.equal(f.h.generation.auditHistory, undefined);
+    assert.deepEqual(f.h.generationHistory.find(b => b.id === old.id), old);
+    assert.deepEqual(f.calls.slice(callsBefore).map(r => r.label), ['preparation', 'grounded cards', 'audit']);
+  }
+});
+
 test('P4 removing retained source evidence during retry prevents stale acceptance', async () => {
   const f = fixture(sourceCases[0]);
   f.g.kick = () => {};
