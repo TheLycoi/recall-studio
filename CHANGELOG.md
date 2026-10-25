@@ -1,5 +1,14 @@
 # Changelog
 
+## Recall Studio 0.1.16 beta: repair before Inbox
+
+- Audit new drafts, repair flagged candidates within a bounded round, independently recheck them, and show only passing cards. Keep unresolved drafts private with reasons and explicit Retry, including partial batches.
+- Preserve meaningful context and procedures. Fail closed when writing rules are unavailable; check retries against current sibling wording.
+- Support explicit one-to-many rewrites with whole-set validation, independent audit and original/history preservation. Protect newer edits and learn saved user corrections even if an optional rewrite fails.
+- Repair spaced suggestion IDs, occurrence history, concurrent learning, reversed-edit evidence, stale proposals and partial-Accept retries. Preserve sibling modal drafts and restore controls after errors.
+- Validate content before reusing Anki receipts, retain failed-migration recovery, drain pending writes across reload and suppress provider-controlled diagnostics that can expose credentials.
+- Keep plugin identity and existing data. Automatic repair applies to new drafts, not existing/exported cards; export still requires a user action. No scheduler or automatic export is added.
+
 ## Recall Studio 0.1.15 beta: card-quality checks and repair guidance
 
 - Detect answers left visible by other cloze numbers, hints and supported inline formatting, without treating hidden slots as adjacent words.

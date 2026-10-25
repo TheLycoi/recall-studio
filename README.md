@@ -7,7 +7,7 @@ conversation and quizzing; capture supporting note passages here for card writin
 
 The repository and BRAT target are `TheLycoi/recall-studio`, formerly
 `TheLycoi/review-inbox`. Plugin ID `review-inbox`, default storage
-`Review Inbox/` and retained command IDs stay unchanged. Version 0.1.15 is a beta
+`Review Inbox/` and retained command IDs stay unchanged. Version 0.1.16 is a beta
 release. The card star asks what to change and rewrites that card with AI.
 It adds no scheduler.
 
@@ -73,11 +73,14 @@ The editor's separate draft Check remains diagnostic until you save.
 The star on a card opens **Rewrite card**. Enter the change you want, then Send.
 Cancelling sends no model request and leaves the card unchanged. Rewrites use
 the existing source, writing rules and guarded replacement path, with revision
-history. This release rewrites one card; splitting it into multiple cards is not
-yet supported. Verify remains the separate check-and-repair action.
+history. Explicit instructions can split a card into a bounded replacement set.
+Every replacement must pass validation and independent audit before the original
+is retired. New cards retain source provenance but do not inherit export receipts.
+Verify remains the separate check-and-repair action.
 
 A `checked` badge applies only to the current wording and source context.
-Background generation audits remain read-only and do not set this badge.
+New-generation audits do not set this badge. They gate publication and can trigger
+a bounded repair before a draft becomes a normal Inbox card.
 
 Export goes through AnkiConnect. Each card carries a stable identity scoped to
 this plugin and this vault, so a repeated send, a retry after a lost reply, or a
@@ -105,7 +108,10 @@ followed by an independent recheck. Unresolved drafts remain held with their
 reasons and cannot be edited or exported as ordinary cards. Retry includes partial
 batches whose passing cards are already ready. Existing and exported cards are
 not repaired automatically; Verify remains optional for older or hand-written
-cards. Missing verdicts and source conflicts cannot become a verified pass.
+cards. Missing verdicts, unavailable writing rules and source conflicts cannot
+become a verified pass. Partial retries audit the current published siblings.
+Length findings require independent quality judgment, not automatic removal of
+essential conditions or meaningful procedures.
 Editing a card or its captured source invalidates the displayed audit. A model
 audit is probabilistic, not proof of truth or approval to export. You still review
 the cards and choose Export.
