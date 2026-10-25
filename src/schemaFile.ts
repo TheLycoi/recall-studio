@@ -18,12 +18,15 @@
  */
 
 import { TFile, TFolder, normalizePath } from "obsidian";
+import { randomUUID } from "crypto";
 import type RecallPlugin from "./main";
 import { observe } from "./preferences";
 import {
   appendLearnedRule,
+  hasLearnedReceipt,
   parseProposals,
   parseSchema,
+  persistProposalIdentity,
   renderDefaultSchema,
   renderEmptySuggestions,
   renderProposal,
@@ -53,8 +56,15 @@ export class SchemaFile {
   private lastProposals: Proposal[] = [];
   /** Set once the folder has proved uncreatable, so the console gets one line rather than one per call. */
   private folderFailed = false;
+  private mutation: Promise<unknown> = Promise.resolve();
 
   constructor(private plugin: RecallPlugin) {}
+
+  private serialize<T>(action: () => Promise<T>): Promise<T> {
+    const result = this.mutation.then(action);
+    this.mutation = result.catch(() => {});
+    return result;
+  }
 
   schemaPath(): string {
     return normalizePath(`${this.plugin.settings.schemaFolder}/recall-rules.md`);
@@ -136,7 +146,33 @@ export class SchemaFile {
   }
 
   async refresh(): Promise<void> {
-    await this.proposals();
+    return this.serialize(() => this.refreshNow());
+  }
+
+  private async refreshNow(): Promise<void> {
+    const proposals = await this.proposals();
+    if (duplicateOccurrences(proposals).length === 0) return;
+    const file = this.plugin.app.vault.getAbstractFileByPath(this.suggestionsPath());
+    if (!(file instanceof TFile)) return;
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const rules = this.plugin.app.vault.getAbstractFileByPath(this.schemaPath());
+      const receipts = rules instanceof TFile ? await this.plugin.app.vault.cachedRead(rules) : "";
+      await this.plugin.app.vault.process(file, md => {
+        for (const p of parseProposals(md)) {
+          if (p.status === "open" && hasLearnedReceipt(receipts, p.occurrenceId!)) {
+            md = setProposalStatus(md, p.occurrenceId!, "applied", today);
+          }
+        }
+        for (const p of duplicateOccurrences(parseProposals(md))) {
+          md = setProposalStatus(md, p.occurrenceId!, "superseded", today);
+        }
+        return md;
+      });
+      await this.proposals();
+    } catch (e) {
+      console.error("Recall Studio: could not recover duplicate suggestions; all blocks were retained", e);
+    }
   }
 
   /**
@@ -148,22 +184,51 @@ export class SchemaFile {
    * only ever gains a line through `accept`.
    */
   async learn(today: string): Promise<number> {
-    const observations = observe(this.plugin.store.revisions());
-    if (observations.length === 0) return 0;
-    const existing = await this.proposals();
-    const fresh = observations.filter((o) => !this.alreadyAnswered(existing, o.id, today));
-    if (fresh.length === 0) return 0;
+    return this.serialize(() => this.learnNow(today));
+  }
 
+  private async learnNow(today: string): Promise<number> {
     const path = this.suggestionsPath();
     let file = this.plugin.app.vault.getAbstractFileByPath(path);
     if (!(file instanceof TFile)) {
+      if (observe(this.plugin.store.revisions()).length === 0) return 0;
       await this.ensureFolder();
       file = await this.plugin.app.vault.create(path, renderEmptySuggestions(this.schemaPath()));
     }
-    const blocks = fresh.map((o) => renderProposal({ ...o, date: today })).join("");
-    await this.plugin.app.vault.process(file as TFile, (md) => `${md.replace(/\n*$/, "\n")}\n${blocks}`);
-    await this.refresh();
-    return fresh.length;
+    const rules = this.plugin.app.vault.getAbstractFileByPath(this.schemaPath());
+    const receipts = rules instanceof TFile ? await this.plugin.app.vault.cachedRead(rules) : "";
+    let inserted = 0;
+    await this.plugin.app.vault.process(file as TFile, (md) => {
+      const observations = observe(this.plugin.store.revisions());
+      const seen = new Set<string>();
+      const answered = parseProposals(md).filter(p => p.status !== "open");
+      for (const p of parseProposals(md)) {
+        if (p.status !== "open") continue;
+        if (hasLearnedReceipt(receipts, p.occurrenceId!)) {
+          md = setProposalStatus(md, p.occurrenceId!, "applied", today);
+          continue;
+        }
+        const current = observations.find(o => o.id === p.id);
+        if (!current || (this.unchangedSuggestion(p, current.rule) && p.rule !== current.rule)) {
+          md = setProposalStatus(md, p.occurrenceId!, "withdrawn", today);
+          continue;
+        }
+        if (this.alreadyAnswered(answered, p.id, today)) {
+          md = setProposalStatus(md, p.occurrenceId!, "superseded", today);
+          continue;
+        }
+        if (seen.has(p.id)) md = setProposalStatus(md, p.occurrenceId!, "superseded", today);
+        seen.add(p.id);
+      }
+      const existing = parseProposals(md);
+      const fresh = observations.filter(o => !this.alreadyAnswered(existing, o.id, today));
+      inserted = fresh.length;
+      if (!inserted) return md;
+      const blocks = fresh.map(o => renderProposal({ ...o, occurrenceId: randomUUID(), date: today })).join("");
+      return `${md.replace(/\n*$/, "\n")}\n${blocks}`;
+    });
+    await this.proposals();
+    return inserted;
   }
 
   /**
@@ -176,8 +241,10 @@ export class SchemaFile {
     for (const p of existing) {
       if (p.id !== id) continue;
       if (p.status === "open" || p.status === "applied") return true;
-      const since = daysBetween(p.statusDate ?? p.date, today);
-      if (since === null || since < DISMISSED_QUIET_DAYS) return true;
+      if (p.status === "dismissed") {
+        const since = daysBetween(p.statusDate ?? p.date, today);
+        if (since === null || since < DISMISSED_QUIET_DAYS) return true;
+      }
     }
     return false;
   }
@@ -188,34 +255,105 @@ export class SchemaFile {
    * rule, not what was suggested.
    *
    * The schema is written before the proposal is stamped: if the second write
-   * fails, the reader has their rule and an entry still marked open, which
-   * they can dismiss. The other order would lose the rule and claim it was
-   * applied.
+   * fails, the occurrence receipt lets a retry finish the stamp without
+   * appending the rule again. The other order could claim a rule was applied
+   * without ever saving it.
    */
   async accept(id: string, rule: string, today: string): Promise<void> {
+    return this.serialize(() => this.acceptNow(id, rule, today));
+  }
+
+  private unchangedSuggestion(proposal: Proposal, currentRule: string): boolean {
+    if (proposal.suggestedRule !== undefined) return proposal.rule === proposal.suggestedRule;
+    // Legacy caps have no original-wording metadata; retain the block even when withdrawing it.
+    return proposal.id === "shorter-answers"
+      ? /^Keep answers to at most \d+ words\.$/.test(proposal.rule)
+      : proposal.rule === currentRule;
+  }
+
+  private checkSupport(proposal: Proposal, text: string): void {
+    const current = observe(this.plugin.store.revisions()).find(o => o.id === proposal.id);
+    if (!current) throw new Error("This suggestion no longer has enough retained evidence. Refresh suggestions before accepting it.");
+    if (text === proposal.rule && this.unchangedSuggestion(proposal, current.rule) && text !== current.rule) {
+      throw new Error("The evidence has changed since this rule was suggested. Refresh suggestions or review your custom wording.");
+    }
+  }
+
+  private async acceptNow(id: string, rule: string, today: string): Promise<void> {
     const text = rule.trim();
     if (!text) return;
-    const proposal = this.lastProposals.find((p) => p.id === id);
+    const proposals = await this.proposals();
+    const proposal = proposals.find(p => p.occurrenceId === id)
+      ?? proposals.find(p => p.id === id && p.status === "open");
+    if (!proposal) throw new Error("This suggestion is no longer open. Refresh suggestions.");
+    const occurrenceId = proposal.occurrenceId!;
+    const existing = this.plugin.app.vault.getAbstractFileByPath(this.schemaPath());
+    const recorded = existing instanceof TFile
+      && hasLearnedReceipt(await this.plugin.app.vault.cachedRead(existing), occurrenceId);
+    if (!recorded) {
+      if (proposal.status !== "open") throw new Error("This suggestion is no longer open. Refresh suggestions.");
+      this.checkSupport(proposal, text);
+    }
+    if (recorded && proposal.status === "applied") return;
+    const suggestions = this.plugin.app.vault.getAbstractFileByPath(this.suggestionsPath());
+    if (!(suggestions instanceof TFile)) throw new Error("The suggestions note is missing. Restore it before retrying.");
+    if (!recorded && occurrenceId.startsWith("legacy:")) {
+      await this.plugin.app.vault.process(suggestions, md => persistProposalIdentity(md, occurrenceId));
+    }
     const file = await this.ensure();
-    await this.plugin.app.vault.process(file, (md) =>
-      appendLearnedRule(md, text, { date: today, count: proposal?.count ?? 0 }),
-    ); // obsidian.d.ts:7458
+    await this.plugin.app.vault.process(file, (md) => {
+      if (hasLearnedReceipt(md, occurrenceId)) return md;
+      this.checkSupport(proposal, text);
+      return appendLearnedRule(md, text, { date: today, count: proposal.count, occurrenceId });
+    }); // obsidian.d.ts:7458
     // The note has changed, so the cached blocks describe the previous version.
     this.cache = null;
-    await this.stamp(id, "applied", today);
+    try {
+      await this.stamp(occurrenceId, "applied", today);
+    } catch {
+      throw new Error("The rule is saved, but its suggestion could not be marked applied. Retry Accept to finish; it will not add the rule twice.");
+    }
   }
 
   async dismiss(id: string, today: string): Promise<void> {
-    await this.stamp(id, "dismissed", today);
+    return this.serialize(async () => {
+      const proposals = await this.proposals();
+      const proposal = proposals.find(p => p.occurrenceId === id)
+        ?? proposals.find(p => p.id === id && p.status === "open");
+      const rules = this.plugin.app.vault.getAbstractFileByPath(this.schemaPath());
+      if (proposal && rules instanceof TFile
+        && hasLearnedReceipt(await this.plugin.app.vault.cachedRead(rules), proposal.occurrenceId!)) {
+        throw new Error("This rule is already saved. Retry Accept to finish its status; delete the rule from the rules note if you want to unlearn it.");
+      }
+      await this.stamp(id, "dismissed", today);
+    });
   }
 
   private async stamp(id: string, status: "applied" | "dismissed", today: string): Promise<void> {
     const file = this.plugin.app.vault.getAbstractFileByPath(this.suggestionsPath());
-    if (file instanceof TFile) {
-      await this.plugin.app.vault.process(file, (md) => setProposalStatus(md, id, status, today));
-    }
-    await this.refresh();
+    if (!(file instanceof TFile)) throw new Error("The suggestions note is missing. Restore it before retrying.");
+    await this.plugin.app.vault.process(file, (md) => {
+      const proposals = parseProposals(md);
+      const target = proposals.find(p => p.occurrenceId === id)
+        ?? proposals.find(p => p.id === id && p.status === "open");
+      if (!target) throw new Error("The selected suggestion is missing. Refresh suggestions.");
+      if (target.status === status) return md;
+      if (target.status !== "open") throw new Error("The selected suggestion is no longer open. Refresh suggestions.");
+      return setProposalStatus(md, target.occurrenceId!, status, today);
+    });
+    await this.proposals();
   }
+}
+
+/** Keep every block, but expose only one unanswered occurrence for each pattern. */
+function duplicateOccurrences(proposals: Proposal[]): Proposal[] {
+  const seen = new Set(proposals.filter(p => p.status === "applied").map(p => p.id));
+  return proposals.filter(p => {
+    if (p.status !== "open") return false;
+    if (seen.has(p.id)) return true;
+    seen.add(p.id);
+    return false;
+  });
 }
 
 /** Whole days from `from` to `to`, both `YYYY-MM-DD`, or null when either is unreadable. */

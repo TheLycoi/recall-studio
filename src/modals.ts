@@ -1,5 +1,6 @@
 import { App, ButtonComponent, Modal, Notice, Setting, SuggestModal, TFile } from "obsidian";
 import { describeError } from "./llm";
+import type { Proposal } from "./schemaNote";
 
 /** Ask for a free-text instruction. Resolves null when cancelled. */
 export class InstructionModal extends Modal {
@@ -122,6 +123,7 @@ export function pickDeck(app: App, decks: string[]): Promise<string | null> {
  * against the edits that produced it.
  */
 export class SchemaSuggestionsModal extends Modal {
+  private opened = false;
   constructor(
     app: App,
     private schema: SchemaFileLike,
@@ -131,20 +133,27 @@ export class SchemaSuggestionsModal extends Modal {
   }
 
   onOpen(): void {
+    this.opened = true;
     const { contentEl } = this;
     contentEl.addClass("wikilm-modal");
     contentEl.createEl("h3", { text: "Card rule suggestions" });
-    void this.renderList();
+    void this.renderList().catch(e => new Notice(`Recall Studio: Could not load suggestions. ${describeError(e)}`));
   }
 
-  /** Re-read and redraw in place, so accepting the first of four leaves the other three on screen. */
+  onClose(): void {
+    this.opened = false;
+    this.contentEl.empty();
+  }
+
+  /** Read once; successful decisions remove only their own row, preserving every other draft. */
   private async renderList(): Promise<void> {
+    const open = (await this.schema.proposals()).filter((p) => p.status === "open");
+    if (!this.opened) return;
     const { contentEl } = this;
     const old = contentEl.querySelector(".wikilm-schema-list");
     old?.remove();
     const list = contentEl.createDiv({ cls: "wikilm-schema-list" });
 
-    const open = (await this.schema.proposals()).filter((p) => p.status === "open");
     this.onChange?.();
 
     const link = list.createEl("p", { cls: "wikilm-muted" });
@@ -179,29 +188,50 @@ export class SchemaSuggestionsModal extends Modal {
 
       const row = new Setting(box);
       let accept: ButtonComponent | null = null;
+      let dismiss: ButtonComponent | null = null;
+      let busy = false;
+      const sync = () => {
+        accept?.setDisabled(busy || input.value.trim() === "");
+        dismiss?.setDisabled(busy);
+      };
+      const decide = async (action: "accept" | "dismiss") => {
+        if (busy) return;
+        busy = true;
+        sync();
+        try {
+          const id = p.occurrenceId ?? p.id;
+          if (action === "accept") await this.schema.accept(id, input.value.trim(), today);
+          else await this.schema.dismiss(id, today);
+          if (!this.opened) return;
+          box.remove();
+          this.onChange?.();
+          if (!list.querySelector(".wikilm-schema-proposal")) {
+            list.createEl("p", { text: "No suggestions waiting." });
+          }
+        } catch (e) {
+          new Notice(`Recall Studio: Could not ${action} this suggestion. ${describeError(e)}`);
+        } finally {
+          busy = false;
+          sync();
+        }
+      };
       row.addButton((b) => {
         accept = b;
         return b
           .setCta()
           .setButtonText("Accept")
           .setTooltip("Write this rule into the card rules note's Learned section")
-          .onClick(() => {
-            b.setDisabled(true);
-            void this.schema.accept(p.id, input.value.trim(), today).then(() => this.renderList());
-          });
+          .onClick(() => { void decide("accept"); });
       });
-      row.addButton((b) =>
-        b
+      row.addButton((b) => {
+        dismiss = b;
+        return b
           .setButtonText("Dismiss")
           .setTooltip("Not a rule you want. Recall Studio stays quiet about this pattern for a month.")
-          .onClick(() => {
-            b.setDisabled(true);
-            void this.schema.dismiss(p.id, today).then(() => this.renderList());
-          }),
-      );
+          .onClick(() => { void decide("dismiss"); });
+      });
       // An empty rule would append a bullet with no rule in it, so Accept is
       // only live while there is something to write.
-      const sync = () => accept?.setDisabled(input.value.trim() === "");
       input.addEventListener("input", sync);
       sync();
     }
@@ -230,11 +260,4 @@ export interface SchemaFileLike {
   ensure(): Promise<TFile>;
 }
 
-type SchemaProposal = {
-  id: string;
-  status: "open" | "applied" | "dismissed";
-  summary: string;
-  rule: string;
-  evidence: string[];
-  count: number;
-};
+type SchemaProposal = Pick<Proposal, "id" | "occurrenceId" | "status" | "summary" | "rule" | "evidence" | "count">;

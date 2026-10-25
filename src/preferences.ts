@@ -136,6 +136,48 @@ function evidenceFrom(revisions: CardRevision[]): string[] {
 
 const plural = (n: number, one: string, many: string): string => (n === 1 ? one : many);
 
+const SNAPSHOT_FIELDS = ["kind", "front", "back", "text", "extra"] as const;
+
+/** One retained correction per card; intermediate edits and undo are not votes. */
+function retainedEdits(revisions: CardRevision[]): { edits: CardRevision[]; requests: CardRevision[] } {
+  const cards = new Map<string, CardRevision[]>();
+  for (const r of [...revisions].sort((a, b) => -byNewestFirst(a, b))) {
+    const group = cards.get(r.cardId) ?? [];
+    group.push(r);
+    cards.set(r.cardId, group);
+  }
+  const edits: CardRevision[] = [];
+  const requests: CardRevision[] = [];
+  for (const group of cards.values()) {
+    let before = { ...group[0].before };
+    for (const r of group) {
+      if (r.via !== "repair") continue;
+      // An automated replacement is a new baseline, never a user correction.
+      if (r.before.kind !== r.after.kind) before = { ...r.after };
+      else for (const field of SNAPSHOT_FIELDS) {
+        if (r.before[field] !== r.after[field]) Object.assign(before, { [field]: r.after[field] });
+      }
+    }
+    const last = group[group.length - 1];
+    const net = { ...last, before, after: last.after };
+    if (!changed(net) || !group.some(r => r.via !== "repair" && changed(r))) continue;
+    edits.push(net);
+    const seen = new Set<string>();
+    for (const r of [...group].reverse()) {
+      if (r.via !== "rewrite") continue;
+      const instruction = normalizeInstruction(r.instruction ?? "");
+      if (seen.has(instruction)) continue;
+      const retained = SNAPSHOT_FIELDS.some(field => r.before[field] !== r.after[field]
+        && before[field] !== last.after[field] && r.after[field] === last.after[field]);
+      if (retained) {
+        requests.push(r);
+        seen.add(instruction);
+      }
+    }
+  }
+  return { edits, requests };
+}
+
 export function observe(
   revisions: CardRevision[],
   opts?: { thresholds?: Partial<Record<PatternId, number>> },
@@ -144,14 +186,14 @@ export function observe(
   // An edit that changed no field is a save, not a correction: it is evidence
   // for nothing, and counting it would let a reader reach a threshold by
   // pressing the button.
-  const edits = (revisions ?? []).filter(r => r.via !== "repair" && changed(r));
+  const { edits, requests } = retainedEdits(revisions ?? []);
   const out: Observation[] = [];
 
   out.push(...shorterAnswers(edits, thresholds["shorter-answers"]));
   out.push(...preferKind(edits, thresholds["prefer-kind"]));
   out.push(...dropOpening(edits, thresholds["drop-opening"]));
   // Legacy extra-field IDs remain readable, but writer schemas cannot act on them.
-  out.push(...instructions(edits, thresholds["instruction"]));
+  out.push(...instructions(requests, thresholds["instruction"]));
 
   // Strongest evidence first; id breaks the tie so the order is the same on
   // every run over the same input, which the dedupe against dismissed

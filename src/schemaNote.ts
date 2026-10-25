@@ -130,6 +130,7 @@ export function parseSchema(md: string): ParsedSchema {
 /** The body as the model should see it: nothing, when all it holds is the placeholder. */
 function liveBody(section: SchemaSection): string {
   const kept = section.body
+    .replace(/ ?<!-- recall-accept: \S+ -->/g, "")
     .split("\n")
     .filter((l) => l.trim() !== LEARNED_PLACEHOLDER)
     .join("\n")
@@ -165,8 +166,10 @@ export function schemaBlocks(parsed: ParsedSchema): { cards: string } {
  * re-render. `test/schemaNote.test.mjs` asserts this by diffing the note line
  * by line with those lines removed.
  */
-export function appendLearnedRule(md: string, rule: string, opts: { date: string; count: number }): string {
-  const line = `- ${rule.trim()} _(learned ${opts.date} from ${opts.count} edits)_`;
+export function appendLearnedRule(md: string, rule: string, opts: { date: string; count: number; occurrenceId?: string }): string {
+  if (opts.occurrenceId && hasLearnedReceipt(md, opts.occurrenceId)) return md;
+  const receipt = opts.occurrenceId ? ` <!-- recall-accept: ${encodeURIComponent(opts.occurrenceId)} -->` : "";
+  const line = `- ${rule.trim()} _(learned ${opts.date} from ${opts.count} edits)_${receipt}`;
   let text = lf(md ?? "");
 
   const heading = /^##\s+Learned\s*$/m.exec(text);
@@ -187,6 +190,11 @@ export function appendLearnedRule(md: string, rule: string, opts: { date: string
   }
 
   return touchFrontmatter(text, opts.date);
+}
+
+/** Acceptance is deduplicated by occurrence, never by arbitrary equal rule text. */
+export function hasLearnedReceipt(md: string, occurrenceId: string): boolean {
+  return md.includes(`<!-- recall-accept: ${encodeURIComponent(occurrenceId)} -->`);
 }
 
 /** Bump `learned_count` and move `updated`, creating the frontmatter when the note has none. */
@@ -214,12 +222,16 @@ function touchFrontmatter(text: string, date: string): string {
  */
 export interface Proposal {
   id: string;
+  /** Identifies this decision, not the recurring pattern in `id`. */
+  occurrenceId?: string;
   date: string;
-  status: "open" | "applied" | "dismissed";
-  /** The day it was accepted or dismissed; absent while open. */
+  status: "open" | "applied" | "dismissed" | "superseded" | "withdrawn";
+  /** The day its status changed; absent while open. */
   statusDate?: string;
   summary: string;
   rule: string;
+  /** Original generated wording, so hand-edited wording is never mistaken for it. */
+  suggestedRule?: string;
   evidence: string[];
   count: number;
 }
@@ -244,7 +256,8 @@ export function renderProposal(p: Omit<Proposal, "status" | "statusDate">): stri
   const evidence = p.evidence.map((e) => `- ${e}`).join("\n");
   return `## Suggestion — ${p.date}
 <!-- id: ${p.id} status: open -->
-
+${p.occurrenceId ? `<!-- occurrence: ${p.occurrenceId} -->\n` : ""}
+<!-- suggested-rule: ${encodeURIComponent(p.suggestedRule ?? p.rule)} -->
 **Noticed:** ${p.summary}
 **Rule:** ${p.rule}
 **Evidence (${p.count} edits):**
@@ -254,12 +267,18 @@ ${evidence}
 `;
 }
 
-const ID_LINE = /^<!--\s*id:\s*(\S+)\s+status:\s*(open|applied|dismissed)(?:\s+(\S+))?\s*-->\s*$/;
+const ID_LINE = /^<!--\s*id:\s*(.+?)\s+status:\s*(open|applied|dismissed|superseded|withdrawn)(?:\s+(\S+))?\s*-->\s*$/;
 
 /** Every proposal in the file, in order. A block missing its comment line is skipped rather than guessed at. */
 export function parseProposals(md: string): Proposal[] {
+  return proposalEntries(md).map(e => e.proposal);
+}
+
+function proposalEntries(md: string): Array<{ proposal: Proposal; from: number; to: number }> {
   const text = lf(md ?? "");
-  const out: Proposal[] = [];
+  const out: Array<{ proposal: Proposal; from: number; to: number }> = [];
+  const occurrences = new Map<string, number>();
+  const reserved = new Set([...text.matchAll(/^<!-- occurrence: (\S+) -->$/gm)].map(m => m[1]));
   const heads = [...text.matchAll(/^##\s+Suggestion\s+—\s*(.*)$/gm)];
   for (let i = 0; i < heads.length; i++) {
     const start = heads[i].index ?? 0;
@@ -268,6 +287,11 @@ export function parseProposals(md: string): Proposal[] {
     const lines = block.split("\n");
     const idMatch = lines.map((l) => ID_LINE.exec(l)).find((x): x is RegExpExecArray => x !== null);
     if (!idMatch) continue;
+    const explicit = /^<!-- occurrence: (\S+) -->$/m.exec(block)?.[1];
+    let ordinal = (occurrences.get(idMatch[1]) ?? 0) + 1;
+    while (reserved.has(`legacy:${encodeURIComponent(idMatch[1])}:${ordinal}`)) ordinal++;
+    if (!explicit) occurrences.set(idMatch[1], ordinal);
+    const occurrenceId = explicit ?? `legacy:${encodeURIComponent(idMatch[1])}:${ordinal}`;
     const status = idMatch[2] as Proposal["status"];
     const evidence: string[] = [];
     let inEvidence = false;
@@ -281,18 +305,37 @@ export function parseProposals(md: string): Proposal[] {
       else if (line.trim() !== "") break;
     }
     const count = Number(/^\*\*Evidence\s*\((\d+)\s+edits\)/m.exec(block)?.[1]);
-    out.push({
+    out.push({ from: start, to: end, proposal: {
       id: idMatch[1],
+      occurrenceId,
       date: (heads[i][1] ?? "").trim(),
       status,
       ...(status !== "open" && idMatch[3] ? { statusDate: idMatch[3] } : {}),
       summary: /^\*\*Noticed:\*\*\s*(.*)$/m.exec(block)?.[1]?.trim() ?? "",
       rule: /^\*\*Rule:\*\*\s*(.*)$/m.exec(block)?.[1]?.trim() ?? "",
+      suggestedRule: decodeRule(/^<!-- suggested-rule: (\S+) -->$/m.exec(block)?.[1]),
       evidence,
       count: Number.isFinite(count) ? count : evidence.length,
-    });
+    } });
   }
   return out;
+}
+
+function decodeRule(encoded?: string): string | undefined {
+  try { return encoded === undefined ? undefined : decodeURIComponent(encoded); }
+  catch { return undefined; }
+}
+
+/** Freeze a legacy address before a cross-file decision can be partially saved. */
+export function persistProposalIdentity(md: string, occurrenceId: string): string {
+  const text = lf(md);
+  const target = proposalEntries(text).find(e => e.proposal.occurrenceId === occurrenceId);
+  if (!target) throw new Error("The selected suggestion is missing. Refresh suggestions.");
+  const block = text.slice(target.from, target.to);
+  if (/^<!-- occurrence:/m.test(block)) return md;
+  const next = block.split("\n").map(line => ID_LINE.test(line)
+    ? `${line}\n<!-- occurrence: ${occurrenceId} -->` : line).join("\n");
+  return text.slice(0, target.from) + next + text.slice(target.to);
 }
 
 /**
@@ -300,16 +343,14 @@ export function parseProposals(md: string): Proposal[] {
  * else. The reader may have annotated a block; those notes are theirs to keep,
  * and an unknown id is a no-op rather than an append.
  */
-export function setProposalStatus(md: string, id: string, status: "applied" | "dismissed", date: string): string {
+export function setProposalStatus(md: string, id: string, status: Exclude<Proposal["status"], "open">, date: string): string {
   const text = lf(md ?? "");
-  const lines = text.split("\n");
-  let changed = false;
-  for (let i = 0; i < lines.length; i++) {
-    const m = ID_LINE.exec(lines[i]);
-    if (!m || m[1] !== id) continue;
-    lines[i] = `<!-- id: ${id} status: ${status} ${date} -->`;
-    changed = true;
-    break;
-  }
-  return changed ? lines.join("\n") : md;
+  const entries = proposalEntries(text);
+  const target = entries.find(e => e.proposal.occurrenceId === id)
+    ?? entries.find(e => e.proposal.id === id && e.proposal.status === "open");
+  if (!target || target.proposal.status !== "open") return md;
+  const block = text.slice(target.from, target.to).split("\n").map(line =>
+    ID_LINE.test(line) ? `<!-- id: ${target.proposal.id} status: ${status} ${date} -->` : line,
+  ).join("\n");
+  return text.slice(0, target.from) + block + text.slice(target.to);
 }
