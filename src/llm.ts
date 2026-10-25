@@ -12,7 +12,7 @@ import { DeepSeekBackend } from "./deepseek";
 import { OpenCodeBackend, OpenCodeError } from "./opencode";
 import { DeepSeekError } from "./deepseekError";
 import { buildExamplesBlock } from "./examples";
-import { lintCard, LINT_FIX_INSTRUCTIONS } from "./lint";
+import { LINT_FIX_INSTRUCTIONS } from "./lint";
 import type { BloomLevel, Card, Highlight, GenerationContext, GenerationPreparation } from "./model";
 import { PreparationOut, GroundedCardsOut, AuditOut, PREPARATION_SYSTEM, AUDIT_SYSTEM, RETRIEVAL_QUALITY_RUBRIC, type GroundedDraft, type GenerationAudit } from "./generation";
 import type { QuizQuestionMessageArgs, QuizRecallGradeMessageArgs } from "./prompt";
