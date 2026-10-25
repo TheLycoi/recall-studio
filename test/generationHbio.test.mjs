@@ -176,6 +176,115 @@ test('P4 a later positive final verdict cannot erase a source hold while a diffe
   assert.ok(f.h.generation.blocked[0].reasons.some(reason => reason.includes(sourceCases[0].source)));
 });
 
+for (const variant of ['initial', 'final verified', 'final failed']) test(`P4 ${variant} source hold survives explicit retries without wording repair`, async () => {
+  const f = fixture(sourceCases[0]);
+  f.g.kick = () => {};
+  const conflict = sourceCases[0].sourceConflict;
+  const complete = f.backend.complete;
+  let retry = false;
+  f.backend.complete = async req => {
+    if (!['audit', 'final audit', 'generation repair'].includes(req.label)) return complete(req);
+    f.calls.push(req);
+    if (req.label === 'generation repair') return req.schema.parse({ cards: [{ ...f.draft, text: 'Treatment Z prevents every complication {{c1::always}}.' }] });
+    const initial = req.label === 'audit';
+    return req.schema.parse({ verdicts: JSON.parse(req.user).cards.map((c, index) => ({
+      index, cardId: c.id,
+      status: variant !== 'initial' && (initial || (!retry && variant === 'final failed')) ? 'failed' : 'verified',
+      reason: initial && variant !== 'initial' ? 'Synthetic retrieval quality defect.' : !retry && variant === 'final failed' ? 'Captured evidence cannot support universal scope.' : 'Synthetic positive quality verdict.',
+      conflicts: !retry && (variant === 'initial' ? initial : !initial) ? [conflict] : [],
+    })) });
+  };
+  await f.g.run(f.h);
+  assert.equal(f.h.cards.length, 0);
+  const heldAudit = structuredClone(variant === 'initial' ? f.h.generation.audit : f.h.generation.finalAudit);
+  assert.deepEqual(heldAudit.verdicts[0].conflicts, [conflict]);
+  const original = structuredClone(f.h.generation.drafts);
+  const repairs = structuredClone(f.h.generation.repairs);
+  const batchId = f.h.generation.id;
+  retry = true;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    // Exercise the persisted history, not only objects retained in this process.
+    const parsed = m.parseInboxJson(JSON.stringify({ version: 1, highlights: [f.h] }));
+    assert.equal(parsed.ok, true);
+    Object.assign(f.h, parsed.data.highlights[0]);
+    f.g.retry(f.h);
+    await f.g.run(f.h);
+    assert.equal(f.calls.filter(r => r.label === 'generation repair').length, variant === 'initial' ? 0 : 1, 'source insufficiency must never become a wording-repair instruction');
+    assert.equal(f.h.cards.length, 0, 'a positive retry does not resolve insufficient source evidence');
+    assert.equal(f.h.generation.blocked.length, 1);
+    assert.ok(f.h.generation.blocked[0].reasons.some(reason => reason.includes(conflict.quote) && reason.includes(conflict.reason)));
+    assert.notEqual((f.h.generation.finalAudit ?? f.h.generation.audit).status, 'verified');
+    assert.ok(f.h.generation.auditHistory.some(a => JSON.stringify(a) === JSON.stringify(heldAudit)), 'retain the exact original audit without adding release identity');
+    assert.equal(f.h.generation.id, batchId);
+    assert.deepEqual(f.h.generation.drafts, original);
+    assert.deepEqual(f.h.generation.repairs, repairs);
+    assert.equal(f.h.text, sourceCases[0].source);
+  }
+});
+
+test('P4 removing retained source evidence during retry prevents stale acceptance', async () => {
+  const f = fixture(sourceCases[0]);
+  f.g.kick = () => {};
+  await f.g.run(f.h);
+  f.g.retry(f.h);
+  const complete = f.backend.complete;
+  f.backend.complete = async req => {
+    if (req.label !== 'audit') return complete(req);
+    f.calls.push(req);
+    f.h.generation.auditHistory = [];
+    return req.schema.parse({ verdicts: JSON.parse(req.user).cards.map((c, index) => ({ index, cardId: c.id, status: 'verified', reason: 'Synthetic positive quality verdict.', conflicts: [] })) });
+  };
+  await f.g.run(f.h);
+  assert.equal(f.h.cards.length, 0, 'changed source-hold state revokes the in-flight retry');
+  assert.match(f.h.error, /inputs changed/i);
+  assert.equal(f.calls.filter(r => r.label === 'generation repair').length, 0);
+});
+
+for (const stale of ['card identity', 'card index', 'source identity', 'input identity']) test(`P4 unrelated historical ${stale} cannot hold the current target`, async () => {
+  const f = fixture(cases[5]);
+  f.g.kick = () => {};
+  await new m.Generator(f.plugin, { release: 'original-release' }).run(f.h);
+  const batch = f.h.generation;
+  const historical = structuredClone(batch.audit);
+  historical.verdicts[0].conflicts = [{ quote: f.h.text, reason: 'Unrelated historical finding.' }];
+  if (stale === 'card identity') historical.verdicts[0].cardId = 'unrelated-card';
+  else if (stale === 'card index') historical.verdicts[0].index = 1;
+  else if (stale === 'source identity') historical.provenance.sourceKey = '0'.repeat(64);
+  else historical.provenance.inputKey = '0'.repeat(64);
+  batch.auditHistory = [historical];
+  const before = structuredClone(historical);
+  f.h.cards = [];
+  f.g.retry(f.h);
+  await f.g.run(f.h);
+  assert.equal(f.h.cards.length, 1, 'a stale finding is not evidence against a different target or capture');
+  assert.equal(f.calls.filter(r => r.label === 'generation repair').length, 0);
+  assert.deepEqual(batch.auditHistory[0], before, 'irrelevant evidence stays intact without becoming a current hold');
+});
+
+for (const revision of ['source context', 'writing context', 'explicit new batch']) test(`P4 ${revision} starts a new batch without inheriting retry source holds`, async () => {
+  const f = fixture(sourceCases[0]);
+  f.g.kick = () => {};
+  await f.g.run(f.h);
+  f.g.retry(f.h);
+  const old = structuredClone(f.h.generation);
+  const complete = f.backend.complete;
+  f.backend.complete = async req => {
+    if (!['audit', 'final audit'].includes(req.label)) return complete(req);
+    f.calls.push(req);
+    return req.schema.parse({ verdicts: JSON.parse(req.user).cards.map((c, index) => ({ index, cardId: c.id, status: 'verified', reason: 'Synthetic reconsideration in a new evidence batch.', conflicts: [] })) });
+  };
+  if (revision === 'source context') f.h.before = 'New source context supplied for reconsideration.';
+  else if (revision === 'writing context') f.settings.writerInstructions = 'New authorized writing context.';
+  else f.g.more(f.h, 'Reconsider in a new batch.');
+  await f.g.run(f.h);
+  assert.notEqual(f.h.generation.id, old.id);
+  assert.equal(f.h.cards.length, 1);
+  assert.equal(f.h.generation.auditHistory, undefined);
+  assert.deepEqual(f.h.generationHistory.find(b => b.id === old.id), old);
+  assert.equal(f.h.text, sourceCases[0].source);
+  assert.equal(f.h.generationHistory[0].auditHistory[0].verdicts[0].conflicts[0].quote, sourceCases[0].sourceConflict.quote);
+});
+
 test('P4 provider schemas require all object fields while old responses and saved records still load', () => {
   function strict(schema) {
     if (!schema || typeof schema !== 'object') return;

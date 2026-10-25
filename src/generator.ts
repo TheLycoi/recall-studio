@@ -166,7 +166,7 @@ export class Generator {
       }
       batch.inputKey = key;
       if (batch.provenance) batch.provenance.inputKey = key;
-      const staged = () => JSON.stringify([batch.preparation, batch.writerOutput, batch.drafts, batch.repairs, batch.audit, batch.finalAudit]);
+      const staged = () => JSON.stringify([batch.preparation, batch.writerOutput, batch.drafts, batch.repairs, batch.audit, batch.finalAudit, batch.auditHistory]);
       let expected = staged();
       const changed = () => { expected = staged(); };
       const checkInputs = () => {
@@ -236,10 +236,12 @@ export class Generator {
         if (new Set(cards.map(c => c.id)).size !== cards.length || cards.some(c => c.highlightId !== h.id || c.generation?.batchId !== batch.id)) throw new Error("Invalid saved draft identity.");
       };
       validateCards(originals);
-      const sourceIssues = (card: Card, checked: Pick<GenerationAuditRecord, "verdicts">) => [
+      const sourceIssues = (card: Card, checked: Pick<GenerationAuditRecord, "verdicts" | "provenance">) => [
         ...sourceConflictsForCard(preparation, card),
-        // Rechecking repaired siblings cannot erase an earlier source hold in this attempt.
-        ...[batch.audit, checked].flatMap(a => a?.verdicts.find(v => v.cardId === card.id)?.conflicts ?? []),
+        // Retry archives quality checks, not source resolution for this batch's targets.
+        ...[batch.audit, batch.finalAudit, ...(batch.auditHistory ?? []), checked].flatMap(a =>
+          a?.provenance && (a.provenance.sourceKey !== generationSourceKey(h) || a.provenance.inputKey !== key) ? []
+            : a?.verdicts.find(v => v.cardId === card.id && originals[v.index]?.id === card.id)?.conflicts ?? []),
       ];
       const audit = async (cards: Card[], final = false): Promise<GenerationAuditRecord> => {
         const saved = final ? batch.finalAudit : batch.audit;
