@@ -16,6 +16,7 @@ const CardRecord = z.object({
   bloom: z.string().optional(), critiqueRan: z.boolean().optional(),
   lintFailures: z.array(z.string()).optional(), lintWarnings: z.array(z.string()).optional(),
   userCheck: z.object({ content: z.string(), at: z.string(), issues: z.array(z.string()) }).optional(),
+  exportAcceptance: z.object({ content: z.string(), at: z.string(), issues: z.array(z.string()) }).optional(),
   generation: z.object({
     batchId: z.string(), planId: z.string(), factIds: z.array(z.string()),
     audit: z.object({ status: AuditStatus, reason: z.string(), content: z.string(), sourceKey: z.string().optional(), provenance: GenerationProvenanceOut.optional() }),

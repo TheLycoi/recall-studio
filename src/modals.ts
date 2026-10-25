@@ -1,6 +1,8 @@
 import { App, ButtonComponent, Modal, Notice, Setting, SuggestModal, TFile } from "obsidian";
 import { describeError } from "./llm";
 import type { Proposal } from "./schemaNote";
+import type { ExportSummary } from "./exportSummary";
+import type { ExportItem } from "./cardActions";
 
 /** Ask for a free-text instruction. Resolves null when cancelled. */
 export class InstructionModal extends Modal {
@@ -54,6 +56,33 @@ export class InstructionModal extends Modal {
 
 export function askInstruction(app: App, title: string, placeholder: string): Promise<string | null> {
   return new Promise((resolve) => new InstructionModal(app, title, placeholder, resolve).open());
+}
+
+/** Closing the warning is cancellation; only the explicit button accepts. */
+export class ExportWarningModal extends Modal {
+  private resolved = false;
+  constructor(app: App, private summary: ExportSummary, private items: ExportItem[], private resolve: (accepted: boolean) => void) { super(app); }
+  onOpen(): void {
+    this.contentEl.createEl("h3", { text: "Review export warnings" });
+    this.contentEl.createEl("p", { text: `${this.summary.notes} notes / ${this.summary.tasks} reviews selected. ${this.summary.warnings.length} notes need your review. Exporting does not mark them verified.` });
+    for (const warning of this.summary.warnings) {
+      const card = this.items.find(item => item.card.id === warning.cardId)!.card;
+      const box = this.contentEl.createDiv();
+      box.createEl("h4", { text: warning.source || "Captured source" });
+      box.createEl("p", { text: card.kind === "qa" ? `${card.front} Answer: ${card.back}` : card.text });
+      const list = box.createEl("ul");
+      for (const reason of warning.reasons) list.createEl("li", { text: reason });
+    }
+    new Setting(this.contentEl)
+      .addButton(b => b.setButtonText("Cancel").onClick(() => this.close()))
+      .addButton(b => b.setButtonText("Export despite warnings").onClick(() => {
+        this.resolved = true; this.resolve(true); this.close();
+      }));
+  }
+  onClose(): void { this.contentEl.empty(); if (!this.resolved) this.resolve(false); }
+}
+export function confirmExport(app: App, summary: ExportSummary, items: ExportItem[]): Promise<boolean> {
+  return new Promise(resolve => new ExportWarningModal(app, structuredClone(summary), structuredClone(items), resolve).open());
 }
 
 /** Pick an Anki deck; typing a new name creates it on export. */

@@ -158,6 +158,8 @@ export interface Card {
   };
   /** Present only after a user-requested check of this exact content. */
   userCheck?: { content: string; at: string; issues: string[] };
+  /** Explicit acceptance of warnings for an export attempt, never a model verdict. */
+  exportAcceptance?: { content: string; at: string; issues: string[] };
 }
 
 export interface Highlight {

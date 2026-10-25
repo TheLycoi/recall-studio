@@ -10,7 +10,8 @@ import { Generator } from "./generator";
 import { Highlighter } from "./highlighter";
 import { InboxView, VIEW_TYPE_INBOX } from "./inboxView";
 import { LlmClient } from "./llm";
-import { askInstruction, pickDeck } from "./modals";
+import { askInstruction, pickDeck, confirmExport } from "./modals";
+import { summarizeExport, exportSelectionKey } from "./exportSummary";
 import type { Card, Highlight } from "./model";
 import { DEFAULT_SETTINGS, RecallSettingTab, type RecallSettings } from "./settings";
 import { SchemaFile } from "./schemaFile";
@@ -50,7 +51,7 @@ export default class RecallPlugin extends Plugin {
     // nothing else on load depends on having one.
     void this.schema.refresh().catch(e => console.error("Recall Studio: schema startup recovery failed", e));
     this.anki = new AnkiClient(() => this.settings.ankiConnectUrl);
-    this.generator = new Generator(this);
+    this.generator = new Generator(this, { release: this.manifest.version });
 
     this.registerView(VIEW_TYPE_INBOX, (leaf) => new InboxView(leaf, this));
 
@@ -248,15 +249,38 @@ export default class RecallPlugin extends Plugin {
   private async acceptExport(list: Highlight[], ids: ReadonlySet<string> | undefined, send: (items: ExportItem[]) => Promise<void>): Promise<void> {
     if (this.exportBusy) { new Notice("Recall Studio: an export is already running."); return; }
     this.exportBusy = true;
+    let accepted = false;
     try {
       const items = exportCandidates(list, ids);
       if (!items.length) { new Notice("Recall Studio: no visible drafts to export."); return; }
+      const ctx = { settings: this.settings, vaultName: this.app.vault.getName(), deck: this.settings.defaultDeck };
+      for (const { card, highlight } of items) buildNote(card, highlight, ctx);
+      const key = exportSelectionKey(items, this.settings);
+      const unchanged = () => {
+        const current = exportCandidates(list, ids);
+        return !this.unloading && current.length === items.length
+          && current.every((item, i) => item.card === items[i].card && item.highlight === items[i].highlight)
+          && exportSelectionKey(current, this.settings) === key;
+      };
+      const summary = summarizeExport(list, new Set(items.map(({ card }) => card.id)));
+      if (summary.error) throw new Error(summary.error);
+      if (summary.warnings.length && !await confirmExport(this.app, summary, items)) return;
+      if (!unchanged()) throw new Error("The export selection or destination changed. Review it and export again.");
+      accepted = true;
+      for (const warning of summary.warnings) {
+        const { card, highlight } = items.find(item => item.card.id === warning.cardId)!;
+        card.exportAcceptance = { content: cardContent(card, highlight), at: new Date().toISOString(), issues: [...warning.reasons] };
+      }
+      // Persist explicit acceptance before transport; it is not a model verdict.
+      this.store.touch();
+      await this.store.flush();
+      if (!unchanged()) throw new Error("The export selection or destination changed. Review it and export again.");
       await withExportAcceptance(items, () => send(items));
     } catch (e) {
       new Notice(`Recall Studio: export failed. ${(e as Error).message}`, 8000);
     } finally {
       this.exportBusy = false;
-      this.store.touch();
+      if (accepted) this.store.touch();
     }
   }
 

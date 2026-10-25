@@ -1,8 +1,16 @@
 import type { Highlight } from "./model";
-import { currentCardCheck, exportCandidates } from "./cardActions";
-import { cardAuditLabel } from "./generation";
+import { cardContent, currentCardCheck, exportCandidates, type ExportItem } from "./cardActions";
+import { cardAuditLabel, generationSourceKey } from "./generation";
 import { lintCard, LINT_LABELS } from "./lint";
 import { countClozes } from "./util";
+
+/** Invalidate an open confirmation on changes to wording, evidence, checks or destination. */
+export function exportSelectionKey(items: ExportItem[], settings: unknown): string {
+  return JSON.stringify([settings, items.map(({ card, highlight }) => [
+    card.id, highlight.id, cardContent(card, highlight), generationSourceKey(highlight),
+    card.status, highlight.status, highlight.archived, card.generation, card.userCheck, card.critiqueReason,
+  ])]);
+}
 
 export interface ExportSummary {
   notes: number;
@@ -35,7 +43,8 @@ export function summarizeExport(
     }
     if (crossInterference.has(card.id)) reasons.add(LINT_LABELS["cross-interference"]);
     const audit = cardAuditLabel(card, highlight);
-    if (!audit.startsWith("Audit verified")) reasons.add(audit);
+    const check = currentCardCheck(card, highlight);
+    if (!audit.startsWith("Audit verified") && (!check || check.issues.length || card.generation?.audit.status === "failed")) reasons.add(audit);
     if (card.critiqueReason) reasons.add(card.critiqueReason);
     for (const issue of currentCardCheck(card, highlight)?.issues ?? []) reasons.add(issue);
     if (reasons.size) warnings.push({ cardId: card.id, source: highlight.sourceTitle, reasons: [...reasons] });

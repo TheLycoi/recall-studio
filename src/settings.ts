@@ -638,7 +638,7 @@ export class RecallSettingTab extends PluginSettingTab {
     field("Q&A extra field", "basicExtraField", "Optional. Receives the highlight quote and source link.");
     field("Cloze note type", "clozeModel");
     field("Cloze text field", "clozeTextField");
-    field("Cloze extra field", "clozeExtraField", "Optional.");
+    field("Cloze extra field", "clozeExtraField", "Required for source links or card extras. Choose a field distinct from Text and show it only on the back of the Anki template.");
 
     new Setting(containerEl)
       .setName("Tags")

@@ -135,6 +135,13 @@ function makeAnki() {
 // --------------------------------------------------------------- the stub
 
 class Stub {}
+let exportDecision = modal => { modal.resolve(true); modal.close(); };
+const exportDialogs = [];
+class ExportModalStub {
+  constructor(app) { this.app = app; this.contentEl = el(); }
+  open() { exportDialogs.push(this); exportDecision(this); }
+  close() { this.onClose?.(); }
+}
 class Notice {
   constructor(message) {
     this.message = String(message);
@@ -203,7 +210,7 @@ let requestUrlImpl = async (opts) => {
 
 const obsidian = {
   App: Stub, ButtonComponent: Stub, Editor: Stub, FileView: Stub, ItemView, MarkdownRenderer: Stub, MarkdownView: ItemView,
-  Menu: Stub, Modal: Stub, Notice, Plugin, PluginSettingTab, Setting: Stub, SuggestModal: Stub,
+  Menu: Stub, Modal: ExportModalStub, Notice, Plugin, PluginSettingTab, Setting: Stub, SuggestModal: Stub,
   MarkdownRenderChild: Stub, editorInfoField: {},
   TAbstractFile: Stub, TFile, TFolder: Stub, WorkspaceLeaf: Stub, WorkspaceWindow: Stub,
   addIcon() {}, setIcon() {}, loadPdfJs: async () => ({}),
@@ -318,7 +325,7 @@ async function loadedPlugin(over = {}) {
   const plugin = new PluginClass(app, { id: "review-inbox", name: "Review Inbox", dir: PLUGIN_DIR, version: "0.1.0" });
   await plugin.onload();
   plugin.settings = settings(over);
-  plugin.store = { all: () => [], touch() {} };
+  plugin.store = { all: () => [], touch() {}, async flush() {} };
   plugin.__app = app;
   return plugin;
 }
@@ -582,4 +589,64 @@ test("a text export splits a one-field cloze model from Q&A rows by note type", 
   assert.equal(qaCard.status, "exported");
   assert.equal(clozeCard.status, "exported");
   assert.equal(draft.status, "exported");
+});
+
+
+// P2 uses the real plugin entry point; each fixture explicitly decides the modal.
+test('P2 cancellation sends nothing, changes no cards and does not persist', async () => {
+  fake = makeAnki(); const plugin = await loadedPlugin(); const c = qa({status:'pending'}), h = highlight([c]);
+  const before = structuredClone(h); let writes = 0; plugin.store.touch = () => writes++;
+  const prior = exportDecision; exportDecision = modal => modal.close();
+  try { await plugin.exportHighlights([h]); } finally { exportDecision = prior; }
+  assert.equal(fake.actions.length, 0); assert.deepEqual(h,before); assert.equal(writes,0);
+});
+test('P2 override records exact content separately without changing the model verdict', async () => {
+  fake = makeAnki(); const plugin = await loadedPlugin(); const c = qa({status:'flagged',critiqueReason:'Ambiguous cue'}), h = highlight([c]);
+  let flushed = false; plugin.store.flush = async () => { flushed = true; };
+  await plugin.exportHighlights([h]);
+  assert.equal(fake.notes.size,1); assert.equal(c.status,'exported');
+  assert.equal(c.generation,undefined); assert.equal(c.critiqueReason,'Ambiguous cue');
+  assert.ok(c.exportAcceptance.issues.some(x=>x.includes('Ambiguous cue')));
+  assert.ok(c.exportAcceptance.content.includes(c.front)); assert.ok(flushed);
+});
+test('P2 card changes while the warning is open invalidate the decision', async () => {
+  fake = makeAnki(); const plugin = await loadedPlugin(); const c = qa({status:'pending'}),h=highlight([c]);
+  const prior = exportDecision; exportDecision = modal => { c.back='Changed answer'; modal.resolve(true); modal.close(); };
+  try { await plugin.exportHighlights([h]); } finally { exportDecision=prior; }
+  assert.equal(fake.actions.length,0); assert.equal(c.status,'pending'); assert.equal(c.exportAcceptance,undefined);
+});
+test('P2 changed selection or destination while the warning is open cannot broaden export', async () => {
+  for (const change of ['selection','settings','archive']) {
+    fake=makeAnki(); const plugin=await loadedPlugin(); const c=qa({status:'pending'}),h=highlight([c]);
+    const prior=exportDecision; exportDecision=modal=>{
+      if(change==='selection')h.cards.push(qa({id:'late',front:'Late card?'}));
+      if(change==='settings')plugin.settings.defaultDeck='Other deck';
+      if(change==='archive')h.archived=true;
+      modal.resolve(true);modal.close();
+    };
+    try { await plugin.exportHighlights([h]); } finally {exportDecision=prior;}
+    assert.equal(fake.actions.length,0,change); assert.equal(c.exportAcceptance,undefined,change);
+  }
+});
+test('P2 current positive explicit check needs no warning; stale check does', async () => {
+  fake=makeAnki(); const plugin=await loadedPlugin(); const c=qa({front:'Spacing practice: what separates reviews?',back:'interval',status:'pending'}),h=highlight([c]);
+  // Same serialization as cardContent: exact card, source context and siblings.
+  c.userCheck={content:JSON.stringify([c.kind,c.front,c.back,c.text,c.extra,h.text,h.before,h.after,h.sourcePath,h.sourceTitle,h.heading,h.instruction,[]]),at:'fixture',issues:[]};
+  const before=exportDialogs.length;await plugin.exportHighlights([h]);assert.equal(exportDialogs.length,before);
+  const stale=qa({id:'stale',status:'pending',userCheck:c.userCheck});const hs=highlight([stale]);
+  await plugin.exportHighlights([hs]);assert.equal(exportDialogs.length,before+1);
+});
+test('P2 mixed selection reports only selected warnings and preserves partial receipts', async () => {
+  fake=makeAnki();const plugin=await loadedPlugin();const a=qa({id:'one',status:'pending'}),b=qa({id:'two',status:'pending'}),h=highlight([a,b]);
+  await plugin.exportHighlights([h],new Set(['one']));const d=exportDialogs.at(-1);
+  assert.equal(d.summary.notes,1);assert.deepEqual(d.summary.warnings.map(w=>w.cardId),['one']);
+  assert.equal(a.status,'exported');assert.equal(b.status,'pending');assert.equal(b.exportAcceptance,undefined);
+  const receipt=a.ankiNoteId;await plugin.exportHighlights([h],new Set(['two']));
+  assert.equal(a.ankiNoteId,receipt);assert.equal(b.status,'pending');assert.equal(b.ankiNoteId,undefined);assert.ok(b.exportAcceptance);
+});
+test('P2 cancelled text export writes no files and records no acceptance', async () => {
+  const plugin=await loadedPlugin();const c=qa({status:'pending'}),h=highlight([c]);const before=[...plugin.__app.__files];
+  const prior=exportDecision;exportDecision=modal=>modal.close();
+  try{await plugin.exportAsTextFile([h]);}finally{exportDecision=prior;}
+  assert.deepEqual([...plugin.__app.__files],before);assert.equal(c.exportAcceptance,undefined);
 });

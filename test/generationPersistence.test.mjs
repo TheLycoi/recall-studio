@@ -188,3 +188,15 @@ test('source-history rename during generation stops the stale batch before publi
     f.store.close();
   }
 });
+
+
+test('P2 export acceptance survives the real store without inventing a model check', async () => {
+  const f=await fixture(); let reloaded;
+  try {
+    await f.g.run(f.h);const c=f.h.cards[0];delete c.userCheck;
+    c.exportAcceptance={content:'exact-selected-content',at:'2026-10-25T00:00:00Z',issues:['Stale audit']};
+    const audit=structuredClone(c.generation.audit);await f.store.flush();f.store.close();
+    reloaded=new InboxStore(f.app,'study');await reloaded.load();const saved=reloaded.all()[0].cards[0];
+    assert.deepEqual(saved.exportAcceptance,c.exportAcceptance);assert.deepEqual(saved.generation.audit,audit);assert.equal(saved.userCheck,undefined);
+  } finally {f.store.close();reloaded?.close();}
+});
