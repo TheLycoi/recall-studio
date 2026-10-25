@@ -67,6 +67,32 @@ export function lintCard(card: Card, highlight: Highlight, siblings: Card[]): Li
     }
     const distinctNumbers = [...new Set(deletions.map((d) => d.n))].sort((a, b) => a - b);
 
+    // shortcut: English generic list intros with bare slots and identical hints only;
+    // other wording or distinguishing hint relations still need the independent audit.
+    const slots = rendered.replace(/\{\{c\d+::[\s\S]*?\}\}/g, "[]");
+    if (distinctNumbers.length > 1
+      && new Set(deletions.map(d => normalizePlain(d.hint))).size === 1
+      && /^(?:[^.!?,{}]+,\s*)?(?:the\s+)?(?:(?:two|three|four|five|six|seven|eight|nine|ten|\d+)\s+)?(?:effects|types|kinds|members|components|parts|features|items)\s*(?:are\b|include\b|:)\s*\[\](?:\s*(?:,\s*(?:(?:and|or)\s+)?|(?:and|or)\s+)\[\])+[.!]?$/i.test(slots.trim())) {
+      failures.push("unordered-list-slots");
+    }
+
+    // shortcut: bare English During/For prefixes and power/cable instructions only;
+    // broader predicates need audit, since "open circuit voltage" is not an imperative.
+    if (deletions.length === 1) {
+      const d = deletions[0];
+      const prefix = rendered.slice(0, d.start);
+      const target = normalizePlain(prefix + d.body);
+      if (/^(?:during|for)\s+[^,;.!?{}]*\b(?:calibration|setup|installation|shutdown|startup|maintenance)\b[^,;.!?{}]*,\s*$/i.test(prefix)
+        && /^[.!]?\s*$/.test(rendered.slice(d.end))
+        && /^(?:(?:disconnect|reconnect|connect)\s+(?:the\s+)?power(?:\s+supply)?|(?:attach|detach)\s+(?:the\s+)?(?:reference\s+)?cable)$/i.test(d.body.trim())
+        && reviewText(highlight.text).split(/[.!?;\n]+/).some(sentence => {
+          const source = normalizePlain(sentence);
+          return source.startsWith(target) && /^ (?:before|after|until|only when|when)\s+\S/.test(source.slice(target.length));
+        })) {
+        failures.push("procedure-boundary-hidden");
+      }
+    }
+
     // A review hides all spans with its number; hidden slots separate visible phrases.
     const leaks = distinctNumbers.some(n => {
       const segments: string[] = [];
@@ -206,6 +232,8 @@ export const LINT_LABELS: Record<LintFailureId | LintWarningId, string> = {
   "cloze-count": "missing cloze",
   "cloze-numbering": "cloze numbering",
   "cloze-framing": "cloze framing",
+  "unordered-list-slots": "unordered list slots",
+  "procedure-boundary-hidden": "missing step boundary",
   "qa-empty": "empty",
   "qa-answer-long": "answer too long",
   "qa-yes-no": "yes/no question",
@@ -230,6 +258,8 @@ export const LINT_FIX_INSTRUCTIONS: Record<LintFailureId | LintWarningId, string
   "cloze-count": "the card has no valid deletion; mark the supported answer span without imposing a deletion quota or splitting the sentence to meet a count",
   "cloze-numbering": "the deletion numbers skip or repeat out of order; number them c1, c2, c3 with no gaps",
   "cloze-framing": "the span exceeds the six words product policy; adjudicate whether it is one meaningful retrieval target before shortening, preserving essential names, negations, and conditions, causal relationships and short procedures; remove only incidental scaffolding, never required meaning",
+  "unordered-list-slots": "the generic unordered list hides unqualified members separately; ask for the complete short set as one retrieval or use distinguishing relationships stated in the source; never invent order, relations or membership, and preserve all supported targets",
+  "procedure-boundary-hidden": "the visible cue names only a procedure while hiding its entire instruction and omitting a step boundary stated in the source; name the subject and the supported before/after/condition boundary in the cue, or explicitly ask for the complete procedure; preserve the action and conditions, never invent a step or rationale",
   "qa-empty": "the card is missing its question, its answer, or its cloze text; write the missing side from the highlight",
   "qa-answer-long": "the answer exceeds the twelve-word product policy; adjudicate focus and required meaning rather than blindly shortening; retain meaningful causal relationships and short procedures, and narrow only genuinely independent retrieval targets",
   "qa-yes-no": "the question can be answered yes or no, which is guessable; ask what, which, how, why, when, or how many instead",

@@ -21,19 +21,27 @@ Source fidelity is not factual truth. Verified means supported against this capt
 
 Retrieval: choose one focused retrieval target per review, not the fewest words or an isolated noun. Name the specific subject and essential conditions in the visible cue; Extra/source links cannot supply them. When the heading identifies the subject, put it on the front if needed; a class label such as HBIO250 is not a subject cue. Be precise about the requested relation, consistent in the expected answer, tractable after studying the capture, and effortful enough to require recall. Preserve meaningful explanations, causal relationships and short procedures; split independent targets in planning, not useful meaning by word count. Word limits (twelve words for QA answers, six words for cloze spans, sixty words per card) are product-policy findings to adjudicate, not learning-science thresholds.
 
-Coverage: select supported definitions, useful basics, mechanisms, distinctions, parts/wholes, causes/effects and significance, not labels alone when relationships are stated. For procedures preserve action verbs, source-supported order and meaningful conditions; test the rationale separately when stated. Do not omit useful foundational facts merely because they seem obvious. Redundancy earns a place for a genuinely different retrieval direction or distinct facet, not duplicate retrieval; distinguish confusable siblings. Never invent mnemonics, personal facts or media. Withhold unsupported targets instead of manufacturing answers; nothing useful may mean no cards.
+Coverage: select supported definitions, useful basics, mechanisms, distinctions, parts/wholes, causes/effects and significance, not labels alone when relationships are stated. For procedures preserve action verbs, source-supported order and meaningful conditions; keep the relevant before/after/condition boundary in the visible cue, not merely a procedure name. Test the rationale separately when stated. Do not omit useful foundational facts merely because they seem obvious. Redundancy earns a place for a genuinely different retrieval direction or distinct facet, not duplicate retrieval; distinguish confusable siblings. Never invent mnemonics, personal facts or media. Withhold unsupported targets instead of manufacturing answers; nothing useful may mean no cards.
 
-Lists: for open lists test a supported category, function or membership criterion, not an arbitrary subset as exhaustive or a meta-card about completeness. Use example-to-category only if useful and not given away. Unordered lists have no meaningful ordinal slots from printed order, even with two or three items. Use supported distinguishing relationships or a focused, tractable complete-list retrieval. Ordered neighbours may cue a step only when the source supports that order. Shared vocabulary is not itself an answer leak.
+Lists: for open lists test a supported category, function or membership criterion, not an arbitrary subset as exhaustive or a meta-card about completeness. Use example-to-category only if useful and not given away. Unordered lists have no meaningful ordinal slots from printed order, even with two or three items. Prefer supported distinguishing relationships or a focused, tractable complete-list retrieval; this product policy is not a universal ban on closed-list clozes. Ordered neighbours may cue a step only when the source supports that order. Shared vocabulary is not itself an answer leak.
 
 Format: prefer cloze for source spans, QA for a produced explanation, mechanism, comparison or a clearer cue. QA has front/back with text empty; cloze has text with front/back empty. Keep markdown to **bold** and code. Cloze uses focused source wording with {{c1::answer}} or {{c1::answer::hint}}; hidden spans must occur verbatim in the capture. Resolve pronouns or surface grammar without changing meaning. Number from 1 without gaps; one deletion is valid. Use source-driven cloze grouping, one number per independently cued target; reuse a number only for one meaningful joint retrieval. Plan grouping does not require joint retrieval: a condition and consequence can be separate cloze reviews if each is clearly cued.
 
-Grouping preference: prefer one to three distinct cloze numbers per note. Coherent lists and enumerations may exceed three when each rendered review remains meaningful and tractable; arbitrary unordered slots remain defective. Plan independent attributes in separate focused groups when needed, but never lose coverage or split a coherent retrieval to meet a count. There is no fixed card quota or hard deletion-count limit. Never reject solely for cloze count. Optional hints are usually one to three words to clarify the answer type; omit the hint when the cue is already clear. Never reject for a missing or longer hint alone. Hints cannot replace subject/conditions or leak through synonyms, initials or grammar. Short names and meaningful conditions such as "The Who" and "until the broth is clear" are not invalid merely for containing who or is.
+Grouping preference: prefer one to three distinct cloze numbers per note. Coherent lists and enumerations may exceed three when each rendered review remains meaningful and tractable; arbitrary unordered slots remain defective. Plan independent attributes in separate focused groups when needed, but never lose coverage or split a coherent retrieval to meet a count. There is no fixed card quota or hard deletion-count limit. Never reject solely for cloze count. Optional hints are usually one to three words to clarify the answer type; omit the hint when the cue is already clear. There is no hint quota. Never reject for a missing or longer hint alone. Hints cannot replace subject/conditions or leak through synonyms, initials or grammar. Short names and meaningful conditions such as "The Who" and "until the broth is clear" are not invalid merely for containing who or is.
 
 Self-check: apply both litmus tests to every rendered review. False positive: could someone answer without knowing, through yes/no guessing, grammar, an answer echo or visible siblings? False negative: could someone know but miss through an ambiguous cue? Reject answer leaks and source-relative filler such as "what does the highlight say". With one number hidden, all its spans are hidden together, other numbers are filled in and hints remain visible. Check visible cue, hidden targets, broken punctuation and sibling interference, not only the unhidden sentence. Retain required context and coverage, then return only the requested schema.
 
 <examples>
+<contrast>
+<highlight>Zeta warning mode has two effects: lower sensor gain and slower sampling.</highlight>
+<bad>In Zeta warning mode, the two effects are {{c1::lower sensor gain}} and {{c2::slower sampling}}.</bad>
+<good>In Zeta warning mode, the two effects are {{c1::lower sensor gain and slower sampling}}.</good>
+<note>Retrieve the complete short set, not an arbitrary slot. If the source instead names distinct relations, keep those visible: sensor gain is {{c1::lower}} and sampling is {{c2::slower}}. Never invent a relation or order.</note>
+</contrast>
 <example>
 <highlight>To calibrate the fictional Zeta sensor, first disconnect power, then attach the reference cable, and finally reconnect power. Disconnecting power prevents a false calibration reading because the reference cable must be attached before the sensor resumes measurement.</highlight>
+<bad>During Zeta calibration, {{c1::disconnect power}}.</bad>
+<good>qa | For Zeta sensor calibration, what must happen before attaching the reference cable? | disconnect power</good>
 <cards>
 cloze | To calibrate the fictional Zeta sensor, first {{c1::disconnect power}}, then {{c2::attach the reference cable}}, and finally {{c3::reconnect power}}.
 qa | Why disconnect power before attaching the reference cable when calibrating the fictional Zeta sensor? | Disconnecting power prevents a false calibration reading because the reference cable must be attached before the sensor resumes measurement.
@@ -49,11 +57,15 @@ cloze | Testosterone signalling: Type III binds {{c1::intracellular receptors}}.
 <note>The heading supplies the subject, not answer evidence. An arbitrary course label would not disambiguate Type III.</note>
 </example>
 <example>
-<highlight>The fictional Zeta sensor flashes blue during calibration.</highlight>
-<requested_target>Why does calibration make it flash blue?</requested_target>
+<highlight>The fictional Zeta sensor uses a blue calibration signal.</highlight>
+<requested_target>Why use a blue calibration signal?</requested_target>
 <cards>
 </cards>
-<note>Withhold this unsupported reason; the capture states the observation but no explanation. Do not add a mechanism from memory.</note>
+<note>Withhold this unsupported reason; the capture supplies none. For a supported color target instead, choose either alternative below, not both.</note>
+<good>The fictional Zeta sensor's calibration signal is {{c1::blue::color}}.</good>
+<good>The fictional Zeta sensor's calibration signal color is {{c1::blue}}.</good>
+<bad>The fictional Zeta sensor's calibration signal is {{c1::blue::blue}}.</bad>
+<note>The optional color hint distinguishes color from timing or signal strength without revealing blue; the explicit color cue needs no hint. The bad hint reveals the value.</note>
 </example>
 </examples>
 </writing_method>`;

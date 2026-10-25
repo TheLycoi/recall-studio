@@ -28,6 +28,8 @@ export type LintFailureId =
   | "cloze-count"
   | "cloze-numbering"
   | "cloze-framing"
+  | "unordered-list-slots"
+  | "procedure-boundary-hidden"
   | "qa-empty"
   | "qa-answer-long"
   | "qa-yes-no"
