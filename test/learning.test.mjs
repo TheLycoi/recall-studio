@@ -64,6 +64,17 @@ function env(revisions = [], initial = {}) {
 }
 const proposal = (id = 'shorter-answers', init = {}) => ({ id, date: today, summary: 'A correction', rule: 'Keep answers to at most 6 words.', evidence: ['synthetic edit'], count: 4, ...init });
 
+test('explicit schema recovery reports a failed bookkeeping write while retaining every block', async () => {
+  const open = api.renderProposal(proposal());
+  const f = env([], { [suggestions]: open + open });
+  const original = f.bytes.get(suggestions), failure = new Error('Synthetic recovery write failure');
+  f.app.vault.process = async () => { throw failure; };
+  const error = console.error; console.error = () => {};
+  try { await assert.rejects(f.schema.refresh(), e => e === failure); }
+  finally { console.error = error; }
+  assert.equal(f.bytes.get(suggestions), original);
+});
+
 test('observer instruction and opening IDs round-trip through status changes', () => {
   const revisions = Array.from({ length: 3 }, (_, i) => rev(`c-${i}`, {}, { front: 'Name this subject?', back: 'short' }, { via: 'rewrite', instruction: 'Use active voice' }));
   for (const observation of api.observe(revisions)) {

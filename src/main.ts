@@ -48,7 +48,7 @@ export default class RecallPlugin extends Plugin {
     );
     // Not awaited: the inbox header wants a count of waiting proposals, and
     // nothing else on load depends on having one.
-    void this.schema.refresh();
+    void this.schema.refresh().catch(e => console.error("Recall Studio: schema startup recovery failed", e));
     this.anki = new AnkiClient(() => this.settings.ankiConnectUrl);
     this.generator = new Generator(this);
 
@@ -128,6 +128,10 @@ export default class RecallPlugin extends Plugin {
 
   private async finishUnload(): Promise<void> {
     let failure: unknown;
+    const schemaStopped = Promise.resolve(this.schema?.stop()).catch(e => {
+      console.error("Recall Studio: schema cleanup failed during unload", e);
+      failure ??= e;
+    });
     const stopped = Promise.resolve(this.generator?.stop()).catch(e => {
       console.error("Recall Studio: generation cleanup failed during unload", e);
       failure ??= e;
@@ -151,7 +155,7 @@ export default class RecallPlugin extends Plugin {
       failure = e;
     }
     // A cancelled run can still roll back cards after its final write resumes.
-    await stopped;
+    await Promise.all([stopped, schemaStopped]);
     try {
       await this.store?.flush();
     } catch (e) {

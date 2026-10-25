@@ -412,7 +412,7 @@ export class RecallSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Independent audit")
       .setDesc(
-        "Generation uses one preparation request and one writer request. This adds at most one independent audit for the whole batch, including a single card. It checks claims against the captured source and reports findings without rewriting cards. Disabled, failed or incomplete audits remain visibly unverified. Audit is not approval; you still decide what to export.",
+        "New cards always receive an independent source audit, one bounded repair attempt when needed, and a separate recheck after repair. Unresolved drafts stay held for explicit Retry; this legacy toggle cannot bypass that gate. Verify remains optional for older or hand-written cards. Auditing is not export approval; you decide what to export.",
       )
       .addToggle((t) =>
         t.setValue(s.critiquePass).onChange((v) => {

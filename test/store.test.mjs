@@ -172,6 +172,21 @@ const quiet = async (fn) => {
   }
 };
 
+test("transient queue notifications refresh listeners without invalidating a durable checkpoint", async () => {
+  const v = vaultWithInbox(), store = new s.InboxStore(v.app, "wiki/_schema");
+  await store.load();
+  let changes = 0; const unsubscribe = store.onChange(() => { changes++; });
+  try {
+    store.notify();
+    assert.equal(changes, 1);
+    assert.equal(store.hasUnsavedChanges, false);
+    assert.equal(store.saveTimer, null);
+    assert.deepEqual(v.writes, []);
+    assert.equal(v.files.get(INBOX), REAL);
+    unsubscribe(); store.notify(); assert.equal(changes, 1);
+  } finally { store.close(); }
+});
+
 test("a read that throws leaves the store read-only, so touch and flush never write over the inbox", async () => {
   const v = vaultWithInbox();
   v.app.vault.adapter.read = async () => {

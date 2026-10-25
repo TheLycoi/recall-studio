@@ -268,6 +268,11 @@ export class InboxStore {
     this.dirty = true;
     this.revision++;
     this.scheduleSave();
+    this.notify();
+  }
+
+  /** Refresh views for transient queue state without dirtying a durable checkpoint. */
+  notify(): void {
     for (const fn of this.listeners) fn();
   }
 

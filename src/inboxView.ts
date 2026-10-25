@@ -172,7 +172,7 @@ export class InboxView extends ItemView {
   private visibleHighlights(): Highlight[] {
     return this.plugin.store.all().filter((h) => {
       if (h.status === "dismissed") return this.filter === "all";
-      if (this.filter === "review") return h.status !== "exported";
+      if (this.filter === "review") return h.status !== "exported" || !!h.generation?.blocked?.length;
       if (this.filter === "exported") return h.status === "exported";
       return true;
     });
@@ -274,12 +274,19 @@ export class InboxView extends ItemView {
       s.title = "Drafts the critique placed at Bloom 'remember'. When every judged card sits there, the set is testing labels, not understanding.";
     }
     if (flagged) stat("flagged", flagged, "is-flagged");
-    if (counts.queued + counts.generating) stat("writing", counts.queued + counts.generating, "is-busy");
+    const active = this.plugin.store.all().filter(h => !h.archived && h.status !== "dismissed");
+    const held = active.reduce((n, h) => n + (h.generation?.blocked?.length ?? 0), 0);
+    if (held) stat("held", held, "is-flagged");
+    for (const phase of ["queued", "preparing", "writing", "auditing", "repairing", "rechecking"] as const) {
+      const n = active.filter(h => h.status === "queued" ? phase === "queued" : h.status === "generating" && (h.generation?.phase ?? "writing") === phase).length;
+      if (n) stat(phase, n, "is-busy");
+    }
     if (counts.errors) stat("failed", counts.errors, "is-error");
     // Failures are otherwise fixed only from the overflow menu; a count the
     // reader is already looking at is where the fix belongs.
-    if (counts.errors) {
-      const retryBtn = stats.createEl("button", { cls: "wikilm-retry-btn", text: `Retry failed (${counts.errors})` });
+    const retryable = active.filter(h => this.plugin.generator?.canRetry(h)).length;
+    if (retryable) {
+      const retryBtn = stats.createEl("button", { cls: "wikilm-retry-btn", text: `Retry failed / held (${retryable})` });
       retryBtn.addEventListener("click", () => this.retryFailedHighlights());
     }
 
@@ -346,7 +353,7 @@ export class InboxView extends ItemView {
       const menu = new Menu();
       menu.addItem((i) =>
         i
-          .setTitle("Retry failed highlights")
+          .setTitle("Retry failed or held highlights")
           .setIcon(RECALL_RETRY_ICON)
           .onClick(() => this.retryFailedHighlights()),
       );
@@ -380,9 +387,9 @@ export class InboxView extends ItemView {
     });
   }
 
-  /** Requeue every highlight sitting in "error", shared by the header button and the overflow menu item. */
-  private retryFailedHighlights(): void {
-    for (const h of this.plugin.store.all()) if (h.status === "error") this.plugin.generator.enqueue(h);
+  /** Explicit retry permission, shared by the header, source and passage actions. */
+  private retryFailedHighlights(list = this.plugin.store.all()): void {
+    for (const h of list) if (this.plugin.generator.canRetry(h)) this.plugin.generator.retry(h);
     this.scheduleRender();
   }
 
@@ -400,11 +407,17 @@ export class InboxView extends ItemView {
     const title = head.createEl("a", { cls: "wikilm-source-title", text: list[0].sourceTitle });
     title.addEventListener("click", () => void this.plugin.app.workspace.openLinkText(path, "", "tab"));
     const draft = list.reduce((n, h) => n + h.cards.filter(c => ["pending", "flagged", "approved"].includes(c.status)).length, 0);
+    const held = list.reduce((n, h) => n + (h.generation?.blocked?.length ?? 0), 0);
     head.createSpan({
       cls: "wikilm-muted",
-      text: `${list.length} highlight${list.length === 1 ? "" : "s"} · ${draft} draft${draft === 1 ? "" : "s"}`,
+      text: `${list.length} highlight${list.length === 1 ? "" : "s"} · ${draft} draft${draft === 1 ? "" : "s"}${held ? ` · ${held} held` : ""}`,
     });
     const actions = head.createDiv({ cls: "wikilm-source-actions" });
+    if (list.some(h => this.plugin.generator?.canRetry(h))) {
+      const retry = actions.createEl("button", { text: "Retry" });
+      retry.title = "Retry failed or held highlights from this source";
+      retry.addEventListener("click", () => this.retryFailedHighlights(list));
+    }
     if (draft && !this.collapsed.has(path)) {
       const b = actions.createEl("button", { text: "Export" });
       b.title = "Accept and export visible draft cards from this note to Anki";
@@ -447,7 +460,7 @@ export class InboxView extends ItemView {
       h.status === "queued"
         ? "queued"
         : h.status === "generating"
-          ? "writing…"
+          ? `${h.generation?.phase ?? "writing"}…`
           : h.status === "error"
             ? "failed"
             : h.status === "exported"
@@ -479,9 +492,16 @@ export class InboxView extends ItemView {
     if (h.generation) {
       const g = h.generation;
       const batchCards = h.cards.filter(c => c.generation?.batchId === g.id);
-      const auditStatus = g.audit?.status === "verified" && (!batchCards.length || batchCards.some(c => !cardAuditLabel(c, h).startsWith("Audit verified"))) ? "unverified" : g.audit?.status ?? "unverified";
-      left.createDiv({ cls: "wikilm-muted", text: `${g.preparation ? "Preparation saved" : "Preparation pending"} · ${g.drafts ? "Drafts saved" : "Writer pending"} · Audit ${auditStatus}` });
-      if (g.audit && auditStatus !== "verified") left.createDiv({ cls: "wikilm-card-reason", text: g.audit.reason });
+      const audit = g.finalAudit ?? g.audit;
+      const auditStatus = audit?.status === "verified" && (!batchCards.length || batchCards.some(c => !cardAuditLabel(c, h).startsWith("Audit verified"))) ? "unverified" : audit?.status ?? "unverified";
+      left.createDiv({ cls: "wikilm-muted", text: `Generation ${g.phase} · ${g.preparation ? "Preparation saved" : "Preparation pending"} · ${g.drafts ? "Drafts saved privately" : "Writer pending"} · ${g.finalAudit ? "Final audit" : "Audit"} ${auditStatus}` });
+      if (audit && auditStatus !== "verified") left.createDiv({ cls: "wikilm-card-reason", text: audit.reason });
+      if (g.blocked?.length) {
+        left.createDiv({ cls: "wikilm-card-reason", text: `${g.blocked.length} held for retry; not editable or exportable.` });
+        for (const held of g.blocked) {
+          for (const reason of held.reasons) left.createDiv({ cls: "wikilm-card-reason", text: reason });
+        }
+      }
       for (const [label, rows] of [["Excluded", g.preparation?.exclusions], ["Omitted", g.preparation?.omissions]] as const) {
         for (const row of rows ?? []) left.createDiv({ cls: "wikilm-muted", text: `${label} ${row.factIds.join(", ")}: ${row.reason}` });
       }
@@ -508,7 +528,7 @@ export class InboxView extends ItemView {
       this.renderVerify(hlActions, () => [h], "passage");
       this.addExportSummary(hlActions, () => [h]);
     }
-    if (h.status === "error") iconBtn(RECALL_RETRY_ICON, "Retry", () => this.plugin.generator.enqueue(h));
+    if (this.plugin.generator?.canRetry(h)) iconBtn(RECALL_RETRY_ICON, "Retry", () => this.retryFailedHighlights([h]));
     iconBtn(RECALL_ADD_ICON, "Add a card by hand", () => {
       const c = makeCard(h.id, { kind: "qa", front: "", back: "" });
       h.cards.push(c);
@@ -529,7 +549,7 @@ export class InboxView extends ItemView {
     const right = row.createDiv({ cls: "wikilm-cards" });
     const cards = liveCards(h);
     if (h.status === "queued" || h.status === "generating") {
-      right.createDiv({ cls: "wikilm-muted wikilm-cards-empty", text: "Cards are being written in the background…" });
+      right.createDiv({ cls: "wikilm-muted wikilm-cards-empty", text: `Generation ${h.generation?.phase ?? "writing"} in the background…` });
     } else if (cards.length === 0) {
       right.createDiv({ cls: "wikilm-muted wikilm-cards-empty", text: "No cards." });
     }

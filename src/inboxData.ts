@@ -21,12 +21,24 @@ const CardRecord = z.object({
     audit: z.object({ status: AuditStatus, reason: z.string(), content: z.string(), sourceKey: z.string().optional() }),
   }).optional(),
 });
+const AuditRecord = z.object({
+  status: AuditStatus, reason: z.string(), verdicts: AuditOut.shape.verdicts,
+  contents: z.array(z.string()).optional(),
+});
+const HeldFindings = z.array(z.object({ cardId: z.string(), reasons: z.array(z.string()) }));
 const BatchRecord = z.object({
   version: z.literal(1), id: z.string(), instruction: z.string(), inputKey: z.string(),
-  phase: z.enum(["preparing", "writing", "auditing", "complete"]),
+  phase: z.enum(["preparing", "writing", "auditing", "repairing", "rechecking", "blocked", "complete"]),
   preparation: PreparationOut.optional(), drafts: z.array(CardRecord).optional(),
-  audit: z.object({ status: AuditStatus, reason: z.string(), verdicts: AuditOut.shape.verdicts }).optional(),
-  auditRequested: z.boolean().optional(), committed: z.boolean().optional(),
+  preparationRequested: z.boolean().optional(), writingRequested: z.boolean().optional(),
+  writerOutput: z.unknown().optional(), writerHistory: z.array(z.unknown()).optional(),
+  audit: AuditRecord.optional(), finalAudit: AuditRecord.optional(), auditHistory: z.array(AuditRecord).optional(),
+  auditRequested: z.boolean().optional(), finalAuditRequested: z.boolean().optional(), committed: z.boolean().optional(),
+  blocked: HeldFindings.optional(), retryFindings: HeldFindings.optional(), repairRound: z.number().optional(),
+  repairs: z.array(z.object({
+    cardId: z.string(), round: z.number(), content: z.string(), findings: z.array(z.string()), requested: z.boolean(),
+    output: z.unknown().optional(), candidate: CardRecord.optional(), error: z.string().optional(),
+  })).optional(),
 });
 const HighlightRecord = z.object({
   id: z.string(), sourcePath: z.string(), sourceTitle: z.string(), text: z.string(),

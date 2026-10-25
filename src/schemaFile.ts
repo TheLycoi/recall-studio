@@ -57,8 +57,28 @@ export class SchemaFile {
   /** Set once the folder has proved uncreatable, so the console gets one line rather than one per call. */
   private folderFailed = false;
   private mutation: Promise<unknown> = Promise.resolve();
+  private closed = false;
+  private writes = new Set<Promise<unknown>>();
 
   constructor(private plugin: RecallPlugin) {}
+
+  /** Revoke new writes synchronously; drain dispatched writes under the store handover. */
+  stop(): Promise<void> {
+    this.closed = true;
+    return Promise.all(this.writes).then(() => {});
+  }
+
+  private write<T>(action: () => Promise<T>): Promise<T> {
+    if (this.closed) throw new Error("Recall Studio: schema writes stopped after unload. Reload before retrying.");
+    const pending = action();
+    this.writes.add(pending);
+    void pending.then(() => this.writes.delete(pending), () => this.writes.delete(pending));
+    return pending;
+  }
+
+  private process(file: TFile, transform: (md: string) => string): Promise<string> {
+    return this.write(() => this.plugin.app.vault.process(file, transform));
+  }
 
   private serialize<T>(action: () => Promise<T>): Promise<T> {
     const result = this.mutation.then(action);
@@ -86,7 +106,7 @@ export class SchemaFile {
     if (existing instanceof TFile) return existing;
     await this.ensureFolder();
     const md = renderDefaultSchema({ today: new Date().toISOString().slice(0, 10) });
-    return await this.plugin.app.vault.create(path, md); // obsidian.d.ts:7386
+    return await this.write(() => this.plugin.app.vault.create(path, md)); // obsidian.d.ts:7386
   }
 
   /** Create the folder on first use only. */
@@ -95,7 +115,7 @@ export class SchemaFile {
     if (!folder || folder === "/") return;
     const existing = this.plugin.app.vault.getAbstractFileByPath(folder);
     if (existing instanceof TFolder) return;
-    await this.plugin.app.vault.createFolder(folder); // obsidian.d.ts:7404
+    await this.write(() => this.plugin.app.vault.createFolder(folder)); // obsidian.d.ts:7404
   }
 
   /**
@@ -151,14 +171,15 @@ export class SchemaFile {
 
   private async refreshNow(): Promise<void> {
     const proposals = await this.proposals();
-    if (duplicateOccurrences(proposals).length === 0) return;
+    if (this.closed || duplicateOccurrences(proposals).length === 0) return;
     const file = this.plugin.app.vault.getAbstractFileByPath(this.suggestionsPath());
     if (!(file instanceof TFile)) return;
     try {
       const today = new Date().toISOString().slice(0, 10);
       const rules = this.plugin.app.vault.getAbstractFileByPath(this.schemaPath());
       const receipts = rules instanceof TFile ? await this.plugin.app.vault.cachedRead(rules) : "";
-      await this.plugin.app.vault.process(file, md => {
+      if (this.closed) return;
+      await this.process(file, md => {
         for (const p of parseProposals(md)) {
           if (p.status === "open" && hasLearnedReceipt(receipts, p.occurrenceId!)) {
             md = setProposalStatus(md, p.occurrenceId!, "applied", today);
@@ -172,6 +193,7 @@ export class SchemaFile {
       await this.proposals();
     } catch (e) {
       console.error("Recall Studio: could not recover duplicate suggestions; all blocks were retained", e);
+      throw e;
     }
   }
 
@@ -193,12 +215,12 @@ export class SchemaFile {
     if (!(file instanceof TFile)) {
       if (observe(this.plugin.store.revisions()).length === 0) return 0;
       await this.ensureFolder();
-      file = await this.plugin.app.vault.create(path, renderEmptySuggestions(this.schemaPath()));
+      file = await this.write(() => this.plugin.app.vault.create(path, renderEmptySuggestions(this.schemaPath())));
     }
     const rules = this.plugin.app.vault.getAbstractFileByPath(this.schemaPath());
     const receipts = rules instanceof TFile ? await this.plugin.app.vault.cachedRead(rules) : "";
     let inserted = 0;
-    await this.plugin.app.vault.process(file as TFile, (md) => {
+    await this.process(file as TFile, (md) => {
       const observations = observe(this.plugin.store.revisions());
       const seen = new Set<string>();
       const answered = parseProposals(md).filter(p => p.status !== "open");
@@ -298,10 +320,10 @@ export class SchemaFile {
     const suggestions = this.plugin.app.vault.getAbstractFileByPath(this.suggestionsPath());
     if (!(suggestions instanceof TFile)) throw new Error("The suggestions note is missing. Restore it before retrying.");
     if (!recorded && occurrenceId.startsWith("legacy:")) {
-      await this.plugin.app.vault.process(suggestions, md => persistProposalIdentity(md, occurrenceId));
+      await this.process(suggestions, md => persistProposalIdentity(md, occurrenceId));
     }
     const file = await this.ensure();
-    await this.plugin.app.vault.process(file, (md) => {
+    await this.process(file, (md) => {
       if (hasLearnedReceipt(md, occurrenceId)) return md;
       this.checkSupport(proposal, text);
       return appendLearnedRule(md, text, { date: today, count: proposal.count, occurrenceId });
@@ -332,7 +354,7 @@ export class SchemaFile {
   private async stamp(id: string, status: "applied" | "dismissed", today: string): Promise<void> {
     const file = this.plugin.app.vault.getAbstractFileByPath(this.suggestionsPath());
     if (!(file instanceof TFile)) throw new Error("The suggestions note is missing. Restore it before retrying.");
-    await this.plugin.app.vault.process(file, (md) => {
+    await this.process(file, (md) => {
       const proposals = parseProposals(md);
       const target = proposals.find(p => p.occurrenceId === id)
         ?? proposals.find(p => p.id === id && p.status === "open");

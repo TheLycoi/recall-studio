@@ -27,7 +27,7 @@ function fixture(overrides={}) {
     return req.schema.parse(result);
   }};
   llm.codex=backend; llm.deepseek=backend; llm.opencode=backend;
-  const plugin={settings,llm,store:{all:()=>[h],touch(){},async flush(){saves.push(JSON.parse(JSON.stringify(h)));},hasUnsavedChanges:false},refreshStatusBar(){}};
+  const plugin={settings,llm,store:{all:()=>[h],touch(){},notify(){},async flush(){saves.push(JSON.parse(JSON.stringify(h)));},hasUnsavedChanges:false},refreshStatusBar(){}};
   const g=new Generator(plugin);
   return {h,settings,calls,saves,llm,backend,plugin,g};
 }

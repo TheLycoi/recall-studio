@@ -36,7 +36,7 @@ export function harness(QuizView) {
     metadataCache:{isUserIgnored:()=>ignored,getFileCache:()=>({frontmatter:{aliases:['Binding sites'],tags:['bio']},tags:[{tag:'#bio/receptors'}]})},
     workspace:{getActiveFile:()=>file,getLeavesOfType:()=>editors,on:(name,fn)=>{events[name]=fn;return{};},openLinkText:async()=>{}}};
   const calls=[];
-  const host={app,settings:{},store:{all:()=>rows,allHistory:()=>rows,touch:()=>{},add:h=>{rows.push(h);return h;},hasDuplicate:(p,t)=>rows.some(h=>h.sourcePath===p&&h.text.replace(/\s+/g,' ').trim()===t)},generator:{enqueue:h=>queued.push(h),more:()=>{throw Error('must not request more');}},openInbox(){},llm:{
+  const host={app,settings:{},store:{all:()=>rows,allHistory:()=>rows,touch:()=>{},add:h=>{rows.push(h);return h;},hasDuplicate:(p,t)=>rows.some(h=>h.sourcePath===p&&h.text.replace(/\s+/g,' ').trim()===t)},generator:{canRetry:()=>false,retry:()=>{throw Error('must not retry study captures');},enqueue:h=>queued.push(h),more:()=>{throw Error('must not request more');}},openInbox(){},llm:{
     requestAuthorization:(check=()=>true)=>check,
     selectStudyEvidence:async args=>({selections:args.passages.map(p=>({id:p.id,quote:p.text})),gaps:[]}),
     quizQuestion:async args=>{calls.push(['question',args]);return{question:'What does affinity mean?',shape:'concept',expects:[1]};},

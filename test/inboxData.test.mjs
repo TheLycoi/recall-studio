@@ -64,6 +64,22 @@ test("parseInboxJson round-trips a valid file", () => {
   assert.deepEqual(result, { ok: true, data, fresh: false });
 });
 
+for (const phase of ['repairing', 'rechecking', 'blocked']) test(`parseInboxJson retains ${phase} private recovery checkpoints and history`, () => {
+  const batch = { ...savedBatch(), phase, blocked: [{ cardId: 'c1', reasons: ['Needs its subject'] }], repairs: [{ cardId: 'c1', round: 1, findings: ['Needs its subject'], requested: true, content: 'old', candidate: savedCard() }] };
+  const data = { version: 1, highlights: [savedHighlight({ generation: batch, generationHistory: [batch] })] };
+  assert.deepEqual(d.parseInboxJson(JSON.stringify(data)), { ok: true, data, fresh: false });
+});
+
+for (const [field, value] of [
+  ['blocked', [{ cardId: 'c1', reasons: null }]], ['blocked', [null]],
+  ['retryFindings', [{ cardId: 'c1', reasons: 7 }]], ['repairs', [{ cardId: 'c1', round: 1, content: 'old', findings: [], requested: true, candidate: null }]],
+  ['finalAudit', { status: 'verified', reason: 'checked', verdicts: null }], ['auditHistory', [null]],
+  ['preparationRequested', 'yes'], ['writingRequested', 'yes'], ['finalAuditRequested', 'yes'], ['repairRound', 'one'],
+]) test(`parseInboxJson rejects malformed generation recovery field ${field}: ${JSON.stringify(value)}`, () => {
+  const data = { version: 1, highlights: [savedHighlight({ generation: { ...savedBatch(), [field]: value } })] };
+  assert.equal(d.parseInboxJson(JSON.stringify(data)).ok, false);
+});
+
 test("parseInboxJson treats an empty string as fresh, not corrupt", () => {
   const result = d.parseInboxJson("");
   assert.equal(result.ok, true);

@@ -104,7 +104,7 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
     available: () => true,
     run: (p) => {
       let n = 0;
-      for (const h of p.store.all()) if (h.status === "error") (p.generator.enqueue(h), n++);
+      for (const h of p.store.all()) if (p.generator.canRetry(h)) (p.generator.retry(h), n++);
       new Notice(`Recall Studio: retrying ${n}.`);
     },
   },

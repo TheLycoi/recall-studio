@@ -40,7 +40,7 @@ Export accepts the visible drafts in its scope and sends them to Anki with sourc
 | Open the card rules note | `rules`, `schema` | Opens your house rules for the card writer, and creates the note if needed. |
 | Review card rule suggestions | `suggestions` | Rules Recall Studio proposes from the edits you keep making. Accept, edit, or dismiss each one. |
 | Send all ==highlights== in this note to inbox | `highlights`, `sweep` | Queues every `==highlight==` in the open note that is not in the inbox yet. |
-| Retry failed highlights | `retry` | Tries the card writer again on highlights that failed. |
+| Retry failed highlights | `retry` | Explicitly retries failed highlights and held private drafts, including partial batches with ready cards. Busy, archived and dismissed captures are skipped. |
 
 Highlighter mode has no palette entry: it is the ribbon pen. While it is on,
 drag across a passage in a note or PDF and it is sent to the inbox.
@@ -90,21 +90,25 @@ merged. If Anki is closed or an export fails, unsent cards keep their previous s
 
 A generation batch uses one preparation request to inventory exact quotes and
 plan cards, then one writer request. Deterministic checks validate quote and
-fact references, card fields and cloze grounding. With **Independent audit**
-enabled, at most one additional request checks the drafted claims against the
-captured passage, including batches containing only one card.
+fact references, card fields and cloze grounding. An independent audit always
+checks the drafted claims against the captured passage, even for a single card.
+Drafts stay private until they pass; the legacy audit toggle cannot bypass this.
 
 Completed stages are checkpointed in the existing inbox file. Retrying after a
 writer failure reuses valid preparation; changed inputs start a new batch.
-Retries preserve card IDs and do not duplicate completed cards. An audit that
-was interrupted is not silently requested again: its cards remain unverified.
+Retries preserve card IDs and do not duplicate completed cards. Interrupted or
+unknown requests require an explicit Retry rather than a silent paid repeat.
 **Write more cards** deliberately starts another batch and retains prior evidence.
 
-Audit findings never rewrite or delete cards. The Inbox distinguishes verified,
-unverified and failed findings; missing verdicts, disabled audits and source
-conflicts cannot become a verified pass. Editing a card or its captured source
-invalidates the displayed audit. A model audit is probabilistic, not proof of
-truth or approval to export. You still review the cards and choose Export.
+Rejected new candidates receive at most one repair attempt per authorized round,
+followed by an independent recheck. Unresolved drafts remain held with their
+reasons and cannot be edited or exported as ordinary cards. Retry includes partial
+batches whose passing cards are already ready. Existing and exported cards are
+not repaired automatically; Verify remains optional for older or hand-written
+cards. Missing verdicts and source conflicts cannot become a verified pass.
+Editing a card or its captured source invalidates the displayed audit. A model
+audit is probabilistic, not proof of truth or approval to export. You still review
+the cards and choose Export.
 
 Each card's collapsed Evidence section shows its saved batch, plan and fact IDs,
 exact source quotes, plan reason and stored audit result. Historical cards resolve

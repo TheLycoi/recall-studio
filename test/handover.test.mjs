@@ -37,7 +37,7 @@ before(async () => {
   globalThis.document ??= { body: element() };
   for (let i = 0; i < 2; i++) {
     const out = await build({
-      stdin: { contents: `export {default as RecallPlugin} from './src/main'; export {InboxStore} from './src/store'; export {Generator} from './src/generator'; export {LlmClient} from './src/llm'; export {makeHighlight} from './src/model';`, resolveDir: root },
+      stdin: { contents: `export {default as RecallPlugin} from './src/main'; export {InboxStore} from './src/store'; export {Generator} from './src/generator'; export {LlmClient} from './src/llm'; export {makeHighlight} from './src/model'; export {renderProposal, parseProposals} from './src/schemaNote';`, resolveDir: root },
       bundle: true, write: false, platform: 'node', format: 'cjs', external: ['obsidian', '@codemirror/view'], logLevel: 'silent',
     });
     const stub = new Proxy({ Plugin: NativeLifecycle, TFile, TFolder, Notice: class { constructor(message) { notices.push(message); } hide() {} }, normalizePath: p => p, addIcon() {}, editorInfoField: {} }, { get: (o, k) => k in o ? o[k] : class {} });
@@ -79,7 +79,7 @@ async function fixture() {
   const settings = { provider: 'codex', codexModel: 'synthetic', writerInstructions: '', language: '', critiquePass: false, historyExamples: false, lintMode: 'badge', concurrency: 1, notifyWhenReady: false };
   const prep = { facts: [{ id: 'F1', statement: h.text, quote: h.text }], plan: [{ id: 'P1', factIds: ['F1'], entity: 'Amber', aspect: '', value: 'heat', reason: 'Stated' }], exclusions: [], omissions: [], conflicts: [] };
   const llm = new LlmClient(() => settings);
-  llm.codex = { complete: async req => req.schema.parse(req.label === 'preparation' ? prep : { cards: [{ planId: 'P1', factIds: ['F1'], kind: 'qa', front: 'What does Amber store?', back: 'heat', text: '' }] }) };
+  llm.codex = { complete: async req => req.schema.parse(req.label === 'preparation' ? prep : req.label === 'audit' ? { verdicts: JSON.parse(req.user).cards.map((card,index) => ({index,cardId:card.id,status:'verified',reason:'Synthetic lifecycle fixture.'})) } : { cards: [{ planId: 'P1', factIds: ['F1'], kind: 'qa', front: 'What does Amber store?', back: 'heat', text: '' }] }) };
   llm.abort = async () => {};
   const plugin = new RecallPlugin(app);
   Object.assign(plugin, { settings, store, llm, refreshStatusBar() {} });
@@ -95,7 +95,167 @@ function withRulesVault(f) {
     return new TFile(path);
   };
   f.app.vault.cachedRead = file => f.adapter.read(file.path);
+  f.app.vault.process = async (file, transform) => {
+    const text = transform(f.files.get(file.path));
+    f.files.set(file.path, text);
+    return text;
+  };
 }
+
+function legacySuggestions(f) {
+  const block = bundles[0].renderProposal({ id: 'instruction:use active voice', date: '2026-10-24', summary: 'Synthetic correction', rule: 'Use active voice.', evidence: ['Synthetic edit'], count: 3 });
+  const path = 'study/recall-suggestions.md';
+  f.files.set(path, block + block);
+  f.files.set('study/recall-rules.md', '# Rules\n');
+  return path;
+}
+
+for (const boundary of ['suggestions', 'rules']) test(`startup schema recovery cannot dispatch after native unload during ${boundary} read`, async () => {
+  const f = await fixture(), entered = deferred(), release = deferred();
+  f.store.close(); withRulesVault(f);
+  const path = legacySuggestions(f), original = f.files.get(path);
+  const read = f.app.vault.cachedRead;
+  let paused = false, writes = 0;
+  f.app.vault.cachedRead = async file => {
+    if (!paused && file.path === (boundary === 'suggestions' ? path : 'study/recall-rules.md')) {
+      paused = true; entered.resolve(); await release.promise;
+    }
+    return read(file);
+  };
+  const process = f.app.vault.process;
+  f.app.vault.process = async (...args) => { writes++; return process(...args); };
+  const old = new bundles[0].RecallPlugin(f.app);
+  try {
+    await old.onload(); await entered.promise;
+    assert.equal(old.unload(), undefined);
+    release.resolve();
+    await old.onunload();
+    await new Promise(r => setImmediate(r));
+    assert.equal(writes, 0, 'a revoked read continuation cannot dispatch a bookkeeping write');
+    assert.equal(f.files.get(path), original);
+  } finally { release.resolve(); await Promise.allSettled([old.onunload()]); old.store?.close(); }
+});
+
+test('native schema handover drains an already-dispatched recovery before a fresh-bundle successor loads', async () => {
+  const f = await fixture(), entered = deferred(), release = deferred();
+  f.store.close(); withRulesVault(f);
+  const path = legacySuggestions(f), process = f.app.vault.process;
+  let calls = 0;
+  f.app.vault.process = async (...args) => {
+    if (++calls === 1) { entered.resolve(); await release.promise; }
+    return process(...args);
+  };
+  const old = new bundles[0].RecallPlugin(f.app), next = new bundles[1].RecallPlugin(f.app);
+  let loading;
+  try {
+    await old.onload(); await entered.promise;
+    old.unload();
+    let loaded = false;
+    loading = next.onload().then(() => { loaded = true; });
+    await new Promise(r => setImmediate(r));
+    assert.equal(loaded, false, 'successor must wait for the old schema mutation');
+    release.resolve();
+    await Promise.all([old.onunload(), loading]);
+    await next.schema.refresh();
+    assert.equal(calls, 1, 'successor sees the recovered bytes without duplicating recovery');
+    assert.deepEqual(bundles[1].parseProposals(f.files.get(path)).map(p => p.status), ['open', 'superseded']);
+  } finally { release.resolve(); await Promise.allSettled([loading, old.onunload(), next.onunload()]); old.store?.close(); next.store?.close(); }
+});
+
+test('loaded schema recovery preserves every legacy block and supports a later human dismissal', async () => {
+  const f = await fixture(); f.store.close(); withRulesVault(f);
+  const path = legacySuggestions(f), old = new bundles[0].RecallPlugin(f.app);
+  try {
+    await old.onload(); await old.schema.refresh();
+    const proposals = await old.schema.proposals();
+    assert.deepEqual(proposals.map(p => p.status), ['open', 'superseded']);
+    await old.schema.dismiss(proposals[0].occurrenceId, '2026-10-24');
+    assert.deepEqual(bundles[0].parseProposals(f.files.get(path)).map(p => p.status), ['dismissed', 'superseded']);
+    assert.equal(f.files.get('study/recall-rules.md'), '# Rules\n');
+  } finally { await old.onunload(); }
+});
+
+test('failed dispatched schema recovery keeps native handover closed to a successor', async () => {
+  const f = await fixture(), entered = deferred(), release = deferred();
+  f.store.close(); withRulesVault(f); const path = legacySuggestions(f), original = f.files.get(path);
+  const failure = new Error('Synthetic schema disk failure');
+  f.app.vault.process = async () => { entered.resolve(); await release.promise; throw failure; };
+  const old = new bundles[0].RecallPlugin(f.app), next = new bundles[1].RecallPlugin(f.app);
+  const error = console.error; console.error = () => {};
+  try {
+    await old.onload(); await entered.promise;
+    old.unload();
+    const settled = assert.rejects(old.onunload(), e => e === failure);
+    release.resolve(); await settled;
+    assert.equal(old.store.closed, true);
+    await assert.rejects(next.onload(), e => e === failure);
+    assert.equal(next.schema, undefined, 'uncertain schema writes cannot be ignored by a fresh bundle');
+    assert.equal(f.files.get(path), original);
+  } finally { release.resolve(); await Promise.allSettled([old.onunload(), next.onunload()]); old.store?.close(); next.store?.close(); console.error = error; }
+});
+
+test('native unload revokes a delayed schema dismissal without changing its occurrence', async () => {
+  const f = await fixture(), entered = deferred(), release = deferred();
+  f.store.close(); withRulesVault(f); const path = legacySuggestions(f);
+  const old = new bundles[0].RecallPlugin(f.app);
+  try {
+    await old.onload(); await old.schema.refresh();
+    const selected = (await old.schema.proposals())[0], before = f.files.get(path), read = f.app.vault.cachedRead;
+    f.app.vault.cachedRead = async file => { if (file.path === path) { entered.resolve(); await release.promise; } return read(file); };
+    const action = old.schema.dismiss(selected.occurrenceId, '2026-10-24');
+    const rejected = assert.rejects(action, /stopped.*unload/i);
+    await entered.promise; old.unload(); release.resolve();
+    await Promise.all([rejected, old.onunload()]);
+    assert.equal(f.files.get(path), before);
+  } finally { release.resolve(); await Promise.allSettled([old.onunload()]); }
+});
+
+test('native unload after a dispatched Accept preserves its receipt and successor retry never appends twice', async () => {
+  const f = await fixture(), entered = deferred(), release = deferred();
+  f.store.close(); withRulesVault(f); const path = legacySuggestions(f);
+  f.files.delete('study/recall-rules.md');
+  const old = new bundles[0].RecallPlugin(f.app), next = new bundles[1].RecallPlugin(f.app);
+  let loading;
+  try {
+    await old.onload(); await old.schema.refresh();
+    for (let i = 0; i < 3; i++) old.store.recordRevision({ cardId: `instruction-${i}`, at: '2026-10-24T00:00:00Z', via: 'rewrite', instruction: 'Use active voice', before: { kind: 'qa', front: 'Old question?', back: 'Old answer', text: '', extra: '' }, after: { kind: 'qa', front: 'New question?', back: 'New answer', text: '', extra: '' } });
+    const selected = (await old.schema.proposals())[0], process = f.app.vault.process;
+    f.app.vault.process = async (file, transform) => {
+      if (file.path === 'study/recall-rules.md') { entered.resolve(); await release.promise; }
+      return process(file, transform);
+    };
+    const accepting = old.schema.accept(selected.occurrenceId, 'Keep my deliberate wording.', '2026-10-24');
+    const rejected = assert.rejects(accepting, /rule is saved.*retry/i);
+    await entered.promise; old.unload();
+    loading = next.onload();
+    release.resolve(); await Promise.all([old.onunload(), loading, rejected]);
+    await next.schema.refresh();
+    const saved = f.files.get('study/recall-rules.md');
+    await next.schema.accept(selected.occurrenceId, 'Do not replace the accepted wording.', '2026-10-24');
+    assert.equal(f.files.get('study/recall-rules.md'), saved);
+    assert.equal(saved.split('Keep my deliberate wording.').length - 1, 1);
+    assert.deepEqual(bundles[1].parseProposals(f.files.get(path)).map(p => p.status), ['applied', 'superseded']);
+  } finally { release.resolve(); await Promise.allSettled([loading, old.onunload(), next.onunload()]); old.store?.close(); next.store?.close(); }
+});
+
+test('native unload after folder creation dispatch prevents the later rules-note creation', async () => {
+  const f = await fixture(), entered = deferred(), release = deferred();
+  f.store.close(); withRulesVault(f);
+  f.app.vault.getAbstractFileByPath = path => f.files.has(path) ? new TFile(path) : null;
+  let folders = 0;
+  f.app.vault.createFolder = async () => { folders++; entered.resolve(); await release.promise; };
+  const old = new bundles[0].RecallPlugin(f.app);
+  try {
+    await old.onload();
+    const creating = old.schema.ensure();
+    const rejected = assert.rejects(creating, /stopped.*unload/i);
+    await entered.promise; old.unload();
+    let done = false; const cleanup = old.onunload().then(() => { done = true; });
+    await new Promise(r => setImmediate(r)); assert.equal(done, false, 'drain the folder mutation too');
+    release.resolve(); await Promise.all([rejected, cleanup]);
+    assert.equal(folders, 1); assert.equal(f.files.has('study/recall-rules.md'), false);
+  } finally { release.resolve(); await Promise.allSettled([old.onunload()]); }
+});
 
 test('saved layout-ready callback cannot restart work after native synchronous unload', async () => {
   const f = await fixture(), callbacks = [], migrations = [], dispatches = [];

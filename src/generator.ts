@@ -39,6 +39,12 @@ export class Generator {
     this.kick();
   }
 
+  canRetry(h: Highlight): boolean {
+    return !this.stopped && !h.archived && !this.running.has(h.id)
+      && !["queued", "generating", "dismissed"].includes(h.status)
+      && (h.status === "error" || !!h.generation?.blocked?.length);
+  }
+
   /** Explicit permission to retry held/unknown work, never used by startup. */
   retry(h: Highlight): void {
     if (h.archived || h.status === "dismissed") return;
@@ -101,6 +107,7 @@ export class Generator {
       const task = this.run(h).finally(() => {
         this.running.delete(h.id);
         this.pending.delete(task);
+        this.plugin.store.notify(); // Retry controls must see that the final checkpoint is no longer busy.
         this.kick();
       });
       this.pending.add(task);
