@@ -8,6 +8,7 @@ import { z } from "zod";
 import type { CompletionRequest, LlmBackend, TextRequest } from "./backend";
 import { assertAuthorized } from "./backend";
 import { extractJson, jsonPreamble } from "./jsonOut";
+import { sanitizeDiagnostic } from "./providerDiagnostic";
 import type { RecallSettings } from "./settings";
 
 /**
@@ -57,7 +58,7 @@ export class OpenCodeError extends Error {
     public kind: OpenCodeErrorKind,
     message: string,
   ) {
-    super(message);
+    super(sanitizeDiagnostic(message));
     this.name = "OpenCodeError";
   }
 }
@@ -446,7 +447,9 @@ export class OpenCodeBackend implements LlmBackend {
     const bin = resolveOpencodeBinary(s.opencodePath);
     const model = req.model ?? s.opencodeModel;
     const cwd = this.workspace();
-    const r = await runOpencode(bin, opencodeArgs(model), cwd, prompt, req.signal, req.authorized);
+    const r = await runOpencode(bin, opencodeArgs(model), cwd, prompt, req.signal, req.authorized).catch((e: unknown) => {
+      throw new OpenCodeError("failed", `Could not start opencode: ${e instanceof Error ? e.message : String(e)}`);
+    });
     const events = parseOpencodeEvents(r.stdout);
     // Before any throw, never after: cleanup is fire-and-forget, so it cannot
     // turn a good answer into an error either way.
@@ -474,7 +477,9 @@ export class OpenCodeBackend implements LlmBackend {
   async listModels(): Promise<string[]> {
     const s = this.getSettings();
     const bin = resolveOpencodeBinary(s.opencodePath);
-    const r = await listOpencodeModels(bin, this.workspace());
+    const r = await listOpencodeModels(bin, this.workspace()).catch((e: unknown) => {
+      throw new OpenCodeError("failed", `Could not list OpenCode models: ${e instanceof Error ? e.message : String(e)}`);
+    });
     const ids = readOpencodeModels(r.stdout);
     if (!ids.length) throw new OpenCodeError("failed", `OpenCode listed no models. Run \`${bin} models\` in a terminal to see what it reports.`);
     return ids;

@@ -8,6 +8,7 @@ import { resolveDeepSeekKey, type KeySource } from "./deepseekKey";
 import { errorMessage, jsonPreamble, readChoice } from "./deepseekWire";
 import { extractJson } from "./jsonOut";
 import type { RecallSettings } from "./settings";
+import { sanitizeDiagnostic } from "./providerDiagnostic";
 
 /**
  * The error type and the status classification live in src/deepseekError.ts,
@@ -119,7 +120,7 @@ export class DeepSeekBackend implements LlmBackend {
       if (res.status < 200 || res.status >= 300) {
         let detail: string | null = null;
         try {
-          detail = errorMessage(res.json);
+          detail = sanitizeDiagnostic(errorMessage(res.json) ?? "", [key]);
         } catch {
           detail = null;
         }
@@ -127,9 +128,9 @@ export class DeepSeekBackend implements LlmBackend {
       }
       return res.json;
     } catch (e) {
-      if (e instanceof DeepSeekError) throw e;
+      if (e instanceof DeepSeekError) throw new DeepSeekError(e.kind, sanitizeDiagnostic(e.message, [key]));
       if (timedOut) throw new DeepSeekError("timeout", `DeepSeek did not answer within ${Math.round(TIMEOUT_MS / 60000)} minutes.`);
-      throw new DeepSeekError("failed", `Could not reach DeepSeek: ${(e as Error).message}`);
+      throw new DeepSeekError("failed", `Could not reach DeepSeek: ${sanitizeDiagnostic(e instanceof Error ? e.message : String(e), [key])}`);
     } finally {
       // The listener outlives the request otherwise: the caller's signal is
       // long-lived, and every request would add another listener to it.
@@ -172,19 +173,25 @@ export class DeepSeekBackend implements LlmBackend {
 
   async listModels(): Promise<string[]> {
     const { key } = this.key();
-    const res = await requestUrl({ url: `${DEEPSEEK_BASE_URL}/models`, method: "GET", headers: this.headers(key), throw: false });
-    if (res.status < 200 || res.status >= 300) {
-      let detail: string | null = null;
-      try {
-        detail = errorMessage(res.json);
-      } catch {
-        detail = null;
+    try {
+      const res = await requestUrl({ url: `${DEEPSEEK_BASE_URL}/models`, method: "GET", headers: this.headers(key), throw: false });
+      if (res.status < 200 || res.status >= 300) {
+        let detail: string | null = null;
+        try {
+          detail = sanitizeDiagnostic(errorMessage(res.json) ?? "", [key]);
+        } catch {
+          detail = null;
+        }
+        throw classifyStatus(res.status, detail);
       }
-      throw classifyStatus(res.status, detail);
+      const ids = readDeepSeekModels(res.json);
+      if (!ids.length) throw new DeepSeekError("failed", "DeepSeek returned no models.");
+      return ids;
+    } catch (e) {
+      const kind = e instanceof DeepSeekError ? e.kind : "failed";
+      const detail = sanitizeDiagnostic(e instanceof Error ? e.message : String(e), [key]);
+      throw new DeepSeekError(kind, e instanceof DeepSeekError ? detail : `Could not list DeepSeek models: ${detail}`);
     }
-    const ids = readDeepSeekModels(res.json);
-    if (!ids.length) throw new DeepSeekError("failed", "DeepSeek returned no models.");
-    return ids;
   }
 
   async complete<T>(req: CompletionRequest<T>): Promise<T> {

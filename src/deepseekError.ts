@@ -7,6 +7,8 @@
  * the status classification is exactly the part worth testing.
  */
 
+import { sanitizeDiagnostic } from "./providerDiagnostic";
+
 export type DeepSeekErrorKind =
   | "no-key"
   | "auth"
@@ -26,7 +28,7 @@ export class DeepSeekError extends Error {
     public kind: DeepSeekErrorKind,
     message: string,
   ) {
-    super(message);
+    super(sanitizeDiagnostic(message));
     this.name = "DeepSeekError";
   }
 }
@@ -48,10 +50,7 @@ const MAX_DETAIL_LENGTH = 200;
  */
 export function redactDetail(detail: string | null): string | null {
   if (!detail) return null;
-  const stripped = detail
-    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "[redacted]")
-    .replace(/sk-[A-Za-z0-9_-]+/gi, "[redacted]")
-    .trim();
+  const stripped = sanitizeDiagnostic(detail).trim();
   if (!stripped) return null;
   return stripped.length > MAX_DETAIL_LENGTH ? `${stripped.slice(0, MAX_DETAIL_LENGTH)}…` : stripped;
 }
@@ -69,7 +68,7 @@ export function classifyStatus(status: number, detail: string | null): DeepSeekE
   const safe = redactDetail(detail);
   const tail = safe ? `: ${safe}` : "";
   if (status === 401 || status === 403) {
-    return new DeepSeekError("auth", `DeepSeek rejected the API key${tail}. Check the key in Recall Studio settings.`);
+    return new DeepSeekError("auth", `DeepSeek rejected the API key${safe ? ` (${safe})` : ""}. Check the key in Recall Studio settings.`);
   }
   if (status === 402) {
     return new DeepSeekError("balance", `DeepSeek reports insufficient balance${tail}. Top up at platform.deepseek.com.`);

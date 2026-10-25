@@ -7,6 +7,7 @@ import { z } from "zod";
 import type { CompletionRequest, LlmBackend, TextRequest } from "./backend";
 import { assertAuthorized } from "./backend";
 import { extractJson, schemaJson } from "./jsonOut";
+import { sanitizeDiagnostic } from "./providerDiagnostic";
 import type { RecallSettings } from "./settings";
 
 /**
@@ -41,7 +42,7 @@ export class CodexError extends Error {
     public kind: CodexErrorKind,
     message: string,
   ) {
-    super(message);
+    super(sanitizeDiagnostic(message));
     this.name = "CodexError";
   }
 }
@@ -347,7 +348,9 @@ export class CodexBackend implements LlmBackend {
   async probe(model?: string): Promise<{ model: string; via: string }> {
     const s = this.getSettings();
     const bin = resolveCodexBinary(s.codexPath);
-    const status = await runQuick(bin, ["login", "status"]);
+    const status = await runQuick(bin, ["login", "status"]).catch((e: unknown) => {
+      throw new CodexError("failed", `Could not check Codex login: ${e instanceof Error ? e.message : String(e)}`);
+    });
     const statusText = `${status.stdout}\n${status.stderr}`;
     if (status.code !== 0 || /not logged in/i.test(statusText) || !/logged in/i.test(statusText)) {
       throw new CodexError("auth", `Codex at ${bin} is not signed in. Open the ChatGPT app and sign in, or run \`codex login\` in a terminal.`);
@@ -431,7 +434,9 @@ export class CodexBackend implements LlmBackend {
         "-",
       ];
       const prompt = (schema ? [PREAMBLE, req.system, req.user] : [TEXT_PREAMBLE, req.system, req.user].filter(Boolean)).join("\n\n");
-      const r = await runCodex(bin, args, prompt, req.signal, req.authorized);
+      const r = await runCodex(bin, args, prompt, req.signal, req.authorized).catch((e: unknown) => {
+        throw new CodexError("failed", `Could not start Codex: ${e instanceof Error ? e.message : String(e)}`);
+      });
       if (r.aborted && req.signal?.aborted) throw new CodexError("aborted", "Cancelled.");
       const { text, error } = parseCodexEvents(r.stdout);
       const failed = r.spawnError || r.timedOut || r.aborted || r.code !== 0;
