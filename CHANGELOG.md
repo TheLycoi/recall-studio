@@ -1,5 +1,15 @@
 # Changelog
 
+## Recall Studio 0.1.19 beta: one built-in writing method
+
+- Use one built-in writing method for preparation, writing, audit and repair. Card language and explicit capture or rewrite instructions remain available.
+- Retire rule-learning and standing-rule controls, along with native chat, quiz, study and manual checking controls. Saved legacy rules, settings and history remain on disk but cannot restore competing writing instructions.
+- Preserve automatic audit, bounded repair, independent recheck and private holds for unresolved drafts. Capture, editing, explicit rewriting and source history remain available.
+- Add narrow English checks for certain arbitrary unordered-list slots and underspecified power/cable procedure cues. Recognized defects enter repair even after a positive model audit; repeated defects stay held. Other wording, procedures and languages can evade these checks.
+- Keep cloze hints optional. Parsing, persistence and export support remain, but useful hint selection by the live model is unmeasured.
+- Keep plugin ID `review-inbox`, stored data and explicit Anki export unchanged. No automatic export or background rewrite of existing cards is added.
+- Synthetic tests and the production build do not establish broader real-model quality, live Obsidian behavior or actual Anki export acceptance. Human Inbox review remains necessary.
+
 ## Recall Studio 0.1.18 beta: optional writer guidance
 
 - Prefer one to three distinct cloze numbers per note, with coherent list and sequence exceptions. Keep all supported targets; this is not a hard count gate.
