@@ -105,6 +105,55 @@ function guardedCases(c) {
 
 guardedCases(list);
 
+const singleList = {
+  ...list,
+  text: 'In Zeta warning mode, the two effects are {{c1::lower sensor gain}} and slower sampling.',
+  repeated: 'In Zeta warning mode, the two effects are {{c1::lower sensor gain}} and slower sampling!',
+};
+guardedCases(singleList);
+
+// The reverse position must use the same bounded production repair path.
+guardedCases({
+  ...singleList,
+  text: 'In Zeta warning mode, the two effects are lower sensor gain and {{c1::slower sampling}}.',
+  repeated: 'In Zeta warning mode, the two effects are lower sensor gain and {{c1::slower sampling}}!',
+});
+
+for (const [source, text] of [
+  ['The two types are alpha and beta.', 'The two types: {{c1::alpha}} and beta.'],
+  ['The two parts are alpha and beta.', 'The two parts include alpha and {{c1::beta}}.'],
+  ['The two features are higher output and longer battery life.', 'The two features are {{c1::higher output}} and longer battery life.'],
+]) test(`single bare list member is rejected only with an explicit source list: ${text}`, () => {
+  assert.ok(hardFailures(source, text).includes('unordered-list-slots'));
+});
+
+const singleListControls = [
+  [list.source, list.repaired],
+  [list.source, 'In Zeta warning mode, the two effects are {{c1::lower sensor gain}} and {{c1::slower sampling}}.'],
+  [list.source, 'In Zeta warning mode, the two effects are {{c1::lower sensor gain::gain effect}} and slower sampling.'],
+  [list.source, 'In Zeta warning mode, the two effects are lower sensor gain and {{c1::slower sampling::sampling effect}}.'],
+  [list.source, 'In Zeta warning mode, sensor gain is {{c1::lower}} and sampling is slower.'],
+  ['The two effects are lower sensor gain and sampling is slower.', 'The two effects are {{c1::lower sensor gain}} and sampling is slower.'],
+  ['The two effects are lower sensor gain and sampling slows.', 'The two effects are {{c1::lower sensor gain}} and sampling slows.'],
+  ['The two effects are lower sensor gain and slower sampling fails.', 'The two effects are {{c1::lower sensor gain}} and slower sampling fails.'],
+  ['The two effects are lower sensor gain and slower signals fade.', 'The two effects are {{c1::lower sensor gain}} and slower signals fade.'],
+  ['The two components are input carries voltage and output carries current.', 'The two components are input carries {{c1::voltage}} and output carries current.'],
+  ['Zeta setup requires first disconnect power, then attach the reference cable.', 'Zeta setup requires first {{c1::disconnect power}}, then attach the reference cable.'],
+  ['The two parts are first alpha and then beta.', 'The two parts are first {{c1::alpha}} and then beta.'],
+  ['Zeta tiene dos efectos: menor ganancia y muestreo lento.', 'Zeta tiene dos efectos: {{c1::menor ganancia}} y muestreo lento.'],
+  ['Lower sensor gain is enabled. Slower sampling is enabled.', singleList.text],
+  ['The two effects are lower sensor gain and faster sampling.', singleList.text],
+  ['The three types are alpha, beta and gamma.', 'The three types are {{c1::alpha}} and beta.'],
+];
+for (const [source, text] of singleListControls) test(`single-list positive audit preserves a valid or unclassified cue: ${text}`, async () => {
+  assert.deepEqual(hardFailures(source, text), []);
+  const f = fixture({ source, text });
+  await f.g.run(f.h);
+  assert.deepEqual(f.calls.map(r => r.label), ['preparation', 'grounded cards', 'audit']);
+  assert.equal(f.h.cards.length, 1);
+  assert.equal(f.h.cards[0].text, text);
+});
+
 test('list boundary controls retain complete sets, joint grouping, order and distinct named relations', () => {
   const cases = [
     [list.source, list.repaired],

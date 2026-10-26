@@ -70,10 +70,28 @@ export function lintCard(card: Card, highlight: Highlight, siblings: Card[]): Li
     // shortcut: English generic list intros with bare slots and identical hints only;
     // other wording or distinguishing hint relations still need the independent audit.
     const slots = rendered.replace(/\{\{c\d+::[\s\S]*?\}\}/g, "[]");
-    if (distinctNumbers.length > 1
+    const list = slots.trim().match(/^(?:[^.!?,{}]+,\s*)?(?:the\s+)?(?:(two|three|four|five|six|seven|eight|nine|ten|\d+)\s+)?(effects|types|kinds|members|components|parts|features|items)\s*(?:are\b|include\b|:)\s*([\s\S]*?)[.!]?$/i);
+    if (list && distinctNumbers.length > 1
       && new Set(deletions.map(d => normalizePlain(d.hint))).size === 1
-      && /^(?:[^.!?,{}]+,\s*)?(?:the\s+)?(?:(?:two|three|four|five|six|seven|eight|nine|ten|\d+)\s+)?(?:effects|types|kinds|members|components|parts|features|items)\s*(?:are\b|include\b|:)\s*\[\](?:\s*(?:,\s*(?:(?:and|or)\s+)?|(?:and|or)\s+)\[\])+[.!]?$/i.test(slots.trim())) {
+      && /^\[\](?:\s*(?:,\s*(?:(?:and|or)\s+)?|(?:and|or)\s+)\[\])+$/i.test(list[3])) {
       failures.push("unordered-list-slots");
+    }
+    // shortcut: single slots need a matching two-member source list and short
+    // single-word/comparative fragments; plural/verb endings and other prose need audit.
+    if (list && /^(?:two|2)$/i.test(list[1]) && deletions.length === 1 && !deletions[0].hint.trim()) {
+      const pair = list[3].split(/\s+and\s+/i);
+      const members = pair.map(member => member === "[]" ? deletions[0].body.trim() : member);
+      const bareMember = /^(?:[a-z][a-z-]*|[a-z]+er\s+[a-z][a-z-]*(?:\s+[a-z][a-z-]*)?)$/i;
+      if (pair.length === 2 && pair.includes("[]")
+        && members.every(member => bareMember.test(member)
+          && !/\b(?:[a-z]+s|are|were|be|been|being|have|had|can|could|will|would|shall|should|must|may|might|then|than|before|after|when|while|until|to|for|with|without)\b/i.test(member))
+        && reviewText(highlight.text).split(/[.!?;\n]+/).some(sentence => {
+          const source = sentence.match(/\b(?:two|2)\s+(effects|types|kinds|members|components|parts|features|items)\s*(?:are\b|include\b|:)\s*(.+)$/i);
+          return source && source[1].toLowerCase() === list[2].toLowerCase()
+            && normalizePlain(source[2]) === normalizePlain(members.join(" and "));
+        })) {
+        failures.push("unordered-list-slots");
+      }
     }
 
     // shortcut: bare English During/For prefixes and power/cable instructions only;
@@ -258,7 +276,7 @@ export const LINT_FIX_INSTRUCTIONS: Record<LintFailureId | LintWarningId, string
   "cloze-count": "the card has no valid deletion; mark the supported answer span without imposing a deletion quota or splitting the sentence to meet a count",
   "cloze-numbering": "the deletion numbers skip or repeat out of order; number them c1, c2, c3 with no gaps",
   "cloze-framing": "the span exceeds the six words product policy; adjudicate whether it is one meaningful retrieval target before shortening, preserving essential names, negations, and conditions, causal relationships and short procedures; remove only incidental scaffolding, never required meaning",
-  "unordered-list-slots": "the generic unordered list hides unqualified members separately; ask for the complete short set as one retrieval or use distinguishing relationships stated in the source; never invent order, relations or membership, and preserve all supported targets",
+  "unordered-list-slots": "the generic unordered list hides an unqualified member without a distinguishing cue; ask for the complete short set as one retrieval or use distinguishing relationships stated in the source; never invent order, relations or membership, and preserve all supported targets",
   "procedure-boundary-hidden": "the visible cue names only a procedure while hiding its entire instruction and omitting a step boundary stated in the source; name the subject and the supported before/after/condition boundary in the cue, or explicitly ask for the complete procedure; preserve the action and conditions, never invent a step or rationale",
   "qa-empty": "the card is missing its question, its answer, or its cloze text; write the missing side from the highlight",
   "qa-answer-long": "the answer exceeds the twelve-word product policy; adjudicate focus and required meaning rather than blindly shortening; retain meaningful causal relationships and short procedures, and narrow only genuinely independent retrieval targets",
