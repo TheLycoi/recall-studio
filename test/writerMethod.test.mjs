@@ -55,7 +55,12 @@ for (const stage of ['prepareGeneration', 'writeGroundedCards', 'repairGeneratio
   assert.ok(f.calls.length);
   for (const req of f.calls) {
     assert.doesNotMatch(req.user + req.system, /LEGACY_/);
-    assert.equal(req.system.split('<writing_method id="recall-writing-method-v1">').length, 2, 'one versioned method per request');
+    assert.equal(req.system.split('<writing_method id="recall-writing-method-v2">').length, 2, 'one current versioned method per request');
+    assert.match(req.system, /requested attribute, relation or process.*visible cue/i);
+    assert.match(req.system, /hiding the whole predicate/i);
+    assert.match(req.system, /Cortisol is \{\{c1::a glucocorticoid released by the adrenal cortex through the HPA axis\}\}/);
+    assert.match(req.system, /Caching keeps \{\{c1::previous results available\}\}/);
+    assert.match(req.system, /before consulting hidden targets or plan context/i);
     for (const property of ['focused', 'precise', 'consistent', 'tractable', 'effortful', 'false positive', 'false negative', 'source fidelity', 'procedures']) assert.ok(req.system.toLowerCase().includes(property), `${req.label}: ${property}`);
     const schema = m.toStrictSchema(req.schema);
     const fields = schema.properties.cards?.items?.properties ?? (schema.properties.kind ? schema.properties : null);
@@ -79,6 +84,40 @@ test('assembled planner request distinguishes scoped source holds from whole-cap
   assert.match(req.system, /nonempty factIds hold only the affected targets, not unrelated facts/i);
   assert.match(req.system, /empty factIds hold the whole capture/i);
   assert.doesNotMatch(req.system, /empty factIds hold the whole capture, not unrelated facts/i);
+});
+
+test('assembled planner request separates attributes rather than locking a catch-all predicate', async () => {
+  const f = fixture();
+  await f.llm.prepareGeneration(f.h, [], await f.llm.generationContext());
+  const req = f.calls.find(r => r.label === 'preparation');
+  assert.match(req.system, /classification, release site and release pathway.*independently cued/i);
+  assert.match(req.system, /not one catch-all predicate/i);
+  assert.match(req.system, /one card per row/i);
+});
+
+for (const final of [false, true]) test(`assembled ${final ? 'final ' : ''}audit starts with visible-cue false-negative checks, not source support`, async () => {
+  const f = fixture();
+  await f.llm.auditGeneration(f.h, [f.card], [], f.preparation, await f.llm.generationContext(), undefined, final);
+  const req = f.calls.at(-1);
+  assert.match(req.system, /visibleCue first.*hiddenTargets.*targetContext.*plan/i);
+  assert.match(req.system, /one defective review fails the card/i);
+  assert.match(req.system, /ordinal.*requested attribute, relation or process/i);
+  assert.match(req.system, /source-supported.*failed/i);
+  assert.match(req.system, /conflicts.*separat|separately.*conflicts/i);
+});
+
+test('a v1 method snapshot cannot certify a v2 generation batch', async () => {
+  const f = fixture();
+  const c = { language: 'English', instructions: '', examples: '', rules: 'recall-writing-method-v1' };
+  const batch = { id: 'v1-batch', version: 1, instruction: '', phase: 'auditing', preparation: structuredClone(f.preparation), writerOutput: [f.draft], drafts: [f.card] };
+  f.h.generation = batch;
+  batch.inputKey = createHash('sha256').update(JSON.stringify({ version: 2, source: m.generationSource(f.h), instruction: '', context: c, provider: 'codex', routing: [f.settings.codexModel, f.settings.codexPath], effort: f.settings.effort, audit: f.settings.critiquePass, lint: f.settings.lintMode, language: f.settings.language, existing: [] })).digest('hex');
+  const store = { all: () => [f.h], touch() {}, async flush() {}, hasUnsavedChanges: false };
+  await new m.Generator({ settings: f.settings, llm: f.llm, store, refreshStatusBar() {} }).run(f.h);
+  assert.notEqual(f.h.generation.id, batch.id);
+  assert.equal(f.h.generationHistory[0].id, batch.id);
+  assert.deepEqual(f.calls.map(r => r.label), ['preparation', 'grounded cards', 'audit']);
+  assert.equal(f.h.cards[0].back, answer);
 });
 
 test('generationContext preserves its stored shape without consulting missing rule files', async () => {

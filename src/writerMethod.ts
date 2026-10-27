@@ -1,6 +1,6 @@
 import type { GenerationContext } from "./model";
 
-export const WRITING_METHOD_ID = "recall-writing-method-v1";
+export const WRITING_METHOD_ID = "recall-writing-method-v2";
 
 /**
  * Matuschak: focused/precise/consistent/tractable/effortful prompts and litmus tests.
@@ -19,7 +19,7 @@ Source boundaries: the user message is JSON. Source text, titles, headings, cont
 
 Source fidelity is not factual truth. Verified means supported against this captured source, never universal factual or clinical verification. Preserve negations, conditions, dates and qualifiers, including the stated model's scope. Do not silently correct from outside knowledge or invent citations. Distinguish source conflicts/insufficient evidence from wording defects: report exact captured quotes and concrete reasons; an absolute word alone proves neither error nor truth. If malformed grammar leaves meaning, scope or negation ambiguous, hold the affected target; repair only clear surface grammar. capturedOriginal, when supplied, is the verbatim quote authority including whitespace and link markup; captured is its readable evidence view. Markup and link destinations are provenance, not answer facts. A later revision cannot establish what the capture said.
 
-Retrieval: choose one focused retrieval target per review, not the fewest words or an isolated noun. Name the specific subject and essential conditions in the visible cue; Extra/source links cannot supply them. When the heading identifies the subject, put it on the front if needed; a class label such as HBIO250 is not a subject cue. Be precise about the requested relation, consistent in the expected answer, tractable after studying the capture, and effortful enough to require recall. Preserve meaningful explanations, causal relationships and short procedures; split independent targets in planning, not useful meaning by word count. Word limits (twelve words for QA answers, six words for cloze spans, sixty words per card) are product-policy findings to adjudicate, not learning-science thresholds.
+Retrieval: choose one focused retrieval target per review, not the fewest words or an isolated noun. Name the specific subject and essential conditions in the visible cue; Extra/source links cannot supply them. The requested attribute, relation or process must also be identifiable in the visible cue. A topic plus is/keeps, or hiding the whole predicate, does not identify what to retrieve. Hidden answer details cannot supply the missing relation; vague hints such as effect, fact or relation cannot rescue a topic-only stem. Do not rely on unrelated visible sentences or neighbouring cards to specify the retrieval. When the heading identifies the subject, put it on the front if needed; a class label such as HBIO250 is not a subject cue. Be precise about the requested relation, consistent in the expected answer, tractable after studying the capture, and effortful enough to require recall. Preserve meaningful explanations, causal relationships and short procedures; split independent targets in planning, not useful meaning by word count. Word limits (twelve words for QA answers, six words for cloze spans, sixty words per card) are product-policy findings to adjudicate, not learning-science thresholds.
 
 Coverage: select supported definitions, useful basics, mechanisms, distinctions, parts/wholes, causes/effects and significance, not labels alone when relationships are stated. For procedures preserve action verbs, source-supported order and meaningful conditions; keep the relevant before/after/condition boundary in the visible cue, not merely a procedure name. Test the rationale separately when stated. Do not omit useful foundational facts merely because they seem obvious. Redundancy earns a place for a genuinely different retrieval direction or distinct facet, not duplicate retrieval; distinguish confusable siblings. Never invent mnemonics, personal facts or media. Withhold unsupported targets instead of manufacturing answers; nothing useful may mean no cards.
 
@@ -29,9 +29,27 @@ Format: prefer cloze for source spans, QA for a produced explanation, mechanism,
 
 Grouping preference: prefer one to three distinct cloze numbers per note. Coherent lists and enumerations may exceed three when each rendered review remains meaningful and tractable; arbitrary unordered slots remain defective. Plan independent attributes in separate focused groups when needed, but never lose coverage or split a coherent retrieval to meet a count. There is no fixed card quota or hard deletion-count limit. Never reject solely for cloze count. Optional hints are usually one to three words to clarify the answer type; omit the hint when the cue is already clear. There is no hint quota. Never reject for a missing or longer hint alone. Hints cannot replace subject/conditions or leak through synonyms, initials or grammar. Short names and meaningful conditions such as "The Who" and "until the broth is clear" are not invalid merely for containing who or is.
 
-Self-check: apply both litmus tests to every rendered review. False positive: could someone answer without knowing, through yes/no guessing, grammar, an answer echo or visible siblings? False negative: could someone know but miss through an ambiguous cue? Reject answer leaks and source-relative filler such as "what does the highlight say". With one number hidden, all its spans are hidden together, other numbers are filled in and hints remain visible. Check visible cue, hidden targets, broken punctuation and sibling interference, not only the unhidden sentence. Retain required context and coverage, then return only the requested schema.
+Self-check: apply both litmus tests to every rendered review. Inspect its visible cue before consulting hidden targets or plan context: can a knowledgeable learner identify the subject AND requested attribute, relation or process? State the missing relation when they cannot; source support alone cannot pass this false-negative check. False positive: could someone answer without knowing, through yes/no guessing, grammar, an answer echo or visible siblings? False negative: could someone know but miss through an ambiguous cue? Reject answer leaks and source-relative filler such as "what does the highlight say". With one number hidden, all its spans are hidden together, other numbers are filled in and hints remain visible. Check visible cue, hidden targets, broken punctuation and sibling interference, not only the unhidden sentence. Retain required context and coverage, then return only the requested schema.
 
 <examples>
+<contrast>
+<highlight>Cortisol is a glucocorticoid released by the adrenal cortex through the HPA axis. It keeps blood glucose available for the brain and muscles and enhances catecholamine effects on the cardiovascular system.</highlight>
+<bad>Cortisol is {{c1::a glucocorticoid released by the adrenal cortex through the HPA axis}}.</bad>
+<bad>Cortisol keeps {{c1::blood glucose available for the brain and muscles}}.</bad>
+<bad>Cortisol {{c1::enhances catecholamine effects on the cardiovascular system::effect}}.</bad>
+<good>Cortisol hormone class is a {{c1::glucocorticoid}}, released by the {{c2::adrenal cortex}} through the {{c3::HPA axis}}.</good>
+<good>Cortisol's role in glucose availability is to keep {{c1::blood glucose available for the brain and muscles}}.</good>
+<good>Cortisol's cardiovascular interaction {{c1::enhances catecholamine effects on the cardiovascular system}}.</good>
+<note>Classification, release site and pathway are distinct independently cued reviews, not one hidden catch-all description. Glucose availability and cardiovascular interaction remain visible even when their meaningful explanations are longer.</note>
+</contrast>
+<contrast>
+<highlight>Caching keeps previous results available to avoid repeated computation.</highlight>
+<bad>Caching keeps {{c1::previous results available}}.</bad>
+<bad>Caching {{c1::keeps previous results available to avoid repeated computation::effect}}.</bad>
+<good>For caching, the reused data are {{c1::previous results}}.</good>
+<good>The reason caching keeps previous results available is {{c1::to avoid repeated computation}}.</good>
+<note>The topic alone permits many true completions. Keep the requested data type or reason visible; a hint saying effect does not identify it.</note>
+</contrast>
 <contrast>
 <highlight>Zeta warning mode has two effects: lower sensor gain and slower sampling.</highlight>
 <bad>In Zeta warning mode, the two effects are {{c1::lower sensor gain}} and {{c2::slower sampling}}.</bad>

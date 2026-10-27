@@ -67,6 +67,29 @@ export function lintCard(card: Card, highlight: Highlight, siblings: Card[]): Li
     }
     const distinctNumbers = [...new Set(deletions.map((d) => d.n))].sort((a, b) => a - b);
 
+    // shortcut: capitalized English copula/keep stems and title-cased bare topics only;
+    // known labels/relational grammar defer to audit. Broader ambiguity needs that audit.
+    const unspecifiedCue = distinctNumbers.some(n => {
+      // Hide all same-number spans together; vague hints and other sentences cannot rescue a stem.
+      const cue = rendered.replace(/\{\{c(\d+)::([\s\S]*?)(?:::([^}]*))?\}\}/g,
+        (_, number, body, hint = "") => Number(number) !== n ? body
+          : /^(?:definition|classification|color|[\p{L}\p{N} -]+\s(?:class|type|site|pathway|role|function|interaction|count|color|cause|reason|meaning))$/iu.test(hint.trim())
+            ? `[${hint}]` : "\uFFFC");
+      return cue.split(/[.!?;\n]+/).some(sentence => {
+        const slots = sentence.trim().match(/^(.+?)\s+\uFFFC(?:\s*(?:,|and|or)\s*\uFFFC)*$/u);
+        if (!slots) return false;
+        const stem = slots[1];
+        // A relation label, possessive, condition or prepositional complement is not bare.
+        if (/['’:]|\b(?:definition|classification|class|type|category|site|pathway|role|function|effect|effects|interaction|count|procedure|order|color|cause|reason|meaning)\b/i.test(stem)
+          || /\b(?:of|for|from|to|in|on|by|with|without|if|when|while|because|before|after|during|until)\b/i.test(stem)) return false;
+        const generic = stem.match(/^([\p{L}\p{N}_ -]+?)\s+(?:is|are|was|were|keeps|keep)$/iu);
+        const subject = generic ? generic[1] : stem;
+        return /^[A-Z][\p{L}\p{N}_-]+(?:\s+[A-Z][\p{L}\p{N}_-]+)*$/u.test(subject)
+          || !!generic && /^[A-Z][\p{L}\p{N}_-]+(?:\s+[\p{L}\p{N}_-]+)*$/u.test(subject);
+      });
+    });
+    if (unspecifiedCue) failures.push("cloze-cue-unspecified");
+
     // shortcut: English generic list intros with bare slots and identical hints only;
     // other wording or distinguishing hint relations still need the independent audit.
     const slots = rendered.replace(/\{\{c\d+::[\s\S]*?\}\}/g, "[]");
@@ -250,6 +273,7 @@ export const LINT_LABELS: Record<LintFailureId | LintWarningId, string> = {
   "cloze-count": "missing cloze",
   "cloze-numbering": "cloze numbering",
   "cloze-framing": "cloze framing",
+  "cloze-cue-unspecified": "missing retrieval relation",
   "unordered-list-slots": "unordered list slots",
   "procedure-boundary-hidden": "missing step boundary",
   "qa-empty": "empty",
@@ -273,6 +297,7 @@ export const LINT_LABELS: Record<LintFailureId | LintWarningId, string> = {
  */
 export const LINT_FIX_INSTRUCTIONS: Record<LintFailureId | LintWarningId, string> = {
   "cloze-not-grounded": "a deletion hides text that is not in the highlight; re-word the sentence so every deletion is a span the highlight states verbatim",
+  "cloze-cue-unspecified": "the visible review names only a topic or generic predicate; name the requested attribute, relation or process using the supported source, not the hidden answer, vague hints or unrelated sentences; preserve all planned meaning and essential conditions",
   "cloze-count": "the card has no valid deletion; mark the supported answer span without imposing a deletion quota or splitting the sentence to meet a count",
   "cloze-numbering": "the deletion numbers skip or repeat out of order; number them c1, c2, c3 with no gaps",
   "cloze-framing": "the span exceeds the six words product policy; adjudicate whether it is one meaningful retrieval target before shortening, preserving essential names, negations, and conditions, causal relationships and short procedures; remove only incidental scaffolding, never required meaning",

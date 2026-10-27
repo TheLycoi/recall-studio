@@ -105,6 +105,32 @@ function guardedCases(c) {
 
 guardedCases(list);
 
+const cortisolSource = '- **Cortisol and its role in the body’s stress response** — A glucocorticoid released by the adrenal cortex through the HPA axis. It keeps blood glucose available for the brain and muscles and enhances catecholamine effects on the cardiovascular system. Negative feedback reduces cortisol after the stressor passes.';
+for (const [text, repaired] of [
+  ['Cortisol is {{c1::a glucocorticoid released by the adrenal cortex through the HPA axis}}.', 'Cortisol hormone class is a {{c1::glucocorticoid}}, released by the {{c2::adrenal cortex}} through the {{c3::HPA axis}}.'],
+  ['Cortisol keeps {{c1::blood glucose available for the brain and muscles}}.', "Cortisol's role in glucose availability is to keep {{c1::blood glucose available for the brain and muscles}}."],
+  ['Cortisol {{c1::enhances catecholamine effects on the cardiovascular system}}.', "Cortisol's cardiovascular interaction {{c1::enhances catecholamine effects on the cardiovascular system}}."],
+]) guardedCases({ source: cortisolSource, text, repeated: text.replace('.', '!'), repaired, id: 'cloze-cue-unspecified' });
+
+test('the observed feedback control publishes unchanged without a repair', async () => {
+  const text = 'For cortisol, after the stressor passes, negative feedback {{c1::reduces cortisol}}.';
+  const f = fixture({ source: cortisolSource, text });
+  await f.g.run(f.h);
+  assert.deepEqual(f.calls.map(r => r.label), ['preparation', 'grounded cards', 'audit']);
+  assert.equal(f.h.cards.length, 1);
+  assert.equal(f.h.cards[0].text, text);
+});
+
+test('the class, site and pathway replacement has an independently cued rendered review for each attribute', () => {
+  const card = m.makeCard('h', { kind: 'cloze', text: 'Cortisol hormone class is a {{c1::glucocorticoid}}, released by the {{c2::adrenal cortex}} through the {{c3::HPA axis}}.' });
+  assert.deepEqual(m.renderedCardReviews(card), [
+    { ordinal: 1, visibleCue: 'Cortisol hormone class is a [...], released by the adrenal cortex through the HPA axis.', hiddenTargets: ['glucocorticoid'] },
+    { ordinal: 2, visibleCue: 'Cortisol hormone class is a glucocorticoid, released by the [...] through the HPA axis.', hiddenTargets: ['adrenal cortex'] },
+    { ordinal: 3, visibleCue: 'Cortisol hormone class is a glucocorticoid, released by the adrenal cortex through the [...].', hiddenTargets: ['HPA axis'] },
+  ]);
+  assert.deepEqual(hardFailures(cortisolSource, card.text), []);
+});
+
 const singleList = {
   ...list,
   text: 'In Zeta warning mode, the two effects are {{c1::lower sensor gain}} and slower sampling.',
