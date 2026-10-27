@@ -67,25 +67,30 @@ export function lintCard(card: Card, highlight: Highlight, siblings: Card[]): Li
     }
     const distinctNumbers = [...new Set(deletions.map((d) => d.n))].sort((a, b) => a - b);
 
-    // shortcut: capitalized English copula/keep stems and title-cased bare topics only;
-    // known labels/relational grammar defer to audit. Broader ambiguity needs that audit.
+    // shortcut: single-name/title-cased English topics with bare/copula/keep stems only;
+    // lowercase multiword subjects vs attributes are ambiguous and need semantic audit.
     const unspecifiedCue = distinctNumbers.some(n => {
       // Hide all same-number spans together; vague hints and other sentences cannot rescue a stem.
       const cue = rendered.replace(/\{\{c(\d+)::([\s\S]*?)(?:::([^}]*))?\}\}/g,
-        (_, number, body, hint = "") => Number(number) !== n ? body
+        (_, number, _body, hint = "") => Number(number) !== n ? "\uFFFD"
           : /^(?:definition|classification|color|[\p{L}\p{N} -]+\s(?:class|type|site|pathway|role|function|interaction|count|color|cause|reason|meaning))$/iu.test(hint.trim())
+            && !/^(?:(?:its|their|the|a|an|main|primary|general|overall)\s+)+(?:role|function)$/i.test(hint.trim())
             ? `[${hint}]` : "\uFFFC");
       return cue.split(/[.!?;\n]+/).some(sentence => {
-        const slots = sentence.trim().match(/^(.+?)\s+\uFFFC(?:\s*(?:,|and|or)\s*\uFFFC)*$/u);
-        if (!slots) return false;
-        const stem = slots[1];
-        // A relation label, possessive, condition or prepositional complement is not bare.
-        if (/['’:]|\b(?:definition|classification|class|type|category|site|pathway|role|function|effect|effects|interaction|count|procedure|order|color|cause|reason|meaning)\b/i.test(stem)
-          || /\b(?:of|for|from|to|in|on|by|with|without|if|when|while|because|before|after|during|until)\b/i.test(stem)) return false;
-        const generic = stem.match(/^([\p{L}\p{N}_ -]+?)\s+(?:is|are|was|were|keeps|keep)$/iu);
-        const subject = generic ? generic[1] : stem;
-        return /^[A-Z][\p{L}\p{N}_-]+(?:\s+[A-Z][\p{L}\p{N}_-]+)*$/u.test(subject)
-          || !!generic && /^[A-Z][\p{L}\p{N}_-]+(?:\s+[\p{L}\p{N}_-]+)*$/u.test(subject);
+        // Sibling bodies cannot specify another clause's relation; inherit only a bare topic.
+        const clauses = sentence.trim().split(/\s+(?:and|or)\s+/i);
+        const topic = clauses[0].match(/^([A-Z][\p{L}\p{N}_-]+(?:\s+[A-Z][\p{L}\p{N}_-]+)*)(?:\s+(?:is|are|was|were|keeps|keep))?\s+(?:\uFFFC|\uFFFD|\[[^\]]+\])$/u)?.[1];
+        return clauses.some(clause => {
+          const slots = clause.trim().match(/^(.+?)\s+\uFFFC(?:\s*,\s*\uFFFC)*$/u);
+          if (!slots) return false;
+          const stem = topic && /^(?:is|are|was|were|keeps|keep)$/i.test(slots[1]) ? `${topic} ${slots[1]}` : slots[1];
+          // A relation label, possessive, condition or prepositional complement is not bare.
+          if (/['’:]|\b(?:definition|classification|class|type|category|site|pathway|role|function|effect|effects|interaction|count|procedure|order|color|cause|reason|meaning)\b/i.test(stem)
+            || /\b(?:of|for|from|to|in|on|by|with|without|if|when|while|because|before|after|during|until)\b/i.test(stem)) return false;
+          const generic = stem.match(/^([\p{L}\p{N}_ -]+?)\s+(?:is|are|was|were|keeps|keep)$/iu);
+          const subject = generic ? generic[1] : stem;
+          return /^[A-Z][\p{L}\p{N}_-]+(?:\s+[A-Z][\p{L}\p{N}_-]+)*$/u.test(subject);
+        });
       });
     });
     if (unspecifiedCue) failures.push("cloze-cue-unspecified");

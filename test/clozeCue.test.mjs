@@ -34,11 +34,16 @@ test('the observed feedback condition remains a valid retrieval cue', () => {
 
 const structuralDefects = [
   ['Insulin is {{c1::a peptide hormone}}.', 'Insulin is a peptide hormone.'],
-  ['Working memory keeps {{c1::information available for ongoing tasks}}.', 'Working memory keeps information available for ongoing tasks.'],
+  ['New York is {{c1::home to five boroughs}}.', 'New York is home to five boroughs.'],
   ['New York {{c1::has five boroughs}}.', 'New York has five boroughs.'],
   ['**Cortisol** keeps {{c1::blood glucose available for the brain and muscles::effect}}.', source],
   ['`Cortisol` {{c1::enhances catecholamine effects on the cardiovascular system::relation}}.', source],
+  ['Cortisol {{c1::enhances catecholamine effects on the cardiovascular system::its role}}.', source],
+  ['Cortisol keeps {{c1::blood glucose available for the brain and muscles::main function}}.', source],
   ['Cortisol is {{c1::a glucocorticoid::type}}.', source],
+  ['Cortisol {{c1::enhances catecholamine effects on the cardiovascular system}} and keeps {{c2::blood glucose available for the brain and muscles}}.', source],
+  ['Cortisol is {{c1::a glucocorticoid}} and keeps {{c1::blood glucose available for the brain and muscles}}.', source],
+  ['Cortisol is {{c1::a glucocorticoid::hormone class}} and keeps {{c2::blood glucose available for the brain and muscles}}.', source],
   ['Cortisol {{c1::keeps blood glucose available for the brain and muscles}} and {{c1::enhances catecholamine effects on the cardiovascular system}}.', source],
   ['Cortisol keeps {{c1::blood glucose available for the brain and muscles}}. For cortisol, after the stressor passes, negative feedback {{c1::reduces cortisol}}.', source],
   ['For cortisol, after the stressor passes, negative feedback {{c1::reduces cortisol}}. Cortisol keeps {{c2::blood glucose available for the brain and muscles}}.', source],
@@ -48,7 +53,14 @@ for (const [text, captured] of structuralDefects) test(`bare-topic structural fa
   assert.ok(failures(text, captured).includes('cloze-cue-unspecified'), text);
 });
 
+// Lowercase multiword noun phrases may name a subject or an attribute; audit decides.
+test('an ambiguous lowercase multiword subject is outside hard-detector certainty', () => {
+  assert.deepEqual(failures('Working memory keeps {{c1::information available for ongoing tasks}}.', 'Working memory keeps information available for ongoing tasks.'), []);
+});
+
 const clearCues = [
+  ['Zeta sensor voltage is {{c1::5 V}}.', 'Zeta sensor voltage is 5 V.'],
+  ['Normal body temperature is {{c1::37 °C}}.', 'Normal body temperature is 37 °C.'],
   ['Cortisol hormone class: {{c1::glucocorticoid}}.', source],
   ['Cortisol release site is the {{c1::adrenal cortex}}.', source],
   ['Cortisol release pathway is the {{c1::HPA axis}}.', source],

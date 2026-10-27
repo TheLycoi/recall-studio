@@ -14,6 +14,7 @@ before(async () => {
     export { CARD_WRITING_METHOD } from './src/writerMethod';
     export { renderedCardReviews } from './src/generation';
     export { parseInboxJson } from './src/inboxData';
+    export { rewriteCandidates } from './src/explicitRewrite';
     export { buildNote } from './src/anki';
     export { clozeToDisplay, inlineMarkdownToHtml, buildAnkiTextImport } from './src/util';
   `, resolveDir: process.cwd() }, bundle: true, write: false, platform: 'node', format: 'cjs', external: ['obsidian'], logLevel: 'silent' });
@@ -103,14 +104,46 @@ function guardedCases(c) {
   });
 }
 
+for (const [source, text] of [
+  ['Zeta sensor voltage is 5 V.', 'Zeta sensor voltage is {{c1::5 V}}.'],
+  ['Normal body temperature is 37 °C.', 'Normal body temperature is {{c1::37 °C}}.'],
+]) {
+  test(`explicit attribute survives production generation without repair: ${text}`, async () => {
+    const f = fixture({ source, text });
+    await f.g.run(f.h);
+    assert.deepEqual(f.calls.map(r => r.label), ['preparation', 'grounded cards', 'audit']);
+    assert.equal(f.h.cards[0]?.text, text);
+    assert.equal(f.h.cards[0].status, 'pending');
+  });
+  test(`explicit rewrite validation accepts a clear attribute: ${text}`, () => {
+    const h = m.makeHighlight({ sourcePath: 'synthetic.md', sourceTitle: 'Synthetic', text: source });
+    const card = m.makeCard(h.id, { kind: 'cloze', text });
+    assert.equal(m.rewriteCandidates(card, h, [{ kind: 'cloze', text, front: '', back: '' }])[0].text, text);
+  });
+}
+
 guardedCases(list);
 
 const cortisolSource = '- **Cortisol and its role in the body’s stress response** — A glucocorticoid released by the adrenal cortex through the HPA axis. It keeps blood glucose available for the brain and muscles and enhances catecholamine effects on the cardiovascular system. Negative feedback reduces cortisol after the stressor passes.';
 for (const [text, repaired] of [
-  ['Cortisol is {{c1::a glucocorticoid released by the adrenal cortex through the HPA axis}}.', 'Cortisol hormone class is a {{c1::glucocorticoid}}, released by the {{c2::adrenal cortex}} through the {{c3::HPA axis}}.'],
+  ['Cortisol is {{c1::a glucocorticoid released by the adrenal cortex through the HPA axis}}.', 'Cortisol hormone class: {{c1::glucocorticoid}}; cortisol is released by the {{c2::adrenal cortex}} through the {{c3::HPA axis}}.'],
   ['Cortisol keeps {{c1::blood glucose available for the brain and muscles}}.', "Cortisol's role in glucose availability is to keep {{c1::blood glucose available for the brain and muscles}}."],
   ['Cortisol {{c1::enhances catecholamine effects on the cardiovascular system}}.', "Cortisol's cardiovascular interaction {{c1::enhances catecholamine effects on the cardiovascular system}}."],
 ]) guardedCases({ source: cortisolSource, text, repeated: text.replace('.', '!'), repaired, id: 'cloze-cue-unspecified' });
+
+for (const [text, repaired] of [
+  ['Cortisol {{c1::enhances catecholamine effects on the cardiovascular system::its role}}.', "Cortisol's cardiovascular interaction {{c1::enhances catecholamine effects on the cardiovascular system}}."],
+  ['Cortisol keeps {{c1::blood glucose available for the brain and muscles::main function}}.', "Cortisol's role in glucose availability is to keep {{c1::blood glucose available for the brain and muscles}}."],
+  ['Cortisol {{c1::enhances catecholamine effects on the cardiovascular system}} and keeps {{c2::blood glucose available for the brain and muscles}}.', "Cortisol's cardiovascular interaction {{c1::enhances catecholamine effects on the cardiovascular system}}; cortisol's role in glucose availability is to keep {{c2::blood glucose available for the brain and muscles}}."],
+  ['Cortisol is {{c1::a glucocorticoid}} and keeps {{c1::blood glucose available for the brain and muscles}}.', "Cortisol hormone class: {{c1::glucocorticoid}}; cortisol's role in glucose availability is to keep {{c2::blood glucose available for the brain and muscles}}."],
+]) {
+  guardedCases({ source: cortisolSource, text, repeated: text.replace('.', '!'), repaired, id: 'cloze-cue-unspecified' });
+  test(`explicit rewrite rejects an unspecified hint or joined clause: ${text}`, () => {
+    const h = m.makeHighlight({ sourcePath: 'synthetic.md', sourceTitle: 'Synthetic', text: cortisolSource });
+    const card = m.makeCard(h.id, { kind: 'cloze', text });
+    assert.throws(() => m.rewriteCandidates(card, h, [{ kind: 'cloze', text, front: '', back: '' }]), /missing retrieval relation/);
+  });
+}
 
 test('the observed feedback control publishes unchanged without a repair', async () => {
   const text = 'For cortisol, after the stressor passes, negative feedback {{c1::reduces cortisol}}.';
@@ -122,12 +155,13 @@ test('the observed feedback control publishes unchanged without a repair', async
 });
 
 test('the class, site and pathway replacement has an independently cued rendered review for each attribute', () => {
-  const card = m.makeCard('h', { kind: 'cloze', text: 'Cortisol hormone class is a {{c1::glucocorticoid}}, released by the {{c2::adrenal cortex}} through the {{c3::HPA axis}}.' });
+  const card = m.makeCard('h', { kind: 'cloze', text: 'Cortisol hormone class: {{c1::glucocorticoid}}; cortisol is released by the {{c2::adrenal cortex}} through the {{c3::HPA axis}}.' });
   assert.deepEqual(m.renderedCardReviews(card), [
-    { ordinal: 1, visibleCue: 'Cortisol hormone class is a [...], released by the adrenal cortex through the HPA axis.', hiddenTargets: ['glucocorticoid'] },
-    { ordinal: 2, visibleCue: 'Cortisol hormone class is a glucocorticoid, released by the [...] through the HPA axis.', hiddenTargets: ['adrenal cortex'] },
-    { ordinal: 3, visibleCue: 'Cortisol hormone class is a glucocorticoid, released by the adrenal cortex through the [...].', hiddenTargets: ['HPA axis'] },
+    { ordinal: 1, visibleCue: 'Cortisol hormone class: [...]; cortisol is released by the adrenal cortex through the HPA axis.', hiddenTargets: ['glucocorticoid'] },
+    { ordinal: 2, visibleCue: 'Cortisol hormone class: glucocorticoid; cortisol is released by the [...] through the HPA axis.', hiddenTargets: ['adrenal cortex'] },
+    { ordinal: 3, visibleCue: 'Cortisol hormone class: glucocorticoid; cortisol is released by the adrenal cortex through the [...].', hiddenTargets: ['HPA axis'] },
   ]);
+  assert.ok(m.CARD_WRITING_METHOD.includes(`<good>${card.text}</good>`), 'the shared example releases cortisol, not its hormone class');
   assert.deepEqual(hardFailures(cortisolSource, card.text), []);
 });
 

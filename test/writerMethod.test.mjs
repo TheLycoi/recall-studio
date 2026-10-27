@@ -55,7 +55,11 @@ for (const stage of ['prepareGeneration', 'writeGroundedCards', 'repairGeneratio
   assert.ok(f.calls.length);
   for (const req of f.calls) {
     assert.doesNotMatch(req.user + req.system, /LEGACY_/);
-    assert.equal(req.system.split('<writing_method id="recall-writing-method-v2">').length, 2, 'one current versioned method per request');
+    assert.ok(req.system.includes('<bad>After the stressor passes, negative feedback {{c1::reduces cortisol}}.</bad>'));
+    assert.ok(req.system.includes('<good>For cortisol, after the stressor passes, negative feedback {{c1::reduces cortisol}}.</good>'));
+    assert.match(req.system, /grammatical subject.*negative feedback.*specific system/i);
+    assert.match(req.system, /shared entity words.*whole answer/i);
+    assert.equal(req.system.split('<writing_method id="recall-writing-method-v3">').length, 2, 'one current versioned method per request');
     assert.match(req.system, /requested attribute, relation or process.*visible cue/i);
     assert.match(req.system, /hiding the whole predicate/i);
     assert.match(req.system, /Cortisol is \{\{c1::a glucocorticoid released by the adrenal cortex through the HPA axis\}\}/);
@@ -104,12 +108,31 @@ for (const final of [false, true]) test(`assembled ${final ? 'final ' : ''}audit
   assert.match(req.system, /ordinal.*requested attribute, relation or process/i);
   assert.match(req.system, /source-supported.*failed/i);
   assert.match(req.system, /conflicts.*separat|separately.*conflicts/i);
+  assert.match(req.system, /name the specific system.*visibleCue/i);
+  assert.match(req.system, /not.*grammatical subject.*hidden consequence/i);
 });
 
-test('a v1 method snapshot cannot certify a v2 generation batch', async () => {
+for (const final of [false, true]) test(`assembled ${final ? 'final ' : ''}audit exposes the missing-system feedback contrast without hidden-answer context`, async () => {
   const f = fixture();
-  const c = { language: 'English', instructions: '', examples: '', rules: 'recall-writing-method-v1' };
-  const batch = { id: 'v1-batch', version: 1, instruction: '', phase: 'auditing', preparation: structuredClone(f.preparation), writerOutput: [f.draft], drafts: [f.card] };
+  f.h.text = 'Negative feedback reduces cortisol after the stressor passes.';
+  const cards = [
+    m.makeCard(f.h.id, { kind: 'cloze', text: 'After the stressor passes, negative feedback {{c1::reduces cortisol}}.' }),
+    m.makeCard(f.h.id, { kind: 'cloze', text: 'For cortisol, after the stressor passes, negative feedback {{c1::reduces cortisol}}.' }),
+  ];
+  await f.llm.auditGeneration(f.h, cards, [], f.preparation, await f.llm.generationContext(), undefined, final);
+  const req = f.calls.at(-1), payload = JSON.parse(req.user);
+  assert.deepEqual(payload.cards.map(c => c.reviews), [
+    [{ ordinal: 1, visibleCue: 'After the stressor passes, negative feedback [...].', hiddenTargets: ['reduces cortisol'] }],
+    [{ ordinal: 1, visibleCue: 'For cortisol, after the stressor passes, negative feedback [...].', hiddenTargets: ['reduces cortisol'] }],
+  ]);
+  assert.match(req.system, /name the specific system.*visibleCue/i);
+  assert.match(req.system, /not.*grammatical subject.*hidden consequence/i);
+});
+
+for (const version of ['v1', 'v2']) test(`a ${version} method snapshot cannot certify a v3 generation batch`, async () => {
+  const f = fixture();
+  const c = { language: 'English', instructions: '', examples: '', rules: `recall-writing-method-${version}` };
+  const batch = { id: `${version}-batch`, version: 1, instruction: '', phase: 'auditing', preparation: structuredClone(f.preparation), writerOutput: [f.draft], drafts: [f.card] };
   f.h.generation = batch;
   batch.inputKey = createHash('sha256').update(JSON.stringify({ version: 2, source: m.generationSource(f.h), instruction: '', context: c, provider: 'codex', routing: [f.settings.codexModel, f.settings.codexPath], effort: f.settings.effort, audit: f.settings.critiquePass, lint: f.settings.lintMode, language: f.settings.language, existing: [] })).digest('hex');
   const store = { all: () => [f.h], touch() {}, async flush() {}, hasUnsavedChanges: false };
