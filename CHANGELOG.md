@@ -1,5 +1,15 @@
 # Changelog
 
+## Recall Studio 0.1.20 prerelease: atomic card-writer testing
+
+This is a testing release, not a card-quality guarantee. The planned writer changes below still require integrated validation; these notes do not claim live-provider, installed Obsidian or Anki acceptance. Human Inbox review remains necessary.
+
+- Include the unreleased cue fixes from `9a40801` and `476349e`: require a visible subject and requested relation, name the specific feedback system, and prevent vague hints or unrelated clauses from rescuing a topic-only cue. Narrow English cue checks to avoid treating ordinary attribute wording as a bare topic; broader ambiguity still needs model and human review.
+- Planned: apply the partial-recall test in planning, writing, audit and repair. Split independently testable targets when a learner could recall one part but miss another, including multiple spans hidden under the same cloze number. Preserve essential qualifiers and meaningful relationships rather than splitting by word count or every occurrence of "and".
+- Planned: replace whole-list recall as the default with source-confirmed fixed-list clozes that hide one member while the others remain visible in stable order. Do not invent a real-world sequence, claim an open list is exhaustive, or fabricate distinctions to separate members.
+- Planned: add narrow hard checks for recognized compound-list answers, including the reported seven-member blank, so a positive model audit or disabled advisory lint cannot waive those defects. Keep unresolved drafts private with reasons after bounded repair; these checks cannot recognize every compound answer or certify atomicity.
+- Preserve plugin ID `review-inbox`, display name Recall Studio, existing cards, settings and history. Existing cards are not automatically rewritten, and export remains an explicit user action. No automatic export is added.
+
 ## Recall Studio 0.1.19 beta: one built-in writing method
 
 - Use one built-in writing method for preparation, writing, audit and repair. Card language and explicit capture or rewrite instructions remain available.

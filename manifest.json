@@ -1,7 +1,7 @@
 {
   "id": "review-inbox",
   "name": "Recall Studio",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "minAppVersion": "1.7.2",
   "description": "Source-grounded flashcards, an inbox for review, passage history and export to Anki. Runs on the Codex CLI with your ChatGPT sign-in, the DeepSeek API with a key, or the opencode CLI.",
   "author": "Conrad Kelonu",
