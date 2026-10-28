@@ -30,6 +30,7 @@ export type LintFailureId =
   | "cloze-framing"
   | "cloze-cue-unspecified"
   | "unordered-list-slots"
+  | "compound-retrieval"
   | "procedure-boundary-hidden"
   | "qa-empty"
   | "qa-answer-long"

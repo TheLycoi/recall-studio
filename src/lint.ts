@@ -49,6 +49,15 @@ function clozeVisibleText(text: string): string {
 /** A front that starts this way invites a bare yes/no answer instead of recall. */
 const QA_YES_NO_START = /^(is|are|was|were|does|do|did|can|will|should|has|have)\b/i;
 
+// shortcut: English list labels plus short noun-like members; semantic compounds need audit.
+function compoundList(answer: string, cue: string): boolean {
+  if (!/\b(?:pillars|effects|types|kinds|members|components|parts|features|items|additions|list)\b/i.test(cue)) return false;
+  if (/\b(?:what|which) is\b.*\b(?:name|title)\b/i.test(cue)) return false;
+  const members = answer.replace(/^\s*[-*]\s+/, "").split(/,\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+|\s+[-*]\s+/i).map(s => s.trim()).filter(Boolean);
+  return new Set(members.map(normalizePlain)).size > 1 && members.every(s => /^[\p{L}][\p{L}’' -]*$/u.test(s) && words(s).length <= 6
+    && !/\b(?:is|are|was|were|because|before|after|when|until|then|disconnect|connect|attach|reconnect)\b/i.test(s));
+}
+
 export function lintCard(card: Card, highlight: Highlight, siblings: Card[]): LintResult {
   const failures: LintFailureId[] = [];
   const warnings: LintWarningId[] = [];
@@ -66,6 +75,14 @@ export function lintCard(card: Card, highlight: Highlight, siblings: Card[]): Li
       deletions.push({ n: Number(m[1]), body: m[2], hint: m[3] ?? "", start: m.index, end: m.index + m[0].length });
     }
     const distinctNumbers = [...new Set(deletions.map((d) => d.n))].sort((a, b) => a - b);
+    if (distinctNumbers.some(n => {
+      const targets = deletions.filter(d => d.n === n);
+      const prefix = rendered.slice(0, targets[0].start).split(/[.;!?]/).at(-1) ?? "";
+      const suffix = rendered.slice(targets[targets.length - 1].end).split(/[.;!?]/)[0];
+      return compoundList(targets.map(d => d.body).join(", "), (prefix + suffix).replace(/\{\{c\d+::[\s\S]*?\}\}/g, "[]"));
+    })) {
+      failures.push("compound-retrieval");
+    }
 
     // shortcut: single-name/title-cased English topics with bare/copula/keep stems only;
     // lowercase multiword subjects vs attributes are ambiguous and need semantic audit.
@@ -95,31 +112,25 @@ export function lintCard(card: Card, highlight: Highlight, siblings: Card[]): Li
     });
     if (unspecifiedCue) failures.push("cloze-cue-unspecified");
 
-    // shortcut: English generic list intros with bare slots and identical hints only;
-    // other wording or distinguishing hint relations still need the independent audit.
+    // shortcut: generic English bare-slot lists require a matching counted source set;
+    // named sets and semantic distinctions remain the independent auditor's responsibility.
     const slots = rendered.replace(/\{\{c\d+::[\s\S]*?\}\}/g, "[]");
     const list = slots.trim().match(/^(?:[^.!?,{}]+,\s*)?(?:the\s+)?(?:(two|three|four|five|six|seven|eight|nine|ten|\d+)\s+)?(effects|types|kinds|members|components|parts|features|items)\s*(?:are\b|include\b|:)\s*([\s\S]*?)[.!]?$/i);
-    if (list && distinctNumbers.length > 1
-      && new Set(deletions.map(d => normalizePlain(d.hint))).size === 1
-      && /^\[\](?:\s*(?:,\s*(?:(?:and|or)\s+)?|(?:and|or)\s+)\[\])+$/i.test(list[3])) {
-      failures.push("unordered-list-slots");
-    }
-    // shortcut: single slots need a matching two-member source list and short
-    // single-word/comparative fragments; plural/verb endings and other prose need audit.
-    if (list && /^(?:two|2)$/i.test(list[1]) && deletions.length === 1 && !deletions[0].hint.trim()) {
-      const pair = list[3].split(/\s+and\s+/i);
-      const members = pair.map(member => member === "[]" ? deletions[0].body.trim() : member);
-      const bareMember = /^(?:[a-z][a-z-]*|[a-z]+er\s+[a-z][a-z-]*(?:\s+[a-z][a-z-]*)?)$/i;
-      if (pair.length === 2 && pair.includes("[]")
-        && members.every(member => bareMember.test(member)
-          && !/\b(?:[a-z]+s|are|were|be|been|being|have|had|can|could|will|would|shall|should|must|may|might|then|than|before|after|when|while|until|to|for|with|without)\b/i.test(member))
-        && reviewText(highlight.text).split(/[.!?;\n]+/).some(sentence => {
-          const source = sentence.match(/\b(?:two|2)\s+(effects|types|kinds|members|components|parts|features|items)\s*(?:are\b|include\b|:)\s*(.+)$/i);
-          return source && source[1].toLowerCase() === list[2].toLowerCase()
-            && normalizePlain(source[2]) === normalizePlain(members.join(" and "));
-        })) {
-        failures.push("unordered-list-slots");
-      }
+    if (list && new Set(deletions.map(d => normalizePlain(d.hint))).size === 1
+      && list[3].split(/,\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+/i)
+        .every(member => /^(?:\[\]|[\p{L}’' -]+)$/u.test(member.trim()))) {
+      const countWords = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
+      const count = (s: string) => countWords.indexOf(s.toLowerCase()) > 0 ? countWords.indexOf(s.toLowerCase()) : Number(s);
+      const members = (s: string) => s.split(/,\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+/i).map(normalizePlain);
+      let i = 0;
+      const shown = members(list[3].replace(/\[\]/g, () => deletions[i++].body));
+      const bounded = list[1] && shown.length === count(list[1]) && reviewText(highlight.text).split(/[.!?;\n]+/).some(sentence => {
+        const source = sentence.match(/\b(two|three|four|five|six|seven|eight|nine|ten|\d+)\s+(effects|types|kinds|members|components|parts|features|items)\s*(?:are\b|:)\s*(.+)$/i);
+        if (!source || source[2].toLowerCase() !== list[2].toLowerCase() || count(source[1]) !== shown.length) return false;
+        const supplied = members(source[3]);
+        return supplied.length === shown.length && supplied.every((member, j) => member === shown[j]);
+      });
+      if (!bounded) failures.push("unordered-list-slots");
     }
 
     // shortcut: bare English During/For prefixes and power/cable instructions only;
@@ -192,6 +203,7 @@ export function lintCard(card: Card, highlight: Highlight, siblings: Card[]): Li
     if (card.front.trim().length === 0 || card.back.trim().length === 0) {
       failures.push("qa-empty");
     }
+    if (compoundList(reviewText(card.back), reviewText(card.front))) failures.push("compound-retrieval");
     // qa-answer-long: back <=12 words.
     if (words(card.back).length > 12) failures.push("qa-answer-long");
     // qa-yes-no: front must not start with a yes/no auxiliary.
@@ -279,7 +291,8 @@ export const LINT_LABELS: Record<LintFailureId | LintWarningId, string> = {
   "cloze-numbering": "cloze numbering",
   "cloze-framing": "cloze framing",
   "cloze-cue-unspecified": "missing retrieval relation",
-  "unordered-list-slots": "unordered list slots",
+  "unordered-list-slots": "unsupported list slots",
+  "compound-retrieval": "multiple retrieval targets",
   "procedure-boundary-hidden": "missing step boundary",
   "qa-empty": "empty",
   "qa-answer-long": "answer too long",
@@ -306,7 +319,8 @@ export const LINT_FIX_INSTRUCTIONS: Record<LintFailureId | LintWarningId, string
   "cloze-count": "the card has no valid deletion; mark the supported answer span without imposing a deletion quota or splitting the sentence to meet a count",
   "cloze-numbering": "the deletion numbers skip or repeat out of order; number them c1, c2, c3 with no gaps",
   "cloze-framing": "the span exceeds the six words product policy; adjudicate whether it is one meaningful retrieval target before shortening, preserving essential names, negations, and conditions, causal relationships and short procedures; remove only incidental scaffolding, never required meaning",
-  "unordered-list-slots": "the generic unordered list hides an unqualified member without a distinguishing cue; ask for the complete short set as one retrieval or use distinguishing relationships stated in the source; never invent order, relations or membership, and preserve all supported targets",
+  "unordered-list-slots": "the list slot lacks evidence of a complete bounded set; use supported distinguishing relationships or hold the target, never invent completeness, order, definitions or membership",
+  "compound-retrieval": "one rendered review hides multiple independently gradable members; preserve all supported targets with distinct cloze numbers, one member hidden per review and the rest visible in stable display order for a complete bounded set; otherwise use source-supported distinctions or hold, never invent definitions or order",
   "procedure-boundary-hidden": "the visible cue names only a procedure while hiding its entire instruction and omitting a step boundary stated in the source; name the subject and the supported before/after/condition boundary in the cue, or explicitly ask for the complete procedure; preserve the action and conditions, never invent a step or rationale",
   "qa-empty": "the card is missing its question, its answer, or its cloze text; write the missing side from the highlight",
   "qa-answer-long": "the answer exceeds the twelve-word product policy; adjudicate focus and required meaning rather than blindly shortening; retain meaningful causal relationships and short procedures, and narrow only genuinely independent retrieval targets",

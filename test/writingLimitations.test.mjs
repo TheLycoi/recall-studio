@@ -26,10 +26,10 @@ before(async () => {
 
 const list = {
   source: 'Zeta warning mode has two effects: lower sensor gain and slower sampling.',
-  text: 'In Zeta warning mode, the two effects are {{c1::lower sensor gain}} and {{c2::slower sampling}}.',
-  repeated: 'In Zeta warning mode, the two effects are {{c1::lower sensor gain}}, {{c2::slower sampling}}.',
-  repaired: 'In Zeta warning mode, the two effects are {{c1::lower sensor gain and slower sampling}}.',
-  id: 'unordered-list-slots',
+  text: 'In Zeta warning mode, the two effects are {{c1::lower sensor gain and slower sampling}}.',
+  repeated: 'In Zeta warning mode, the two effects are {{c1::lower sensor gain}} and {{c1::slower sampling}}.',
+  repaired: 'In Zeta warning mode, the two effects are {{c1::lower sensor gain}} and {{c2::slower sampling}}.',
+  id: 'compound-retrieval',
 };
 
 function fixture(c, { repeat = false, conflict = false } = {}) {
@@ -165,80 +165,45 @@ test('the class, site and pathway replacement has an independently cued rendered
   assert.deepEqual(hardFailures(cortisolSource, card.text), []);
 });
 
-const singleList = {
-  ...list,
-  text: 'In Zeta warning mode, the two effects are {{c1::lower sensor gain}} and slower sampling.',
-  repeated: 'In Zeta warning mode, the two effects are {{c1::lower sensor gain}} and slower sampling!',
-};
-guardedCases(singleList);
-
-// The reverse position must use the same bounded production repair path.
-guardedCases({
-  ...singleList,
-  text: 'In Zeta warning mode, the two effects are lower sensor gain and {{c1::slower sampling}}.',
-  repeated: 'In Zeta warning mode, the two effects are lower sensor gain and {{c1::slower sampling}}!',
-});
-
+// Closed-list slots are intentional: display order does not assert semantic order.
 for (const [source, text] of [
+  [list.source, list.repaired],
+  [list.source, 'In Zeta warning mode, the two effects are {{c1::lower sensor gain}} and slower sampling.'],
+  [list.source, 'In Zeta warning mode, the two effects are lower sensor gain and {{c1::slower sampling}}.'],
   ['The two types are alpha and beta.', 'The two types: {{c1::alpha}} and beta.'],
   ['The two parts are alpha and beta.', 'The two parts include alpha and {{c1::beta}}.'],
   ['The two features are higher output and longer battery life.', 'The two features are {{c1::higher output}} and longer battery life.'],
-]) test(`single bare list member is rejected only with an explicit source list: ${text}`, () => {
-  assert.ok(hardFailures(source, text).includes('unordered-list-slots'));
-});
-
-const singleListControls = [
-  [list.source, list.repaired],
-  [list.source, 'In Zeta warning mode, the two effects are {{c1::lower sensor gain}} and {{c1::slower sampling}}.'],
-  [list.source, 'In Zeta warning mode, the two effects are {{c1::lower sensor gain::gain effect}} and slower sampling.'],
-  [list.source, 'In Zeta warning mode, the two effects are lower sensor gain and {{c1::slower sampling::sampling effect}}.'],
-  [list.source, 'In Zeta warning mode, sensor gain is {{c1::lower}} and sampling is slower.'],
-  ['The two effects are lower sensor gain and sampling is slower.', 'The two effects are {{c1::lower sensor gain}} and sampling is slower.'],
-  ['The two effects are lower sensor gain and sampling slows.', 'The two effects are {{c1::lower sensor gain}} and sampling slows.'],
-  ['The two effects are lower sensor gain and slower sampling fails.', 'The two effects are {{c1::lower sensor gain}} and slower sampling fails.'],
-  ['The two effects are lower sensor gain and slower signals fade.', 'The two effects are {{c1::lower sensor gain}} and slower signals fade.'],
-  ['The two components are input carries voltage and output carries current.', 'The two components are input carries {{c1::voltage}} and output carries current.'],
-  ['Zeta setup requires first disconnect power, then attach the reference cable.', 'Zeta setup requires first {{c1::disconnect power}}, then attach the reference cable.'],
-  ['The two parts are first alpha and then beta.', 'The two parts are first {{c1::alpha}} and then beta.'],
-  ['Zeta tiene dos efectos: menor ganancia y muestreo lento.', 'Zeta tiene dos efectos: {{c1::menor ganancia}} y muestreo lento.'],
-  ['Lower sensor gain is enabled. Slower sampling is enabled.', singleList.text],
-  ['The two effects are lower sensor gain and faster sampling.', singleList.text],
-  ['The three types are alpha, beta and gamma.', 'The three types are {{c1::alpha}} and beta.'],
-];
-for (const [source, text] of singleListControls) test(`single-list positive audit preserves a valid or unclassified cue: ${text}`, async () => {
+  ['The three types are alpha, beta and gamma.', 'The 3 types: {{c1::alpha}}, {{c2::beta}}, and {{c3::gamma}}.'],
+  ['The three types are alpha, beta and gamma.', 'The three types are {{c1::alpha::type}}, {{c2::beta::type}} and {{c3::gamma::type}}.'],
+]) test(`complete bounded slots publish without repair: ${text}`, async () => {
   assert.deepEqual(hardFailures(source, text), []);
   const f = fixture({ source, text });
   await f.g.run(f.h);
   assert.deepEqual(f.calls.map(r => r.label), ['preparation', 'grounded cards', 'audit']);
-  assert.equal(f.h.cards.length, 1);
   assert.equal(f.h.cards[0].text, text);
 });
 
-test('list boundary controls retain complete sets, joint grouping, order and distinct named relations', () => {
-  const cases = [
-    [list.source, list.repaired],
-    [list.source, 'In Zeta warning mode, the two effects are {{c1::lower sensor gain}} and {{c1::slower sampling}}.'],
+for (const [source, text] of [
+  ['Types include alpha and beta.', 'The types include {{c1::alpha}} and {{c2::beta}}.'],
+  ['Some examples of types are alpha and beta.', 'The two types are {{c1::alpha}} and {{c2::beta}}.'],
+  ['The three types are alpha, beta and gamma.', 'The three types are {{c1::alpha}} and beta.'],
+  ['The two effects are lower sensor gain and faster sampling.', 'The two effects are {{c1::lower sensor gain}} and slower sampling.'],
+]) test(`open, arbitrary subset or unsupported list stays defective: ${text}`, () => {
+  assert.ok(hardFailures(source, text).includes('unordered-list-slots'));
+});
+
+test('list boundary controls retain order, named relations and focused procedures', () => {
+  for (const [source, text] of [
     ['Zeta setup requires first disconnect power, then attach the reference cable.', 'Zeta setup requires first {{c1::disconnect power}}, then {{c2::attach the reference cable}}.'],
     ['In Zeta warning mode, sensor gain is lower and sampling is slower.', 'In Zeta warning mode, sensor gain is {{c1::lower}} and sampling is {{c2::slower}}.'],
     ['Zeta uses two channels: input carries voltage and output carries current.', 'Zeta uses two channels: input carries {{c1::voltage}} and output carries {{c2::current}}.'],
-    [list.source, 'In Zeta warning mode, the two effects are {{c1::lower sensor gain::gain effect}} and {{c2::slower sampling::sampling effect}}.'],
-    ['Zeta setup order: 1. disconnect power; 2. attach the reference cable.', 'Zeta setup order: 1. {{c1::disconnect power}}; 2. {{c2::attach the reference cable}}.'],
-    ['Zeta tiene dos efectos: menor ganancia y muestreo lento.', 'Zeta tiene dos efectos: {{c1::menor ganancia}} y {{c2::muestreo lento}}.'],
-  ];
-  for (const [source, text] of cases) assert.deepEqual(hardFailures(source, text), [], text);
+  ]) assert.deepEqual(hardFailures(source, text), [], text);
 });
 
-test('shared method contrasts arbitrary list slots with complete-set retrieval', () => {
-  assert.ok(m.CARD_WRITING_METHOD.includes(list.text));
-  assert.ok(m.CARD_WRITING_METHOD.includes(list.repaired));
-  assert.match(m.CARD_WRITING_METHOD, /product policy.*not.*universal/i);
-});
-
-test('list detector covers generic colon/count intros and identical non-distinguishing hints', () => {
-  const source = 'The three types are alpha, beta and gamma.';
-  for (const text of ['The 3 types: {{c1::alpha}}, {{c2::beta}}, and {{c3::gamma}}.', 'The three types are {{c1::alpha::type}}, {{c2::beta::type}} and {{c3::gamma::type}}.']) {
-    assert.ok(hardFailures(source, text).includes('unordered-list-slots'), text);
-  }
+test('shared method contrasts whole-set recall with atomic closed-list retrieval', () => {
+  assert.ok(m.CARD_WRITING_METHOD.includes(`<bad>${list.text}</bad>`));
+  assert.ok(m.CARD_WRITING_METHOD.includes(`<good>${list.repaired}</good>`));
+  assert.match(m.CARD_WRITING_METHOD, /stable display order is not semantic order/i);
 });
 
 const procedure = {

@@ -59,7 +59,15 @@ for (const stage of ['prepareGeneration', 'writeGroundedCards', 'repairGeneratio
     assert.ok(req.system.includes('<good>For cortisol, after the stressor passes, negative feedback {{c1::reduces cortisol}}.</good>'));
     assert.match(req.system, /grammatical subject.*negative feedback.*specific system/i);
     assert.match(req.system, /shared entity words.*whole answer/i);
-    assert.equal(req.system.split('<writing_method id="recall-writing-method-v3">').length, 2, 'one current versioned method per request');
+    assert.equal(req.system.split('<writing_method id="recall-writing-method-v4">').length, 2, 'one current versioned method per request');
+    assert.match(req.system, /separately correct.*incorrect.*split/i);
+    assert.match(req.system, /one member hidden per review.*stable display order/i);
+    assert.match(req.system, /stable display order.*not.*semantic order/i);
+    assert.match(req.system, /learner prerequisites.*understand.*learn first/i);
+    assert.match(req.system, /imagery.*mnemonics.*graphic deletion.*learner/i);
+    assert.match(req.system, /prior memories.*personal examples.*emotion/i);
+    assert.match(req.system, /priority.*source.*dates/i);
+    assert.doesNotMatch(req.system, /prefer.*complete-list retrieval|retrieve the complete short set/i);
     assert.match(req.system, /requested attribute, relation or process.*visible cue/i);
     assert.match(req.system, /hiding the whole predicate/i);
     assert.match(req.system, /Cortisol is \{\{c1::a glucocorticoid released by the adrenal cortex through the HPA axis\}\}/);
@@ -129,7 +137,7 @@ for (const final of [false, true]) test(`assembled ${final ? 'final ' : ''}audit
   assert.match(req.system, /not.*grammatical subject.*hidden consequence/i);
 });
 
-for (const version of ['v1', 'v2']) test(`a ${version} method snapshot cannot certify a v3 generation batch`, async () => {
+for (const version of ['v1', 'v2', 'v3']) test(`a ${version} method snapshot cannot certify a v4 generation batch`, async () => {
   const f = fixture();
   const c = { language: 'English', instructions: '', examples: '', rules: `recall-writing-method-${version}` };
   const batch = { id: `${version}-batch`, version: 1, instruction: '', phase: 'auditing', preparation: structuredClone(f.preparation), writerOutput: [f.draft], drafts: [f.card] };
