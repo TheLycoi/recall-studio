@@ -86,6 +86,17 @@ for (const front of ['What are the two titles on the list?', 'Which names are li
   await f.run();
   assert.equal(f.h.cards.length, 0);
 });
+for (const front of ['Which features does the list author describe?', 'What are the features of the list with title Atlas?']) test(`CQ-R3 incidental attribute does not waive a feature request: ${front}`, async () => {
+  const fields = { kind: 'qa', front, back: 'red casing and blue trim' };
+  const f = fixture(featureSource, fields);
+  assert.ok(m.lintCard(m.makeCard(f.h.id, fields), f.h, []).failures.includes('compound-retrieval'));
+  await f.run();
+  assert.deepEqual(f.calls.map(r => r.label), ['preparation', 'grounded cards', 'audit', 'generation repair', 'final audit']);
+  assert.equal(f.h.cards.length, 0);
+  assert.ok(f.saves.every(h => h.cards.length === 0));
+  await assert.rejects(() => f.llm.rewriteCards(f.h, m.makeCard(f.h.id, fields), 'Preserve the requested features.'));
+  assert.equal(f.h.text, featureSource);
+});
 const atomic = { kind: 'cloze', text: 'The two features are {{c1::red casing}} and {{c2::blue trim}}.' };
 for (const back of ['red casing and blue trim', 'red casing and blue trim.', 'red casing and blue trim!', 'red casing and blue trim?', 'red casing and blue trim;', '- red casing\n- blue trim.', '**red casing** and **blue trim**.', 'red casing\nblue trim.']) {
   for (const repeat of [true, false]) test(`R2 ${JSON.stringify(back)} ${repeat ? 'holds repeated defect' : 'accepts atomic repair'}`, async () => {
@@ -100,6 +111,24 @@ for (const back of ['red casing and blue trim', 'red casing and blue trim.', 're
     else assert.equal(f.h.cards[0].text, atomic.text);
   });
 }
+for (const front of ['Why does the list cache retain results?', 'How does the list cache save work?']) test(`CQ-R2 focused explanation publishes with incidental list vocabulary: ${front}`, async () => {
+  const source = 'The list cache retains results to avoid repeated computation and preserve time for new work.';
+  const fields = { kind: 'qa', front, back: 'To avoid repeated computation and preserve time for new work.' };
+  const f = fixture(source, fields);
+  assert.ok(!m.lintCard(m.makeCard(f.h.id, fields), f.h, []).failures.includes('compound-retrieval'));
+  await f.run();
+  assert.equal(f.h.cards.length, 1);
+  assert.deepEqual(f.calls.map(r => r.label), ['preparation', 'grounded cards', 'audit']);
+  assert.ok(f.saves.some(h => h.cards.length === 1));
+  const rewrite = fixture(source, fields);
+  assert.equal((await rewrite.llm.rewriteCards(rewrite.h, m.makeCard(rewrite.h.id, fields), 'Keep the causal explanation.')).length, 1);
+  assert.equal(f.h.text, source);
+  const repaired = fixture(source, { kind: 'qa', front: 'What are the list features?', back: 'red casing and blue trim.' }, fields);
+  await repaired.run();
+  assert.equal(repaired.h.cards.length, 1);
+  assert.equal(repaired.h.cards[0].back, fields.back);
+  assert.deepEqual(repaired.calls.map(r => r.label), ['preparation', 'grounded cards', 'audit', 'generation repair', 'final audit']);
+});
 for (const text of ['The two features are {{c1::red casing and blue trim.}}', 'The two features are {{c1::red casing}} and {{c1::blue trim.}}']) test(`R2 punctuated same-number cloze: ${text}`, async () => {
   const fields = { kind: 'cloze', text };
   const f = fixture(featureSource, fields);
