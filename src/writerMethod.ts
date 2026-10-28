@@ -1,6 +1,6 @@
 import type { GenerationContext } from "./model";
 
-export const WRITING_METHOD_ID = "recall-writing-method-v4";
+export const WRITING_METHOD_ID = "recall-writing-method-v5";
 
 /**
  * Matuschak: focused/precise/consistent/tractable/effortful prompts and litmus tests.
@@ -31,9 +31,19 @@ Format: prefer cloze for source spans, QA for a produced explanation, mechanism,
 
 Grouping preference: prefer one to three distinct cloze numbers per note. Coherent lists and enumerations may exceed three when each rendered review remains meaningful and tractable; open or underspecified unordered slots remain defective. Plan independent attributes in separate focused groups when needed, but never lose coverage or split a coherent retrieval to meet a count. There is no fixed card quota or hard deletion-count limit. Never reject solely for cloze count. Optional hints are usually one to three words to clarify the answer type; omit the hint when the cue is already clear. There is no hint quota. Never reject for a missing or longer hint alone. Hints cannot replace subject/conditions or leak through synonyms, initials or grammar. Short names and meaningful conditions such as "The Who" and "until the broth is clear" are not invalid merely for containing who or is.
 
-Self-check: apply both litmus tests to every rendered review. Inspect its visible cue before consulting hidden targets or plan context: can a knowledgeable learner identify the subject AND requested attribute, relation or process? Name the specific system using its identifying visible words, not the hidden target or metadata. State the missing subject or relation when they cannot; source support alone cannot pass this false-negative check. False positive: could someone answer without knowing, through yes/no guessing, grammar, an answer echo or visible siblings? False negative: could someone know but miss through an ambiguous cue? Reject answer leaks and source-relative filler such as "what does the highlight say". With one number hidden, all its spans are hidden together, other numbers are filled in and hints remain visible. Check visible cue, hidden targets, broken punctuation and sibling interference, not only the unhidden sentence. Retain required context and coverage, then return only the requested schema.
+Self-check: apply both litmus tests to every rendered review. Inspect its visible cue before consulting hidden targets or plan context: can a knowledgeable learner identify the subject AND requested attribute, relation or process? Cite exact visible words for BOTH the system identity AND the requested relation; if either has no visible evidence, fail rather than infer it from the answer, aspect, plan or source. A named beacon plus is does not request classification; an indicator plus a condition does not request a color transition. Prefer an explicit QA question or relation-labeled cloze when a natural stem leaves the task unspecified. For a color transition keep the starting color (for example amber), transition verb and condition visible and retrieve only the destination; do not hide the entire from/to relation. Name the specific system using its identifying visible words, not the hidden target or metadata. State the missing subject or relation when they cannot; source support alone cannot pass this false-negative check. False positive: could someone answer without knowing, through yes/no guessing, grammar, an answer echo or visible siblings? False negative: could someone know but miss through an ambiguous cue? Reject answer leaks and source-relative filler such as "what does the highlight say". With one number hidden, all its spans are hidden together, other numbers are filled in and hints remain visible. Check visible cue, hidden targets, broken punctuation and sibling interference, not only the unhidden sentence. Retain required context and coverage, then return only the requested schema.
 
 <examples>
+<contrast>
+<highlight>The fictional Orin beacon is a coastal marker. The Orin beacon’s indicator changes from amber to green only when the anchor is locked.</highlight>
+<bad>The fictional Orin beacon is {{c1::a coastal marker}}.</bad>
+<good>The fictional Orin beacon's classification is {{c1::a coastal marker}}.</good>
+<good>qa | What is the classification of the fictional Orin beacon? | a coastal marker</good>
+<bad>The Orin beacon’s indicator {{c1::changes from amber to green}} only when the anchor is locked.</bad>
+<good>The Orin beacon’s indicator changes from amber to {{c1::green}} only when the anchor is locked.</good>
+<good>qa | When the anchor is locked, from amber to which color does the Orin beacon's indicator change? | green</good>
+<note>The classification cue is classification, not beacon is. The transition cue explicitly shows changes from amber to and the condition, retrieving the destination only. A named subject and a condition cannot supply a missing requested relation. Explicit attributes remain valid: Zeta sensor voltage is {{c1::5 V}}; normal body temperature is {{c1::37 °C}}; the list's title is {{c1::War and Peace}}. Keep meaningful explanations when an explicit why/how question requests them.</note>
+</contrast>
 <contrast>
 <highlight>Cortisol is a glucocorticoid released by the adrenal cortex through the HPA axis. It keeps blood glucose available for the brain and muscles and enhances catecholamine effects on the cardiovascular system.</highlight>
 <bad>Cortisol is {{c1::a glucocorticoid released by the adrenal cortex through the HPA axis}}.</bad>

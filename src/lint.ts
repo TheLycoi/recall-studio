@@ -52,8 +52,12 @@ const QA_YES_NO_START = /^(is|are|was|were|does|do|did|can|will|should|has|have)
 // shortcut: English list labels plus short noun-like members; semantic compounds need audit.
 function compoundList(answer: string, cue: string): boolean {
   if (!/\b(?:pillars|effects|types|kinds|members|components|parts|features|items|additions|list)\b/i.test(cue)) return false;
-  if (/\b(?:what|which) is\b.*\b(?:name|title)\b/i.test(cue)) return false;
-  const members = answer.replace(/^\s*[-*]\s+/, "").split(/,\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+|\s+[-*]\s+/i).map(s => s.trim()).filter(Boolean);
+  // An explicit singular attribute can contain punctuation/conjunctions without being a set.
+  const singleAttribute = /\b(?:name|title|author)\b/i.test(cue)
+    && !/\b(?:names|titles|authors|members?|items|each|every|all|both|multiple|several|two|three|four|five|six|seven|eight|nine|ten|\d+|and|or)\b/i.test(cue)
+    && (/^(?:what|which|who)\b/i.test(cue.trim()) || /\b(?:name|title|author)(?:\s+of\s+[^:?!]+?)?\s*(?:is\b|was\b|:)/i.test(cue));
+  if (singleAttribute) return false;
+  const members = answer.replace(/^\s*[-*]\s+/, "").split(/,\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+|\s+[-*]\s+/i).map(s => s.trim().replace(/[.!?;]$/, "").trim()).filter(Boolean);
   return new Set(members.map(normalizePlain)).size > 1 && members.every(s => /^[\p{L}][\p{L}’' -]*$/u.test(s) && words(s).length <= 6
     && !/\b(?:is|are|was|were|because|before|after|when|until|then|disconnect|connect|attach|reconnect)\b/i.test(s));
 }
@@ -203,7 +207,7 @@ export function lintCard(card: Card, highlight: Highlight, siblings: Card[]): Li
     if (card.front.trim().length === 0 || card.back.trim().length === 0) {
       failures.push("qa-empty");
     }
-    if (compoundList(reviewText(card.back), reviewText(card.front))) failures.push("compound-retrieval");
+    if (compoundList(reviewText(card.back.replace(/\r?\n\s*(?:[-*]\s+)?/g, " - ")), reviewText(card.front))) failures.push("compound-retrieval");
     // qa-answer-long: back <=12 words.
     if (words(card.back).length > 12) failures.push("qa-answer-long");
     // qa-yes-no: front must not start with a yes/no auxiliary.

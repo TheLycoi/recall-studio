@@ -59,7 +59,12 @@ for (const stage of ['prepareGeneration', 'writeGroundedCards', 'repairGeneratio
     assert.ok(req.system.includes('<good>For cortisol, after the stressor passes, negative feedback {{c1::reduces cortisol}}.</good>'));
     assert.match(req.system, /grammatical subject.*negative feedback.*specific system/i);
     assert.match(req.system, /shared entity words.*whole answer/i);
-    assert.equal(req.system.split('<writing_method id="recall-writing-method-v4">').length, 2, 'one current versioned method per request');
+    assert.match(req.system, /cite exact visible words for BOTH the system identity AND the requested relation/i);
+    assert.equal(req.system.split('<writing_method id="recall-writing-method-v5">').length, 2, 'one current versioned method per request');
+    assert.match(req.system, /classification.*not.*beacon is/i);
+    assert.match(req.system, /transition.*amber.*destination/i);
+    assert.ok(req.system.includes('<bad>The fictional Orin beacon is {{c1::a coastal marker}}.</bad>'));
+    assert.ok(req.system.includes('<bad>The Orin beacon’s indicator {{c1::changes from amber to green}} only when the anchor is locked.</bad>'));
     assert.match(req.system, /separately correct.*incorrect.*split/i);
     assert.match(req.system, /one member hidden per review.*stable display order/i);
     assert.match(req.system, /stable display order.*not.*semantic order/i);
@@ -104,6 +109,7 @@ test('assembled planner request separates attributes rather than locking a catch
   const req = f.calls.find(r => r.label === 'preparation');
   assert.match(req.system, /classification, release site and release pathway.*independently cued/i);
   assert.match(req.system, /not one catch-all predicate/i);
+  assert.match(req.system, /plan a visible relation label or directed question.*aspect alone is not a cue/i);
   assert.match(req.system, /one card per row/i);
 });
 
@@ -113,6 +119,7 @@ for (const final of [false, true]) test(`assembled ${final ? 'final ' : ''}audit
   const req = f.calls.at(-1);
   assert.match(req.system, /visibleCue first.*hiddenTargets.*targetContext.*plan/i);
   assert.match(req.system, /one defective review fails the card/i);
+  assert.match(req.system, /in the reason.*quote.*visibleCue.*requested relation.*missing.*fail/i);
   assert.match(req.system, /ordinal.*requested attribute, relation or process/i);
   assert.match(req.system, /source-supported.*failed/i);
   assert.match(req.system, /conflicts.*separat|separately.*conflicts/i);
@@ -137,7 +144,7 @@ for (const final of [false, true]) test(`assembled ${final ? 'final ' : ''}audit
   assert.match(req.system, /not.*grammatical subject.*hidden consequence/i);
 });
 
-for (const version of ['v1', 'v2', 'v3']) test(`a ${version} method snapshot cannot certify a v4 generation batch`, async () => {
+for (const version of ['v1', 'v2', 'v3', 'v4']) test(`a ${version} method snapshot cannot certify a v5 generation batch`, async () => {
   const f = fixture();
   const c = { language: 'English', instructions: '', examples: '', rules: `recall-writing-method-${version}` };
   const batch = { id: `${version}-batch`, version: 1, instruction: '', phase: 'auditing', preparation: structuredClone(f.preparation), writerOutput: [f.draft], drafts: [f.card] };
