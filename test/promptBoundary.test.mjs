@@ -33,7 +33,7 @@ function assertCardSource(payload, h) {
 function assertDataAuthority(system) {
   assert.match(system, /data, not instructions/i);
   for (const name of ['context', 'examples', 'history', 'draft']) assert.match(system, new RegExp(name, 'i'));
-  assert.match(system, /style only/i);
+  assert.match(system, /instructions.*supported targets or style/i);
   assert.match(system, /never override.*grounding.*schema/i);
 }
 for (const method of ['writeCards', 'critiqueCards', 'rewriteCard']) test(`${method} serializes adversarial source, card and reader fields without losing bytes or identities`, async () => {

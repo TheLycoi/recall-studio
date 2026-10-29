@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import Module from 'node:module';
 import { createHash } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 let m;
 before(async () => {
@@ -60,7 +62,7 @@ for (const stage of ['prepareGeneration', 'writeGroundedCards', 'repairGeneratio
     assert.match(req.system, /grammatical subject.*negative feedback.*specific system/i);
     assert.match(req.system, /shared entity words.*whole answer/i);
     assert.match(req.system, /cite exact visible words for BOTH the system identity AND the requested relation/i);
-    assert.equal(req.system.split('<writing_method id="recall-writing-method-v5">').length, 2, 'one current versioned method per request');
+    assert.equal(req.system.split('<writing_method id="recall-writing-method-v6">').length, 2, 'one current versioned method per request');
     assert.match(req.system, /classification.*not.*beacon is/i);
     assert.match(req.system, /transition.*amber.*destination/i);
     assert.ok(req.system.includes('<bad>The fictional Orin beacon is {{c1::a coastal marker}}.</bad>'));
@@ -92,6 +94,101 @@ for (const stage of ['prepareGeneration', 'writeGroundedCards', 'repairGeneratio
     assert.equal(p.instruction ?? p.highlightInstruction, f.h.instruction);
     if (stage.startsWith('rewrite')) assert.equal(p.rewriteInstruction, 'Retain the explanation.');
   }
+});
+
+test('assembled highlight requests carry the approved method without changing application schemas', async t => {
+  const f = fixture(), context = await f.llm.generationContext();
+  await f.llm.prepareGeneration(f.h, [], context);
+  await f.llm.writeGroundedCards(f.h, [], f.preparation, context);
+  await f.llm.repairGeneration(f.h, [f.card], [], f.preparation, context, [{ cardId: f.card.id, reasons: ['Missing subject.'] }]);
+  await f.llm.auditGeneration(f.h, [f.card], [], f.preparation, context);
+  await f.llm.auditGeneration(f.h, [f.card], [], f.preparation, context, undefined, true);
+  await f.llm.writeCards(f.h);
+  await f.llm.critiqueCards(f.h, [f.card]);
+  await f.llm.rewriteCard(f.h, f.card, 'Retain the explanation.');
+  await f.llm.rewriteCards(f.h, f.card, 'Retain the explanation.');
+  assert.deepEqual(f.calls.map(r => r.label), ['preparation', 'grounded cards', 'generation repair', 'audit', 'final audit', 'cards', 'verdicts', 'card', 'rewrite cards', 'rewrite audit']);
+  if (process.env.RECALL_PROMPT_EVIDENCE_DIR) {
+    mkdirSync(process.env.RECALL_PROMPT_EVIDENCE_DIR, { recursive: true });
+    writeFileSync(join(process.env.RECALL_PROMPT_EVIDENCE_DIR, 'highlight-method-requests.json'), JSON.stringify(f.calls.map(({ label, system, user, schema }) => ({ label, system, user: JSON.parse(user), schema: m.toStrictSchema(schema) })), null, 2));
+  }
+  await t.test('all twenty rules are runtime applicability checks, not mandatory techniques', () => {
+    const rules = ['Flag unclear meaning', 'Retain the supplied conceptual frame', 'Keep useful fundamentals', 'Separate independently gradable targets', 'Use selective blanks', 'Reuse helpful supplied pictures', 'Reuse supplied memory aids when helpful', 'Suggest image masking when appropriate', 'Decompose unordered collections', 'Break sequences into manageable retrievals', 'Distinguish easily confused material', 'Remove distracting wording', 'Connect to supplied prior knowledge', 'Use supplied personal examples', 'Preserve meaningful personal associations', 'Keep necessary context visible', 'Allow useful alternate retrieval directions', 'Attach evidence references', 'Retain relevant source dates or versions', "Favor the learner's priorities"];
+    for (const req of f.calls) {
+      const checklist = req.system.match(/<twenty_rule_checklist>([\s\S]*?)<\/twenty_rule_checklist>/)?.[1];
+      assert.ok(checklist, `${req.label}: checklist must reach the transport`);
+      assert.deepEqual(checklist.trim().split('\n'), rules.map((rule, i) => `${i + 1}. ${rule}.`));
+      assert.match(req.system, /applicability.*not.*every technique.*every card/i);
+      assert.match(req.system, /not.*proof of comprehension/i);
+      assert.match(req.system, /never fabricate.*experiences.*knowledge.*understanding/i);
+      assert.match(req.system, /only through supported output capabilities/i);
+      assert.match(req.system, /no.*suggestion.*fields/i);
+      assert.match(req.system, /lack of learner history alone.*not.*block/i);
+    }
+  });
+  await t.test('the highlight and supported target instructions set relevance without permitting invented facts', () => {
+    for (const req of f.calls) {
+      assert.match(req.system, /selected highlight and explicit target instruction.*relevance boundary/i);
+      assert.match(req.system, /capture\/rewrite instructions.*supported targets or style/i);
+      assert.match(req.system, /never override factual grounding or the output schema/i);
+      assert.match(req.system, /not.*whole note.*every conceivable question/i);
+      assert.match(req.system, /material omissions.*exclusions.*omissions/i);
+      assert.match(req.system, /do not omit useful foundational facts/i);
+    }
+    const plannerTask = f.calls[0].system.split('</writing_method>')[1];
+    assert.match(plannerTask, /selected targets.*not exhaustive permutations/i);
+    assert.match(plannerTask, /exclusions\/omissions/i);
+  });
+  await t.test('closed-list route and four-member examples use distinct reviews without a count gate', () => {
+    for (const req of f.calls) {
+      assert.ok(req.system.includes('Pulmonary circuit route: {{c1::right ventricle}} → {{c2::lungs}} → {{c3::left atrium}}.'));
+      assert.ok(req.system.includes('Systemic circuit route: {{c1::left ventricle}} → {{c2::body}} → {{c3::right atrium}}.'));
+      assert.ok(req.system.includes('The kit contains exactly four tools: {{c1::a probe}}, {{c2::a clamp}}, {{c3::a gauge}} and {{c4::a brush}}.'));
+      assert.match(req.system, /one member hidden per review.*all other members visible.*stable display order/i);
+      assert.match(req.system, /stable display order is not semantic order or rank/i);
+      assert.match(req.system, /coherent lists and enumerations may exceed three/i);
+      assert.match(req.system, /optional hints/i);
+    }
+  });
+  await t.test('planning allows coherent source-driven grouping without one row per member', () => {
+    assert.match(f.calls[0].system.split('</writing_method>')[1], /coherent route or closed list.*one row.*distinct cloze numbers.*not.*row per member/i);
+  });
+  await t.test('open examples may ask for examples and acceptable alternatives, never fixed missing members', () => {
+    for (const req of f.calls) {
+      assert.match(req.system, /explicitly example-seeking question with acceptable alternatives/i);
+      assert.ok(req.system.includes('What is one example of a tool the kit may contain?'));
+      assert.match(req.system, /arbitrary subsets.*unknown completeness cannot support a missing-member/i);
+      assert.doesNotMatch(req.system, /use source-supported distinctions or hold with a reason|use a supported relation or hold\./i);
+    }
+    assert.match(f.calls[0].system.split('</writing_method>')[1], /example-seeking.*acceptable alternatives/i);
+    for (const req of f.calls.filter(r => ['audit', 'final audit'].includes(r.label))) {
+      assert.match(req.system.split('</writing_method>')[1], /example-seeking.*acceptable alternatives/i);
+      assert.match(req.system, /different true completion.*unless.*explicitly.*examples/i);
+    }
+  });
+  await t.test('ordered overlap supplies cue context without bundling independent answers', () => {
+    for (const req of f.calls) {
+      assert.match(req.system, /individual ordered steps.*overlapping cue context/i);
+      assert.match(req.system, /overlap.*context.*not.*independent steps under one number/i);
+      assert.match(req.system, /before\/after\/condition boundary in the visible cue/i);
+      assert.match(req.system, /test the rationale separately when stated/i);
+    }
+  });
+  await t.test('transport retains the exact schema fields and plan/fact identities', () => {
+    const expected = {
+      preparation: ['conflicts', 'exclusions', 'facts', 'omissions', 'plan'],
+      'rewrite audit': ['preservesFacts', 'reason', 'verdicts'],
+    };
+    for (const req of f.calls) {
+      const schema = m.toStrictSchema(req.schema);
+      assert.deepEqual(Object.keys(schema.properties).sort(), expected[req.label] ?? (req.label === 'card' ? ['back', 'front', 'kind', 'text'] : ['audit', 'final audit', 'verdicts'].includes(req.label) ? ['verdicts'] : ['cards']));
+      if (['grounded cards', 'generation repair'].includes(req.label)) {
+        assert.deepEqual(Object.keys(schema.properties.cards.items.properties).sort(), ['back', 'factIds', 'front', 'kind', 'planId', 'text']);
+        assert.equal(JSON.parse(req.user).preparation.plan[0].id, 'P1');
+        assert.deepEqual(JSON.parse(req.user).preparation.plan[0].factIds, ['F1']);
+      }
+    }
+  });
 });
 
 test('assembled planner request distinguishes scoped source holds from whole-capture holds', async () => {
@@ -144,7 +241,7 @@ for (const final of [false, true]) test(`assembled ${final ? 'final ' : ''}audit
   assert.match(req.system, /not.*grammatical subject.*hidden consequence/i);
 });
 
-for (const version of ['v1', 'v2', 'v3', 'v4']) test(`a ${version} method snapshot cannot certify a v5 generation batch`, async () => {
+for (const version of ['v1', 'v2', 'v3', 'v4', 'v5']) test(`a ${version} method snapshot cannot certify a v6 generation batch`, async () => {
   const f = fixture();
   const c = { language: 'English', instructions: '', examples: '', rules: `recall-writing-method-${version}` };
   const batch = { id: `${version}-batch`, version: 1, instruction: '', phase: 'auditing', preparation: structuredClone(f.preparation), writerOutput: [f.draft], drafts: [f.card] };
