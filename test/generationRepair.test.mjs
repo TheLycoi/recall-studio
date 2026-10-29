@@ -119,7 +119,9 @@ test('source-grounded context repair is private, bounded and independently reche
   for (const label of ['grounded cards', 'generation repair', 'final audit']) {
     const req = f.calls.find(r => r.label === label);
     assert.match(req.system, /one focused retrieval target per review/i);
-    assert.match(req.system, /subject.*conditions.*visible cue/i);
+    assert.match(req.system, /ordinary attribute, mechanism and consequence reviews, keep the specific subject and requested relation visible/i);
+    assert.match(req.system, /identify the target from the visible cue and keep essential conditions visible/i);
+    assert.match(req.system, /in term-identification reviews, the visible definition or identifying relation and essential context must distinguish the hidden term; the name itself need not be visible/i);
     assert.match(req.system, /Extra\/source links cannot supply/i);
     assert.match(req.system, /causal relationships.*short procedures/i);
     assert.match(req.system, /word.*product.policy/i);

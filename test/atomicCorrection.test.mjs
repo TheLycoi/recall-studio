@@ -48,7 +48,7 @@ for (const [bad, good, cue] of [
   const initial = JSON.parse(f.calls.find(r => r.label === 'audit').user).cards[0];
   assert.equal(initial.reviews[0].visibleCue, bad.replace(/\{\{c1::.*?\}\}/, '[...]'));
   assert.ok(!initial.reviews[0].visibleCue.includes(cue), 'a plan aspect cannot supply visible relation evidence');
-  for (const req of f.calls) assert.match(req.system, /cite exact visible words for BOTH the system identity AND the requested relation/i);
+  for (const req of f.calls) assert.match(req.system, /cite exact visible words for the identifying cue AND requested relation/i);
   if (repeat) assert.ok(f.saves.every(h => !h.cards.length));
   else assert.ok(m.renderedCardReviews(f.h.cards[0])[0].visibleCue.includes(cue));
   assert.equal(f.h.text, orinSource);

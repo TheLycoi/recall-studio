@@ -61,8 +61,8 @@ for (const stage of ['prepareGeneration', 'writeGroundedCards', 'repairGeneratio
     assert.ok(req.system.includes('<good>For cortisol, after the stressor passes, negative feedback {{c1::reduces cortisol}}.</good>'));
     assert.match(req.system, /grammatical subject.*negative feedback.*specific system/i);
     assert.match(req.system, /shared entity words.*whole answer/i);
-    assert.match(req.system, /cite exact visible words for BOTH the system identity AND the requested relation/i);
-    assert.equal(req.system.split('<writing_method id="recall-writing-method-v6">').length, 2, 'one current versioned method per request');
+    assert.match(req.system, /cite exact visible words for the identifying cue AND requested relation/i);
+    assert.equal(req.system.split('<writing_method id="recall-writing-method-v7">').length, 2, 'one current versioned method per request');
     assert.match(req.system, /classification.*not.*beacon is/i);
     assert.match(req.system, /transition.*amber.*destination/i);
     assert.ok(req.system.includes('<bad>The fictional Orin beacon is {{c1::a coastal marker}}.</bad>'));
@@ -241,7 +241,7 @@ for (const final of [false, true]) test(`assembled ${final ? 'final ' : ''}audit
   assert.match(req.system, /not.*grammatical subject.*hidden consequence/i);
 });
 
-for (const version of ['v1', 'v2', 'v3', 'v4', 'v5']) test(`a ${version} method snapshot cannot certify a v6 generation batch`, async () => {
+for (const version of ['v1', 'v2', 'v3', 'v4', 'v5', 'v6']) test(`a ${version} method snapshot cannot certify a v7 generation batch`, async () => {
   const f = fixture();
   const c = { language: 'English', instructions: '', examples: '', rules: `recall-writing-method-${version}` };
   const batch = { id: `${version}-batch`, version: 1, instruction: '', phase: 'auditing', preparation: structuredClone(f.preparation), writerOutput: [f.draft], drafts: [f.card] };
