@@ -1,6 +1,6 @@
 {
   "name": "review-inbox",
-  "version": "0.1.20",
+  "version": "0.1.21",
   "description": "Flashcards from what you highlight, a source-linked inbox to review them, and export to Anki. Runs on the Codex CLI, the DeepSeek API, or the opencode CLI.",
   "main": "main.js",
   "private": true,
@@ -20,6 +20,6 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "zod": "^4.5.4"
+    "zod": "4.6.6"
   }
 }

@@ -1,5 +1,14 @@
 # Changelog
 
+## Recall Studio 0.1.21 release candidate: highlight writer
+
+- Review all twenty formulation rules for applicability in the shared writing method. Do not invent learner understanding, personal associations or unavailable visual aids.
+- Keep useful retrieval targets within the selected highlight and explicit target instruction. Nearby context may identify the subject, not supply extra answer facts.
+- Clarify fixed-list missing-member clozes versus open examples. Retain stable display order, optional hints and coherent lists with more than three numbers; permit supported, explicitly example-seeking questions without inventing exhaustive membership.
+- Add production-module regression fixtures for circuit routes, a four-tool list, same-number grouping, open-list slots, hints, grounding and application-schema identity. These examples cover existing validator behavior, not a new hard-gate fix or live-model quality claim.
+- Pin runtime Zod to patched `4.6.6` for GHSA-mrhx-c7xc-m3w5; leave every other dependency pin unchanged.
+- Preserve plugin ID `review-inbox`, Obsidian minimum version, existing data and explicit Anki export. Publication and live installation remain separate acceptance steps.
+
 ## Recall Studio 0.1.20 prerelease: atomic card-writer testing
 
 This is a testing release, not a card-quality guarantee. The checks cover recognized structures and still rely on model and human judgment for broader ambiguity. Human Inbox review remains necessary.

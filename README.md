@@ -9,6 +9,24 @@ The repository and BRAT target are `TheLycoi/recall-studio`, formerly
 `TheLycoi/review-inbox`. Plugin ID `review-inbox` and the default data folder
 `Review Inbox/` stay unchanged.
 
+## 0.1.21 release candidate
+
+The shared method reviews all twenty formulation rules for applicability. It does
+not require every technique on every card or claim to know the learner's
+understanding. Personal associations and visual aids need supplied input.
+
+The selected highlight and explicit target instruction bound relevance; nearby
+context cannot add answer facts. Fixed lists can use stable-order clozes with
+one member hidden per review, including coherent notes with more than three
+numbers. Open examples do not establish a complete set, but an explicitly
+example-seeking question can accept supported alternatives. Hints are optional.
+
+This candidate pins runtime Zod to patched `4.6.6` for GHSA-mrhx-c7xc-m3w5 and
+leaves other dependency pins unchanged. It preserves existing cards, settings,
+history and explicit export.
+Release preparation and synthetic fixtures do not establish live model quality,
+medical correctness or an installed update.
+
 ## Workflow
 
 1. Select text in a note or PDF and run **Send selection to inbox**. Use
