@@ -6,7 +6,7 @@ import Module from 'node:module';
 
 let m, system;
 before(async () => {
-  const out = await build({ stdin: { contents: `export { LlmClient } from './src/llm'; export { lintCard } from './src/lint'; export { makeCard, makeHighlight } from './src/model'; export { validatePreparation, validateDrafts } from './src/generation';`, resolveDir: process.cwd() }, bundle: true, write: false, format: 'cjs', platform: 'node', external: ['obsidian'], logLevel: 'silent' });
+  const out = await build({ stdin: { contents: `export { LlmClient } from './src/llm'; export { lintCard } from './src/lint'; export { makeCard, makeHighlight } from './src/model'; export { validatePreparation, validateDrafts, renderedCardReviews } from './src/generation';`, resolveDir: process.cwd() }, bundle: true, write: false, format: 'cjs', platform: 'node', external: ['obsidian'], logLevel: 'silent' });
   const mod = new Module('prompt-examples');
   mod.require = id => id === 'obsidian' ? { Notice: class {}, requestUrl() { throw Error('Network forbidden'); } } : Module.createRequire(import.meta.url)(id);
   mod._compile(out.outputFiles[0].text, 'prompt-examples');
@@ -21,7 +21,9 @@ function examples() {
     const text = block.match(/<highlight>([\s\S]*?)<\/highlight>/)[1];
     const heading = block.match(/<heading>([\s\S]*?)<\/heading>/)?.[1];
     const h = m.makeHighlight({ sourcePath: 'example.md', sourceTitle: heading ?? 'Zeta calibration', heading, text });
-    const cards = (block.match(/<cards>([\s\S]*?)<\/cards>/)?.[1] ?? '').split('\n').filter(line => /^(qa|cloze) \|/.test(line)).map(line => {
+    const cardsElement = block.match(/<cards>([\s\S]*?)<\/cards>/);
+    const lines = cardsElement ? cardsElement[1].split('\n') : [...block.matchAll(/<good>([\s\S]*?)<\/good>/g)].map(([, text]) => `cloze | ${text}`);
+    const cards = lines.filter(line => /^(qa|cloze) \|/.test(line)).map(line => {
       const [kind, front, back] = line.split(' | ');
       return m.makeCard(h.id, kind === 'qa' ? { kind, front, back } : { kind, text: front });
     });
@@ -29,14 +31,33 @@ function examples() {
   });
 }
 
-test('the shared method has three aligned examples: procedure/explanation, subject cue and withheld unsupported reason', () => {
+test('the shared method has four aligned examples: routes, procedure/explanation, subject cue and withheld unsupported reason', () => {
   const ex = examples();
-  assert.equal(ex.length, 3);
-  assert.deepEqual(ex.map(e => e.cards.length), [2, 1, 0]);
-  assert.match(ex[0].cards[0].text, /c1::disconnect power.*c2::attach the reference cable.*c3::reconnect power/);
-  assert.match(ex[1].cards[0].text, /^Testosterone signalling: Type III binds/);
-  assert.match(ex[2].block, /requested_target.*Why/);
-  assert.match(ex[2].block, /Withhold this unsupported reason/);
+  assert.equal(ex.length, 4);
+  assert.deepEqual(ex.map(e => e.cards.length), [2, 2, 1, 0]);
+  assert.match(ex[1].cards[0].text, /c1::disconnect power.*c2::attach the reference cable.*c3::reconnect power/);
+  assert.match(ex[2].cards[0].text, /^Testosterone signalling: Type III binds/);
+  assert.match(ex[3].block, /requested_target.*Why/);
+  assert.match(ex[3].block, /Withhold this unsupported reason/);
+  assert.match(ex[3].block, /<cards>\s*<\/cards>/);
+  assert.equal([...ex[3].block.matchAll(/<good>/g)].length, 2);
+});
+
+test('each route example renders three independent reviews with its other locations visible', () => {
+  const { cards } = examples()[0];
+  const routes = [
+    ['Pulmonary circuit route', ['right ventricle', 'lungs', 'left atrium']],
+    ['Systemic circuit route', ['left ventricle', 'body', 'right atrium']],
+  ];
+  assert.equal(cards.length, routes.length);
+  for (const [index, [label, locations]] of routes.entries()) {
+    assert.equal(cards[index].kind, 'cloze');
+    assert.deepEqual(m.renderedCardReviews(cards[index]), locations.map((location, hiddenIndex) => ({
+      ordinal: hiddenIndex + 1,
+      visibleCue: `${label}: ${locations.map((other, i) => i === hiddenIndex ? '[...]' : other).join(' → ')}.`,
+      hiddenTargets: [location],
+    })));
+  }
 });
 
 test('examples keep structural and source checks, while the meaningful long explanation requires length adjudication', () => {
