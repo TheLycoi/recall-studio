@@ -9,23 +9,26 @@ The repository and BRAT target are `TheLycoi/recall-studio`, formerly
 `TheLycoi/review-inbox`. Plugin ID `review-inbox` and the default data folder
 `Review Inbox/` stay unchanged.
 
-## 0.1.21 release candidate
+## 0.1.22 beta: simpler writing and fewer labels
 
-The shared method reviews all twenty formulation rules for applicability. It does
-not require every technique on every card or claim to know the learner's
-understanding. Personal associations and visual aids need supplied input.
+One shared writing method guides preparation, writing, audit and repair. This
+release shortens it from 23,170 to 13,260 characters while retaining the twenty-rule
+applicability checklist. Prior understanding, personal associations and visual
+aids still need human judgment or supplied input.
 
-The selected highlight and explicit target instruction bound relevance; nearby
-context cannot add answer facts. Fixed lists can use stable-order clozes with
-one member hidden per review, including coherent notes with more than three
-numbers. Open examples do not establish a complete set, but an explicitly
-example-seeking question can accept supported alternatives. Hints are optional.
+Related targets can share a coherent note with separate cloze numbers, usually
+two or three. One useful deletion is valid; coherent lists may need more than
+three. Supported term-definition pairs can test both directions when each review
+has a clear identifying cue. These are writing preferences, not numerical gates.
 
-This candidate pins runtime Zod to patched `4.6.6` for GHSA-mrhx-c7xc-m3w5 and
-leaves other dependency pins unchanged. It preserves existing cards, settings,
-history and explicit export.
-Release preparation and synthetic fixtures do not establish live model quality,
-medical correctness or an installed update.
+Verification-status badges and status-only export warnings are removed. Actual
+findings, source conflicts and saved evidence remain. Warning overrides still
+require explicit acceptance, and generation never exports cards automatically.
+
+The selected highlight remains the answer-evidence boundary. Existing cards,
+settings, history, export receipts and dependency pins stay unchanged. A small
+live-model sample passed grouping and audit checks; it does not establish broad
+model reliability, medical accuracy or learning outcomes.
 
 ## Workflow
 
@@ -50,8 +53,9 @@ medical correctness or an installed update.
 
 Automatic checks are not proof of truth or learner understanding. Findings and
 saved Evidence remain visible for review, including their source quotes, batch
-and plan references. Changing a card or its captured source makes its displayed
-audit stale. Existing cards are not repaired in the background.
+and plan references. Saved audits remain tied to the wording and source they
+checked; editing does not certify a card. Existing cards are not repaired in the
+background.
 
 Unresolved generated drafts remain held rather than becoming ordinary editable
 or exportable cards. Held counts, reasons and **Retry** remain available even

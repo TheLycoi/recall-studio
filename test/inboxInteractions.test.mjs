@@ -98,7 +98,7 @@ test('partial generation shows held counts, reasons and final audit without expo
   const heldStat = descendants(root).filter(e => e.classes.includes('wikilm-stat')).find(e => /held/.test(textOf(e)));
   assert.ok(heldStat, 'header counts held drafts separately from published review cards');
   assert.match(textOf(root), /The front needs its subject/);
-  assert.match(textOf(root), /Final audit failed/i);
+  assert.match(textOf(root), /Final checker found a problem/);
   assert.doesNotMatch(textOf(root), /PRIVATE ORIGINAL|Private answer/);
   assert.equal(descendants(root).filter(e => e.classes.includes('wikilm-card')).length, 1);
   assert.deepEqual(h, original, 'rendering must not mutate private or published records');

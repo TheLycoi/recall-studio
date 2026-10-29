@@ -78,16 +78,16 @@ test('shared cue checks permit term identification without weakening ordinary su
 });
 
 test('assembled planner keeps reciprocal targets in one row when independently cued', () => {
-  const task = requests.find(r => r.label === 'preparation').system.split('</writing_method>')[1];
-  assert.match(task, /term-definition.*one row.*different cloze numbers/i);
+  const task = requests.find(r => r.label === 'preparation').system;
+  assert.match(task, /term-definition.*different cloze numbers/i);
   assert.match(task, /both.*visible cues.*distinguish/i);
 });
 
 for (const label of ['audit', 'final audit']) test(`${label} task accepts identifying definitions instead of demanding the hidden name`, () => {
   const req = requests.find(r => r.label === label);
-  const task = req.system.split('</writing_method>')[1];
+  const task = req.system;
   assert.match(task, /term-identification.*visible definition.*essential context.*distinguish/i);
-  assert.match(task, /do not fail.*solely.*name.*hidden/i);
+  assert.match(task, /hidden name alone is not a defect/i);
   assert.match(task, /ordinary attribute, mechanism and consequence.*name the specific system.*visibleCue/i);
   assert.match(task, /quote.*identifying cue.*requested relation/i);
   assert.doesNotMatch(task, /For each ordinal, name the specific system/i);
@@ -111,10 +111,10 @@ test('transport field descriptions allow definition-cued terms for QA and cloze'
   }
 });
 
-test('current v8 identity carries the reciprocal contract without inheriting older approval', () => {
-  assert.equal(m.WRITING_METHOD_ID, 'recall-writing-method-v8');
+test('current v9 identity carries the reciprocal contract without inheriting older approval', () => {
+  assert.equal(m.WRITING_METHOD_ID, 'recall-writing-method-v9');
   for (const req of requests) {
-    assert.equal(req.system.split('<writing_method id="recall-writing-method-v8">').length, 2);
-    assert.equal(JSON.parse(req.user).rules, 'recall-writing-method-v8');
+    assert.equal(req.system.split('<writing_method id="recall-writing-method-v9">').length, 2);
+    assert.equal(JSON.parse(req.user).rules, 'recall-writing-method-v9');
   }
 });

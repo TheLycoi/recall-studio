@@ -62,7 +62,7 @@ export class ExportWarningModal extends Modal {
   constructor(app: App, private summary: ExportSummary, private items: ExportItem[], private resolve: (accepted: boolean) => void) { super(app); }
   onOpen(): void {
     this.contentEl.createEl("h3", { text: "Review export warnings" });
-    this.contentEl.createEl("p", { text: `${this.summary.notes} notes / ${this.summary.tasks} reviews selected. ${this.summary.warnings.length} notes need your review. Exporting does not mark them verified.` });
+    this.contentEl.createEl("p", { text: `${this.summary.notes} notes / ${this.summary.tasks} reviews selected. ${this.summary.warnings.length} notes need your review.` });
     for (const warning of this.summary.warnings) {
       const card = this.items.find(item => item.card.id === warning.cardId)!.card;
       const box = this.contentEl.createDiv();

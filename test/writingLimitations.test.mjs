@@ -161,7 +161,7 @@ test('the class, site and pathway replacement has an independently cued rendered
     { ordinal: 2, visibleCue: 'Cortisol hormone class: glucocorticoid; cortisol is released by the [...] through the HPA axis.', hiddenTargets: ['adrenal cortex'] },
     { ordinal: 3, visibleCue: 'Cortisol hormone class: glucocorticoid; cortisol is released by the adrenal cortex through the [...].', hiddenTargets: ['HPA axis'] },
   ]);
-  assert.ok(m.CARD_WRITING_METHOD.includes(`<good>${card.text}</good>`), 'the shared example releases cortisol, not its hormone class');
+  assert.match(m.CARD_WRITING_METHOD, /never independent attributes or list members/i);
   assert.deepEqual(hardFailures(cortisolSource, card.text), []);
 });
 
@@ -201,8 +201,8 @@ test('list boundary controls retain order, named relations and focused procedure
 });
 
 test('shared method contrasts whole-set recall with atomic closed-list retrieval', () => {
-  assert.ok(m.CARD_WRITING_METHOD.includes(`<bad>${list.text}</bad>`));
-  assert.ok(m.CARD_WRITING_METHOD.includes(`<good>${list.repaired}</good>`));
+  assert.match(m.CARD_WRITING_METHOD, /never hide the whole set or independent members under one number/i);
+  assert.match(m.CARD_WRITING_METHOD, /one member hidden per review with all other members visible/i);
   assert.match(m.CARD_WRITING_METHOD, /stable display order is not semantic order/i);
 });
 
@@ -249,7 +249,8 @@ const noHint = "The fictional Zeta sensor's calibration signal color is {{c1::bl
 const leakingHint = "The fictional Zeta sensor's calibration signal is {{c1::blue::blue}}.";
 
 test('shared method contrasts a useful optional type hint, a clear no-hint cue and an answer-leaking hint', () => {
-  for (const text of [hinted, noHint, leakingHint]) assert.ok(m.CARD_WRITING_METHOD.includes(text), text);
+  assert.match(m.CARD_WRITING_METHOD, /optional hints.*omit when clear/i);
+  assert.match(m.CARD_WRITING_METHOD, /hints cannot replace subject\/conditions or leak through synonyms, initials or grammar/i);
   assert.match(m.CARD_WRITING_METHOD, /no hint quota/i);
   assert.match(m.CARD_WRITING_METHOD, /unsupported reason/i);
 });

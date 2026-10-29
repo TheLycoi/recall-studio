@@ -1,5 +1,14 @@
 # Changelog
 
+## Recall Studio 0.1.22 beta: simpler writer and verification-label removal
+
+- Shorten the shared writing method from 23,170 to 13,260 characters. Keep all twenty applicability rules, source boundaries, variant-field guidance and independent audit/repair stages.
+- Group related retrieval targets before planning locks note boundaries. Prefer two or three distinct cloze numbers per coherent note without rejecting useful single-deletion or larger-list notes. Preserve all selected fact links.
+- Allow focused term-definition retrieval in both directions with separate cloze numbers and a visible identifying cue for each review. Do not force ambiguous reversals.
+- Remove verification-status badges and warnings based only on missing or stale checks. Keep actual findings, source conflicts, source quotes, explicit warning acceptance and stale-export safeguards.
+- Preserve plugin ID `review-inbox`, existing cards, settings, history and receipts. No storage migration, automatic export or background rewrite of existing cards.
+- Verification: 1,828 tests pass in the combined source suite. Seven bounded live-model requests covered two-/three-review generation and seven audit cases. This is a small sample, not a quality guarantee or an Anki export test.
+
 ## Recall Studio 0.1.21 release candidate: highlight writer
 
 - Review all twenty formulation rules for applicability in the shared writing method. Do not invent learner understanding, personal associations or unavailable visual aids.

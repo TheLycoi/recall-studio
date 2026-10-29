@@ -37,16 +37,51 @@ for(const kind of ['qa','cloze'])test(`invalid ${kind} reports the existing refu
   assert.match(result.error,/Cannot export/);assert.equal(result.notes,0);
   assert.throws(()=>exportCandidates([h],ids),{message:result.error});
 });
-test('audits are current-content warnings, never factual certification',()=>{
+test('legacy and edited cards without concrete findings have no status-only warning',()=>{
   const {h}=fixture();const c=h.cards[0];h.cards=[c];const ids=new Set([c.id]);
-  assert.match(summarizeExport([h],ids).warnings[0].reasons.join(' '),/no staged audit/);
+  assert.deepEqual(summarizeExport([h],ids).warnings,[]);
   c.generation={batchId:'g',planId:'P',factIds:['F'],audit:{status:'verified',reason:'Supported',content:cardAuditContent(c),sourceKey:generationSourceKey(h)}};
-  assert.equal(summarizeExport([h],ids).warnings.length,0);
-  c.front='Which material stores heat?';
-  assert.match(summarizeExport([h],ids).warnings[0].reasons.join(' '),/card changed/);
+  assert.deepEqual(summarizeExport([h],ids).warnings,[]);
+  c.front='Amber stores which form of energy?';
+  assert.deepEqual(summarizeExport([h],ids).warnings,[]);
   h.text='Different capture';
-  assert.match(summarizeExport([h],ids).warnings[0].reasons.join(' '),/capture changed/);
+  assert.deepEqual(summarizeExport([h],ids).warnings,[]);
 });
+for(const status of ['failed','unverified'])test(`${status} concrete findings survive wording and source changes without status labels`,()=>{
+  const {h}=fixture();const c=h.cards[0];h.cards=[c];const ids=new Set([c.id]);
+  const reason='The capture does not establish that Amber stores heat.';
+  c.generation={batchId:'g',planId:'P',factIds:['F'],audit:{status,reason,content:cardAuditContent(c),sourceKey:generationSourceKey(h)}};
+  for(const change of ['none','card','capture']) {
+    if(change==='card')c.front='Amber stores which form of energy?';
+    if(change==='capture')h.text='Different capture';
+    const before=structuredClone(h);
+    assert.deepEqual(summarizeExport([h],ids).warnings,[{cardId:c.id,source:h.sourceTitle,reasons:[reason]}]);
+    assert.deepEqual(h,before);
+  }
+});
+for(const reason of ['', 'Unverified', 'Audit unverified', 'Independent audit has not run.', 'Explicit rewrite; original staged audit retained on the source card.'])test(`status-only audit reason does not warn: ${reason}`,()=>{
+  const {h}=fixture();const c=h.cards[0];h.cards=[c];
+  c.generation={batchId:'g',planId:'P',factIds:['F'],audit:{status:'unverified',reason,content:cardAuditContent(c),sourceKey:generationSourceKey(h)}};
+  assert.deepEqual(summarizeExport([h],new Set([c.id])).warnings,[]);
+});
+test('source-conflict details remain export warnings from the card’s own saved batch',()=>{
+  const {h}=fixture();const c=h.cards[0];h.cards=[c];const ids=new Set([c.id]);
+  c.generation={batchId:'old',planId:'P1',factIds:['F1'],audit:{status:'verified',reason:'Supported',content:cardAuditContent(c),sourceKey:generationSourceKey(h)}};
+  h.generation={version:1,id:'new',inputKey:'',instruction:'',phase:'complete',preparation:{facts:[],plan:[],conflicts:[{factIds:['F1'],quote:'Unrelated batch quote',reason:'Other batch concern'}],exclusions:[],omissions:[]}};
+  h.generationHistory=[{version:1,id:'old',inputKey:'',instruction:'',phase:'complete',preparation:{facts:[],plan:[],conflicts:[{factIds:['F1'],quote:'Exact <b>quote</b>',reason:'The source contradicts this claim.'},{factIds:['F2'],quote:'Other fact',reason:'Other fact concern'}],exclusions:[],omissions:[]}}];
+  const before=structuredClone(h);
+  assert.deepEqual(summarizeExport([h],ids).warnings,[{cardId:c.id,source:h.sourceTitle,reasons:['Source conflict: The source contradicts this claim. Quote: “Exact <b>quote</b>”']}]);
+  assert.deepEqual(h,before);
+});
+
+test('legacy cards retain whole-capture conflicts as warnings without inventing fact-ID matches',()=>{
+  const {h}=fixture();const c=h.cards[0];h.cards=[c];
+  h.generationHistory=[{version:1,id:'old',inputKey:'',instruction:'',phase:'complete',preparation:{facts:[],plan:[],conflicts:[{quote:'Amber stores heat.',reason:'Earlier unresolved capture conflict.'},{factIds:['F1'],quote:'Other fact',reason:'No matching card provenance'}],exclusions:[],omissions:[]}}];
+  const before=structuredClone(h);
+  assert.deepEqual(summarizeExport([h],new Set([c.id])).warnings,[{cardId:c.id,source:h.sourceTitle,reasons:['Source conflict: Earlier unresolved capture conflict. Quote: “Amber stores heat.”']}]);
+  assert.deepEqual(h,before);
+});
+
 test('current check issues and cross-source interference are advisory warnings',()=>{
   const {h,ids}=fixture();const c=h.cards[0];
   c.userCheck={content:cardContent(c,h),at:'fixture',issues:['Needs a more precise cue']};

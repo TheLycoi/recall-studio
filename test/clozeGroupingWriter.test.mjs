@@ -60,10 +60,10 @@ before(async () => {
   }
 });
 
-test('every assembled stage carries v8 grouping without weakening focused reviews or reciprocal cues', () => {
-  assert.equal(m.WRITING_METHOD_ID, 'recall-writing-method-v8');
+test('every assembled stage carries v9 grouping without weakening focused reviews or reciprocal cues', () => {
+  assert.equal(m.WRITING_METHOD_ID, 'recall-writing-method-v9');
   for (const req of requests) {
-    assert.equal(req.system.split('<writing_method id="recall-writing-method-v8">').length, 2, req.label);
+    assert.equal(req.system.split('<writing_method id="recall-writing-method-v9">').length, 2, req.label);
     assert.equal(JSON.parse(req.user).rules, m.WRITING_METHOD_ID, req.label);
     const method = req.system.split('</writing_method>')[0];
     assert.match(method, /aim for two to three useful distinct cloze numbers per note/i, req.label);
@@ -89,11 +89,11 @@ test('every assembled stage carries v8 grouping without weakening focused review
 
 test('planner resolves same-sentence fragmentation before rows lock and retains every fact link', () => {
   const req = requests.find(r => r.label === 'preparation');
-  const task = req.system.split('</writing_method>')[1];
-  assert.match(task, /before locking plan rows.*same coherent sentence or context.*one row/i);
-  assert.match(task, /retain all.*factIds/i);
-  assert.match(task, /before locking.*near-identical sentence scaffolds.*only.*hidden span/i);
-  assert.match(task, /separately justified contexts.*separate rows/i);
+  const task = req.system;
+  assert.match(task, /same coherent sentence or context.*one planned row/i);
+  assert.match(task, /one note with all fact links/i);
+  assert.match(task, /do not emit near-identical sentence notes differing only in the hidden span/i);
+  assert.match(task, /separately justified contexts.*separate notes/i);
   assert.match(task, /exactly one card per row/i);
   const fields = m.toStrictSchema(req.schema).properties.plan.items.properties;
   assert.match(fields.factIds.description, /all.*fact IDs.*group/i);
@@ -102,7 +102,7 @@ test('planner resolves same-sentence fragmentation before rows lock and retains 
 
 for (const label of ['audit', 'final audit']) test(`${label} flags avoidable split-note duplication without repairing or dropping rows`, () => {
   const req = requests.find(r => r.label === label);
-  const task = req.system.split('</writing_method>')[1];
+  const task = req.system;
   assert.match(task, /flag avoidable split-note duplication/i);
   assert.match(task, /separately justified contexts.*not.*duplication/i);
   assert.match(task, /unresolved grouping.*held.*never drop a row or fact/i);

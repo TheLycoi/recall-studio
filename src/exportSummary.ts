@@ -1,14 +1,34 @@
-import type { Highlight } from "./model";
+import type { Card, GenerationAuditRecord, Highlight } from "./model";
 import { cardContent, currentCardCheck, exportCandidates, type ExportItem } from "./cardActions";
-import { cardAuditLabel, generationSourceKey } from "./generation";
+import { generationSourceKey, sourceConflictsForCard } from "./generation";
 import { lintCard, LINT_LABELS } from "./lint";
 import { countClozes } from "./util";
+
+/** Keep recorded concerns, not lifecycle messages or positive certification. */
+export function auditFinding(audit?: Pick<GenerationAuditRecord, "status" | "reason">): string {
+  if (!audit || audit.status === "verified") return "";
+  const reason = audit.reason.trim();
+  if (/^(?:audit )?(?:unverified|verified|failed)(?: \((?:no staged audit|card changed|capture changed)\))?\.?$/i.test(reason)) return "";
+  if (["Independent audit has not run.", "Explicit rewrite; original staged audit retained on the source card.", "Independent audit completed; see each candidate's verdict."].includes(reason)) return "";
+  return reason;
+}
+
+function sourceConflictFindings(card: Card, highlight: Highlight): string[] {
+  return [highlight.generation, ...(highlight.generationHistory ?? [])].flatMap(batch => {
+    if (!batch?.preparation) return [];
+    const conflicts = batch.id === card.generation?.batchId
+      ? sourceConflictsForCard(batch.preparation, card)
+      : batch.preparation.conflicts.filter(conflict => !conflict.factIds?.length);
+    return conflicts.map(conflict => `Source conflict: ${conflict.reason} Quote: “${conflict.quote}”`);
+  });
+}
 
 /** Invalidate an open confirmation on changes to wording, evidence, checks or destination. */
 export function exportSelectionKey(items: ExportItem[], settings: unknown, crossInterference: ReadonlyMap<string, string[]> = new Map()): string {
   return JSON.stringify([settings, items.map(({ card, highlight }) => [
     card.id, highlight.id, cardContent(card, highlight), generationSourceKey(highlight),
     card.status, highlight.status, highlight.archived, card.generation, card.userCheck, card.critiqueReason,
+    sourceConflictFindings(card, highlight),
     [...(crossInterference.get(card.id) ?? [])].sort(),
   ])]);
 }
@@ -43,11 +63,12 @@ export function summarizeExport(
       reasons.add(`${LINT_LABELS[id]}${policy}`);
     }
     if (crossInterference.has(card.id)) reasons.add(LINT_LABELS["cross-interference"]);
-    const audit = cardAuditLabel(card, highlight);
+    const finding = auditFinding(card.generation?.audit);
     const check = currentCardCheck(card, highlight);
-    if (!audit.startsWith("Audit verified") && (!check || check.issues.length || card.generation?.audit.status === "failed")) reasons.add(audit);
+    if (finding) reasons.add(finding);
+    for (const conflict of sourceConflictFindings(card, highlight)) reasons.add(conflict);
     if (card.critiqueReason) reasons.add(card.critiqueReason);
-    for (const issue of currentCardCheck(card, highlight)?.issues ?? []) reasons.add(issue);
+    for (const issue of check?.issues ?? []) reasons.add(issue);
     if (reasons.size) warnings.push({ cardId: card.id, source: highlight.sourceTitle, reasons: [...reasons] });
   }
   return { notes: items.length, tasks, warnings };

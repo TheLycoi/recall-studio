@@ -20,9 +20,8 @@ import { isPdfHighlight, liveCards, makeCard, pendingCards, type Card, type Card
 import { askInstruction } from "./modals";
 import { countClozes, fmtDate, locateQuote, splitFrontmatter, plainText } from "./util";
 import { describeError } from "./llm";
-import { cardAuditLabel } from "./generation";
 import { resolveCardEvidence } from "./cardEvidence";
-import { summarizeExport } from "./exportSummary";
+import { auditFinding, summarizeExport } from "./exportSummary";
 import { findCrossInterference, lintCard, LINT_LABELS, wrapCloze } from "./lint";
 import { DEFAULT_SETTINGS } from "./settings";
 import { applyExplicitRewrite, explicitRewriteAuthorization, rewriteCandidates } from "./explicitRewrite";
@@ -476,11 +475,9 @@ export class InboxView extends ItemView {
     if (h.status === "error" && h.error) left.createDiv({ cls: "wikilm-error", text: h.error });
     if (h.generation) {
       const g = h.generation;
-      const batchCards = h.cards.filter(c => c.generation?.batchId === g.id);
-      const audit = g.finalAudit ?? g.audit;
-      const auditStatus = audit?.status === "verified" && (!batchCards.length || batchCards.some(c => !cardAuditLabel(c, h).startsWith("Audit verified"))) ? "unverified" : audit?.status ?? "unverified";
-      left.createDiv({ cls: "wikilm-muted", text: `Generation ${g.phase} · ${g.preparation ? "Preparation saved" : "Preparation pending"} · ${g.drafts ? "Drafts saved privately" : "Writer pending"} · ${g.finalAudit ? "Final audit" : "Audit"} ${auditStatus}` });
-      if (audit && auditStatus !== "verified") left.createDiv({ cls: "wikilm-card-reason", text: audit.reason });
+      const finding = auditFinding(g.finalAudit ?? g.audit);
+      left.createDiv({ cls: "wikilm-muted", text: `Generation ${g.phase} · ${g.preparation ? "Preparation saved" : "Preparation pending"} · ${g.drafts ? "Drafts saved privately" : "Writer pending"}` });
+      if (finding) left.createDiv({ cls: "wikilm-card-reason", text: finding });
       if (g.blocked?.length) {
         left.createDiv({ cls: "wikilm-card-reason", text: `${g.blocked.length} held for retry; not editable or exportable.` });
         for (const held of g.blocked) {
@@ -583,9 +580,6 @@ export class InboxView extends ItemView {
     }
     if (c.status === "duplicate") meta.createSpan({ cls: "wikilm-badge wikilm-badge-duplicate", text: "Duplicate content" });
     if (c.edited) meta.createSpan({ cls: "wikilm-badge", text: "edited" });
-    const auditLabel = cardAuditLabel(c, h);
-    const auditBadge = meta.createSpan({ cls: "wikilm-badge", text: auditLabel });
-    auditBadge.title = c.generation?.audit.reason ?? "No independent staged audit is recorded for this card. Human review is still required.";
     // Render what the pipeline actually recorded rather than recomputing it:
     // the stored lintFailures are the ones lintMode acted on, so a recomputed
     // check could disagree with the status the card is sitting in.
@@ -616,11 +610,6 @@ export class InboxView extends ItemView {
       if (c.critiqueReason) {
         const b = meta.createSpan({ cls: "wikilm-badge wikilm-badge-critique", text: "critique" });
         b.title = c.critiqueReason;
-      }
-      const check = currentCardCheck(c, h);
-      if (check) {
-        const b = meta.createSpan({ cls: `wikilm-badge ${check.issues.length ? "wikilm-badge-warn" : "wikilm-badge-checked"}`, text: check.issues.length ? "checked · issues found" : "checked" });
-        b.title = check.issues.length ? check.issues.join("\n") : "User-requested check completed for this wording; no issues found.";
       }
     }
     const actions = top.createDiv({ cls: "wikilm-card-actions" });
@@ -674,7 +663,7 @@ export class InboxView extends ItemView {
       shownReasons.add(key);
       el.createDiv({ cls: "wikilm-card-reason", text });
     };
-    if (c.generation && !auditLabel.startsWith("Audit verified")) showReason(c.generation.audit.reason);
+    showReason(auditFinding(c.generation?.audit));
     const userCheck = currentCardCheck(c, h);
     if (userCheck?.issues.length) showReason(userCheck.issues.join(" · "));
 
@@ -699,10 +688,8 @@ export class InboxView extends ItemView {
     const details = parent.createEl("details", { cls: "wikilm-evidence" });
     details.createEl("summary", { text: "Evidence" });
     const evidence = resolveCardEvidence(h, c);
-    details.createDiv({ text: cardAuditLabel(c, h) });
     if (c.generation) {
       details.createDiv({ text: `Batch: ${c.generation.batchId} · Plan: ${c.generation.planId} · Facts: ${c.generation.factIds.join(", ")}` });
-      details.createDiv({ text: `Stored audit (${c.generation.audit.status}): ${c.generation.audit.reason}` });
     }
     if (evidence.state !== "resolved") {
       details.createDiv({ text: evidence.state === "legacy"
@@ -715,7 +702,7 @@ export class InboxView extends ItemView {
         details.createEl("blockquote", { cls: "wikilm-evidence-quote", text: fact.quote });
       }
     }
-    details.createDiv({ cls: "wikilm-muted", text: "Saved evidence, not a fresh source check. A model audit is not proof of correctness." });
+    details.createDiv({ cls: "wikilm-muted", text: "Saved evidence, not a fresh source check." });
     const source = details.createEl("button", { text: "Open source" });
     source.addEventListener("click", e => {
       e.stopPropagation();

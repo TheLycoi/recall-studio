@@ -57,12 +57,12 @@ for (const stage of ['prepareGeneration', 'writeGroundedCards', 'repairGeneratio
   assert.ok(f.calls.length);
   for (const req of f.calls) {
     assert.doesNotMatch(req.user + req.system, /LEGACY_/);
-    assert.ok(req.system.includes('<bad>After the stressor passes, negative feedback {{c1::reduces cortisol}}.</bad>'));
-    assert.ok(req.system.includes('<good>For cortisol, after the stressor passes, negative feedback {{c1::reduces cortisol}}.</good>'));
+    assert.match(req.system, /grammatical subject.*negative feedback.*specific system/i);
+    assert.match(req.system, /specific subject and requested relation visible/i);
     assert.match(req.system, /grammatical subject.*negative feedback.*specific system/i);
     assert.match(req.system, /shared entity words.*whole answer/i);
     assert.match(req.system, /cite exact visible words for the identifying cue AND requested relation/i);
-    assert.equal(req.system.split('<writing_method id="recall-writing-method-v8">').length, 2, 'one current versioned method per request');
+    assert.equal(req.system.split('<writing_method id="recall-writing-method-v9">').length, 2, 'one current versioned method per request');
     assert.match(req.system, /classification.*not.*beacon is/i);
     assert.match(req.system, /transition.*amber.*destination/i);
     assert.ok(req.system.includes('<bad>The fictional Orin beacon is {{c1::a coastal marker}}.</bad>'));
@@ -70,15 +70,15 @@ for (const stage of ['prepareGeneration', 'writeGroundedCards', 'repairGeneratio
     assert.match(req.system, /separately correct.*incorrect.*split/i);
     assert.match(req.system, /one member hidden per review.*stable display order/i);
     assert.match(req.system, /stable display order.*not.*semantic order/i);
-    assert.match(req.system, /learner prerequisites.*understand.*learn first/i);
+    assert.match(req.system, /learner prerequisites[\s\S]*understand.*learn first/i);
     assert.match(req.system, /imagery.*mnemonics.*graphic deletion.*learner/i);
     assert.match(req.system, /prior memories.*personal examples.*emotion/i);
     assert.match(req.system, /priority.*source.*dates/i);
     assert.doesNotMatch(req.system, /prefer.*complete-list retrieval|retrieve the complete short set/i);
     assert.match(req.system, /requested attribute, relation or process.*visible cue/i);
     assert.match(req.system, /hiding the whole predicate/i);
-    assert.match(req.system, /Cortisol is \{\{c1::a glucocorticoid released by the adrenal cortex through the HPA axis\}\}/);
-    assert.match(req.system, /Caching keeps \{\{c1::previous results available\}\}/);
+    assert.match(req.system, /never independent attributes or list members/i);
+    assert.match(req.system, /topic plus is\/keeps, hiding the whole predicate/i);
     assert.match(req.system, /before consulting hidden targets or plan context/i);
     for (const property of ['focused', 'precise', 'consistent', 'tractable', 'effortful', 'false positive', 'false negative', 'source fidelity', 'procedures']) assert.ok(req.system.toLowerCase().includes(property), `${req.label}: ${property}`);
     const schema = m.toStrictSchema(req.schema);
@@ -135,15 +135,15 @@ test('assembled highlight requests carry the approved method without changing ap
       assert.match(req.system, /material omissions.*exclusions.*omissions/i);
       assert.match(req.system, /do not omit useful foundational facts/i);
     }
-    const plannerTask = f.calls[0].system.split('</writing_method>')[1];
+    const plannerTask = f.calls[0].system;
     assert.match(plannerTask, /selected targets.*not exhaustive permutations/i);
     assert.match(plannerTask, /exclusions\/omissions/i);
   });
   await t.test('closed-list route and four-member examples use distinct reviews without a count gate', () => {
     for (const req of f.calls) {
-      assert.ok(req.system.includes('Pulmonary circuit route: {{c1::right ventricle}} → {{c2::lungs}} → {{c3::left atrium}}.'));
-      assert.ok(req.system.includes('Systemic circuit route: {{c1::left ventricle}} → {{c2::body}} → {{c3::right atrium}}.'));
-      assert.ok(req.system.includes('The kit contains exactly four tools: {{c1::a probe}}, {{c2::a clamp}}, {{c3::a gauge}} and {{c4::a brush}}.'));
+      assert.match(req.system, /ordered neighbours.*source supports that order/i);
+      assert.match(req.system, /individual ordered steps.*overlapping cue context/i);
+      assert.match(req.system, /coherent lists and enumerations may exceed three/i);
       assert.match(req.system, /one member hidden per review.*all other members visible.*stable display order/i);
       assert.match(req.system, /stable display order is not semantic order or rank/i);
       assert.match(req.system, /coherent lists and enumerations may exceed three/i);
@@ -151,18 +151,18 @@ test('assembled highlight requests carry the approved method without changing ap
     }
   });
   await t.test('planning allows coherent source-driven grouping without one row per member', () => {
-    assert.match(f.calls[0].system.split('</writing_method>')[1], /coherent route or closed list.*one row.*distinct cloze numbers.*not.*row per member/i);
+    assert.match(f.calls[0].system, /coherent route or closed list.*one row.*distinct cloze numbers.*not.*row per member/i);
   });
   await t.test('open examples may ask for examples and acceptable alternatives, never fixed missing members', () => {
     for (const req of f.calls) {
       assert.match(req.system, /explicitly example-seeking question with acceptable alternatives/i);
-      assert.ok(req.system.includes('What is one example of a tool the kit may contain?'));
+      assert.match(req.system, /example-seeking question with acceptable alternatives from the capture/i);
       assert.match(req.system, /arbitrary subsets.*unknown completeness cannot support a missing-member/i);
       assert.doesNotMatch(req.system, /use source-supported distinctions or hold with a reason|use a supported relation or hold\./i);
     }
     assert.match(f.calls[0].system.split('</writing_method>')[1], /example-seeking.*acceptable alternatives/i);
     for (const req of f.calls.filter(r => ['audit', 'final audit'].includes(r.label))) {
-      assert.match(req.system.split('</writing_method>')[1], /example-seeking.*acceptable alternatives/i);
+      assert.match(req.system, /example-seeking.*acceptable alternatives/i);
       assert.match(req.system, /different true completion.*unless.*explicitly.*examples/i);
     }
   });
@@ -204,7 +204,7 @@ test('assembled planner request separates attributes rather than locking a catch
   const f = fixture();
   await f.llm.prepareGeneration(f.h, [], await f.llm.generationContext());
   const req = f.calls.find(r => r.label === 'preparation');
-  assert.match(req.system, /classification, release site and release pathway.*independently cued/i);
+  assert.match(req.system, /independently cued attributes.*not one catch-all predicate/i);
   assert.match(req.system, /not one catch-all predicate/i);
   assert.match(req.system, /plan a visible relation label or directed question.*aspect alone is not a cue/i);
   assert.match(req.system, /one card per row/i);
@@ -217,11 +217,11 @@ for (const final of [false, true]) test(`assembled ${final ? 'final ' : ''}audit
   assert.match(req.system, /visibleCue first.*hiddenTargets.*targetContext.*plan/i);
   assert.match(req.system, /one defective review fails the card/i);
   assert.match(req.system, /in the reason.*quote.*visibleCue.*requested relation.*missing.*fail/i);
-  assert.match(req.system, /ordinal.*requested attribute, relation or process/i);
+  assert.match(req.system, /requested attribute, relation or process.*visible cue/i);
   assert.match(req.system, /source-supported.*failed/i);
   assert.match(req.system, /conflicts.*separat|separately.*conflicts/i);
   assert.match(req.system, /name the specific system.*visibleCue/i);
-  assert.match(req.system, /not.*grammatical subject.*hidden consequence/i);
+  assert.match(req.system, /not a grammatical subject or the hidden consequence/i);
 });
 
 for (const final of [false, true]) test(`assembled ${final ? 'final ' : ''}audit exposes the missing-system feedback contrast without hidden-answer context`, async () => {
@@ -238,10 +238,10 @@ for (const final of [false, true]) test(`assembled ${final ? 'final ' : ''}audit
     [{ ordinal: 1, visibleCue: 'For cortisol, after the stressor passes, negative feedback [...].', hiddenTargets: ['reduces cortisol'] }],
   ]);
   assert.match(req.system, /name the specific system.*visibleCue/i);
-  assert.match(req.system, /not.*grammatical subject.*hidden consequence/i);
+  assert.match(req.system, /not a grammatical subject or the hidden consequence/i);
 });
 
-for (const version of ['v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7']) test(`a ${version} method snapshot cannot certify a v8 generation batch`, async () => {
+for (const version of ['v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7', 'v8']) test(`a ${version} method snapshot cannot certify a v9 generation batch`, async () => {
   const f = fixture();
   const c = { language: 'English', instructions: '', examples: '', rules: `recall-writing-method-${version}` };
   const batch = { id: `${version}-batch`, version: 1, instruction: '', phase: 'auditing', preparation: structuredClone(f.preparation), writerOutput: [f.draft], drafts: [f.card] };

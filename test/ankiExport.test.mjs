@@ -614,61 +614,106 @@ test("a text export splits a one-field cloze model from Q&A rows by note type", 
 
 
 // P2 uses the real plugin entry point; each fixture explicitly decides the modal.
+for (const method of ['exportHighlights', 'exportAsTextFile']) {
+  test(`P2 ${method}: a clean legacy draft exports without warning consent`, async () => {
+    fake = makeAnki();
+    const plugin = await loadedPlugin(), card = qa({ status: 'pending' }), source = highlight([card]);
+    let decisions = 0;
+    await decideExport(modal => { decisions++; modal.close(); }, () => plugin[method]([source]));
+    assert.equal(decisions, 0);
+    assert.equal(card.status, 'exported');
+    assert.equal(card.exportAcceptance, undefined);
+    assert.equal(card.userCheck, undefined);
+    assert.equal(card.generation, undefined);
+    assert.equal(fake.notes.size, method === 'exportHighlights' ? 1 : 0);
+    assert.equal([...plugin.__app.__files.keys()].filter(path => path.endsWith('.txt')).length, method === 'exportAsTextFile' ? 1 : 0);
+  });
+}
 test('P2 cancellation sends nothing, changes no cards and does not persist', async () => {
-  fake = makeAnki(); const plugin = await loadedPlugin(); const c = qa({status:'pending'}), h = highlight([c]);
-  const before = structuredClone(h); let writes = 0; plugin.store.touch = () => writes++;
-  const prior = exportDecision; exportDecision = modal => modal.close();
+  fake = makeAnki(); const plugin = await loadedPlugin(); const c = qa({status:'pending',critiqueReason:'The cue omits its source condition.'}), h = highlight([c]);
+  const before = structuredClone(h); let writes = 0, decisions = 0; plugin.store.touch = () => writes++;
+  const prior = exportDecision; exportDecision = modal => { decisions++; modal.close(); };
   try { await plugin.exportHighlights([h]); } finally { exportDecision = prior; }
+  assert.equal(decisions, 1);
   assert.equal(fake.actions.length, 0); assert.deepEqual(h,before); assert.equal(writes,0);
 });
 test('P2 override records exact content separately without changing the model verdict', async () => {
   fake = makeAnki(); const plugin = await loadedPlugin(); const c = qa({status:'flagged',critiqueReason:'Ambiguous cue'}), h = highlight([c]);
-  let flushed = false; plugin.store.flush = async () => { flushed = true; };
-  await plugin.exportHighlights([h]);
+  let flushed = false, decisions = 0; plugin.store.flush = async () => { flushed = true; };
+  await decideExport(modal => { decisions++; clickExportButton(modal, 'Export despite warnings'); }, () => plugin.exportHighlights([h]));
+  assert.equal(decisions, 1);
   assert.equal(fake.notes.size,1); assert.equal(c.status,'exported');
   assert.equal(c.generation,undefined); assert.equal(c.critiqueReason,'Ambiguous cue');
   assert.ok(c.exportAcceptance.issues.some(x=>x.includes('Ambiguous cue')));
   assert.ok(c.exportAcceptance.content.includes(c.front)); assert.ok(flushed);
 });
 test('P2 card changes while the warning is open invalidate the decision', async () => {
-  fake = makeAnki(); const plugin = await loadedPlugin(); const c = qa({status:'pending'}),h=highlight([c]);
-  const prior = exportDecision; exportDecision = modal => { c.back='Changed answer'; modal.resolve(true); modal.close(); };
+  fake = makeAnki(); const plugin = await loadedPlugin(); const c = qa({status:'pending',critiqueReason:'The cue omits its source condition.'}),h=highlight([c]);
+  let decisions = 0;
+  const prior = exportDecision; exportDecision = modal => { decisions++; c.back='Changed answer'; modal.resolve(true); modal.close(); };
   try { await plugin.exportHighlights([h]); } finally { exportDecision=prior; }
+  assert.equal(decisions, 1);
   assert.equal(fake.actions.length,0); assert.equal(c.status,'pending'); assert.equal(c.exportAcceptance,undefined);
 });
 test('P2 changed selection or destination while the warning is open cannot broaden export', async () => {
   for (const change of ['selection','settings','archive']) {
-    fake=makeAnki(); const plugin=await loadedPlugin(); const c=qa({status:'pending'}),h=highlight([c]);
+    fake=makeAnki(); const plugin=await loadedPlugin(); const c=qa({status:'pending',critiqueReason:'The cue omits its source condition.'}),h=highlight([c]);
+    let decisions = 0;
     const prior=exportDecision; exportDecision=modal=>{
+      decisions++;
       if(change==='selection')h.cards.push(qa({id:'late',front:'Late card?'}));
       if(change==='settings')plugin.settings.defaultDeck='Other deck';
       if(change==='archive')h.archived=true;
       modal.resolve(true);modal.close();
     };
     try { await plugin.exportHighlights([h]); } finally {exportDecision=prior;}
+    assert.equal(decisions, 1, change);
     assert.equal(fake.actions.length,0,change); assert.equal(c.exportAcceptance,undefined,change);
   }
 });
-test('P2 current positive explicit check needs no warning; stale check does', async () => {
+test('P2 clean current and stale explicit checks skip warnings; a stale check with a concern needs acceptance', async () => {
   fake=makeAnki(); const plugin=await loadedPlugin(); const c=qa({front:'Spacing practice: what separates reviews?',back:'interval',status:'pending'}),h=highlight([c]);
   // Same serialization as cardContent: exact card, source context and siblings.
   c.userCheck={content:JSON.stringify([c.kind,c.front,c.back,c.text,c.extra,h.text,h.before,h.after,h.sourcePath,h.sourceTitle,h.heading,h.instruction,[]]),at:'fixture',issues:[]};
+  const savedCheck = structuredClone(c.userCheck);
   const before=exportDialogs.length;await plugin.exportHighlights([h]);assert.equal(exportDialogs.length,before);
+  assert.equal(c.status, 'exported'); assert.equal(c.exportAcceptance, undefined);
   const stale=qa({id:'stale',status:'pending',userCheck:c.userCheck});const hs=highlight([stale]);
-  await plugin.exportHighlights([hs]);assert.equal(exportDialogs.length,before+1);
+  await plugin.exportHighlights([hs]);assert.equal(exportDialogs.length,before);
+  assert.equal(stale.status, 'exported'); assert.equal(stale.exportAcceptance, undefined);
+  assert.deepEqual(c.userCheck, savedCheck); assert.deepEqual(stale.userCheck, savedCheck);
+  const warned = qa({ id: 'stale-warned', status: 'pending', userCheck: c.userCheck, critiqueReason: 'The cue omits its source condition.' }), hw = highlight([warned]);
+  fake = makeAnki();
+  let decisions = 0;
+  await decideExport(modal => {
+    decisions++;
+    assert.deepEqual(modal.summary.warnings.map(warning => warning.cardId), [warned.id]);
+    assert.ok(visibleText(modal.contentEl).includes(warned.critiqueReason));
+    clickExportButton(modal, 'Export despite warnings');
+  }, () => plugin.exportHighlights([hw]));
+  assert.equal(decisions, 1); assert.equal(exportDialogs.length, before + 1);
+  assert.equal(warned.status, 'exported'); assert.equal(fake.notes.size, 1);
+  assert.deepEqual(warned.exportAcceptance.issues, [warned.critiqueReason]);
+  assert.deepEqual(warned.userCheck, savedCheck);
 });
 test('P2 mixed selection reports only selected warnings and preserves partial receipts', async () => {
   fake=makeAnki();const plugin=await loadedPlugin();const a=qa({id:'one',status:'pending'}),b=qa({id:'two',status:'pending'}),h=highlight([a,b]);
-  await plugin.exportHighlights([h],new Set(['one']));const d=exportDialogs.at(-1);
+  let d, decisions = 0;
+  await decideExport(modal => { decisions++; d = modal; clickExportButton(modal, 'Export despite warnings'); }, () => plugin.exportHighlights([h],new Set(['one'])));
+  assert.equal(decisions, 1);
   assert.equal(d.summary.notes,1);assert.deepEqual(d.summary.warnings.map(w=>w.cardId),['one']);
   assert.equal(a.status,'exported');assert.equal(b.status,'pending');assert.equal(b.exportAcceptance,undefined);
-  const receipt=a.ankiNoteId;await plugin.exportHighlights([h],new Set(['two']));
+  const receipt=a.ankiNoteId;
+  await decideExport(modal => { decisions++; clickExportButton(modal, 'Export despite warnings'); }, () => plugin.exportHighlights([h],new Set(['two'])));
+  assert.equal(decisions, 2);
   assert.equal(a.ankiNoteId,receipt);assert.equal(b.status,'pending');assert.equal(b.ankiNoteId,undefined);assert.ok(b.exportAcceptance);
 });
 test('P2 cancelled text export writes no files and records no acceptance', async () => {
-  const plugin=await loadedPlugin();const c=qa({status:'pending'}),h=highlight([c]);const before=[...plugin.__app.__files];
-  const prior=exportDecision;exportDecision=modal=>modal.close();
+  const plugin=await loadedPlugin();const c=qa({status:'pending',critiqueReason:'The cue omits its source condition.'}),h=highlight([c]);const before=[...plugin.__app.__files];
+  let decisions = 0;
+  const prior=exportDecision;exportDecision=modal=>{ decisions++; modal.close(); };
   try{await plugin.exportAsTextFile([h]);}finally{exportDecision=prior;}
+  assert.equal(decisions, 1);
   assert.deepEqual([...plugin.__app.__files],before);assert.equal(c.exportAcceptance,undefined);
 });
 
@@ -751,14 +796,16 @@ for (const method of ['exportHighlights', 'exportAsTextFile']) {
         };
         const started = barrier(), release = barrier();
         if (phase === 'flush') plugin.store.flush = async () => { started.resolve(); await release.promise; };
-        let touches = 0;
+        let touches = 0, decisions = 0;
         plugin.store.touch = () => touches++;
         const exporting = decideExport(modal => {
+          decisions++;
           if (phase === 'dialog') mutate();
           clickExportButton(modal, 'Export despite warnings');
         }, () => plugin[method]([source], new Set([card.id])));
         if (phase === 'flush') { await started.promise; mutate(); release.resolve(); }
         await exporting;
+        assert.equal(decisions, 1);
         assert.equal(fake.actions.length, 0);
         assert.equal([...plugin.__app.__files.keys()].filter(path => path.endsWith('.txt')).length, 0);
         assert.equal(card.status, 'pending');
@@ -775,21 +822,24 @@ for (const method of ['exportHighlights', 'exportAsTextFile']) {
         fake = makeAnki();
         const plugin = await loadedPlugin();
         const card = qa({ status: 'pending' }), source = highlight([card], { topicPath: change === 'topic-added' ? undefined : 'topics/Original.md' });
+        if (phase === 'dialog') card.critiqueReason = 'The cue omits its source condition.';
         const payload = () => production.buildNote(card, source, { settings: plugin.settings, vaultName: plugin.__app.vault.getName(), deck: plugin.settings.defaultDeck });
         const initial = payload(), started = barrier(), release = barrier();
         const mutate = () => {
           if (change === 'vault-name') plugin.__app.vault.getName = () => 'Renamed Vault';
           else source.topicPath = change === 'topic-removed' ? undefined : 'topics/Changed.md';
         };
-        let touches = 0;
+        let touches = 0, decisions = 0;
         plugin.store.touch = () => touches++;
         if (phase === 'flush') plugin.store.flush = async () => { started.resolve(); await release.promise; };
         const exporting = decideExport(modal => {
+          decisions++;
           if (phase === 'dialog') mutate();
           clickExportButton(modal, 'Export despite warnings');
         }, () => plugin[method]([source]));
         if (phase === 'flush') { await started.promise; mutate(); release.resolve(); }
         await exporting;
+        assert.equal(decisions, phase === 'dialog' ? 1 : 0);
         assert.notDeepEqual(initial, payload(), 'The changed provenance affects the actual final note');
         assert.equal(fake.actions.length, 0);
         assert.equal([...plugin.__app.__files.keys()].filter(path => path.endsWith('.txt')).length, 0);
@@ -862,6 +912,7 @@ for (const method of ['exportHighlights', 'exportAsTextFile']) {
     fake = makeAnki();
     const plugin = await loadedPlugin();
     const { card, source } = realStoreFixture(plugin);
+    card.critiqueReason = 'The cue omits its source condition.';
     const started = barrier(), release = barrier();
     const adapter = plugin.__app.vault.adapter, write = adapter.write;
     let first = true;
@@ -869,16 +920,22 @@ for (const method of ['exportHighlights', 'exportAsTextFile']) {
       if (first) { first = false; started.resolve(); await release.promise; }
       return write(path, data);
     };
-    const exporting = plugin[method]([source]);
+    let decisions = 0;
+    const exporting = decideExport(modal => {
+      decisions++;
+      clickExportButton(modal, 'Export despite warnings');
+    }, () => plugin[method]([source]));
     await started.promise;
     const unloading = plugin.onunload();
     release.resolve();
     await exporting;
     await unloading;
+    assert.equal(decisions, 1);
     assert.equal(fake.actions.length, 0);
     assert.equal([...plugin.__app.__files.keys()].filter(path => path.endsWith('.txt')).length, 0);
     assert.equal(card.status, 'pending');
     assert.ok(card.exportAcceptance);
+    assert.deepEqual(card.exportAcceptance.issues, [card.critiqueReason]);
     assert.equal(plugin.store.hasUnsavedChanges, false);
     assert.equal(plugin.store.closed, true);
     assert.equal(plugin.__app.__files.get('Review Inbox/inbox.json'), JSON.stringify(plugin.store.data, null, 2));
