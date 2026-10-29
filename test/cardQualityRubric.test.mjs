@@ -74,7 +74,7 @@ const criteria = [
   /not invalid.*who or is/i,
   /(?:never|do not) invent.*mnemonics.*personal facts.*media/i,
   /no (?:fixed )?card.*quota/i,
-  /prefer one to three distinct cloze numbers per note/i,
+  /aim for two to three useful distinct cloze numbers per note/i,
   /coherent lists and enumerations may exceed three/i,
   /never reject.*solely.*cloze count/i,
   /optional hints.*one to three words/i,
