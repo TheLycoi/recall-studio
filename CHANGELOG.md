@@ -1,5 +1,14 @@
 # Changelog
 
+## Recall Studio 0.1.23 beta: source-grounded mixed-format writing
+
+- Ship writer method v11, the better-performing baseline in the bounded Q&A/cloze comparison. Keep both formats, including closed-list notes that hide one member per review. Do not include the unsuccessful v12 prompt revision.
+- Decompose supported facts before grouping, preserve source quotes and exact numbers/units, and teach the writer with a schema-matched example inside the existing request.
+- Require audit coverage for every rendered review. Preserve active source holds through repair/retry and reject duplicate preparation targets before writing.
+- Keep accepted length/framing findings tied to exact wording so repeated export checks do not revive resolved warnings. Preserve real source and syntax failures, explicit export consent and meaningful list/alternative-answer exceptions.
+- Preserve plugin ID, settings, stored cards, history and receipts. No automatic Anki export, study-data migration or rewrite of existing cards.
+- The live comparison used a small, unblinded sample. Mixed output performed better on the selected passage, but compound planning and answer giveaways still occurred. Human review and independent auditing remain necessary; this is not a broad reliability or learning-outcome claim.
+
 ## Recall Studio 0.1.22 beta: simpler writer and verification-label removal
 
 - Shorten the shared writing method from 23,170 to 13,260 characters. Keep all twenty applicability rules, source boundaries, variant-field guidance and independent audit/repair stages.

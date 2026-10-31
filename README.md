@@ -9,26 +9,28 @@ The repository and BRAT target are `TheLycoi/recall-studio`, formerly
 `TheLycoi/review-inbox`. Plugin ID `review-inbox` and the default data folder
 `Review Inbox/` stay unchanged.
 
-## 0.1.22 beta: simpler writing and fewer labels
+## 0.1.23 beta: source-grounded mixed-format writing
 
-One shared writing method guides preparation, writing, audit and repair. This
-release shortens it from 23,170 to 13,260 characters while retaining the twenty-rule
-applicability checklist. Prior understanding, personal associations and visual
-aids still need human judgment or supplied input.
+Writer method v11 supports Q&A and cloze cards. Closed lists can hide one member
+per review while the others remain visible; selected meanings and relationships
+can use direct questions. Grouped notes and reversed term-definition retrieval
+still need a meaningful cue for every rendered review.
 
-Related targets can share a coherent note with separate cloze numbers, usually
-two or three. One useful deletion is valid; coherent lists may need more than
-three. Supported term-definition pairs can test both directions when each review
-has a clear identifying cue. These are writing preferences, not numerical gates.
+Preparation decomposes supported facts before grouping. A compact worked example
+shows the writer how to preserve source quotes, exact values, selected fact links
+and the output schema. Audit coverage is required for every rendered review.
+Source holds survive retries, duplicate plan targets are rejected, and accepted
+soft findings remain tied to the wording and source that were checked.
 
-Verification-status badges and status-only export warnings are removed. Actual
-findings, source conflicts and saved evidence remain. Warning overrides still
-require explicit acceptance, and generation never exports cards automatically.
+The earlier removal of verification-status decoration remains. Actual findings,
+source conflicts and saved evidence stay available. Export still requires an
+explicit user action; existing cards are not rewritten in the background.
 
-The selected highlight remains the answer-evidence boundary. Existing cards,
-settings, history, export receipts and dependency pins stay unchanged. A small
-live-model sample passed grouping and audit checks; it does not establish broad
-model reliability, medical accuracy or learning outcomes.
+This release retains the better-performing baseline from a small, unblinded Luna
+comparison, not the unsuccessful v12 revision. Compound planning and answer
+leakage remain possible. The results do not establish broad model reliability,
+medical accuracy or learning outcomes. Plugin identity and saved settings,
+content, history, export receipts and dependency versions stay unchanged.
 
 ## Workflow
 
