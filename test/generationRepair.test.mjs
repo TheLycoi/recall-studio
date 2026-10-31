@@ -1,3 +1,4 @@
+import { auditVerdict } from './auditFixture.mjs';
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
@@ -31,7 +32,7 @@ function fixture({ defect = true, legacyAudit = true, final = 'verified', repair
     if (req.label === 'grounded cards') return req.schema.parse({ cards: [defect ? poor : good] });
     if (req.label === 'generation repair') return req.schema.parse({ cards: [repair ?? good] });
     const status = req.label === 'audit' && defect ? 'failed' : final;
-    return req.schema.parse({ verdicts: payload.cards.map((c, index) => ({ index, cardId: c.id, status, reason: status === 'failed' ? 'The front omits the subject and essential calibration condition; Extra does not fix the cue.' : 'Synthetic verdict, not real-model quality evidence.' })) });
+    return req.schema.parse({ verdicts: payload.cards.map((c, index) => (auditVerdict(c, { index, cardId: c.id, status, reason: status === 'failed' ? 'The front omits the subject and essential calibration condition; Extra does not fix the cue.' : 'Synthetic verdict, not real-model quality evidence.' }))) });
   } };
   llm.codex = backend;
   const plugin = { settings, llm, store: { all: () => [h], touch() {}, async flush() { saves.push(structuredClone(h)); }, hasUnsavedChanges: false }, refreshStatusBar() {} };
@@ -46,13 +47,13 @@ for (const missing of [false, true]) for (const duplicate of [false, true]) test
   f.backend.complete = async req => {
     f.calls.push(req);
     const u = JSON.parse(req.user);
-    if (req.label === 'preparation') return req.schema.parse({ ...f.p, plan: [f.p.plan[0], { ...f.p.plan[0], id: 'P2' }] });
+    if (req.label === 'preparation') return req.schema.parse({ ...f.p, plan: [f.p.plan[0], { ...f.p.plan[0], id: 'P2', aspect: 'preceding calibration action' }] });
     if (req.label === 'grounded cards') return req.schema.parse({ cards: [f.good, second] });
     if (req.label === 'generation repair') throw Error('Synthetic repair unavailable');
     inputs.push(u);
     const duplicated = u.cards.some((c, i) => u.cards.some((other, j) => i !== j && other.front === c.front) || u.existing.some(other => other.front === c.front));
-    return req.schema.parse({ verdicts: u.cards.flatMap((c, index) => !retry && missing && !index ? [] : [{ index, cardId: c.id,
-      status: !retry && !index ? 'unverified' : duplicated ? 'failed' : 'verified', reason: duplicated ? 'Duplicate current sibling cue' : 'Synthetic distinct cue' }]) });
+    return req.schema.parse({ verdicts: u.cards.flatMap((c, index) => !retry && missing && !index ? [] : [auditVerdict(c, { index, cardId: c.id,
+      status: !retry && !index ? 'unverified' : duplicated ? 'failed' : 'verified', reason: duplicated ? 'Duplicate current sibling cue' : 'Synthetic distinct cue' })]) });
   };
   await f.g.run(f.h);
   assert.equal(f.h.cards.length, 1);
@@ -145,7 +146,7 @@ for (const failure of ['missing', 'duplicate', 'provider']) test(`${failure} fin
     f.calls.push(req);
     if (failure === 'provider') throw Error('synthetic unavailable');
     const c = JSON.parse(req.user).cards[0];
-    const v = { index: 0, cardId: c.id, status: 'verified', reason: 'Synthetic.' };
+    const v = auditVerdict(c, { index: 0, cardId: c.id, status: 'verified', reason: 'Synthetic.' });
     return req.schema.parse({ verdicts: failure === 'missing' ? [] : [v, v] });
   };
   await f.g.run(f.h);
@@ -175,7 +176,7 @@ test('explicit retry retains identity and original while authorizing one new rep
   assert.equal(f.h.cards.length, 0);
   const id = f.h.generation.drafts[0].id;
   const complete = f.backend.complete;
-  f.backend.complete = async req => req.label.includes('audit') ? (f.calls.push(req), req.schema.parse({ verdicts: JSON.parse(req.user).cards.map((c, index) => ({ index, cardId: c.id, status: 'verified', reason: 'Synthetic retry.' })) })) : req.label === 'generation repair' ? (f.calls.push(req), req.schema.parse({ cards: [{ ...f.good, front: 'Zeta sensor calibration: why disconnect power before attaching the reference cable?' }] })) : complete(req);
+  f.backend.complete = async req => req.label.includes('audit') ? (f.calls.push(req), req.schema.parse({ verdicts: JSON.parse(req.user).cards.map((c, index) => (auditVerdict(c, { index, cardId: c.id, status: 'verified', reason: 'Synthetic retry.' }))) })) : req.label === 'generation repair' ? (f.calls.push(req), req.schema.parse({ cards: [{ ...f.good, front: 'Zeta sensor calibration: why disconnect power before attaching the reference cable?' }] })) : complete(req);
   f.g.kick = () => {};
   f.g.retry(f.h);
   await f.g.run(f.h);
@@ -242,7 +243,7 @@ test('final audit includes unchanged siblings and can hold a newly interfering r
       f.calls.push(req);
       const payload = JSON.parse(req.user);
       assert.equal(payload.cards.length, 2, 'audit all candidates, not only the repair');
-      return req.schema.parse({ verdicts: payload.cards.map((c, index) => ({ index, cardId: c.id, status: index === 0 ? 'failed' : 'verified', reason: index === 0 ? req.label === 'final audit' ? 'Repair now interferes with unchanged sibling' : 'Missing context' : 'Synthetic clean sibling' })) });
+      return req.schema.parse({ verdicts: payload.cards.map((c, index) => (auditVerdict(c, { index, cardId: c.id, status: index === 0 ? 'failed' : 'verified', reason: index === 0 ? req.label === 'final audit' ? 'Repair now interferes with unchanged sibling' : 'Missing context' : 'Synthetic clean sibling' }))) });
     }
     return complete(req);
   };
@@ -290,14 +291,14 @@ test('explicit partial retry checks current published sibling wording without re
   f.backend.complete = async req => {
     f.calls.push(req);
     const payload = JSON.parse(req.user);
-    if (req.label === 'preparation') return req.schema.parse({ ...f.p, plan: [f.p.plan[0], { ...f.p.plan[0], id: 'P2' }] });
+    if (req.label === 'preparation') return req.schema.parse({ ...f.p, plan: [f.p.plan[0], { ...f.p.plan[0], id: 'P2', aspect: 'preceding calibration action' }] });
     if (req.label === 'grounded cards') return req.schema.parse({ cards: [f.poor, { ...f.good, planId: 'P2' }] });
     if (req.label === 'generation repair') {
       if (phase === 'retry') assert.ok(payload.existing.some(c => c.front === 'New user sibling wording'), 'repair sees the current sibling');
       return req.schema.parse({ cards: [{ ...f.good, ...(phase === 'retry' ? { front: 'Zeta sensor calibration: why disconnect power before attaching the reference cable?' } : {}) }] });
     }
     if (phase === 'retry') assert.ok(payload.cards.some(c => c.front === 'New user sibling wording'), 'final audit sees the current sibling');
-    return req.schema.parse({ verdicts: payload.cards.map((c, index) => ({ index, cardId: c.id, status: phase === 'first' && index === 0 ? 'failed' : 'verified', reason: 'Synthetic test verdict.' })) });
+    return req.schema.parse({ verdicts: payload.cards.map((c, index) => (auditVerdict(c, { index, cardId: c.id, status: phase === 'first' && index === 0 ? 'failed' : 'verified', reason: 'Synthetic test verdict.' }))) });
   };
   await f.g.run(f.h);
   assert.equal(f.h.cards.length, 1);

@@ -1,3 +1,4 @@
+import { auditVerdict } from './auditFixture.mjs';
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -42,7 +43,7 @@ function fixture(status = 'verified', poorCue = false) {
     if (req.label === 'preparation') return JSON.stringify(preparation);
     if (req.label === 'grounded cards') return JSON.stringify({ cards: drafts });
     if (req.label === 'generation repair') return JSON.stringify({ cards: payload.candidates.map(c => ({ ...drafts.find(d => d.planId === c.planId), ...(c.planId === 'P2' ? rationale : {}) })) });
-    if (req.label === 'audit' || req.label === 'final audit') return JSON.stringify({ verdicts: payload.cards.map((c, index) => ({ index, cardId: c.id, status, reason: status === 'failed' ? 'The source supports the answer, but the cue does not identify its subject.' : 'Synthetic transport verdict, not a model quality judgment.' })) });
+    if (req.label === 'audit' || req.label === 'final audit') return JSON.stringify({ verdicts: payload.cards.map((c, index) => (auditVerdict(c, { index, cardId: c.id, status, reason: status === 'failed' ? 'The source supports the answer, but the cue does not identify its subject.' : 'Synthetic transport verdict, not a model quality judgment.' }))) });
     if (req.label === 'cards') return JSON.stringify({ cards: [rationale] });
     if (req.label === 'verdicts') return JSON.stringify({ verdicts: payload.cards.map((c, index) => ({ index, verdict: ['keep', 'revise', 'drop'][index], reason: 'Synthetic verdict for schema compatibility.', bloom: 'remember', kind: 'qa', ...(index === 1 ? rationale : { front: '', back: '', text: '' }) })) });
     if (req.label === 'card') return JSON.stringify(rationale);

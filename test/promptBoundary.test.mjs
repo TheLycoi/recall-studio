@@ -59,7 +59,10 @@ for (const method of ['writeCards', 'critiqueCards', 'rewriteCard']) test(`${met
     assert.ok(!request.user.includes(f.history[0].cards[0].front), "Retired history is not disclosed");
     assert.deepEqual(payload.existing, f.existing.map(cardData));
   }
-  if (method === 'critiqueCards') assert.deepEqual(payload.cards, f.h.cards.slice(0, 2).map((c, index) => ({ index, ...cardData(c) })));
+  if (method === 'critiqueCards') {
+    assert.deepEqual(payload.cards.map(({ reviews, checks, ...c }) => c), f.h.cards.slice(0, 2).map((c, index) => ({ index, ...cardData(c) })));
+    assert.ok(payload.cards.every(c => Array.isArray(c.reviews) && Array.isArray(c.checks)));
+  }
   if (method === 'rewriteCard') {
     assert.deepEqual(payload.currentCard, cardData(f.h.cards[0]));
     assert.deepEqual(payload.siblings, [cardData(f.h.cards[1])]);

@@ -1,3 +1,4 @@
+import { auditVerdict } from './auditFixture.mjs';
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
@@ -24,7 +25,7 @@ function fixture(source, text) {
     calls.push(req.label);
     if (req.label === 'preparation') return req.schema.parse(preparation);
     if (req.label === 'grounded cards') return req.schema.parse({ cards: [{ planId: 'P1', factIds: ['F1'], kind: 'cloze', front: '', back: '', text }] });
-    return req.schema.parse({ verdicts: JSON.parse(req.user).cards.map((card, index) => ({ index, cardId: card.id, status: 'verified', reason: 'Synthetic positive audit, not a model judgment.' })) });
+    return req.schema.parse({ verdicts: JSON.parse(req.user).cards.map((card, index) => (auditVerdict(card, { index, cardId: card.id, status: 'verified', reason: 'Synthetic positive audit, not a model judgment.' }))) });
   } };
   const plugin = { settings, llm, store: { all: () => [h], touch() {}, async flush() {}, hasUnsavedChanges: false }, refreshStatusBar() {} };
   return { h, old, calls, preparation, plugin, g: new m.Generator(plugin) };

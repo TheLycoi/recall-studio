@@ -4,7 +4,8 @@
 // and so cannot be.
 import type { CardRevision, InboxData } from "./model";
 import { z } from "zod";
-import { PreparationOut, AuditOut, GenerationProvenanceOut } from "./generation";
+import { PreparationOut, AuditOut, GenerationProvenanceOut, ScopedSourceFindingOut } from "./generation";
+import { QualityAcceptanceOut } from "./qualityAcceptance";
 
 const AuditStatus = z.enum(["verified", "unverified", "failed"]);
 
@@ -15,6 +16,7 @@ const CardRecord = z.object({
   srNote: z.string().optional(), createdAt: z.string().optional(), critiqueReason: z.string().optional(),
   bloom: z.string().optional(), critiqueRan: z.boolean().optional(),
   lintFailures: z.array(z.string()).optional(), lintWarnings: z.array(z.string()).optional(),
+  qualityAcceptance: QualityAcceptanceOut.optional(),
   userCheck: z.object({ content: z.string(), at: z.string(), issues: z.array(z.string()) }).optional(),
   exportAcceptance: z.object({ content: z.string(), at: z.string(), issues: z.array(z.string()) }).optional(),
   generation: z.object({
@@ -23,6 +25,7 @@ const CardRecord = z.object({
   }).optional(),
 });
 const AuditRecord = z.object({
+  sourceFindings: z.array(ScopedSourceFindingOut).optional(),
   status: AuditStatus, reason: z.string(), verdicts: AuditOut.shape.verdicts,
   contents: z.array(z.string()).optional(), provenance: GenerationProvenanceOut.optional(),
 });

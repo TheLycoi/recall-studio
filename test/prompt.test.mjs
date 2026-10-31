@@ -24,9 +24,13 @@ function assertStrict(node, path, seen = new Set()) {
     for (const [k, v] of Object.entries(node.properties ?? {})) assertStrict(v, `${path}.${k}`, seen);
   }
   if (node.type === "array") assertStrict(node.items, `${path}[]`, seen);
-  for (const key of ["anyOf", "oneOf", "allOf"]) {
-    assert.equal(node[key], undefined, `${path}: ${key} is a union, which the strict serializer rejects`);
+  // Nullable review ordinals are supported; card variants keep flat sentinels.
+  if (node.anyOf) {
+    assert.match(path, /\.reviews\[\]\.ordinal$/);
+    assert.deepEqual(node.anyOf.map(branch => branch.type), ["integer", "null"]);
+    node.anyOf.forEach(branch => assertStrict(branch, path, seen));
   }
+  for (const key of ["oneOf", "allOf"]) assert.equal(node[key], undefined, `${path}: unsupported composition`);
 }
 
 test("assembled card schemas retain strict variants and empty-field sentinels", async () => {

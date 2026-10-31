@@ -1,5 +1,6 @@
 import { MAX_REWRITE_CARDS, rewriteCandidates } from "./explicitRewrite";
 import { lintCard } from "./lint";
+import { AssessmentFields, cardChecks } from "./qualityAcceptance";
 import { z } from "zod";
 import { assertAuthorized } from "./backend";
 import type { LlmBackend } from "./backend";
@@ -9,7 +10,7 @@ import { OpenCodeBackend, OpenCodeError } from "./opencode";
 import { DeepSeekError } from "./deepseekError";
 import { writingContext, cardSystem, CARD_FIELD_DESCRIPTIONS } from "./writerMethod";
 import { LINT_FIX_INSTRUCTIONS } from "./lint";
-import type { BloomLevel, Card, Highlight, GenerationContext, GenerationPreparation } from "./model";
+import type { BloomLevel, Card, Highlight, GenerationContext, GenerationPreparation, ScopedSourceFinding } from "./model";
 import { PreparationOut, GroundedCardsOut, AuditOut, PREPARATION_SYSTEM, AUDIT_SYSTEM, renderedCardReviews, type GroundedDraft, type GenerationAudit } from "./generation";
 import type { RecallSettings } from "./settings";
 
@@ -40,7 +41,7 @@ export type CardDraft = z.infer<typeof CardOut>;
  *
  * Flat and strict on purpose: the Codex backend writes this schema to
  * `--output-schema` (`toStrictSchema` in src/codex.ts), which runs strict
- * and rejects unions and optional fields, so `front`/`back`/`text` are
+ * with required object fields. Card variants retain flat sentinels, so `front`/`back`/`text` are
  * sentinel empty strings rather than optionals, exactly as `CardOut` above
  * does it.
  *
@@ -48,6 +49,7 @@ export type CardDraft = z.infer<typeof CardOut>;
  * `bloomLevelsInSync` below is the compile-time guard on that.
  */
 const VerdictOut = z.object({
+  ...AssessmentFields,
   index: z.number().int().describe("0-based index of the card being judged, as numbered in the list."),
   verdict: z
     .enum(["keep", "revise", "drop"])
@@ -84,7 +86,8 @@ function cardData(c: Card) {
 
 const WRITER_SYSTEM = cardSystem("You are the writer. Write source-grounded flashcards for explicit human review before Anki export. Follow the supplied task and preserve any locked plan's coverage; do not approve your own output.");
 
-const CRITIC_SYSTEM = cardSystem(`You are the independent checker for the supplied cards, not their writer. Judge grounding and retrieval quality, including siblings and existing duplicates. Report the Bloom level actually supported, not a higher level the capture cannot supply. When verdict fields request a revision, only a source-supported wording repair is allowed: keep/drop echo kind and leave front/back/text empty; revise returns the whole corrected variant with its unused fields empty. Drop flags the card for human review, never deletes it. Give a concrete reader-facing reason and exactly one verdict per supplied index. When the task asks for findings only, do not write or repair cards.`);
+const CRITIC_SYSTEM = cardSystem(`You are the independent checker for the supplied cards, not their writer. Judge grounding and retrieval quality, including siblings and existing duplicates. Report the Bloom level actually supported, not a higher level the capture cannot supply. When verdict fields request a revision, only a source-supported wording repair is allowed: keep/drop echo kind and leave front/back/text empty; revise returns the whole corrected variant with its unused fields empty. Drop flags the card for human review, never deletes it. Give a concrete reader-facing reason and exactly one verdict per supplied index. When the task asks for findings only, do not write or repair cards.
+Assess the ORIGINAL supplied card, not a proposed revision. Return contractVersion 1 and reviews covering every supplied ordinal exactly once (QA null), each with status, reason, identifyingCue and relationCue quoted from that answer-hidden visibleCue, and answerable/effortful booleans. Verified requires both booleans and actual nonempty cue quotations. Return checks covering every supplied ID once, with resolution accepted or defect and a concrete reason. Only soft findings can be accepted; hard checks remain defects. Keep requires all rendered reviews verified and all checks accepted. Revise/drop must still supply complete findings, using empty cue quotations for missing cues rather than inventing them.`);
 
 /**
  * Prompts and schemas live here. The backend for the chosen provider — the
@@ -191,14 +194,14 @@ export class LlmClient {
     return result.cards;
   }
 
-  async auditGeneration(h: Highlight, cards: Card[], existing: Card[], preparation: GenerationPreparation, context: GenerationContext, authorized?: () => boolean, final = false, capturedOriginal = h.text): Promise<GenerationAudit> {
+  async auditGeneration(h: Highlight, cards: Card[], existing: Card[], preparation: GenerationPreparation, context: GenerationContext, authorized?: () => boolean, final = false, capturedOriginal = h.text, sourceFindings: ScopedSourceFinding[] = []): Promise<GenerationAudit> {
     const authorization = { authorized: this.requestAuthorization(authorized) };
     assertAuthorized(authorization);
     const safeContext = writingContext(context);
     const result = await this.backend().complete({
       ...authorization,
       system: AUDIT_SYSTEM,
-      user: JSON.stringify({ captured: h.text, sourceTitle: h.sourceTitle, heading: h.heading, contextBefore: h.before, contextAfter: h.after, instruction: h.instruction, ...safeContext, capturedOriginal, preparation, cards: cards.map((c, index) => ({ index, ...cardData(c), planId: c.generation?.planId, factIds: c.generation?.factIds, reviews: renderedCardReviews(c), targetContext: (() => { const row = preparation.plan.find(p => p.id === c.generation?.planId); return row ? { entity: row.entity, aspect: row.aspect } : null; })(), checks: (() => { const lint = lintCard(c, h, [...existing, ...cards.filter(s => s.id !== c.id)]); return [...lint.failures, ...lint.warnings].map(id => ({ id, finding: LINT_FIX_INSTRUCTIONS[id] })); })() })), existing }),
+      user: JSON.stringify({ captured: h.text, sourceTitle: h.sourceTitle, heading: h.heading, contextBefore: h.before, contextAfter: h.after, instruction: h.instruction, ...safeContext, capturedOriginal, sourceFindings, preparation, cards: cards.map((c, index) => ({ index, ...cardData(c), planId: c.generation?.planId, factIds: c.generation?.factIds, reviews: renderedCardReviews(c), targetContext: (() => { const row = preparation.plan.find(p => p.id === c.generation?.planId); return row ? { entity: row.entity, aspect: row.aspect } : null; })(), checks: (() => { const lint = lintCard(c, h, [...existing, ...cards.filter(s => s.id !== c.id)]); return [...lint.failures, ...lint.warnings].map(id => ({ id, finding: LINT_FIX_INSTRUCTIONS[id] })); })() })), existing }),
       schema: AuditOut, label: final ? "final audit" : "audit", maxTokens: 8000, retryInvalidResponse: false,
     });
     assertAuthorized(authorization);
@@ -244,7 +247,8 @@ export class LlmClient {
       ...authorization,
       user: JSON.stringify({
         source: { title: h.sourceTitle, heading: h.heading, contextBefore: h.before, highlight: h.text, contextAfter: h.after },
-        cards: cards.map((c, index) => ({ index, ...cardData(c) })),
+        cards: cards.map((c, index) => ({ index, ...cardData(c), reviews: renderedCardReviews(c),
+          checks: cardChecks(c, h, [...existing, ...cards.filter(s => s.id !== c.id)]).map(id => ({ id, finding: LINT_FIX_INSTRUCTIONS[id as keyof typeof LINT_FIX_INSTRUCTIONS] })) })),
         ...writingContext(s), highlightInstruction: h.instruction, existing: existing.map(cardData),
         task: `Return exactly one verdict for each of the ${cards.length} drafted cards, using its index. A new card repeating an existing card's retrieval is a duplicate.`,
       }),

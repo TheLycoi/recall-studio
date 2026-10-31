@@ -1,3 +1,4 @@
+import { auditVerdict } from './auditFixture.mjs';
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
@@ -51,7 +52,7 @@ async function fixture() {
   llm.codex = { async complete(req) {
     calls.push(req.label);
     const user = JSON.parse(req.user);
-    return req.schema.parse(req.label === 'preparation' ? preparation : req.label === 'grounded cards' ? { cards: [{ planId: 'P1', factIds: ['F1'], kind: 'qa', front: 'What does Amber store?', back: 'heat', text: '' }] } : { verdicts: [{ index: 0, cardId: user.cards[0].id, status: 'verified', reason: 'Supported' }] });
+    return req.schema.parse(req.label === 'preparation' ? preparation : req.label === 'grounded cards' ? { cards: [{ planId: 'P1', factIds: ['F1'], kind: 'qa', front: 'What does Amber store?', back: 'heat', text: '' }] } : { verdicts: [auditVerdict(user.cards[0], { index: 0, cardId: user.cards[0].id, status: 'verified', reason: 'Supported' })] });
   } };
   llm.abort = async () => {};
   const plugin = new RecallPlugin();

@@ -5,7 +5,8 @@ import { makeCard, type Card, type GenerationAuditRecord, type GenerationBatch, 
 import { describeError } from "./llm";
 import { lintCard, isHardLintFailure, LINT_FIX_INSTRUCTIONS } from "./lint";
 import { nextInstruction } from "./inboxData";
-import { cardAuditContent, generationKey, generationSource, generationSourceKey, sourceConflictsForCard, validatePreparation, validateDrafts, validateAudit } from "./generation";
+import { cardChecks, recordQualityAcceptance } from "./qualityAcceptance";
+import { cardAuditContent, generationKey, generationSource, generationSourceKey, sourceFindingsFromResponse, retainedSourceFindings, activeSourceFindings, validatePreparation, validateDrafts, validateAudit } from "./generation";
 
 class Interrupted extends Error {}
 
@@ -55,20 +56,21 @@ export class Generator {
       return;
     }
     if (b) {
+      const sourceHeld = !!b.preparation?.conflicts.some(c => c.kind !== "framing") || [b.audit, b.finalAudit, ...(b.auditHistory ?? [])].some(a => a?.verdicts.some(v => v.conflicts?.some(c => c.kind !== "framing")));
       b.retryFindings = structuredClone((b.blocked ?? []).filter(f => {
         const repair = [...(b.repairs ?? [])].reverse().find(r => r.cardId === f.cardId);
         return b.finalAudit?.verdicts.some(v => v.cardId === f.cardId && v.status === "failed") || repair?.error || !repair?.candidate;
       }));
       b.repairRound = (b.repairRound ?? 0) + 1;
-      if (b.finalAudit) (b.auditHistory ??= []).push(b.finalAudit);
-      delete b.finalAudit;
-      delete b.finalAuditRequested;
-      if (!b.audit?.verdicts.length || b.audit.status === "unverified" || JSON.stringify(b.audit.contents) !== JSON.stringify(b.drafts?.map(cardAuditContent))) {
+      if (sourceHeld || !b.audit?.verdicts.length || b.audit.status === "unverified" || b.audit.verdicts.some(v => v.contractVersion !== 1) || JSON.stringify(b.audit.contents) !== JSON.stringify(b.drafts?.map(cardAuditContent))) {
         if (b.audit) (b.auditHistory ??= []).push(b.audit);
         delete b.audit;
         delete b.auditRequested;
         delete b.retryFindings;
       }
+      if (b.finalAudit) (b.auditHistory ??= []).push(b.finalAudit);
+      delete b.finalAudit;
+      delete b.finalAuditRequested;
       if (!b.preparation) delete b.preparationRequested;
       if (!b.drafts) {
         if (b.writerOutput) (b.writerHistory ??= []).push(b.writerOutput);
@@ -244,18 +246,17 @@ export class Generator {
         if (new Set(cards.map(c => c.id)).size !== cards.length || cards.some(c => c.highlightId !== h.id || c.generation?.batchId !== batch.id)) throw new Error("Invalid saved draft identity.");
       };
       validateCards(originals);
-      const sourceIssues = (card: Card, checked: Pick<GenerationAuditRecord, "verdicts" | "provenance">) => [
-        ...sourceConflictsForCard(preparation, card),
-        // Retry archives quality checks, not source resolution for this batch's targets.
-        ...[batch.audit, batch.finalAudit, ...(batch.auditHistory ?? []), checked].flatMap(a =>
-          a?.provenance && (a.provenance.sourceKey !== generationSourceKey(h) || a.provenance.inputKey !== key) ? []
-            : a?.verdicts.find(v => v.cardId === card.id && originals[v.index]?.id === card.id)?.conflicts ?? []),
-      ];
+      const records = (checked?: GenerationAuditRecord) => [...(batch.auditHistory ?? []), batch.audit, batch.finalAudit, checked]
+        .filter(a => !a?.provenance || (a.provenance.sourceKey === generationSourceKey(h) && a.provenance.inputKey === key));
+      const retained = (checked?: GenerationAuditRecord) => retainedSourceFindings(preparation, records(checked), originals, generationSourceKey(h));
+      const sourceIssues = (card: Card, checked: GenerationAuditRecord) => activeSourceFindings(retained(checked), records(checked), generationSourceKey(h), h.text).filter(f => f.cardId === card.id);
       const audit = async (cards: Card[], final = false): Promise<GenerationAuditRecord> => {
         const saved = final ? batch.finalAudit : batch.audit;
+        const auditExisting = existing.filter(c => !cards.some(candidate => candidate.id === c.id));
+        const checks = cards.map(c => cardChecks(c, words, [...auditExisting, ...cards.filter(s => s.id !== c.id)]));
         if (saved) {
-          validateAudit(saved, cards, h.text, saved.provenance ? undefined : words.text);
           if (JSON.stringify(saved.contents) !== JSON.stringify(cards.map(cardAuditContent))) return { status: "unverified", reason: "Saved audit does not match the exact candidates; explicit retry is required.", verdicts: [], contents: cards.map(cardAuditContent) };
+          validateAudit(saved, cards, h.text, saved.provenance ? undefined : words.text, checks, retained());
           return saved;
         }
         const requested = final ? batch.finalAuditRequested : batch.auditRequested;
@@ -264,14 +265,17 @@ export class Generator {
         else batch.auditRequested = true;
         await save();
         let result: GenerationAuditRecord;
+        let raw: unknown;
         try {
-          const raw = cards.length ? await this.plugin.llm.auditGeneration(words, structuredClone(cards), structuredClone(existing.filter(c => !cards.some(candidate => candidate.id === c.id))), preparation, context, authorized, final, h.text) : { verdicts: [] };
+          raw = cards.length ? await this.plugin.llm.auditGeneration(words, structuredClone(cards), structuredClone(auditExisting), preparation, context, authorized, final, h.text, structuredClone(retained())) : { verdicts: [] };
           await checkContext();
-          const checked = validateAudit(raw, cards, h.text);
-          result = { status: checked.verdicts.some(v => v.status === "failed") ? "failed" : checked.verdicts.length === cards.length && checked.verdicts.every(v => v.status === "verified") && !cards.some(c => sourceIssues(c, checked).length) ? "verified" : "unverified", reason: checked.verdicts.length === cards.length ? "Independent audit completed; see each candidate's verdict." : "Independent audit omitted verdicts; affected candidates are held.", verdicts: checked.verdicts, contents: cards.map(cardAuditContent) };
+          const checked = validateAudit(raw, cards, h.text, undefined, checks, retained());
+          result = { status: checked.verdicts.some(v => v.status === "failed") ? "failed" : checked.verdicts.length === cards.length && checked.verdicts.every(v => v.status === "verified") && !cards.some(c => sourceIssues(c, { ...checked, status: "unverified", reason: "" }).length) ? "verified" : "unverified", reason: checked.verdicts.length === cards.length ? "Independent audit completed; see each candidate's verdict." : "Independent audit omitted verdicts; affected candidates are held.", verdicts: checked.verdicts, contents: cards.map(cardAuditContent) };
         } catch (e) {
           await checkContext();
           result = { status: "unverified", reason: `Independent audit unavailable: ${describeError(e)}`, verdicts: [], contents: cards.map(cardAuditContent) };
+          const findings = sourceFindingsFromResponse(raw, cards, h.text, generationSourceKey(h));
+          if (findings.length) result.sourceFindings = findings;
         }
         result.provenance = this.provenance(h, key);
         if (final) batch.finalAudit = result;
@@ -288,15 +292,16 @@ export class Generator {
         const lint = lintCard(card, words, [...existing, ...cards.filter(c => c.id !== card.id)]);
         const hard = lint.failures.filter(isHardLintFailure);
         const verdict = checked.contents?.[index] === cardAuditContent(card) ? checked.verdicts.find(v => v.index === index && v.cardId === card.id) : undefined;
-        return [...hard.map(id => LINT_FIX_INSTRUCTIONS[id]), ...sourceIssues(card, checked).map(c => `Source conflicts or insufficient evidence need human review: ${c.reason} Quote: “${c.quote}”`), ...(verdict?.status === "verified" ? [] : [verdict?.reason ?? checked.reason])];
+        return [...hard.map(id => LINT_FIX_INSTRUCTIONS[id]), ...(verdict?.conflicts?.filter(c => c.kind === "framing").map(c => c.reason) ?? []), ...(verdict?.reassessments?.filter(r => r.resolution === "framing").map(r => r.reason) ?? []), ...sourceIssues(card, checked).map(c => `Source conflicts or insufficient evidence need human review: ${c.reason} Quote: “${c.quote}”`), ...(verdict?.status === "verified" ? [] : [verdict?.reason ?? checked.reason])];
       };
       const round = batch.repairRound ?? 0;
       const targets = cards.map((card, index) => {
         const verdict = initial.verdicts.find(v => v.index === index && v.cardId === card.id);
         const lint = lintCard(card, words, [...existing, ...cards.filter(c => c.id !== card.id)]);
-        const confirmed = (initial.contents?.[index] === cardAuditContent(card) && verdict?.status === "failed") || lint.failures.some(isHardLintFailure);
+        const framing = [...(verdict?.status === "verified" ? [] : preparation.conflicts.filter(c => c.kind === "framing" && (!c.factIds?.length || c.factIds.some(id => card.generation?.factIds.includes(id)))).map(c => c.reason)), ...(verdict?.conflicts?.filter(c => c.kind === "framing").map(c => c.reason) ?? []), ...(verdict?.reassessments?.filter(r => r.resolution === "framing").map(r => r.reason) ?? [])];
+        const confirmed = framing.length > 0 || (initial.contents?.[index] === cardAuditContent(card) && verdict?.status === "failed") || lint.failures.some(isHardLintFailure);
         const retry = batch.retryFindings?.find(f => f.cardId === card.id);
-        return { card, reasons: sourceIssues(card, initial).length ? [] : retry?.reasons ?? (confirmed ? [...new Set([...issues(card, index, initial), ...[...lint.failures, ...lint.warnings].map(id => LINT_FIX_INSTRUCTIONS[id])])] : []) };
+        return { card, reasons: sourceIssues(card, initial).length ? [] : retry?.reasons ?? (confirmed ? [...new Set([...framing, ...issues(card, index, initial), ...[...lint.failures, ...lint.warnings].map(id => LINT_FIX_INSTRUCTIONS[id])])] : []) };
       }).filter(t => t.reasons.length && !h.cards.some(c => c.id === t.card.id));
       for (const target of targets) {
         if (batch.repairs?.some(r => r.round === round && r.cardId === target.card.id)) continue;
@@ -349,6 +354,11 @@ export class Generator {
         h.cards.push(published);
         appended.push(published);
         appendedContents.set(published, JSON.stringify(published));
+      }
+      // Bind only after every published sibling has its final wording.
+      for (const card of appended) {
+        recordQualityAcceptance(card, h, final.verdicts.find(v => v.cardId === card.id)?.checks ?? []);
+        appendedContents.set(card, JSON.stringify(card));
       }
       h.generatedAt = new Date().toISOString();
       batch.committed = true;

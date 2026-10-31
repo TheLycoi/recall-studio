@@ -1,3 +1,4 @@
+import { auditVerdict } from './auditFixture.mjs';
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
@@ -147,7 +148,7 @@ test('the real queue exposes held Retry after its busy final checkpoint settles'
     if (req.label === 'preparation') return req.schema.parse({ facts: [{ id: 'F1', statement: h.text, quote: h.text }], plan: [{ id: 'P1', factIds: ['F1'], entity: 'Amber', aspect: 'storage', value: 'heat', reason: 'Stated' }], exclusions: [], omissions: [], conflicts: [] });
     if (req.label === 'grounded cards') return req.schema.parse({ cards: [{ planId: 'P1', factIds: ['F1'], kind: 'qa', front: 'What does Amber release?', back: 'energy', text: '' }] });
     if (req.label === 'generation repair') throw Error('Synthetic repair unavailable');
-    return req.schema.parse({ verdicts: JSON.parse(req.user).cards.map((card, index) => ({ index, cardId: card.id, status: 'failed', reason: 'Synthetic held candidate' })) });
+    return req.schema.parse({ verdicts: JSON.parse(req.user).cards.map((card, index) => (auditVerdict(card, { index, cardId: card.id, status: 'failed', reason: 'Synthetic held candidate' }))) });
   } };
   host.generator = new Generator(host);
   let release, paused = false;

@@ -1,3 +1,4 @@
+import { auditVerdict } from './auditFixture.mjs';
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
@@ -31,7 +32,7 @@ test('source-backed cloze cards are not capped by legacy batch counts or schema 
     assert.equal(generation.validateDrafts({ cards }, p, oldLimit).length, 101);
   }
   const committed = cards.map((c, i) => ({ ...c, id: `card-${i}` }));
-  const verdicts = committed.map((c, index) => ({ index, cardId: c.id, status: 'verified', reason: 'Supported by the captured source.' }));
+  const verdicts = committed.map((c, index) => (auditVerdict(c, { index, cardId: c.id, status: 'verified', reason: 'Supported by the captured source.' })));
   assert.equal(generation.validateAudit({ verdicts }, committed).verdicts.length, 101);
 });
 

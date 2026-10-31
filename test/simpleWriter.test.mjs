@@ -2,10 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadQuiz } from './quizHarness.mjs';
 
-test('v9 keeps one shared contract and bounded stage-specific tasks', async () => {
+test('v10 keeps one shared contract and bounded stage-specific tasks', async () => {
   const { WRITING_METHOD_ID, CARD_WRITING_METHOD, writingContext } = await loadQuiz('src/writerMethod.ts');
   const { PREPARATION_SYSTEM, AUDIT_SYSTEM } = await loadQuiz('src/generation.ts');
-  assert.equal(WRITING_METHOD_ID, 'recall-writing-method-v9');
+  assert.equal(WRITING_METHOD_ID, 'recall-writing-method-v10');
   assert.equal(writingContext({ language: 'English' }).rules, WRITING_METHOD_ID);
   for (const system of [PREPARATION_SYSTEM, AUDIT_SYSTEM]) {
     assert.equal(system.split(CARD_WRITING_METHOD).length, 2);
@@ -15,10 +15,10 @@ test('v9 keeps one shared contract and bounded stage-specific tasks', async () =
 });
 
 // Engineering prose budget, not a learning threshold or token/cost estimate.
-test('the shared runtime method is at most 60% of the v8 instructions', async () => {
+test('the shared runtime method grows at most 20% in bytes over v9', async () => {
   const { CARD_WRITING_METHOD, cardSystem } = await loadQuiz('src/writerMethod.ts');
-  const v8Characters = 23170;
-  assert.ok(CARD_WRITING_METHOD.length <= Math.floor(v8Characters * 0.6), `${CARD_WRITING_METHOD.length} shared characters`);
+  const v9Bytes = 13266;
+  assert.ok(Buffer.byteLength(CARD_WRITING_METHOD) <= Math.floor(v9Bytes * 1.2), `${Buffer.byteLength(CARD_WRITING_METHOD)} shared bytes`);
   const request = cardSystem('Write the supplied plan.');
   assert.equal(request.split(CARD_WRITING_METHOD).length, 2);
   const checklist = request.match(/<twenty_rule_checklist>([\s\S]*?)<\/twenty_rule_checklist>/)?.[1];

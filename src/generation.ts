@@ -2,15 +2,19 @@ import { createHash } from "crypto";
 import { z } from "zod";
 import { cardSystem, CARD_FIELD_DESCRIPTIONS, writingContext } from "./writerMethod";
 export { CARD_WRITING_METHOD as RETRIEVAL_QUALITY_RUBRIC } from "./writerMethod";
-import { makeCard, makeHighlight, type Card, type GenerationContext, type GenerationPreparation, type Highlight } from "./model";
+import { makeCard, makeHighlight, type Card, type GenerationContext, type GenerationPreparation, type GenerationAuditRecord, type ScopedSourceFinding, type Highlight } from "./model";
 import { exportCandidates } from "./cardActions";
-import { lintCard, reviewText } from "./lint";
+import { lintCard } from "./lint";
+import { AssessmentFields, validateAssessment } from "./qualityAcceptance";
+export { renderedCardReviews } from "./qualityAcceptance";
 import type { RecallSettings } from "./settings";
 
 const text = z.string().min(1).max(16000);
 const ids = z.array(text).min(1);
 const disposition = z.object({ factIds: ids, reason: text });
-const sourceConflict = z.object({ quote: text, reason: text });
+const sourceConflict = z.object({ quote: text, reason: text, kind: z.preprocess(v => v === undefined ? "legacy" : v, z.enum(["framing", "contradiction", "insufficient", "legacy"])) });
+export const ScopedSourceFindingOut = sourceConflict.extend({ id: text, cardId: text, sourceKey: text, content: z.string() });
+const reassessment = z.object({ findingId: text, cardId: text, sourceKey: text, content: z.string(), resolution: z.enum(["resolved", "framing", "unresolved"]), quote: text, reason: text });
 export const GenerationProvenanceOut = z.object({
   build: z.object({ release: text, commit: text.optional() }).optional(),
   sourceKey: z.string().regex(/^[a-f0-9]{64}$/),
@@ -33,6 +37,8 @@ export const GroundedCardsOut = z.object({ cards: z.array(z.object({
 })) });
 export type GroundedDraft = z.infer<typeof GroundedCardsOut>["cards"][number];
 export const AuditOut = z.object({ verdicts: z.array(z.object({
+  ...AssessmentFields,
+  reassessments: z.preprocess(v => v === undefined ? [] : v, z.array(reassessment)),
   index: z.number().int(), cardId: text, status: z.enum(["verified", "unverified", "failed"]), reason: text,
   // Required on the wire for strict providers; old responses may lack this field.
   conflicts: z.preprocess(v => v === undefined ? [] : v, z.array(sourceConflict)).describe("Source conflicts or insufficient evidence for this card, separate from retrieval defects. Exact captured quotes and reasons; empty when none."),
@@ -40,13 +46,15 @@ export const AuditOut = z.object({ verdicts: z.array(z.object({
 export type GenerationAudit = z.infer<typeof AuditOut>;
 
 // Method adapted from planetjc/anki-process-engine-live; see NOTICE.txt.
-export const PREPARATION_SYSTEM = cardSystem(`You are the planner, not the writer. Select useful supported targets before locking plan rows; preserve selected targets and basics, not exhaustive permutations. Apply shared grouping and cue checks now: combine duplicate sentence scaffolds in one row, retaining every factId; a coherent route or closed list can use one row with distinct cloze numbers, not a mandatory row per member. Plan a visible relation label or directed question for each target; aspect alone is not a cue. Independently cued attributes are not one catch-all predicate. Open lists allow example-seeking questions with acceptable alternatives, not arbitrary missing members.
-Quote contiguous captured passages character for character without cleanup, ellipses or corrections. Facts use unique F1, F2, ... IDs; plan rows use unique P1, P2, ... IDs and exact factIds, entity, aspect (empty if unnecessary), value and inclusion reason. The writer must produce exactly one card per row; resolve coverage/grouping now, ignoring legacy maxCards. Every inventoried fact needs a plan or exclusions/omissions with IDs and reasons. Keep quotes for unsupported/weak targets in facts/conflicts rather than planning them. Return conflicts with exact quotes, reasons and affected factIds: nonempty factIds hold only the affected targets, not unrelated facts; empty factIds hold the whole capture. An empty inventory/plan is allowed.`);
+export const PREPARATION_SYSTEM = cardSystem(`You are the planner, not the writer. Select useful supported targets before locking plan rows. Preserve selected targets and basics, not exhaustive permutations. Resolve grouping before exactly one card per row is locked: combine repeated scaffolds, retaining all factIds. A coherent route or closed list can use one row with distinct cloze numbers, not a mandatory row per member. Plan a visible relation label or directed question; aspect alone is not a cue. Independently cued attributes are not one catch-all predicate. Open lists allow example-seeking questions with acceptable alternatives, not arbitrary missing members.
+Quote contiguous captured passages character for character, without cleanup or corrections. Facts have unique F1, F2, ... IDs; rows have unique P1, P2, ... IDs and exact factIds, entity, aspect (empty if unnecessary), value and reason. Every inventoried fact needs a plan or exclusions/omissions with IDs and reasons. Keep unsupported targets in facts/conflicts, not the plan. Empty inventory/plan is allowed; ignore legacy maxCards.
+Return conflicts with exact captured quotes, reasons and affected factIds: nonempty factIds hold only the affected targets, not unrelated facts; empty factIds hold the whole capture. Set kind to framing for repairable wording of supported targets, contradiction for contradictory evidence, or insufficient for ambiguous/missing evidence. An accidentally exhaustive question over clear open examples is framing if an example cue preserves the selected target. A required complete set with missing evidence stays held; never silently narrow the plan.`);
 
-export const AUDIT_SYSTEM = cardSystem(`You are the independent auditor, not the writer. Audit every card against captured text, not merely its inventory or plan; a matching quote is not proof of the authored claim. Check support, fluency, selected coverage, exclusions, duplication and retrieval quality. Return exactly one verdict per card using BOTH its exact zero-based index and card ID. Verified requires complete source support and no unresolved issue; unverified means support cannot be established; failed means a conflict, unsupported claim or other defect. A source-supported card with poor retrieval quality is failed; clean lint or a matching plan does not establish quality.
-Inspect every supplied rendered review; one defective review fails the card. Read visibleCue first without borrowing specificity from hiddenTargets, targetContext or the plan. For ordinary attribute, mechanism and consequence reviews, name the specific system using visibleCue, not a grammatical subject or the hidden consequence. For term identification, use the distinguishing visible definition/relation and context; a hidden name alone is not a defect. In the reason, for each ordinal quote exact visibleCue words for the identifying cue and requested relation; if either is missing, fail. Name the affected ordinal and missing subject/conditions or relation, independent hidden parts, or visible answer/echo revealing the hidden target. A different true completion fails an unspecified task unless it explicitly requests examples and accepts supported alternatives.
-Flag avoidable split-note duplication with the overlapping scaffold and affected targets, even when the plan split them. Separately justified contexts are not duplication. Shared locked-row/candidate cardinality still applies; unresolved grouping stays held, never silently merged or waived.
-Adjudicate every deterministic warning and length-policy flag explicitly in the reason. Style/sibling warnings may be resolved; invalid syntax, unsupported deletions, recognized compound retrieval, unsupported list slots and rendered answer leaks cannot be overridden. Check all candidates, including unchanged siblings after repairs. Report findings only: never repair cards, add facts or delete cards. Report source conflicts/insufficient evidence separately in conflicts with exact captured quotes and reasons, empty when none. A source hold cannot be waived by a positive quality verdict or permit changing facts.`);
+export const AUDIT_SYSTEM = cardSystem(`Audit every card against captured text for support, selected coverage, exclusions, duplication and retrieval quality; recheck unchanged siblings after repair. Return one verdict per zero-based index AND card ID. Verified means supported without unresolved defects; unverified means uncertain support; source-supported poor retrieval is failed.
+Inspect visibleCue first without hiddenTargets, targetContext or plan; one defective review fails the card. For ordinary attribute, mechanism and consequence retrieval, name the specific system using visibleCue, not a grammatical subject or the hidden consequence. For term-identification use visible definition and essential context to distinguish the term; a hidden name alone is not a defect. In the reason quote exact visibleCue words for the identifying cue and requested relation; if missing, fail. Per ordinal name missing subject/conditions, visible answer/echo of the hidden target, or other concrete defects. Separately justified contexts are not duplication. A different true completion fails unless the task explicitly requests examples and accepts supported alternatives.
+Return contractVersion 1. reviews must cover every supplied ordinal once (QA null): status, reason, identifyingCue and relationCue quoted from THAT answer-hidden front, answerable and effortful booleans. Verified requires both booleans true and nonempty quotations. checks must cover every supplied ID once with resolution accepted or defect and a concrete reason. Adjudicate length-policy flags by focus and necessary meaning. Only soft flags can be accepted; hard checks remain defects. Overall verified cannot contradict a review or check.
+Report findings only: never repair cards, add facts, delete or merge rows. Report conflicts separately with exact captured quotes, reasons and kind: framing for supported-target wording; contradiction or insufficient for source problems. Clear open examples support example cues, not exhaustive sets. Ambiguous negation or missing required completeness stays held. An explicit captured condition can supersede a broad heading for that target, not ambiguous siblings.
+For each sourceFinding reassessed, echo its findingId, cardId, sourceKey and content with resolution resolved, framing or unresolved, a concrete reason and exact captured supporting quote. Resolved needs evidence settling that original concern; framing requires repair/recheck. Omitted/unresolved findings stay held. Generic verified and other targets never clear source holds or authorize changing facts.`);
 
 /** Only saved legacy stages may also use their former readable snapshot for quotes. */
 export function validatePreparation(raw: unknown, snapshot: string, _legacyMaxCards?: number, legacySnapshot?: string): GenerationPreparation {
@@ -63,10 +71,13 @@ export function validatePreparation(raw: unknown, snapshot: string, _legacyMaxCa
     refs.forEach(id => covered.add(id));
   };
   const plans = new Set<string>();
-
+  const payloads = new Map<string, string>();
   for (const row of p.plan) {
     if (!/^P[1-9]\d*$/.test(row.id) || plans.has(row.id)) throw new Error("Invalid or duplicate plan ID.");
     plans.add(row.id); check(row.factIds);
+    const payload = JSON.stringify([row.factIds, row.entity, row.aspect, row.value, row.reason]);
+    if (payloads.has(payload)) throw new Error(`Duplicate plan payload: ${payloads.get(payload)} and ${row.id}.`);
+    payloads.set(payload, row.id);
   }
   for (const row of [...p.exclusions, ...p.omissions]) {
     if (row.factIds.some(id => covered.has(id))) throw new Error("A fact is both planned and excluded/omitted, or has conflicting dispositions.");
@@ -111,12 +122,20 @@ export function validateDrafts(raw: unknown, p: GenerationPreparation, _legacyMa
   return drafts;
 }
 
-export function validateAudit(raw: unknown, cards: Card[], snapshot?: string, legacySnapshot?: string): GenerationAudit {
+export function validateAudit(raw: unknown, cards: Card[], snapshot?: string, legacySnapshot?: string, checks: string[][] = cards.map(() => []), findings: ScopedSourceFinding[] = []): GenerationAudit {
   const audit = AuditOut.parse(raw);
   const seen = new Set<number>();
   for (const v of audit.verdicts) {
     if (seen.has(v.index) || cards[v.index]?.id !== v.cardId) throw new Error("Audit contains an unknown, mismatched or duplicate card verdict.");
     seen.add(v.index);
+    validateAssessment(v, cards[v.index], checks[v.index] ?? [], v.status === "verified");
+    const resolved = new Set<string>();
+    for (const r of v.reassessments) {
+      const f = findings.find(f => f.id === r.findingId && f.cardId === v.cardId);
+      if (!f || resolved.has(r.findingId) || r.cardId !== f.cardId || r.sourceKey !== f.sourceKey || r.content !== f.content
+        || !r.reason.trim() || !r.quote.trim() || !snapshot?.includes(r.quote)) throw Error("Invalid scoped source reassessment identity, content or captured evidence.");
+      resolved.add(r.findingId);
+    }
     for (const c of v.conflicts ?? []) {
       if (!c.quote.trim() || (!snapshot?.includes(c.quote) && !legacySnapshot?.includes(c.quote))) throw new Error("Audit conflict quote is not in the captured snapshot.");
     }
@@ -126,19 +145,67 @@ export function validateAudit(raw: unknown, cards: Card[], snapshot?: string, le
 
 /** Legacy unscoped conflicts remain whole-capture holds. */
 export function sourceConflictsForCard(p: GenerationPreparation, c: Card): GenerationPreparation["conflicts"] {
-  return p.conflicts.filter(issue => !issue.factIds?.length || issue.factIds.some(id => c.generation?.factIds.includes(id)));
+  return p.conflicts.filter(issue => issue.kind !== "framing" && (!issue.factIds?.length || issue.factIds.some(id => c.generation?.factIds.includes(id))));
 }
 
-/** Render the same numbered spans and inline formatting used by the leak linter. */
-export function renderedCardReviews(c: Card): { ordinal: number | null; visibleCue: string; hiddenTargets: string[] }[] {
-  if (c.kind === "qa") return [{ ordinal: null, visibleCue: reviewText(c.front), hiddenTargets: [reviewText(c.back)] }];
-  const rendered = reviewText(c.text);
-  const spans = [...rendered.matchAll(/\{\{c(\d+)::([\s\S]*?)(?:::([^}]*))?\}\}/g)];
-  return [...new Set(spans.map(m => Number(m[1])))].sort((a, b) => a - b).map(ordinal => ({
-    ordinal,
-    visibleCue: rendered.replace(/\{\{c(\d+)::([\s\S]*?)(?:::([^}]*))?\}\}/g, (_, n, body, hint) => Number(n) === ordinal ? `[${hint || "..."}]` : body),
-    hiddenTargets: spans.filter(m => Number(m[1]) === ordinal).map(m => m[2]),
+/** Stable finding identities preserve history while allowing only explicit scoped resolution. */
+export function retainedSourceFindings(p: GenerationPreparation, records: (GenerationAuditRecord | undefined)[], originals: Card[], sourceKey: string): ScopedSourceFinding[] {
+  const findings: ScopedSourceFinding[] = [];
+  for (const card of originals) {
+    const add = (issue: GenerationPreparation["conflicts"][number], content: string, key = sourceKey) => {
+      if (issue.kind === "framing") return;
+      const id = createHash("sha256").update(JSON.stringify([key, card.id, content, issue.quote, issue.reason, issue.kind ?? "legacy"])).digest("hex");
+      if (!findings.some(f => f.id === id)) findings.push({ ...issue, id, cardId: card.id, sourceKey: key, content });
+    };
+    sourceConflictsForCard(p, card).forEach(c => add(c, cardAuditContent(card)));
+    for (const a of records) {
+      for (const f of a?.sourceFindings ?? []) if (f.cardId === card.id && f.sourceKey === sourceKey) add(f, f.content);
+      const v = a?.verdicts.find(v => v.cardId === card.id && originals[v.index]?.id === card.id);
+      for (const c of v?.conflicts ?? []) add(c, a?.contents?.[v!.index] ?? cardAuditContent(card), a?.provenance?.sourceKey ?? sourceKey);
+    }
+  }
+  return findings;
+}
+
+/** A malformed quality assessment must not erase independently valid source holds. */
+export function sourceFindingsFromResponse(raw: unknown, cards: Card[], snapshot: string, sourceKey: string): ScopedSourceFinding[] {
+  const parsed = z.object({ verdicts: z.array(z.object({ index: z.number().int(), cardId: text, conflicts: z.array(sourceConflict) })) }).safeParse(raw);
+  if (!parsed.success) return [];
+  const verdicts = parsed.data.verdicts.filter(v => cards[v.index]?.id === v.cardId).map(v => ({ ...v,
+    status: "unverified" as const, reason: "Quality assessment rejected; source findings retained.",
+    conflicts: v.conflicts.filter(c => c.kind !== "framing" && c.quote.trim() && snapshot.includes(c.quote)),
   }));
+  return retainedSourceFindings({ facts: [], plan: [], exclusions: [], omissions: [], conflicts: [] },
+    [{ status: "unverified", reason: "Source findings only, not approval.", verdicts, contents: cards.map(cardAuditContent) }], cards, sourceKey);
+}
+
+export function activeSourceFindings(findings: ScopedSourceFinding[], records: (GenerationAuditRecord | undefined)[], sourceKey: string, snapshot: string): ScopedSourceFinding[] {
+  return findings.filter(f => {
+    let active = true;
+    for (const a of records) {
+      if (!a || (a.provenance && a.provenance.sourceKey !== sourceKey)) continue;
+      const v = a.verdicts.find(v => v.cardId === f.cardId);
+      const resolution = v?.contractVersion === 1 && v.reassessments?.find(r =>
+        r.findingId === f.id && r.cardId === f.cardId && r.sourceKey === sourceKey && f.sourceKey === sourceKey
+        && r.content === f.content && r.reason.trim() && r.quote.trim() && snapshot.includes(r.quote));
+      if (resolution) active = resolution.resolution === "unresolved";
+      // A later concern, or contradictory evidence in this same response, reopens the hold.
+      if (a.sourceFindings?.some(s => s.id === f.id && s.cardId === f.cardId && s.sourceKey === f.sourceKey)
+        || (v && (!a.contents || a.contents[v.index] === f.content) && v.conflicts?.some(c =>
+          c.quote === f.quote && c.reason === f.reason && (c.kind ?? "legacy") === (f.kind ?? "legacy")))) active = true;
+    }
+    return active;
+  });
+}
+
+export function sourceConcernsForCard(card: Card, h: Highlight): ScopedSourceFinding[] {
+  return [h.generation, ...(h.generationHistory ?? [])].flatMap(batch => {
+    if (!batch?.preparation) return [];
+    const records = [...(batch.auditHistory ?? []), batch.audit, batch.finalAudit];
+    const preparation = batch.id === card.generation?.batchId ? batch.preparation : { ...batch.preparation, conflicts: batch.preparation.conflicts.filter(c => !c.factIds?.length) };
+    const originals = batch.id === card.generation?.batchId ? batch.drafts ?? [card] : [card];
+    return activeSourceFindings(retainedSourceFindings(preparation, records, originals, batch.provenance?.sourceKey ?? generationSourceKey(h)), records, generationSourceKey(h), h.text).filter(f => f.cardId === card.id);
+  });
 }
 
 export function cardAuditContent(c: Card): string {

@@ -1,3 +1,4 @@
+import { auditVerdict } from './auditFixture.mjs';
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
@@ -32,7 +33,7 @@ function fixture() {
     const p = JSON.parse(req.user);
     if (req.label === 'preparation') return JSON.stringify(preparation);
     if (['grounded cards', 'generation repair'].includes(req.label)) return JSON.stringify({ cards: [draft] });
-    if (['audit', 'final audit'].includes(req.label)) return JSON.stringify({ verdicts: p.cards.map((c, index) => ({ index, cardId: c.id, status: 'verified', reason: 'Synthetic source check.', conflicts: [] })) });
+    if (['audit', 'final audit'].includes(req.label)) return JSON.stringify({ verdicts: p.cards.map((c, index) => (auditVerdict(c, { index, cardId: c.id, status: 'verified', reason: 'Synthetic source check.', conflicts: [] }))) });
     if (['cards', 'rewrite cards'].includes(req.label)) return JSON.stringify({ cards: [draft] });
     if (req.label === 'card') return JSON.stringify(draft);
     if (req.label === 'verdicts') return JSON.stringify({ verdicts: [{ index: 0, verdict: 'keep', reason: '', bloom: 'understand', kind: 'qa', front: '', back: '', text: '' }] });
@@ -62,7 +63,7 @@ for (const stage of ['prepareGeneration', 'writeGroundedCards', 'repairGeneratio
     assert.match(req.system, /grammatical subject.*negative feedback.*specific system/i);
     assert.match(req.system, /shared entity words.*whole answer/i);
     assert.match(req.system, /cite exact visible words for the identifying cue AND requested relation/i);
-    assert.equal(req.system.split('<writing_method id="recall-writing-method-v9">').length, 2, 'one current versioned method per request');
+    assert.equal(req.system.split('<writing_method id="recall-writing-method-v10">').length, 2, 'one current versioned method per request');
     assert.match(req.system, /classification.*not.*beacon is/i);
     assert.match(req.system, /transition.*amber.*destination/i);
     assert.ok(req.system.includes('<bad>The fictional Orin beacon is {{c1::a coastal marker}}.</bad>'));
@@ -241,7 +242,7 @@ for (const final of [false, true]) test(`assembled ${final ? 'final ' : ''}audit
   assert.match(req.system, /not a grammatical subject or the hidden consequence/i);
 });
 
-for (const version of ['v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7', 'v8']) test(`a ${version} method snapshot cannot certify a v9 generation batch`, async () => {
+for (const version of ['v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7', 'v8', 'v9']) test(`a ${version} method snapshot cannot certify a v10 generation batch`, async () => {
   const f = fixture();
   const c = { language: 'English', instructions: '', examples: '', rules: `recall-writing-method-${version}` };
   const batch = { id: `${version}-batch`, version: 1, instruction: '', phase: 'auditing', preparation: structuredClone(f.preparation), writerOutput: [f.draft], drafts: [f.card] };

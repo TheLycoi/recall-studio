@@ -1,6 +1,6 @@
 import type { GenerationContext } from "./model";
 
-export const WRITING_METHOD_ID = "recall-writing-method-v9";
+export const WRITING_METHOD_ID = "recall-writing-method-v10";
 
 /** Matuschak retrieval/litmus guidance and Wozniak's twenty-rule applicability check. */
 export const CARD_WRITING_METHOD = `<writing_method id="${WRITING_METHOD_ID}">
@@ -36,7 +36,7 @@ Twenty-rule applicability check, not a requirement to use every technique on eve
 Apply within the source boundary and schema; references belong in supported provenance. Missing assets never authorize fabricated images or completed visual cards.
 
 Retrieval and coverage
-Choose one focused retrieval target per review. If parts could be separately correct and incorrect, split into independent reviews. One topic or cloze number does not prove atomicity: all same-number spans hide together. Reuse a number only for repetition of the same target, never independent attributes or list members.
+First identify one supported target and its requested relation: one focused retrieval target per review. Then write a self-contained meaningful cue in fresh wording before adding cloze markup; do not inherit a vague plan label or mechanically blank source prose. Choose cloze or QA for that retrieval, retaining verbatim hidden spans. If parts could be separately correct and incorrect, split into independent reviews. One topic or cloze number does not prove atomicity: all same-number spans hide together. Reuse a number only for repetition of the same target, never independent attributes or list members.
 Identify the target from the visible cue and keep essential conditions visible; Extra/source links cannot supply them. For ordinary attribute, mechanism and consequence reviews, keep the specific subject and requested relation visible. A grammatical subject such as negative feedback does not identify the specific system; name it visibly, not through the hidden consequence. The requested attribute, relation or process must be identifiable in the visible cue: topic plus is/keeps, hiding the whole predicate or vague hints like effect/fact/relation are insufficient. Hidden answers, unrelated sentences, neighbours and metadata cannot supply the task. Put a subject-identifying heading on the front when needed; a course label is not a subject cue. Shared entity words may stay visible without revealing the whole answer.
 Be focused, precise, consistent, tractable after studying and effortful enough to require recall. Preserve meaningful explanations, causal relationships and short procedures; split independent targets in planning, not useful meaning by word count. Word limits (twelve words for QA answers, six words for cloze spans, sixty words per card) are product-policy findings to adjudicate, not learning thresholds. A focused explanation can exceed a length warning without becoming a different retrieval task.
 Prefer one source-supported term-definition cloze note with different cloze numbers only when both rendered visible cues distinguish the answer. In term-identification reviews, the visible definition or identifying relation and essential context must distinguish the hidden term; the name itself need not be visible. Definition reviews keep the term, definition relation and context visible. Never hide both sides under one number. Do not force reversals: omit ambiguous reverse directions; never invent distinguishing facts or rescue them with answer leaks.
@@ -49,7 +49,7 @@ Resolve grouping before locking plan rows. Checker: flag avoidable split-note du
 
 Format and self-check
 Prefer cloze for source spans, QA for a produced explanation, mechanism, comparison or clearer cue. QA has front/back with text empty; cloze has text with front/back empty. Keep markdown to **bold** and code. Use {{c1::answer}} or {{c1::answer::hint}}; hidden spans must occur verbatim in the capture. Resolve pronouns/surface grammar without changing meaning. Number from 1 without gaps. Optional hints usually clarify answer type in one to three words; omit when clear. There is no hint quota; never reject for a missing or longer hint alone. Hints cannot replace subject/conditions or leak through synonyms, initials or grammar. Short names and conditions such as "The Who" and "until the broth is clear" are not invalid merely for containing who/is.
-Apply both litmus tests to every rendered review before consulting hidden targets or plan context. Hide all spans of one number together, fill the other numbers and leave hints visible. Cite exact visible words for the identifying cue AND requested relation. For term identification use the distinguishing definition/relation and context; for ordinary reviews use the specific subject. If either lacks visible evidence, fail rather than infer from the answer, aspect, plan or source. False negative: could a knowledgeable learner miss through ambiguity? False positive: could someone answer without knowing through yes/no guessing, grammar, answer echoes or siblings? Reject answer leaks and source-relative filler such as "what does the highlight say". Check punctuation and sibling interference, retain required context/coverage and return only the requested schema.
+Apply both litmus tests to every rendered review before consulting hidden targets or plan context. For QA inspect only the front. For cloze hide all spans of one number together, fill the other numbers and leave hints visible. Cite exact visible words for the identifying cue AND requested relation. For term identification use the distinguishing definition/relation and context; for ordinary reviews use the specific subject. If either lacks visible evidence, revise rather than infer from the answer, aspect, plan or source. False negative: could a knowledgeable learner miss through ambiguity or missing conditions? False positive: could someone answer without knowing the intended relationship through yes/no guessing, grammar, answer echoes, semantic paraphrase or siblings? A definition can legitimately cue a technical term; a visible paraphrase that supplies the requested relationship is a giveaway. Compare with the matching examples below. Revise defects before emitting only the requested schema, preserving context, coverage and fact links; reject source-relative filler such as "what does the highlight say" and check punctuation/sibling interference. This authoring self-check is not independent audit clearance; never emit a self-approved verdict.
 
 <examples>
 <contrast>
@@ -83,6 +83,29 @@ Apply both litmus tests to every rendered review before consulting hidden target
 cloze | To calibrate the fictional Zeta sensor, first {{c1::disconnect power}}, then {{c2::attach the reference cable}}, and finally {{c3::reconnect power}}.
 qa | Why disconnect power before attaching the reference cable when calibrating the fictional Zeta sensor? | Disconnecting power prevents a false calibration reading because the reference cable must be attached before the sensor resumes measurement.
 </cards>
+</example>
+<contrast>
+<highlight>Under steady load, the fictional Orin governor's output rate is invariant. In Neral notation, invariant is defined as constant despite load changes.</highlight>
+<bad>Under steady load, the fictional Orin governor's output rate is {{c1::invariant}} (constant, does not change).</bad>
+<good>Under steady load, the fictional Orin governor's output rate is {{c1::invariant}}.</good>
+<good>In Neral notation, {{c1::invariant}} is defined as constant despite load changes.</good>
+<note>For relationship recall the parenthetical is a giveaway; for term identification the definition is a valid cue. Steady load is a needed visible condition, not an answer gloss. The two good forms are alternative tasks, not mandatory siblings.</note>
+</contrast>
+<contrast>
+<highlight>Zeta's signal types include alpha and beta.</highlight>
+<bad>qa | List all Zeta signal types. | alpha and beta</bad>
+<good>qa | Name one example of Zeta's signal types. | alpha or beta</good>
+<note>Either answer alone suffices; the key lists alternatives, not two required facts. Do not claim these open examples are complete.</note>
+</contrast>
+<example>
+<highlight>For the fictional Neral relay, the two effects are alpha and beta.</highlight>
+<good>For the fictional Neral relay, the two effects are {{c1::beta}} and {{c2::alpha}}.</good>
+<note>Complete unordered membership is preserved in a stable authored display order; source order is incidental. Each review hides one member.</note>
+</example>
+<example>
+<highlight>The fictional Neral relay's timing module is named phase synchronized adaptive pulse interval stabilization controller.</highlight>
+<good>The fictional Neral relay's timing module is named {{c1::phase synchronized adaptive pulse interval stabilization controller}}.</good>
+<note>One meaningful long technical name needs length adjudication, not truncation or invented shorter terminology.</note>
 </example>
 </examples>
 </writing_method>`;

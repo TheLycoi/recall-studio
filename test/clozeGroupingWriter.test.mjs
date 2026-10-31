@@ -1,3 +1,4 @@
+import { auditVerdict } from './auditFixture.mjs';
 // Request-contract checks only: synthetic replies do not establish model grouping judgments.
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -37,7 +38,7 @@ before(async () => {
     if (req.label === 'preparation') return JSON.stringify(preparation);
     if (['grounded cards', 'generation repair', 'cards', 'rewrite cards'].includes(req.label)) return JSON.stringify({ cards: [draft] });
     if (req.label === 'card') return JSON.stringify(draft);
-    if (['audit', 'final audit'].includes(req.label)) return JSON.stringify({ verdicts: [{ index: 0, cardId: card.id, status: 'verified', reason: 'Synthetic transport, not a semantic judgment.', conflicts: [] }] });
+    if (['audit', 'final audit'].includes(req.label)) return JSON.stringify({ verdicts: [auditVerdict(card, { index: 0, cardId: card.id, status: 'verified', reason: 'Synthetic transport, not a semantic judgment.', conflicts: [] })] });
     if (req.label === 'verdicts') return JSON.stringify({ verdicts: [{ index: 0, verdict: 'keep', reason: '', bloom: 'remember', kind: 'cloze', front: '', back: '', text: '' }] });
     if (req.label === 'rewrite audit') return JSON.stringify({ preservesFacts: true, reason: 'Synthetic transport.', verdicts: [{ index: 0, verdict: 'keep', reason: '' }] });
     throw Error(req.label);
@@ -60,10 +61,10 @@ before(async () => {
   }
 });
 
-test('every assembled stage carries v9 grouping without weakening focused reviews or reciprocal cues', () => {
-  assert.equal(m.WRITING_METHOD_ID, 'recall-writing-method-v9');
+test('every assembled stage carries v10 grouping without weakening focused reviews or reciprocal cues', () => {
+  assert.equal(m.WRITING_METHOD_ID, 'recall-writing-method-v10');
   for (const req of requests) {
-    assert.equal(req.system.split('<writing_method id="recall-writing-method-v9">').length, 2, req.label);
+    assert.equal(req.system.split('<writing_method id="recall-writing-method-v10">').length, 2, req.label);
     assert.equal(JSON.parse(req.user).rules, m.WRITING_METHOD_ID, req.label);
     const method = req.system.split('</writing_method>')[0];
     assert.match(method, /aim for two to three useful distinct cloze numbers per note/i, req.label);

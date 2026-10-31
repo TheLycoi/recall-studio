@@ -1,3 +1,4 @@
+import { auditVerdict } from './auditFixture.mjs';
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
@@ -49,7 +50,7 @@ function fixture(c, { repeat = false, conflict = false } = {}) {
     if (req.label === 'generation repair') return JSON.stringify({ cards: [draft(repeat ? c.repeated : c.repaired)] });
     assert.ok(['audit', 'final audit'].includes(req.label), req.label);
     assert.deepEqual(payload.cards[0].reviews, m.renderedCardReviews(m.makeCard(h.id, { kind: 'cloze', text: req.label === 'audit' ? c.text : repeat ? c.repeated : c.repaired })));
-    return JSON.stringify({ verdicts: payload.cards.map((card, index) => ({ index, cardId: card.id, status: 'verified', reason: 'Always-positive synthetic audit, not live-model evidence.', conflicts: conflict ? [{ quote: c.source, reason: 'Insufficient evidence for the planned scope.' }] : [] })) });
+    return JSON.stringify({ verdicts: payload.cards.map((card, index) => (auditVerdict(card, { index, cardId: card.id, status: 'verified', reason: 'Always-positive synthetic audit, not live-model evidence.', conflicts: conflict ? [{ quote: c.source, reason: 'Insufficient evidence for the planned scope.' }] : [] }))) });
   };
   llm.codex = backend;
   const plugin = { settings, llm, store: { all: () => [h], touch() {}, async flush() { saves.push(structuredClone(h)); }, hasUnsavedChanges: false }, refreshStatusBar() {} };
@@ -100,7 +101,11 @@ function guardedCases(c) {
     assert.deepEqual(f.calls.map(r => r.label), ['preparation', 'grounded cards', 'audit']);
     assert.equal(f.h.generation.drafts[0].text, c.text);
     assert.ok(f.h.generation.blocked[0].reasons.some(reason => reason.includes(c.source)));
-    assert.equal(f.h.generation.audit.verdicts[0].conflicts[0].quote, c.source);
+    assert.equal(f.h.generation.audit.status, 'unverified', 'contradictory approval cannot satisfy the quality contract');
+    assert.equal(f.h.generation.audit.sourceFindings[0].quote, c.source, 'source holds survive the rejected quality contract');
+    const saved = m.parseInboxJson(JSON.stringify({ version: 1, highlights: [f.h] }));
+    assert.equal(saved.ok, true);
+    assert.deepEqual(saved.data.highlights[0].generation.audit.sourceFindings, f.h.generation.audit.sourceFindings);
   });
 }
 

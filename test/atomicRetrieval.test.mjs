@@ -1,3 +1,4 @@
+import { auditVerdict } from './auditFixture.mjs';
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
@@ -33,7 +34,7 @@ async function run({ replacement = repaired, conflict = false, text = screenshot
     if (req.label === 'preparation') return JSON.stringify(preparation);
     if (req.label === 'grounded cards') return JSON.stringify({ cards: [draft(text)] });
     if (req.label === 'generation repair') return JSON.stringify({ cards: [draft(replacement)] });
-    return JSON.stringify({ verdicts: JSON.parse(req.user).cards.map((c, index) => ({ index, cardId: c.id, status: 'verified', reason: 'Synthetic always-positive audit.', conflicts: conflict ? [{ quote: source, reason: 'Insufficient captured evidence.' }] : [] })) });
+    return JSON.stringify({ verdicts: JSON.parse(req.user).cards.map((c, index) => (auditVerdict(c, { index, cardId: c.id, status: 'verified', reason: 'Synthetic always-positive audit.', conflicts: conflict ? [{ quote: source, reason: 'Insufficient captured evidence.' }] : [] }))) });
   };
   llm.codex = backend;
   const plugin = { settings, llm, store: { all: () => [h], touch() {}, async flush() { saves.push(structuredClone(h)); }, hasUnsavedChanges: false }, refreshStatusBar() {} };

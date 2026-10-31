@@ -1,3 +1,4 @@
+import { auditVerdict } from './auditFixture.mjs';
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
@@ -23,7 +24,7 @@ function fixture(overrides={}) {
   const llm=new LlmClient(()=>settings);
   const backend={complete:async req=>{
     calls.push(req);
-    const result=req.label==='preparation' ? preparation() : req.label==='grounded cards' ? draft() : {verdicts:[{index:0,cardId:JSON.parse(req.user).cards[0].id,status:'verified',reason:'The captured source supports this claim.'}]};
+    const result=req.label==='preparation' ? preparation() : req.label==='grounded cards' ? draft() : {verdicts:[auditVerdict(JSON.parse(req.user).cards[0], {index:0,cardId:JSON.parse(req.user).cards[0].id,status:'verified',reason:'The captured source supports this claim.'})]};
     return req.schema.parse(result);
   }};
   llm.codex=backend; llm.deepseek=backend; llm.opencode=backend;
@@ -45,7 +46,7 @@ test('six deletions on the same source sentence remain one cloze note', async ()
       exclusions: [], omissions: [], conflicts: [],
     });
     if (req.label === 'grounded cards') return req.schema.parse({ cards: [{ planId: 'P1', factIds: terms.map((_, i) => `F${i + 1}`), kind: 'cloze', front: '', back: '', text }] });
-    return req.schema.parse({ verdicts: [{ index: 0, cardId: JSON.parse(req.user).cards[0].id, status: 'verified', reason: 'Each hidden term appears in the source.' }] });
+    return req.schema.parse({ verdicts: [auditVerdict(JSON.parse(req.user).cards[0], { index: 0, cardId: JSON.parse(req.user).cards[0].id, status: 'verified', reason: 'Each hidden term appears in the source.' })] });
   };
   await f.g.run(f.h);
   assert.equal(f.h.cards.length, 1);
@@ -64,7 +65,7 @@ test('source-backed cloze notes can exceed the old per-highlight quota without a
     f.calls.push(req);
     if (req.label === 'preparation') return req.schema.parse({ facts, plan: facts.map((fact, i) => ({ id: `P${i + 1}`, factIds: [fact.id], entity: `Item${i + 1}`, aspect: 'property', value: `token${i + 1}`, reason: 'A distinct supported fact.' })), exclusions: [], omissions: [], conflicts: [] });
     if (req.label === 'grounded cards') return req.schema.parse({ cards: facts.map((fact, i) => ({ planId: `P${i + 1}`, factIds: [fact.id], kind: 'cloze', front: '', back: '', text: `Item${i + 1} stores {{c1::token${i + 1}}}.` })) });
-    return req.schema.parse({ verdicts: JSON.parse(req.user).cards.map((card, index) => ({ index, cardId: card.id, status: 'verified', reason: 'Supported by the source.' })) });
+    return req.schema.parse({ verdicts: JSON.parse(req.user).cards.map((card, index) => (auditVerdict(card, { index, cardId: card.id, status: 'verified', reason: 'Supported by the source.' }))) });
   };
   await f.g.run(f.h);
   assert.equal(f.h.status, 'ready');
@@ -75,13 +76,13 @@ test('source-backed cloze notes can exceed the old per-highlight quota without a
 
 for(const [provider,Backend] of [['codex',()=>CodexBackend],['opencode',()=>OpenCodeBackend]])test(`${provider} actual complete adapter validates all three stages through a mocked transport`,async()=>{
   const f=fixture({provider});const backend=new (Backend())(()=>f.settings);let transports=0;
-  backend.exec=async req=>{transports++;const user=JSON.parse(req.user);const result=req.label==='preparation'?preparation():req.label==='grounded cards'?draft():{verdicts:[{index:0,cardId:user.cards[0].id,status:'verified',reason:'Captured source supports the claim'}]};if(provider==='codex'){const schema=toStrictSchema(req.schema);assert.equal(schema.additionalProperties,false);}return JSON.stringify(result);};
+  backend.exec=async req=>{transports++;const user=JSON.parse(req.user);const result=req.label==='preparation'?preparation():req.label==='grounded cards'?draft():{verdicts:[auditVerdict(user.cards[0], {index:0,cardId:user.cards[0].id,status:'verified',reason:'Captured source supports the claim'})]};if(provider==='codex'){const schema=toStrictSchema(req.schema);assert.equal(schema.additionalProperties,false);}return JSON.stringify(result);};
   f.llm[provider]=backend;await f.g.run(f.h);assert.equal(f.h.status,'ready');assert.equal(transports,3);assert.equal(f.h.cards[0].generation.audit.status,'verified');
 });
 
 test('partial multi-card audit verifies only the exact addressed card',async()=>{
   const f=fixture();const original=f.backend.complete;
-  f.backend.complete=async req=>{f.calls.push(req);const user=JSON.parse(req.user);if(req.label==='preparation'){const p=preparation();p.plan.push({id:'P2',factIds:['F2'],entity:'Cobalt',aspect:'',value:'reflects light',reason:'Stated property'});p.omissions=[];return req.schema.parse(p);}if(req.label==='grounded cards'){const d=draft();d.cards.push({planId:'P2',factIds:['F2'],kind:'qa',front:'What does Cobalt reflect?',back:'light',text:''});return req.schema.parse(d);}assert.equal(user.cards.length,2);assert.deepEqual(user.cards.map(c=>c.index),[0,1]);return req.schema.parse({verdicts:[{index:1,cardId:user.cards[1].id,status:'verified',reason:'The second card is supported'}]});};
+  f.backend.complete=async req=>{f.calls.push(req);const user=JSON.parse(req.user);if(req.label==='preparation'){const p=preparation();p.plan.push({id:'P2',factIds:['F2'],entity:'Cobalt',aspect:'',value:'reflects light',reason:'Stated property'});p.omissions=[];return req.schema.parse(p);}if(req.label==='grounded cards'){const d=draft();d.cards.push({planId:'P2',factIds:['F2'],kind:'qa',front:'What does Cobalt reflect?',back:'light',text:''});return req.schema.parse(d);}assert.equal(user.cards.length,2);assert.deepEqual(user.cards.map(c=>c.index),[0,1]);return req.schema.parse({verdicts:[auditVerdict(user.cards[1], {index:1,cardId:user.cards[1].id,status:'verified',reason:'The second card is supported'})]});};
   await f.g.run(f.h);assert.equal(f.h.generation.audit.status,'unverified');assert.equal(f.h.cards.length,1);assert.equal(f.h.cards[0].back,'light');assert.equal(f.h.cards[0].generation.audit.status,'verified');assert.equal(f.h.generation.blocked.length,1);assert.equal(f.h.generation.phase,'blocked');
 });
 
@@ -107,7 +108,7 @@ test('DeepSeek staged preparation performs one HTTP request even on empty JSON o
 test('DeepSeek real adapter parses all three bounded stages with deterministic HTTP fixtures',async()=>{
   const f=fixture({provider:'deepseek',deepseekModel:'synthetic',deepseekApiKey:'synthetic-not-a-secret'});
   f.llm.deepseek=new DeepSeekBackend(()=>f.settings);const requests=[];
-  httpReply=async args=>{const body=JSON.parse(args.body);requests.push(body);const user=JSON.parse(body.messages[1].content);const out=requests.length===1?preparation():requests.length===2?draft():{verdicts:[{index:0,cardId:user.cards[0].id,status:'verified',reason:'Captured source supports the claim'}]};return {status:200,json:{choices:[{message:{content:JSON.stringify(out)},finish_reason:'stop'}]}};};
+  httpReply=async args=>{const body=JSON.parse(args.body);requests.push(body);const user=JSON.parse(body.messages[1].content);const out=requests.length===1?preparation():requests.length===2?draft():{verdicts:[auditVerdict(user.cards[0], {index:0,cardId:user.cards[0].id,status:'verified',reason:'Captured source supports the claim'})]};return {status:200,json:{choices:[{message:{content:JSON.stringify(out)},finish_reason:'stop'}]}};};
   await f.g.run(f.h);assert.equal(f.h.status,'ready');assert.equal(requests.length,3);assert.equal(f.h.cards[0].generation.audit.status,'verified');assert.ok(requests.every(r=>r.model==='synthetic'));
 });
 
@@ -219,7 +220,7 @@ for(const mode of ['throws','partial','unknown-id','wrong-index','duplicate']) t
 
 test('a failed finding attempts one repair and retains unresolved originals privately',async()=>{
   const f=fixture();const original=f.backend.complete;
-  f.backend.complete=async req=>req.label==='audit'?(f.calls.push(req),req.schema.parse({verdicts:[{index:0,cardId:JSON.parse(req.user).cards[0].id,status:'failed',reason:'Unsupported qualifier'}]})):original(req);
+  f.backend.complete=async req=>req.label==='audit'?(f.calls.push(req),req.schema.parse({verdicts:[auditVerdict(JSON.parse(req.user).cards[0], {index:0,cardId:JSON.parse(req.user).cards[0].id,status:'failed',reason:'Unsupported qualifier'})]})):original(req);
   await f.g.run(f.h);assert.equal(f.h.cards.length,0);assert.equal(f.h.generation.drafts[0].back,'heat');assert.equal(f.h.generation.audit.status,'failed');assert.equal(f.calls.filter(c=>c.label==='generation repair').length,1);assert.equal(f.h.generation.phase,'blocked');
 });
 

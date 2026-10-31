@@ -111,10 +111,10 @@ test('examples keep structural and source checks, while the meaningful long expl
   assert.match(system, /length warning without becoming a different retrieval task/);
 });
 
-// Actual assembled instructions keep four concise fictional example groups.
+// Actual assembled instructions keep the original four groups and four first-pass contrasts.
 test('runtime examples cover grouping, reciprocal cues, visible relations and ordered explanations', () => {
   const groups = [...system.matchAll(/<(contrast|example)>([\s\S]*?)<\/\1>/g)].map(m => m[2]);
-  assert.equal(groups.length, 4);
+  assert.equal(groups.length, 8);
   for (const group of groups) {
     assert.match(group, /<highlight>/);
     assert.match(group, /<good>|<cards>/);

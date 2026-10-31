@@ -51,7 +51,7 @@ const QA_YES_NO_START = /^(is|are|was|were|does|do|did|can|will|should|has|have)
 
 // shortcut: English list labels plus short noun-like members; semantic compounds need audit.
 function compoundList(answer: string, cue: string): boolean {
-  if (!/\b(?:pillars|effects|types|kinds|members|components|parts|features|items|additions|list)\b/i.test(cue)) return false;
+  if (!/\b(?:pillars|effects|types?|kinds?|examples?|members|components|parts|features|items|additions|list)\b/i.test(cue)) return false;
   // Why/how can ask for one causal relationship; semantic compounds still need audit.
   if (/^(?:why|how(?!\s+(?:many|much)\b))\b/i.test(cue.trim())) return false;
   // An explicit singular attribute can contain punctuation/conjunctions without being a set.
@@ -64,6 +64,19 @@ function compoundList(answer: string, cue: string): boolean {
   const members = answer.replace(/^\s*[-*]\s+/, "").split(/,\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+|\s+[-*]\s+/i).map(s => s.trim().replace(/[.!?;]$/, "").trim()).filter(Boolean);
   return new Set(members.map(normalizePlain)).size > 1 && members.every(s => /^[\p{L}][\p{L}’' -]*$/u.test(s) && words(s).length <= 6
     && !/\b(?:is|are|was|were|because|before|after|when|until|then|disconnect|connect|attach|reconnect)\b/i.test(s));
+}
+
+// shortcut: explicit English singular example requests and short source-present alternatives;
+// source membership is necessary; semantic support still needs independent audit.
+function supportedExampleAlternatives(answer: string, cue: string, source: string): boolean {
+  const question = cue.trim().replace(/[.!?]$/, "").trim();
+  if (!/^(?:(?:name|give|provide)\s+(?:one|an?)|what\s+is\s+(?:one|an?))\s+(?:example|type|kind)\s+of\s+\S/i.test(question)
+    || /[.!?;:,\n]|\b(?:and|or|plus|then|also|both|all|each|every|two|three|multiple|several)\b/i.test(question)) return false;
+  const alternatives = answer.trim().replace(/[.!?]$/, "").split(/\s+or\s+/i);
+  const evidence = ` ${normalizePlain(source)} `;
+  return alternatives.length > 1 && alternatives.every(value => /^[\p{L}][\p{L}’' -]*$/u.test(value.trim())
+    && words(value).length <= 6 && !/\b(?:and|is|are|was|were)\b/i.test(value)
+    && !containsAnswer(cue, value) && evidence.includes(` ${normalizePlain(value)} `));
 }
 
 export function lintCard(card: Card, highlight: Highlight, siblings: Card[]): LintResult {
@@ -136,7 +149,11 @@ export function lintCard(card: Card, highlight: Highlight, siblings: Card[]): Li
         const source = sentence.match(/\b(two|three|four|five|six|seven|eight|nine|ten|\d+)\s+(effects|types|kinds|members|components|parts|features|items)\s*(?:are\b|:)\s*(.+)$/i);
         if (!source || source[2].toLowerCase() !== list[2].toLowerCase() || count(source[1]) !== shown.length) return false;
         const supplied = members(source[3]);
-        return supplied.length === shown.length && supplied.every((member, j) => member === shown[j]);
+        // Incidental display order may differ; ordered/ranked context still uses positions.
+        const ordered = /\b(?:ordered|ranked|order|sequence|steps?|route|first|then|finally|before|after)\b/i.test(sentence + " " + slots);
+        const expected = ordered ? shown : [...shown].sort();
+        const actual = ordered ? supplied : supplied.sort();
+        return actual.length === expected.length && actual.every((member, j) => member === expected[j]);
       });
       if (!bounded) failures.push("unordered-list-slots");
     }
@@ -211,7 +228,9 @@ export function lintCard(card: Card, highlight: Highlight, siblings: Card[]): Li
     if (card.front.trim().length === 0 || card.back.trim().length === 0) {
       failures.push("qa-empty");
     }
-    if (compoundList(reviewText(card.back.replace(/\r?\n\s*(?:[-*]\s+)?/g, " - ")), reviewText(card.front))) failures.push("compound-retrieval");
+    const answer = reviewText(card.back.replace(/\r?\n\s*(?:[-*]\s+)?/g, " - "));
+    const cue = reviewText(card.front);
+    if (compoundList(answer, cue) && !supportedExampleAlternatives(answer, cue, reviewText(highlight.text))) failures.push("compound-retrieval");
     // qa-answer-long: back <=12 words.
     if (words(card.back).length > 12) failures.push("qa-answer-long");
     // qa-yes-no: front must not start with a yes/no auxiliary.

@@ -1,3 +1,4 @@
+import { auditVerdict } from './auditFixture.mjs';
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
@@ -18,7 +19,7 @@ async function fixture(){
   const v=vault(),store=new InboxStore(v.app,'study');await store.load();
   const h=makeHighlight({sourcePath:'synthetic.md',sourceTitle:'Synthetic',text:'Amber stores heat.'});store.add(h);
   const settings={provider:'codex',codexModel:'synthetic',maxCardsPerHighlight:5,language:'',writerInstructions:'',critiquePass:true,historyExamples:false,lintMode:'badge',notifyWhenReady:false,concurrency:1};
-  const calls=[],llm=new LlmClient(()=>settings);const backend={async complete(req){calls.push(req.label);const user=JSON.parse(req.user);return req.schema.parse(req.label==='preparation'?prep:req.label==='grounded cards'?{cards:[{planId:'P1',factIds:['F1'],kind:'qa',front:'What does Amber store?',back:'heat',text:''}]}:{verdicts:[{index:0,cardId:user.cards[0].id,status:'verified',reason:'Supported by source'}]});}};llm.codex=backend;
+  const calls=[],llm=new LlmClient(()=>settings);const backend={async complete(req){calls.push(req.label);const user=JSON.parse(req.user);return req.schema.parse(req.label==='preparation'?prep:req.label==='grounded cards'?{cards:[{planId:'P1',factIds:['F1'],kind:'qa',front:'What does Amber store?',back:'heat',text:''}]}:{verdicts:[auditVerdict(user.cards[0], {index:0,cardId:user.cards[0].id,status:'verified',reason:'Supported by source'})]});}};llm.codex=backend;
   const plugin={settings,store,llm,refreshStatusBar(){}};
   return {...v,store,h,calls,backend,plugin,g:new Generator(plugin)};
 }

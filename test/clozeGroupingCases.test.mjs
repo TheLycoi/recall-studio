@@ -1,3 +1,4 @@
+import { auditVerdict } from './auditFixture.mjs';
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
@@ -136,7 +137,7 @@ async function run(f, { status = 'verified', reason = 'Supplied synthetic approv
       assert.deepEqual(card.factIds, f.drafts[i].factIds);
       assert.deepEqual(card.reviews, m.renderedCardReviews(card));
     }
-    return req.schema.parse({ verdicts: payload.cards.map((card, index) => ({ index, cardId: card.id, status, reason, conflicts: [] })) });
+    return req.schema.parse({ verdicts: payload.cards.map((card, index) => (auditVerdict(card, { index, cardId: card.id, status, reason, conflicts: [] }))) });
   } };
   const plugin = {
     settings, llm,
@@ -236,7 +237,10 @@ for (const { name, group, failure, reason } of [
   assert.ok(inspect(f)[0].hard.includes(failure));
   const result = await run(f);
   assertHeld(result, 1, reason);
-  for (const audit of [result.h.generation.audit, result.h.generation.finalAudit]) assert.equal(audit.verdicts[0].status, 'verified');
+  for (const audit of [result.h.generation.audit, result.h.generation.finalAudit]) {
+    assert.equal(audit.status, 'unverified', 'contradictory positive verdicts fail the structured contract');
+    assert.match(audit.reason, /Hard checks cannot be waived/);
+  }
   for (const request of result.calls.filter(c => ['audit', 'final audit'].includes(c.label))) {
     assert.ok(request.payload.cards[0].checks.some(check => check.id === failure));
   }

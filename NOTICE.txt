@@ -42,7 +42,10 @@ Commit: 46fa5e9527804b82b9521bf1ed3229e2cce6790d
 
 The preparation inventory, entity/aspect/value plan, explicit exclusions and
 independent audit in src/generation.ts adapt method/1-extract.md through
-method/4-audit.md. The adaptation keeps Review Inbox's source-only grounding,
+method/4-audit.md. The shared writer in src/writerMethod.ts also adapts the
+relationship-before-markup composition and rendered-front self-check principles
+from method/3-cards.md; writer checks do not replace independent clearance.
+The adaptation keeps Review Inbox's source-only grounding,
 Q&A/cloze model, deterministic lint and human export controls. It does not
 include the separate AnkiEngine application's code, medical correction policy,
 special cloze template, ACP/sidecars or .apkg integration.

@@ -1,3 +1,4 @@
+import { auditVerdict } from './auditFixture.mjs';
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
@@ -79,7 +80,7 @@ async function fixture() {
   const settings = { provider: 'codex', codexModel: 'synthetic', writerInstructions: '', language: '', critiquePass: false, historyExamples: false, lintMode: 'badge', concurrency: 1, notifyWhenReady: false };
   const prep = { facts: [{ id: 'F1', statement: h.text, quote: h.text }], plan: [{ id: 'P1', factIds: ['F1'], entity: 'Amber', aspect: '', value: 'heat', reason: 'Stated' }], exclusions: [], omissions: [], conflicts: [] };
   const llm = new LlmClient(() => settings);
-  llm.codex = { complete: async req => req.schema.parse(req.label === 'preparation' ? prep : req.label === 'audit' ? { verdicts: JSON.parse(req.user).cards.map((card,index) => ({index,cardId:card.id,status:'verified',reason:'Synthetic lifecycle fixture.'})) } : { cards: [{ planId: 'P1', factIds: ['F1'], kind: 'qa', front: 'What does Amber store?', back: 'heat', text: '' }] }) };
+  llm.codex = { complete: async req => req.schema.parse(req.label === 'preparation' ? prep : req.label === 'audit' ? { verdicts: JSON.parse(req.user).cards.map((card,index) => (auditVerdict(card, {index,cardId:card.id,status:'verified',reason:'Synthetic lifecycle fixture.'}))) } : { cards: [{ planId: 'P1', factIds: ['F1'], kind: 'qa', front: 'What does Amber store?', back: 'heat', text: '' }] }) };
   llm.abort = async () => {};
   const plugin = new RecallPlugin(app);
   Object.assign(plugin, { settings, store, llm, refreshStatusBar() {} });
@@ -177,7 +178,7 @@ test('live layout startup migrates only retired leaves and completes the real ge
       dispatches.push(request.label);
       if (request.label !== 'audit') return f.llm.codex.complete(request);
       const { cards } = JSON.parse(request.user);
-      return request.schema.parse({ verdicts: cards.map((card, index) => ({ index, cardId: card.id, status: 'verified', reason: 'Synthetic supported card' })) });
+      return request.schema.parse({ verdicts: cards.map((card, index) => (auditVerdict(card, { index, cardId: card.id, status: 'verified', reason: 'Synthetic supported card' }))) });
     };
     assert.deepEqual(dispatches, []);
     assert.equal(f.files.has('study/recall-rules.md'), false);

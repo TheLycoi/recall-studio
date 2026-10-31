@@ -1,3 +1,4 @@
+import { auditVerdict } from './auditFixture.mjs';
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
@@ -61,7 +62,7 @@ async function run({ captured = source, text = pair, status = 'verified', reason
       assert.equal(card.planId, 'P1');
       assert.deepEqual(card.factIds, ['F1']);
     }
-    return req.schema.parse({ verdicts: payload.cards.map((card, index) => ({ index, cardId: card.id, status, reason, conflicts })) });
+    return req.schema.parse({ verdicts: payload.cards.map((card, index) => (auditVerdict(card, { index, cardId: card.id, status, reason, conflicts }))) });
   } };
   const plugin = {
     settings, llm,
@@ -159,7 +160,10 @@ for (const { name, captured, text, failure, reason } of [
   const f = await run({ captured, text });
   held(f, reason);
   repairedAndRechecked(f);
-  for (const audit of [f.h.generation.audit, f.h.generation.finalAudit]) assert.equal(audit.verdicts[0].status, 'verified');
+  for (const audit of [f.h.generation.audit, f.h.generation.finalAudit]) {
+    assert.equal(audit.status, 'unverified', 'contradictory positive verdicts fail the structured contract');
+    assert.match(audit.reason, /Hard checks cannot be waived/);
+  }
   for (const req of f.calls.filter(r => ['audit', 'final audit'].includes(r.label))) {
     assert.ok(req.payload.cards[0].checks.some(check => check.id === failure));
   }
@@ -179,7 +183,7 @@ test('a supplied quoted source conflict prevents publication despite an approvin
   held(f, /Source conflicts or insufficient evidence need human review/);
   assert.deepEqual(f.calls.map(r => r.label), ['preparation', 'grounded cards', 'audit']);
   assert.equal(f.h.generation.audit.verdicts[0].status, 'verified');
-  assert.deepEqual(f.h.generation.audit.verdicts[0].conflicts, conflicts);
+  assert.deepEqual(f.h.generation.audit.verdicts[0].conflicts, conflicts.map(c => ({ ...c, kind: 'legacy' })));
   assert.equal(f.h.generation.repairs, undefined);
 });
 
@@ -192,7 +196,7 @@ test('production schemas and validators enforce reciprocal draft provenance and 
   assert.throws(() => m.validateDrafts({ cards: [{ ...cloze(pair), planId: 'P99' }] }, p), /plan reference/);
   assert.throws(() => m.validateDrafts({ cards: [{ ...cloze(pair), factIds: ['F99'] }] }, p), /fact links/);
   const { card } = check(source, pair);
-  const verdict = { index: 0, cardId: card.id, status: 'verified', reason: 'Supplied audit.', conflicts: [] };
+  const verdict = auditVerdict(card, { index: 0, cardId: card.id, status: 'verified', reason: 'Supplied audit.', conflicts: [] });
   assert.throws(() => m.validateAudit({ verdicts: [{ ...verdict, cardId: 'wrong-card' }] }, [card], source), /mismatched/);
   assert.throws(() => m.validateAudit({ verdicts: [{ ...verdict, conflicts: [{ quote: 'invented evidence', reason: 'Unsupported quote.' }] }] }, [card], source), /quote is not in the captured snapshot/);
 });

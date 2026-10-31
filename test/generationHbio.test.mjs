@@ -1,3 +1,4 @@
+import { auditVerdict } from './auditFixture.mjs';
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
@@ -68,7 +69,7 @@ function fixture(c) {
     const card = JSON.parse(req.user).cards[0];
     assert.deepEqual(card.reviews, c.reviews, 'auditor receives the exact per-ordinal retrieval, not just the unhidden note');
     assert.deepEqual(card.targetContext, { entity: c.entity, aspect: 'stated relationship' });
-    return req.schema.parse({ verdicts: [{ index: 0, cardId: card.id, status: c.reason ? 'failed' : 'verified', reason: c.reason ?? 'Synthetic positive control, not live model evidence.', ...(conflict ? { conflicts: [conflict] } : {}) }] });
+    return req.schema.parse({ verdicts: [auditVerdict(card, { index: 0, cardId: card.id, status: c.reason ? 'failed' : 'verified', reason: c.reason ?? 'Synthetic positive control, not live model evidence.', ...(conflict ? { conflicts: [conflict] } : {}) })] });
   } };
   llm.codex = backend;
   const plugin = { settings, llm, store: { all: () => [h], touch() {}, async flush() {}, hasUnsavedChanges: false }, refreshStatusBar() {} };
@@ -88,13 +89,13 @@ for (const c of cases) test(`P3 rendered contract: ${c.name}`, async () => {
 const sourceCases = [
   { name: 'absolute copied clinical claim', source: 'Treatment Z always prevents every complication.', entity: 'Treatment Z', text: 'Treatment Z {{c1::always}} prevents every complication.',
     reviews: [{ ordinal: 1, visibleCue: 'Treatment Z [...] prevents every complication.', hiddenTargets: ['always'] }],
-    sourceConflict: { quote: 'Treatment Z always prevents every complication.', reason: 'Insufficient evidence for universal clinical scope; faithful copying is not factual verification.' } },
+    sourceConflict: { kind: 'insufficient', quote: 'Treatment Z always prevents every complication.', reason: 'Insufficient evidence for universal clinical scope; faithful copying is not factual verification.' } },
   { name: 'intra-source contradiction', source: 'Treatment Z always prevents complications. Treatment Z sometimes fails to prevent complications.', entity: 'Treatment Z', text: 'Treatment Z {{c1::always}} prevents complications.',
     reviews: [{ ordinal: 1, visibleCue: 'Treatment Z [...] prevents complications.', hiddenTargets: ['always'] }],
-    sourceConflict: { quote: 'Treatment Z always prevents complications. Treatment Z sometimes fails to prevent complications.', reason: 'Conflicting source positions cannot support this absolute target.' } },
+    sourceConflict: { kind: 'insufficient', quote: 'Treatment Z always prevents complications. Treatment Z sometimes fails to prevent complications.', reason: 'Conflicting source positions cannot support this absolute target.' } },
   { name: 'malformed source grammar', source: 'Treatment Z do not never prevent complications.', entity: 'Treatment Z', text: 'Treatment Z {{c1::do not never}} prevent complications.',
     reviews: [{ ordinal: 1, visibleCue: 'Treatment Z [...] prevent complications.', hiddenTargets: ['do not never'] }],
-    sourceConflict: { quote: 'Treatment Z do not never prevent complications.', reason: 'Insufficient evidence: malformed source grammar makes the negation ambiguous; a grammar edit must not choose the fact.' } },
+    sourceConflict: { kind: 'insufficient', quote: 'Treatment Z do not never prevent complications.', reason: 'Insufficient evidence: malformed source grammar makes the negation ambiguous; a grammar edit must not choose the fact.' } },
 ];
 
 for (const c of sourceCases) test(`P4 independent source hold: ${c.name}`, async () => {
@@ -130,7 +131,7 @@ test('P4 preparation can scope an evidence hold and omit its target without bloc
 
 test('P4 a preparation hold on a planned target cannot be waived by a positive audit or sent for factual repair', async () => {
   const f = fixture(cases[5]);
-  const conflict = { factIds: ['F1'], quote: f.h.text, reason: 'Insufficient evidence for this planned scope.' };
+  const conflict = { kind: 'insufficient', factIds: ['F1'], quote: f.h.text, reason: 'Insufficient evidence for this planned scope.' };
   f.preparation.conflicts.push(conflict);
   await f.g.run(f.h);
   assert.equal(f.h.cards.length, 0);
@@ -141,7 +142,7 @@ test('P4 a preparation hold on a planned target cannot be waived by a positive a
 
 test('P4 rejects invented audit evidence and invalid conflict fact references', () => {
   const c = m.makeCard('h', { kind: 'qa', front: 'Which signal?', back: 'reference signal' });
-  const v = { index: 0, cardId: c.id, status: 'verified', reason: 'Synthetic', conflicts: [{ quote: 'invented authority', reason: 'Unsupported claim' }] };
+  const v = auditVerdict(c, { index: 0, cardId: c.id, status: 'verified', reason: 'Synthetic', conflicts: [{ quote: 'invented authority', reason: 'Unsupported claim' }] });
   assert.throws(() => m.validateAudit({ verdicts: [v] }, [c], 'Original captured source.'), /quote.*captured snapshot/i);
   const f = fixture(cases[5]);
   f.preparation.conflicts.push({ quote: f.h.text, reason: 'Insufficient', factIds: ['F99'] });
@@ -163,10 +164,10 @@ test('P4 a later positive final verdict cannot erase a source hold while a diffe
       assert.deepEqual(JSON.parse(req.user).candidates.map(c => c.planId), ['P2'], 'only prompt quality is repairable');
       return req.schema.parse({ cards: [{ ...second, front: 'During Zeta calibration, why disconnect power before cable attachment?' }] });
     }
-    return req.schema.parse({ verdicts: JSON.parse(req.user).cards.map((c, index) => ({ index, cardId: c.id,
+    return req.schema.parse({ verdicts: JSON.parse(req.user).cards.map((c, index) => (auditVerdict(c, { index, cardId: c.id,
       status: req.label === 'audit' && index === 1 ? 'failed' : 'verified', reason: 'Synthetic quality finding',
       conflicts: req.label === 'audit' && index === 0 ? [sourceCases[0].sourceConflict] : [],
-    })) });
+    }))) });
   };
   await f.g.run(f.h);
   assert.equal(f.h.cards.length, 1);
@@ -187,12 +188,12 @@ for (const variant of ['initial', 'final verified', 'final failed']) test(`P4 ${
     f.calls.push(req);
     if (req.label === 'generation repair') return req.schema.parse({ cards: [{ ...f.draft, text: 'Treatment Z prevents every complication {{c1::always}}.' }] });
     const initial = req.label === 'audit';
-    return req.schema.parse({ verdicts: JSON.parse(req.user).cards.map((c, index) => ({
+    return req.schema.parse({ verdicts: JSON.parse(req.user).cards.map((c, index) => (auditVerdict(c, {
       index, cardId: c.id,
       status: variant !== 'initial' && (initial || (!retry && variant === 'final failed')) ? 'failed' : 'verified',
       reason: initial && variant !== 'initial' ? 'Synthetic retrieval quality defect.' : !retry && variant === 'final failed' ? 'Captured evidence cannot support universal scope.' : 'Synthetic positive quality verdict.',
       conflicts: !retry && (variant === 'initial' ? initial : !initial) ? [conflict] : [],
-    })) });
+    }))) });
   };
   await f.g.run(f.h);
   assert.equal(f.h.cards.length, 0);
@@ -233,7 +234,7 @@ for (const [read, mutation] of [['initial', 'remove'], ['initial', 'nested quote
   f.backend.complete = async req => {
     if (req.label !== 'audit') return complete(req);
     f.calls.push(req);
-    return req.schema.parse({ verdicts: JSON.parse(req.user).cards.map((c, index) => ({ index, cardId: c.id, status: 'verified', reason: 'Synthetic positive quality verdict.', conflicts: [] })) });
+    return req.schema.parse({ verdicts: JSON.parse(req.user).cards.map((c, index) => (auditVerdict(c, { index, cardId: c.id, status: 'verified', reason: 'Synthetic positive quality verdict.', conflicts: [] }))) });
   };
   if (read === 'replacement') f.settings.language = 'New authorized writing context.';
   let entered, resume;
@@ -288,7 +289,7 @@ test('P4 removing retained source evidence during retry prevents stale acceptanc
     if (req.label !== 'audit') return complete(req);
     f.calls.push(req);
     f.h.generation.auditHistory = [];
-    return req.schema.parse({ verdicts: JSON.parse(req.user).cards.map((c, index) => ({ index, cardId: c.id, status: 'verified', reason: 'Synthetic positive quality verdict.', conflicts: [] })) });
+    return req.schema.parse({ verdicts: JSON.parse(req.user).cards.map((c, index) => (auditVerdict(c, { index, cardId: c.id, status: 'verified', reason: 'Synthetic positive quality verdict.', conflicts: [] }))) });
   };
   await f.g.run(f.h);
   assert.equal(f.h.cards.length, 0, 'changed source-hold state revokes the in-flight retry');
@@ -327,7 +328,7 @@ for (const revision of ['source context', 'writing context', 'explicit new batch
   f.backend.complete = async req => {
     if (!['audit', 'final audit'].includes(req.label)) return complete(req);
     f.calls.push(req);
-    return req.schema.parse({ verdicts: JSON.parse(req.user).cards.map((c, index) => ({ index, cardId: c.id, status: 'verified', reason: 'Synthetic reconsideration in a new evidence batch.', conflicts: [] })) });
+    return req.schema.parse({ verdicts: JSON.parse(req.user).cards.map((c, index) => (auditVerdict(c, { index, cardId: c.id, status: 'verified', reason: 'Synthetic reconsideration in a new evidence batch.', conflicts: [] }))) });
   };
   if (revision === 'source context') f.h.before = 'New source context supplied for reconsideration.';
   else if (revision === 'writing context') f.settings.language = 'New authorized writing context.';
@@ -387,9 +388,9 @@ test('P4 new quotes require original bytes while legacy staged quotes retain the
   assert.equal(m.validatePreparation(f.preparation, raw, undefined, readable).facts[0].quote, readable);
   assert.deepEqual(f.preparation, before, 'legacy evidence is not backfilled or cleaned');
   const card = m.makeCard(f.h.id, { kind: 'qa', front: 'Treatment Z: which frequency?', back: 'always' });
-  const audit = { verdicts: [{ index: 0, cardId: card.id, status: 'unverified', reason: 'Source issue', conflicts: [{ quote: readable, reason: 'Legacy source insufficiency' }] }] };
+  const audit = { verdicts: [auditVerdict(card, { index: 0, cardId: card.id, status: 'unverified', reason: 'Source issue', conflicts: [{ quote: readable, reason: 'Legacy source insufficiency' }] })] };
   assert.throws(() => m.validateAudit(audit, [card], raw), /quote.*captured snapshot/i);
-  assert.deepEqual(m.validateAudit(audit, [card], raw, readable), audit);
+  assert.deepEqual(m.validateAudit(audit, [card], raw, readable), m.AuditOut.parse(audit));
 });
 
 test('P4 a qualified course fact remains capture-supported, not universally factually verified', async () => {

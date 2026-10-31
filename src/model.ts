@@ -44,13 +44,16 @@ export type LintWarningId = "duplicate-card" | "shared-answer" | "cross-interfer
 export type BloomLevel = "remember" | "understand" | "apply" | "analyze" | "evaluate" | "create";
 
 export type GenerationAuditStatus = "verified" | "unverified" | "failed";
+export interface SourceFinding { quote: string; reason: string; kind?: "framing" | "contradiction" | "insufficient" | "legacy" }
+export interface ScopedSourceFinding extends SourceFinding { id: string; cardId: string; sourceKey: string; content: string }
+export interface SourceReassessment { findingId: string; cardId: string; sourceKey: string; content: string; resolution: "resolved" | "framing" | "unresolved"; quote: string; reason: string }
 export interface GenerationPreparation {
   facts: { id: string; statement: string; quote: string }[];
   plan: { id: string; factIds: string[]; entity: string; aspect: string; value: string; reason: string }[];
   exclusions: { factIds: string[]; reason: string }[];
   omissions: { factIds: string[]; reason: string }[];
   /** Conflicting or insufficient source evidence, separate from prompt quality. Empty or legacy absent factIds holds the whole capture. */
-  conflicts: { quote: string; reason: string; factIds?: string[] }[];
+  conflicts: (SourceFinding & { factIds?: string[] })[];
 }
 export interface GenerationContext {
   /** Legacy saved batches may carry this field; it no longer limits writing. */
@@ -74,9 +77,13 @@ export interface GenerationProvenance {
 }
 export interface GenerationAuditRecord {
   provenance?: GenerationProvenance;
+  /** Valid source holds retained when the separate quality contract was rejected. */
+  sourceFindings?: ScopedSourceFinding[];
   status: GenerationAuditStatus;
   reason: string;
-  verdicts: { index: number; cardId: string; status: GenerationAuditStatus; reason: string; conflicts?: { quote: string; reason: string }[] }[];
+  verdicts: { index: number; cardId: string; status: GenerationAuditStatus; reason: string; conflicts?: SourceFinding[];
+    contractVersion?: number; reviews?: { ordinal: number | null; status: GenerationAuditStatus; reason: string; identifyingCue: string; relationCue: string; answerable: boolean; effortful: boolean }[];
+    checks?: { id: string; resolution: "accepted" | "defect"; reason: string }[]; reassessments?: SourceReassessment[] }[];
   /** A verdict applies only to the exact candidate wording checked. */
   contents?: string[];
 }
@@ -121,6 +128,8 @@ export interface GenerationBatch {
   committed?: boolean;
 }
 
+export interface QualityAcceptance { version: 1; method: string; content: string; at: string; accepted: { id: string; reason: string }[] }
+
 export interface Card {
   id: string;
   highlightId: string;
@@ -160,6 +169,8 @@ export interface Card {
     factIds: string[];
     audit: { status: GenerationAuditStatus; reason: string; content: string; sourceKey?: string; provenance?: GenerationProvenance };
   };
+  /** Explicit soft-check decisions for exact evidence, siblings and method. */
+  qualityAcceptance?: QualityAcceptance;
   /** Present only after a user-requested check of this exact content. */
   userCheck?: { content: string; at: string; issues: string[] };
   /** Explicit acceptance of warnings for an export attempt, never a model verdict. */

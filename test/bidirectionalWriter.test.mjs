@@ -1,3 +1,4 @@
+import { auditVerdict } from './auditFixture.mjs';
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
@@ -29,7 +30,7 @@ before(async () => {
     if (req.label === 'preparation') return JSON.stringify(preparation);
     if (['grounded cards', 'generation repair', 'cards', 'rewrite cards'].includes(req.label)) return JSON.stringify({ cards: [draft] });
     if (req.label === 'card') return JSON.stringify(draft);
-    if (['audit', 'final audit'].includes(req.label)) return JSON.stringify({ verdicts: [{ index: 0, cardId: card.id, status: 'verified', reason: 'Synthetic transport fixture, not a semantic judgment.', conflicts: [] }] });
+    if (['audit', 'final audit'].includes(req.label)) return JSON.stringify({ verdicts: [auditVerdict(card, { index: 0, cardId: card.id, status: 'verified', reason: 'Synthetic transport fixture, not a semantic judgment.', conflicts: [] })] });
     if (req.label === 'verdicts') return JSON.stringify({ verdicts: [{ index: 0, verdict: 'keep', reason: '', bloom: 'remember', kind: 'cloze', front: '', back: '', text: '' }] });
     if (req.label === 'rewrite audit') return JSON.stringify({ preservesFacts: true, reason: 'Synthetic transport fixture.', verdicts: [{ index: 0, verdict: 'keep', reason: '' }] });
     throw Error(req.label);
@@ -111,10 +112,10 @@ test('transport field descriptions allow definition-cued terms for QA and cloze'
   }
 });
 
-test('current v9 identity carries the reciprocal contract without inheriting older approval', () => {
-  assert.equal(m.WRITING_METHOD_ID, 'recall-writing-method-v9');
+test('current v10 identity carries the reciprocal contract without inheriting older approval', () => {
+  assert.equal(m.WRITING_METHOD_ID, 'recall-writing-method-v10');
   for (const req of requests) {
-    assert.equal(req.system.split('<writing_method id="recall-writing-method-v9">').length, 2);
-    assert.equal(JSON.parse(req.user).rules, 'recall-writing-method-v9');
+    assert.equal(req.system.split('<writing_method id="recall-writing-method-v10">').length, 2);
+    assert.equal(JSON.parse(req.user).rules, 'recall-writing-method-v10');
   }
 });

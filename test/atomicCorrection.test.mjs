@@ -1,3 +1,4 @@
+import { auditVerdict } from './auditFixture.mjs';
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
@@ -28,7 +29,7 @@ function fixture(source, fields, replacement = fields, rejectInitial = false) {
     if (req.label === 'rewrite audit') return JSON.stringify({ preservesFacts: true, reason: 'Synthetic source/coverage check.', verdicts: [{ index: 0, verdict: 'keep', reason: '' }] });
     const payload = JSON.parse(req.user);
     const failed = rejectInitial && (req.label === 'audit' || JSON.stringify(fields) === JSON.stringify(replacement));
-    return JSON.stringify({ verdicts: payload.cards.map((c, index) => ({ index, cardId: c.id, status: failed ? 'failed' : 'verified', reason: failed ? 'Synthetic regression verdict: requested classification/transition has no visible relation words.' : 'Synthetic positive audit, not live inference.', conflicts: [] })) });
+    return JSON.stringify({ verdicts: payload.cards.map((c, index) => (auditVerdict(c, { index, cardId: c.id, status: failed ? 'failed' : 'verified', reason: failed ? 'Synthetic regression verdict: requested classification/transition has no visible relation words.' : 'Synthetic positive audit, not live inference.', conflicts: [] }))) });
   };
   llm.codex = backend;
   const g = new m.Generator({ settings, llm, store: { all: () => [h], touch() {}, async flush() { saves.push(structuredClone(h)); }, hasUnsavedChanges: false }, refreshStatusBar() {} });

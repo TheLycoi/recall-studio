@@ -1,3 +1,4 @@
+import { auditVerdict } from './auditFixture.mjs';
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
@@ -19,13 +20,13 @@ function fixture() {
   const draft = { planId: 'P1', factIds: ['F1'], kind: 'qa', front: 'What does Amber store?', back: 'heat', text: '' };
   const card = m.makeCard(h.id, draft);
   card.generation = { batchId: 'legacy', planId: 'P1', factIds: ['F1'], audit: { status: 'unverified', reason: 'Not checked.', content: m.cardAuditContent(card), sourceKey: m.generationSourceKey(h) } };
-  const audit = { status: 'verified', reason: 'Saved check.', contents: [m.cardAuditContent(card)], verdicts: [{ index: 0, cardId: card.id, status: 'verified', reason: 'Supported.', conflicts: [] }] };
+  const audit = { status: 'verified', reason: 'Saved check.', contents: [m.cardAuditContent(card)], verdicts: [auditVerdict(card, { index: 0, cardId: card.id, status: 'verified', reason: 'Supported.', conflicts: [] })] };
   const batch = h.generation = { version: 1, id: 'legacy', instruction: '', inputKey: '', phase: 'preparing', provenance: { build: { release: 'legacy-release' }, sourceKey: m.generationSourceKey(h), inputKey: '' } };
   const calls = [], llm = new m.LlmClient(() => settings);
   llm.codex = { async complete(req) {
     calls.push(req.label);
     const user = JSON.parse(req.user);
-    return req.schema.parse(req.label === 'preparation' ? preparation : req.label === 'grounded cards' ? { cards: [draft] } : { verdicts: user.cards.map((c, index) => ({ index, cardId: c.id, status: 'verified', reason: 'Supported.', conflicts: [] })) });
+    return req.schema.parse(req.label === 'preparation' ? preparation : req.label === 'grounded cards' ? { cards: [draft] } : { verdicts: user.cards.map((c, index) => (auditVerdict(c, { index, cardId: c.id, status: 'verified', reason: 'Supported.', conflicts: [] }))) });
   } };
   const plugin = { settings, llm, store: { all: () => [h], touch() {}, notify() {}, async flush() {}, hasUnsavedChanges: false }, refreshStatusBar() {} };
   return { h, settings, preparation, draft, card, audit, batch, calls, llm, plugin, g: new m.Generator(plugin) };

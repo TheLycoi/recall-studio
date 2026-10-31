@@ -1,5 +1,7 @@
 import type { Card, Highlight } from "./model";
 import { lintCard, LINT_LABELS, LINT_FIX_INSTRUCTIONS } from "./lint";
+import { acceptanceContent, cardChecks, currentQualityAcceptance, recordQualityAcceptance, unacceptedChecks, validateAssessment, type CheckDecision, type ReviewAssessment } from "./qualityAcceptance";
+import { sourceConcernsForCard } from "./generation";
 
 export interface CardCheck {
   content: string;
@@ -9,11 +11,7 @@ export interface CardCheck {
 
 /** Includes source context: a verdict is not reusable after its evidence changes. */
 export function cardContent(card: Card, highlight: Highlight): string {
-  return JSON.stringify([card.kind, card.front, card.back, card.text, card.extra,
-    highlight.text, highlight.before, highlight.after, highlight.sourcePath,
-    highlight.sourceTitle, highlight.heading, highlight.instruction,
-    highlight.cards.filter(c => c.id !== card.id && c.status !== "deleted")
-      .map(c => [c.id, c.kind, c.front, c.back, c.text])]);
+  return acceptanceContent(card, highlight);
 }
 
 export function currentCardCheck(card: Card, highlight: Highlight): CardCheck | undefined {
@@ -33,7 +31,7 @@ export function cardAuthorization(card: Card, highlight: Highlight, active: () =
 export async function checkCard(
   card: Card,
   highlight: Highlight,
-  critique: (highlight: Highlight, cards: Card[], siblings: Card[], authorized: () => boolean) => Promise<Array<{ verdict: string; reason?: string }>>,
+  critique: (highlight: Highlight, cards: Card[], siblings: Card[], authorized: () => boolean) => Promise<Array<{ verdict: string; reason?: string; contractVersion?: number; reviews?: ReviewAssessment[]; checks?: CheckDecision[] }>>,
   active: () => boolean = () => true,
 ): Promise<void> {
   delete card.userCheck;
@@ -41,12 +39,19 @@ export async function checkCard(
   const current = cardAuthorization(card, highlight, active);
   if (!current()) return;
   const siblings = highlight.cards.filter(c => c.id !== card.id && c.status !== "deleted");
-  const { failures, warnings } = lintCard(card, highlight, siblings);
+  const checks = cardChecks(card, highlight, siblings);
   const verdicts = await critique(structuredClone(highlight), [structuredClone(card)], structuredClone(siblings), current);
   if (!current()) return;
   const verdict = verdicts[0];
   if (verdicts.length !== 1 || !verdict || !["keep", "revise", "drop"].includes(verdict.verdict)) throw new Error("The check must return exactly one valid verdict.");
-  const issues = [...failures, ...warnings].map(id => LINT_LABELS[id]);
+  const concerns = sourceConcernsForCard(card, highlight);
+  if (verdict.contractVersion !== undefined) {
+    validateAssessment({ contractVersion: verdict.contractVersion, reviews: verdict.reviews ?? [], checks: verdict.checks ?? [] }, card, checks, verdict.verdict === "keep");
+    if (verdict.verdict === "keep" && !concerns.length) recordQualityAcceptance(card, highlight, verdict.checks ?? []);
+  }
+  if (verdict.verdict !== "keep" || concerns.length) delete card.qualityAcceptance;
+  const issues = unacceptedChecks(card, highlight, checks).map(id => LINT_LABELS[id as keyof typeof LINT_LABELS]);
+  issues.push(...concerns.map(c => `Source conflicts or insufficient evidence need scoped reassessment: ${c.reason}`));
   if (verdict.verdict !== "keep") issues.push(verdict.reason?.trim() || `The model recommends ${verdict.verdict === "drop" ? "discarding" : "revising"} this card.`);
   card.userCheck = { content, at: new Date().toISOString(), issues };
 }
@@ -93,11 +98,15 @@ export async function checkAndRepairCard(
   const current = cardAuthorization(card, highlight, active);
   try {
     if (!current()) return { status: "cancelled" };
-    if (!currentCardCheck(card, highlight)?.issues.length) await checkCard(card, highlight, critique, current);
+    const siblingsNow = highlight.cards.filter(c => c.id !== card.id && c.status !== "deleted");
+    const sourceConcerns = sourceConcernsForCard(card, highlight);
+    if (!sourceConcerns.length && currentQualityAcceptance(card, highlight) && !unacceptedChecks(card, highlight, cardChecks(card, highlight, siblingsNow)).length) return { status: "checked" };
+    if (!currentCardCheck(card, highlight)) await checkCard(card, highlight, critique, current);
     if (!current()) return { status: "cancelled" };
     const check = currentCardCheck(card, highlight);
     if (!check) return { status: "cancelled" };
     if (!check.issues.length) return { status: "checked" };
+    if (sourceConcerns.length) throw Error("Source concerns require explicit scoped source reassessment before wording repair.");
     const siblings = highlight.cards.filter(c => c.id !== card.id && c.status !== "deleted");
     const { failures, warnings } = lintCard(card, highlight, siblings);
     const findings = [...failures, ...warnings].map(id => LINT_FIX_INSTRUCTIONS[id]).concat(check.issues);
@@ -107,6 +116,8 @@ export async function checkAndRepairCard(
     const candidate = cardReplacement(card, highlight, draft);
 
     if (cardContent(candidate, highlight) === content) throw new Error("The repair returned the same card. The original is unchanged.");
+    // Criticism of the old wording must not veto a fresh check of its replacement.
+    delete candidate.critiqueReason;
     await checkCard(candidate, highlight, critique, current);
     if (!current()) return { status: "cancelled" };
     const checked = currentCardCheck(candidate, highlight);
@@ -123,6 +134,7 @@ export async function checkAndRepairCard(
     delete card.bloom;
     delete card.critiqueRan;
     card.userCheck = checked;
+    card.qualityAcceptance = candidate.qualityAcceptance;
     return { status: "repaired", instruction };
   } catch (error) {
     if (!current()) return { status: "cancelled" };
