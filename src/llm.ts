@@ -8,7 +8,7 @@ import { CodexBackend, CodexError } from "./codex";
 import { DeepSeekBackend } from "./deepseek";
 import { OpenCodeBackend, OpenCodeError } from "./opencode";
 import { DeepSeekError } from "./deepseekError";
-import { writingContext, cardSystem, CARD_FIELD_DESCRIPTIONS } from "./writerMethod";
+import { writingContext, cardSystem, CARD_FIELD_DESCRIPTIONS, GROUNDED_WRITING_EXAMPLE } from "./writerMethod";
 import { LINT_FIX_INSTRUCTIONS } from "./lint";
 import type { BloomLevel, Card, Highlight, GenerationContext, GenerationPreparation, ScopedSourceFinding } from "./model";
 import { PreparationOut, GroundedCardsOut, AuditOut, PREPARATION_SYSTEM, AUDIT_SYSTEM, renderedCardReviews, type GroundedDraft, type GenerationAudit } from "./generation";
@@ -171,7 +171,7 @@ export class LlmClient {
     const safeContext = writingContext(context);
     const result = await this.backend().complete({
       ...authorization,
-      system: WRITER_SYSTEM + "\n\nWrite exactly one card per supplied plan row with its planId and exact factIds. Respect exclusions and omissions; the inventory is not independent evidence.",
+      system: WRITER_SYSTEM + "\n\n" + GROUNDED_WRITING_EXAMPLE + "\n\nWrite exactly one card per supplied plan row with its planId and exact factIds. Respect exclusions and omissions; the inventory is not independent evidence.",
       user: JSON.stringify({ captured: h.text, sourceTitle: h.sourceTitle, heading: h.heading, contextBefore: h.before, contextAfter: h.after, instruction: h.instruction, ...safeContext, preparation, existing }),
       schema: GroundedCardsOut, label: "grounded cards", maxTokens: 8000, retryInvalidResponse: false,
     });
@@ -186,7 +186,7 @@ export class LlmClient {
     const safeContext = writingContext(context);
     const result = await this.backend().complete({
       ...authorization,
-      system: WRITER_SYSTEM + "\n\nRepair only the supplied rejected candidates using all findings, captured source, plan/fact links and siblings. Return exactly one replacement per supplied candidate with its planId, exact factIds and all planned meaning. Do not return clean siblings, split rows, waive findings or shorten away required context. If a sound one-card repair is impossible, retain supported coverage for the independent final audit to hold; do not approve it.",
+      system: WRITER_SYSTEM + "\n\n" + GROUNDED_WRITING_EXAMPLE + "\n\nRepair only the supplied rejected candidates using all findings, captured source, plan/fact links and siblings. Return exactly one replacement per supplied candidate with its planId, exact factIds and all planned meaning. Do not return clean siblings, split rows, waive findings or shorten away required context. If a sound one-card repair is impossible, retain supported coverage for the independent final audit to hold; do not approve it.",
       user: JSON.stringify({ captured: h.text, sourceTitle: h.sourceTitle, heading: h.heading, contextBefore: h.before, contextAfter: h.after, instruction: h.instruction, ...safeContext, preparation, candidates: cards.map(c => ({ ...cardData(c), planId: c.generation?.planId, factIds: c.generation?.factIds })), findings, existing: existing.map(cardData) }),
       schema: GroundedCardsOut, label: "generation repair", maxTokens: 8000, retryInvalidResponse: false,
     });

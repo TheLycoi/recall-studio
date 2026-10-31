@@ -61,10 +61,10 @@ before(async () => {
   }
 });
 
-test('every assembled stage carries v10 grouping without weakening focused reviews or reciprocal cues', () => {
-  assert.equal(m.WRITING_METHOD_ID, 'recall-writing-method-v10');
+test('every assembled stage carries v11 grouping without weakening focused reviews or reciprocal cues', () => {
+  assert.equal(m.WRITING_METHOD_ID, 'recall-writing-method-v11');
   for (const req of requests) {
-    assert.equal(req.system.split('<writing_method id="recall-writing-method-v10">').length, 2, req.label);
+    assert.equal(req.system.split('<writing_method id="recall-writing-method-v11">').length, 2, req.label);
     assert.equal(JSON.parse(req.user).rules, m.WRITING_METHOD_ID, req.label);
     const method = req.system.split('</writing_method>')[0];
     assert.match(method, /aim for two to three useful distinct cloze numbers per note/i, req.label);

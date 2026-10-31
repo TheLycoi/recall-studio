@@ -58,12 +58,13 @@ for (const stage of ['prepareGeneration', 'writeGroundedCards', 'repairGeneratio
   assert.ok(f.calls.length);
   for (const req of f.calls) {
     assert.doesNotMatch(req.user + req.system, /LEGACY_/);
+    assert.equal(req.system.includes("<grounded_example>"), ["grounded cards", "generation repair"].includes(req.label), "schema-specific example stays in its two callers");
     assert.match(req.system, /grammatical subject.*negative feedback.*specific system/i);
     assert.match(req.system, /specific subject and requested relation visible/i);
     assert.match(req.system, /grammatical subject.*negative feedback.*specific system/i);
     assert.match(req.system, /shared entity words.*whole answer/i);
     assert.match(req.system, /cite exact visible words for the identifying cue AND requested relation/i);
-    assert.equal(req.system.split('<writing_method id="recall-writing-method-v10">').length, 2, 'one current versioned method per request');
+    assert.equal(req.system.split('<writing_method id="recall-writing-method-v11">').length, 2, 'one current versioned method per request');
     assert.match(req.system, /classification.*not.*beacon is/i);
     assert.match(req.system, /transition.*amber.*destination/i);
     assert.ok(req.system.includes('<bad>The fictional Orin beacon is {{c1::a coastal marker}}.</bad>'));
@@ -242,7 +243,7 @@ for (const final of [false, true]) test(`assembled ${final ? 'final ' : ''}audit
   assert.match(req.system, /not a grammatical subject or the hidden consequence/i);
 });
 
-for (const version of ['v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7', 'v8', 'v9']) test(`a ${version} method snapshot cannot certify a v10 generation batch`, async () => {
+for (const version of ['v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7', 'v8', 'v9', 'v10']) test(`a ${version} method snapshot cannot certify a v11 generation batch`, async () => {
   const f = fixture();
   const c = { language: 'English', instructions: '', examples: '', rules: `recall-writing-method-${version}` };
   const batch = { id: `${version}-batch`, version: 1, instruction: '', phase: 'auditing', preparation: structuredClone(f.preparation), writerOutput: [f.draft], drafts: [f.card] };
