@@ -9,7 +9,14 @@ The repository and BRAT target are `TheLycoi/recall-studio`, formerly
 `TheLycoi/review-inbox`. Plugin ID `review-inbox` and the default data folder
 `Review Inbox/` stay unchanged.
 
-## 0.1.23 beta: source-grounded mixed-format writing
+## 0.1.24 beta: retain source findings after malformed audits
+
+Malformed quality assessments no longer discard valid source concerns at the
+provider-parser boundary. Those candidates stay held after reload and a generic
+positive retry; only scoped evidence can resolve the source finding. This hotfix
+keeps the v11 writer, request schema and saved-data format unchanged.
+
+### Mixed-format writing
 
 Writer method v11 supports Q&A and cloze cards. Closed lists can hide one member
 per review while the others remain visible; selected meanings and relationships

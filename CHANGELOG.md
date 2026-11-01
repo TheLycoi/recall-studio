@@ -1,5 +1,11 @@
 # Changelog
 
+## Recall Studio 0.1.24 beta: retain source findings after malformed audits
+
+- Retain valid scoped source concerns when malformed quality fields would otherwise reject the whole provider response. Mark that assessment incomplete, never approved.
+- Preserve the hold through saved-state reload and explicit retry. A generic positive audit cannot clear the original concern.
+- Keep writer v11, provider request schemas, dependency pins, stored data and explicit export unchanged. No new model stage or background rewrite.
+
 ## Recall Studio 0.1.23 beta: source-grounded mixed-format writing
 
 - Ship writer method v11, the better-performing baseline in the bounded Q&A/cloze comparison. Keep both formats, including closed-list notes that hide one member per review. Do not include the unsuccessful v12 prompt revision.

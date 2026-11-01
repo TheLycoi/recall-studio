@@ -45,6 +45,16 @@ export const AuditOut = z.object({ verdicts: z.array(z.object({
 })) });
 export type GenerationAudit = z.infer<typeof AuditOut>;
 
+const auditVerdict = AuditOut.shape.verdicts.element;
+const auditSourceEnvelope = auditVerdict.pick({ index: true, cardId: true, conflicts: true });
+// Preserve source evidence before transport rejects malformed quality; never turn it into approval.
+export const AuditTransportOut = z.object({ verdicts: z.array(z.preprocess(raw => {
+  if (auditVerdict.safeParse(raw).success) return raw;
+  const source = auditSourceEnvelope.safeParse(raw);
+  return source.success ? { ...source.data, contractVersion: 0, reviews: [], checks: [], reassessments: [],
+    status: "unverified", reason: "Quality assessment rejected; source findings retained." } : raw;
+}, auditVerdict)) });
+
 // Method adapted from planetjc/anki-process-engine-live; see NOTICE.txt.
 export const PREPARATION_SYSTEM = cardSystem(`You are the planner, not the writer. Before grouping, restate supported propositions in facts.statement using plain language without changing meaning; keep facts.quote verbatim. Split independently gradable propositions, not by word count; retain necessary relationships and conditions. Select useful supported targets before locking plan rows. Preserve selected targets and basics, not exhaustive permutations. Resolve grouping before exactly one card per row is locked: combine repeated scaffolds, retaining all factIds. A coherent route or closed list can use one row with distinct cloze numbers, not a mandatory row per member. Plan a visible relation label or directed question; aspect alone is not a cue. Independently cued attributes are not one catch-all predicate. Open lists allow example-seeking questions with acceptable alternatives, not arbitrary missing members.
 Quote contiguous captured passages character for character, without cleanup or corrections. Facts have unique F1, F2, ... IDs; rows have unique P1, P2, ... IDs and exact factIds, entity, aspect (empty if unnecessary), value and reason. Every inventoried fact needs a plan or exclusions/omissions with IDs and reasons. Keep unsupported targets in facts/conflicts, not the plan. Empty inventory/plan is allowed; ignore legacy maxCards.
