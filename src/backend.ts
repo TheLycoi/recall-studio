@@ -16,6 +16,8 @@ export interface CompletionRequest<T> extends SourceAuthorization {
   system: string;
   user: string;
   schema: z.ZodType<T>;
+  /** Stricter provider contract when response parsing must preserve partial evidence. */
+  outputSchema?: z.ZodType;
   /** Disable provider response retries for a caller with a strict call budget. */
   retryInvalidResponse?: boolean;
   /** Plural noun for error messages ("cards", "highlights"). */

@@ -195,7 +195,7 @@ export class DeepSeekBackend implements LlmBackend {
   }
 
   async complete<T>(req: CompletionRequest<T>): Promise<T> {
-    const text = await this.jsonText(req, req.label, req.schema);
+    const text = await this.jsonText(req, req.label, req.outputSchema ?? req.schema);
     let value: unknown;
     try {
       value = JSON.parse(extractJson(text));

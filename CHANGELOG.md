@@ -1,5 +1,12 @@
 # Changelog
 
+## Recall Studio 0.1.25 beta: constrain audits and isolate incomplete verdicts
+
+- Constrain audit output to each request's card identities, rendered-review counts and ordinals, and supplied deterministic-check IDs. Keep tolerant source-preserving response parsing separate.
+- Hold incomplete or invalid card assessments without discarding valid sibling verdicts. Keep exact coverage checks, ambiguous-identity rejection and scoped source holds.
+- Preserve writer v11, saved drafts and cards, dependency pins, settings and explicit export. Add no automatic model requests or migrations.
+- Two bounded live audit requests over private copies of the reported drafts passed the output contract. Two drafts still failed semantic retrieval checks; no live cards were changed.
+
 ## Recall Studio 0.1.24 beta: retain source findings after malformed audits
 
 - Retain valid scoped source concerns when malformed quality fields would otherwise reject the whole provider response. Mark that assessment incomplete, never approved.

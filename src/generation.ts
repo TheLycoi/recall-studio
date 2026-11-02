@@ -5,7 +5,7 @@ export { CARD_WRITING_METHOD as RETRIEVAL_QUALITY_RUBRIC } from "./writerMethod"
 import { makeCard, makeHighlight, type Card, type GenerationContext, type GenerationPreparation, type GenerationAuditRecord, type ScopedSourceFinding, type Highlight } from "./model";
 import { exportCandidates } from "./cardActions";
 import { lintCard } from "./lint";
-import { AssessmentFields, validateAssessment } from "./qualityAcceptance";
+import { AssessmentFields, CheckDecisionOut, ReviewAssessmentOut, renderedCardReviews, validateAssessment } from "./qualityAcceptance";
 export { renderedCardReviews } from "./qualityAcceptance";
 import type { RecallSettings } from "./settings";
 
@@ -54,6 +54,20 @@ export const AuditTransportOut = z.object({ verdicts: z.array(z.preprocess(raw =
   return source.success ? { ...source.data, contractVersion: 0, reviews: [], checks: [], reassessments: [],
     status: "unverified", reason: "Quality assessment rejected; source findings retained." } : raw;
 }, auditVerdict)) });
+
+/** Constrain provider output to this request; strict local validation still checks uniqueness and meaning. */
+export function auditOutputSchema(cards: Card[], checks: string[][]): z.ZodType {
+  const variants = cards.map((card, index) => {
+    const ordinals = renderedCardReviews(card).map(r => r.ordinal);
+    const expectedChecks = checks[index] ?? [];
+    return auditVerdict.extend({
+      index: z.literal(index), cardId: z.literal(card.id), contractVersion: z.literal(1),
+      reviews: z.array(ReviewAssessmentOut.extend({ ordinal: z.literal(ordinals.length ? ordinals : [null]) })).length(ordinals.length).describe("One assessment per supplied ordinal, exactly once."),
+      checks: z.array(expectedChecks.length ? CheckDecisionOut.extend({ id: z.enum(expectedChecks) }) : CheckDecisionOut).length(expectedChecks.length).describe("Only the supplied deterministic-check IDs, exactly once; empty when none were supplied."),
+    });
+  });
+  return z.object({ verdicts: z.array(variants.length > 1 ? z.union(variants) : variants[0] ?? auditVerdict).length(cards.length) });
+}
 
 // Method adapted from planetjc/anki-process-engine-live; see NOTICE.txt.
 export const PREPARATION_SYSTEM = cardSystem(`You are the planner, not the writer. Before grouping, restate supported propositions in facts.statement using plain language without changing meaning; keep facts.quote verbatim. Split independently gradable propositions, not by word count; retain necessary relationships and conditions. Select useful supported targets before locking plan rows. Preserve selected targets and basics, not exhaustive permutations. Resolve grouping before exactly one card per row is locked: combine repeated scaffolds, retaining all factIds. A coherent route or closed list can use one row with distinct cloze numbers, not a mandatory row per member. Plan a visible relation label or directed question; aspect alone is not a cue. Independently cued attributes are not one catch-all predicate. Open lists allow example-seeking questions with acceptable alternatives, not arbitrary missing members.
@@ -151,6 +165,29 @@ export function validateAudit(raw: unknown, cards: Card[], snapshot?: string, le
     }
   }
   return audit;
+}
+
+/** A malformed assessment holds its card; ambiguous identities still reject the whole response. */
+export function isolateAuditFailures(raw: unknown, cards: Card[], snapshot: string, checks: string[][], findings: ScopedSourceFinding[] = []): GenerationAudit & { rejected: GenerationAudit["verdicts"] } {
+  const audit = AuditOut.parse(raw);
+  const seen = new Set<number>();
+  for (const v of audit.verdicts) {
+    if (seen.has(v.index) || cards[v.index]?.id !== v.cardId) throw new Error("Audit contains an unknown, mismatched or duplicate card verdict.");
+    seen.add(v.index);
+  }
+  const rejected: GenerationAudit["verdicts"] = [];
+  const verdicts = audit.verdicts.map(v => {
+    try { return validateAudit({ verdicts: [v] }, cards, snapshot, undefined, checks, findings).verdicts[0]; }
+    catch (e) {
+      rejected.push(v);
+      const reason = `Audit response rejected: ${e instanceof Error ? e.message : "Invalid assessment."}`;
+      // These local placeholders record missing verification, never model approval or source resolution.
+      return { ...v, contractVersion: 1, status: "unverified" as const, reason, conflicts: [], reassessments: [],
+        reviews: renderedCardReviews(cards[v.index]).map(r => ({ ordinal: r.ordinal, status: "unverified" as const, reason, identifyingCue: "", relationCue: "", answerable: false, effortful: false })),
+        checks: (checks[v.index] ?? []).map(id => ({ id, resolution: "defect" as const, reason })) };
+    }
+  });
+  return { verdicts, rejected };
 }
 
 /** Legacy unscoped conflicts remain whole-capture holds. */

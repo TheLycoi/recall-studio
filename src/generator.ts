@@ -6,7 +6,7 @@ import { describeError } from "./llm";
 import { lintCard, isHardLintFailure, LINT_FIX_INSTRUCTIONS } from "./lint";
 import { nextInstruction } from "./inboxData";
 import { cardChecks, recordQualityAcceptance } from "./qualityAcceptance";
-import { cardAuditContent, generationKey, generationSource, generationSourceKey, sourceFindingsFromResponse, retainedSourceFindings, activeSourceFindings, validatePreparation, validateDrafts, validateAudit } from "./generation";
+import { cardAuditContent, generationKey, generationSource, generationSourceKey, sourceFindingsFromResponse, retainedSourceFindings, activeSourceFindings, validatePreparation, validateDrafts, validateAudit, isolateAuditFailures } from "./generation";
 
 class Interrupted extends Error {}
 
@@ -269,8 +269,10 @@ export class Generator {
         try {
           raw = cards.length ? await this.plugin.llm.auditGeneration(words, structuredClone(cards), structuredClone(auditExisting), preparation, context, authorized, final, h.text, structuredClone(retained())) : { verdicts: [] };
           await checkContext();
-          const checked = validateAudit(raw, cards, h.text, undefined, checks, retained());
-          result = { status: checked.verdicts.some(v => v.status === "failed") ? "failed" : checked.verdicts.length === cards.length && checked.verdicts.every(v => v.status === "verified") && !cards.some(c => sourceIssues(c, { ...checked, status: "unverified", reason: "" }).length) ? "verified" : "unverified", reason: checked.verdicts.length === cards.length ? "Independent audit completed; see each candidate's verdict." : "Independent audit omitted verdicts; affected candidates are held.", verdicts: checked.verdicts, contents: cards.map(cardAuditContent) };
+          const checked = isolateAuditFailures(raw, cards, h.text, checks, retained());
+          result = { status: checked.verdicts.some(v => v.status === "failed") ? "failed" : checked.verdicts.length === cards.length && checked.verdicts.every(v => v.status === "verified") && !cards.some(c => sourceIssues(c, { ...checked, status: "unverified", reason: "" }).length) ? "verified" : "unverified", reason: checked.rejected.length ? checked.verdicts.find(v => v.index === checked.rejected[0].index)!.reason : checked.verdicts.length === cards.length ? "Independent audit completed; see each candidate's verdict." : "Independent audit omitted verdicts; affected candidates are held.", verdicts: checked.verdicts, contents: cards.map(cardAuditContent) };
+          const findings = sourceFindingsFromResponse({ verdicts: checked.rejected }, cards, h.text, generationSourceKey(h));
+          if (findings.length) result.sourceFindings = findings;
         } catch (e) {
           await checkContext();
           result = { status: "unverified", reason: `Independent audit unavailable: ${describeError(e)}`, verdicts: [], contents: cards.map(cardAuditContent) };

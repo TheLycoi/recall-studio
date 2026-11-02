@@ -486,7 +486,7 @@ export class OpenCodeBackend implements LlmBackend {
   }
 
   async complete<T>(req: CompletionRequest<T>): Promise<T> {
-    const text = await this.exec(req, [preamble(req.schema), req.system, req.user].join("\n\n"));
+    const text = await this.exec(req, [preamble(req.outputSchema ?? req.schema), req.system, req.user].join("\n\n"));
     let value: unknown;
     try {
       value = JSON.parse(extractJson(text));

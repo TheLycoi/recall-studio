@@ -11,7 +11,7 @@ import { DeepSeekError } from "./deepseekError";
 import { writingContext, cardSystem, CARD_FIELD_DESCRIPTIONS, GROUNDED_WRITING_EXAMPLE } from "./writerMethod";
 import { LINT_FIX_INSTRUCTIONS } from "./lint";
 import type { BloomLevel, Card, Highlight, GenerationContext, GenerationPreparation, ScopedSourceFinding } from "./model";
-import { PreparationOut, GroundedCardsOut, AuditTransportOut, PREPARATION_SYSTEM, AUDIT_SYSTEM, renderedCardReviews, type GroundedDraft, type GenerationAudit } from "./generation";
+import { PreparationOut, GroundedCardsOut, AuditTransportOut, auditOutputSchema, PREPARATION_SYSTEM, AUDIT_SYSTEM, renderedCardReviews, type GroundedDraft, type GenerationAudit } from "./generation";
 import type { RecallSettings } from "./settings";
 
 const CardOut = z.object({
@@ -198,11 +198,12 @@ export class LlmClient {
     const authorization = { authorized: this.requestAuthorization(authorized) };
     assertAuthorized(authorization);
     const safeContext = writingContext(context);
+    const checks = cards.map(c => cardChecks(c, h, [...existing, ...cards.filter(s => s.id !== c.id)]));
     const result = await this.backend().complete({
       ...authorization,
       system: AUDIT_SYSTEM,
-      user: JSON.stringify({ captured: h.text, sourceTitle: h.sourceTitle, heading: h.heading, contextBefore: h.before, contextAfter: h.after, instruction: h.instruction, ...safeContext, capturedOriginal, sourceFindings, preparation, cards: cards.map((c, index) => ({ index, ...cardData(c), planId: c.generation?.planId, factIds: c.generation?.factIds, reviews: renderedCardReviews(c), targetContext: (() => { const row = preparation.plan.find(p => p.id === c.generation?.planId); return row ? { entity: row.entity, aspect: row.aspect } : null; })(), checks: (() => { const lint = lintCard(c, h, [...existing, ...cards.filter(s => s.id !== c.id)]); return [...lint.failures, ...lint.warnings].map(id => ({ id, finding: LINT_FIX_INSTRUCTIONS[id] })); })() })), existing }),
-      schema: AuditTransportOut, label: final ? "final audit" : "audit", maxTokens: 8000, retryInvalidResponse: false,
+      user: JSON.stringify({ captured: h.text, sourceTitle: h.sourceTitle, heading: h.heading, contextBefore: h.before, contextAfter: h.after, instruction: h.instruction, ...safeContext, capturedOriginal, sourceFindings, preparation, cards: cards.map((c, index) => ({ index, ...cardData(c), planId: c.generation?.planId, factIds: c.generation?.factIds, reviews: renderedCardReviews(c), targetContext: (() => { const row = preparation.plan.find(p => p.id === c.generation?.planId); return row ? { entity: row.entity, aspect: row.aspect } : null; })(), checks: checks[index].map(id => ({ id, finding: LINT_FIX_INSTRUCTIONS[id as keyof typeof LINT_FIX_INSTRUCTIONS] })) })), existing }),
+      schema: AuditTransportOut, outputSchema: auditOutputSchema(cards, checks), label: final ? "final audit" : "audit", maxTokens: 8000, retryInvalidResponse: false,
     });
     assertAuthorized(authorization);
     return result;

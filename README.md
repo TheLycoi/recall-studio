@@ -9,12 +9,18 @@ The repository and BRAT target are `TheLycoi/recall-studio`, formerly
 `TheLycoi/review-inbox`. Plugin ID `review-inbox` and the default data folder
 `Review Inbox/` stay unchanged.
 
-## 0.1.24 beta: retain source findings after malformed audits
+## 0.1.25 beta: constrain audits and isolate incomplete verdicts
 
-Malformed quality assessments no longer discard valid source concerns at the
-provider-parser boundary. Those candidates stay held after reload and a generic
-positive retry; only scoped evidence can resolve the source finding. This hotfix
-keeps the v11 writer, request schema and saved-data format unchanged.
+Audit output contracts now specify the requested card identities, review ordinals
+and deterministic-check IDs. When one assessment is incomplete, that card stays
+held without discarding valid sibling verdicts. Unknown or duplicate card
+identities still reject the response. Genuine source holds survive reload and
+generic positive retry; only scoped evidence can resolve them.
+
+Writer v11, saved data and the automatic request budget are unchanged. Two live
+audits of private copies of the reported drafts returned complete contracts;
+two drafts still failed retrieval-quality checks. This fixes audit-format
+handling, not every card-writing defect, and does not retry existing captures.
 
 ### Mixed-format writing
 
