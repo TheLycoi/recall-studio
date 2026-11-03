@@ -1,5 +1,12 @@
 # Changelog
 
+## Recall Studio 0.1.26 beta: repair requested card splits
+
+- Let an explicit split request override the default preference for grouping related clozes into one note. Keep source, coverage and retrieval checks.
+- Add one indexed repair round for rejected wording, followed by a complete-set audit. Keep accepted siblings unchanged; refuse malformed, unchanged, stale or still-failing repairs without partially replacing the original.
+- Show the actual failure reason, successful split count or unchanged result. Retain original cards, annotations, source evidence and export receipts through the existing replacement path.
+- Preserve writer v11, settings, data format and automatic generation behavior. Explicit rewrites use at most four requests; no background retry, migration or automatic export.
+
 ## Recall Studio 0.1.25 beta: constrain audits and isolate incomplete verdicts
 
 - Constrain audit output to each request's card identities, rendered-review counts and ordinals, and supplied deterministic-check IDs. Keep tolerant source-preserving response parsing separate.

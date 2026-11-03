@@ -42,7 +42,7 @@ const drafts = [
   { kind: 'cloze', front: '', back: '', text: 'Object A {{c1::contracts}}.' },
   { kind: 'qa', front: 'What happens to Object B?', back: 'stays constant', text: '' },
 ];
-function fixture({ output = { cards: drafts }, audit, pause } = {}) {
+function fixture({ output = { cards: drafts }, audit, repair, finalAudit, pause } = {}) {
   frames.length = 0;
   globalThis.window = { requestAnimationFrame: fn => frames.push(fn), setTimeout() {}, clearTimeout() {} };
   const h = makeHighlight({ sourcePath: 'objects.md', sourceTitle: 'Objects', text: 'Object A contracts. Object B stays constant.', status: 'ready' });
@@ -71,6 +71,8 @@ function fixture({ output = { cards: drafts }, audit, pause } = {}) {
     if (pause === req.label) { pending = true; await barrier.promise; }
     const value = req.label === 'rewrite audit'
       ? audit ?? { preservesFacts: true, reason: 'Both original facts retained.', verdicts: drafts.map((_, index) => ({ index, verdict: 'keep', reason: '' })) }
+      : req.label === 'rewrite repair' ? repair ?? { cards: [] }
+      : req.label === 'rewrite final audit' ? finalAudit ?? fixtureAudit(drafts)
       : typeof output === 'function' ? output(req) : output;
     return { status: 200, json: { choices: [{ message: { content: JSON.stringify(value) }, finish_reason: 'stop' }] } };
   };
@@ -108,7 +110,7 @@ for (const kind of ['qa', 'cloze']) for (const focused of [true, false]) test(`G
   const before = structuredClone(f.h);
   await f.view.onOpen();
   f.star('Keep the complete procedure and condition; improve its cue.'); await Promise.all(f.runs); f.draw();
-  assert.deepEqual(f.requests.map(r => r.label), ['rewrite cards', 'rewrite audit'], 'length is adjudicated, not rejected before the independent check');
+  assert.deepEqual(f.requests.map(r => r.label), focused ? ['rewrite cards', 'rewrite audit'] : ['rewrite cards', 'rewrite audit', 'rewrite repair'], 'length is adjudicated before a bounded repair attempt');
   const request = f.requests[1], payload = JSON.parse(request.user);
   const finding = payload.cards[0].checks.find(c => c.id === (kind === 'qa' ? 'qa-answer-long' : 'cloze-framing'));
   assert.match(finding.finding, /adjudicate.*meaningful|adjudicate.*meaning/i);
@@ -132,7 +134,7 @@ test('G3: over-sixty-word unfocused card reaches audit with its actual findings 
   f.h.text = back;
   const before = structuredClone(f.h);
   await f.view.onOpen(); f.star('Improve the cue'); await Promise.all(f.runs);
-  assert.equal(f.requests.length, 2);
+  assert.equal(f.requests.length, 3, 'A failed repair still preserves the original');
   assert.deepEqual(JSON.parse(f.requests[1].user).cards[0].checks.map(c => c.id), ['qa-answer-long', 'card-long']);
   assert.deepEqual(f.h, before); assert.deepEqual(f.revisions, []);
   await f.view.onClose();
@@ -236,7 +238,7 @@ for (const audit of [
   const expected = structuredClone(f.h);
   f.star('Split into cards'); await Promise.all(f.runs); f.draw();
   assert.deepEqual(f.h, expected); assert.deepEqual(f.revisions, []);
-  assert.equal(f.requests.length, 2); assert.equal(f.learning(), 0);
+  assert.equal(f.requests.length, audit?.verdicts?.some(v => v.verdict === 'revise') ? 3 : 2); assert.equal(f.learning(), 0);
   await f.view.onClose();
 });
 
@@ -357,7 +359,7 @@ test('the complete operational maximum is accepted without truncation', async ()
 });
 
 test('rendered split survives real store flush and reload with every ID, receipt and revision intact', async () => {
-  const f = fixture(), files = new Map();
+  const f = fixture({ audit: repairableAudit, repair: repairOutput }), files = new Map();
   const adapter = { exists: async path => files.has(path), mkdir: async () => {}, read: async path => files.get(path),
     write: async (path, bytes) => { files.set(path, bytes); }, remove: async path => { files.delete(path); },
     rename: async (from, to) => { assert.ok(!files.has(to), 'Desktop rename does not overwrite'); files.set(to, files.get(from)); files.delete(from); } };
@@ -387,5 +389,109 @@ test('a changed one-card explicit response forks a receipted record instead of r
   assert.ok(child); assert.notEqual(child.id, before.id);
   assert.equal(child.ankiNoteId, undefined); assert.equal(child.srNote, undefined);
   assert.deepEqual(f.c, { ...before, status: 'deleted' });
+  await f.view.onClose();
+});
+
+const repairableAudit = { ...fixtureAudit(drafts), verdicts: [
+  { index: 0, verdict: 'keep', reason: 'Supported focused retrieval.' },
+  { index: 1, verdict: 'revise', reason: 'Clarify the visible relation cue.' },
+] };
+const repaired = { ...drafts[1], front: 'How does Object B respond?' };
+const repairOutput = { cards: [{ index: 1, ...repaired }] };
+
+for (const action of ['star', 'Save']) test(`${action} repairs only rejected split drafts and checks the whole set before insertion`, async () => {
+  const f = fixture({ audit: repairableAudit, repair: repairOutput }); await f.view.onOpen();
+  const before = structuredClone(f.c), noticeStart = notices.length;
+  if (action === 'star') f.star('Rewrite into multiple cards'); else f.save('Rewrite into multiple cards');
+  await Promise.all(f.runs); f.draw();
+  const children = f.h.cards.filter(c => c.rewrite);
+  assert.equal(children.length, 2, 'A repairable wording failure must get one bounded correction');
+  assert.deepEqual(f.requests.map(r => r.label), ['rewrite cards', 'rewrite audit', 'rewrite repair', 'rewrite final audit']);
+  const request = JSON.parse(f.requests[2].user);
+  assert.deepEqual(request.candidates.map(c => c.index), [1]);
+  assert.deepEqual(request.findings, [{ index: 1, reason: 'Clarify the visible relation cue.' }]);
+  assert.equal(request.accepted[0].text, drafts[0].text);
+  assert.equal(children[0].text, drafts[0].text, 'The clean sibling is not regenerated');
+  assert.equal(children[1].front, repaired.front);
+  assert.deepEqual(f.c, { ...before, status: 'deleted' });
+  assert.equal(f.revisions.length, 1); assert.equal(f.revisions[0].replacements.length, 2);
+  assert.match(notices.slice(noticeStart).join('\n'), /Rewrote into 2 cards/);
+  for (const req of f.requests) {
+    assert.match(req.system, /explicit.*split.*overrides.*grouping/i);
+    assert.equal(req.retryInvalidResponse, false);
+  }
+  assert.deepEqual(JSON.parse(f.requests[3].user).cards.map(c => c.front), ['', repaired.front]);
+  assert.ok(JSON.parse(f.requests[3].user).cards.every(c => c.reviews.length === 1));
+  await f.view.onClose();
+});
+
+for (const repair of [
+  { cards: [{ index: 1, ...drafts[1] }] },
+  { cards: [] }, { cards: [{ index: 0, ...repaired }] }, { cards: [{ index: 1, ...repaired }, { index: 1, ...repaired }] },
+  { cards: [{ index: 3, ...repaired }] }, { cards: [{ index: 1, kind: 'cloze', front: '', back: '', text: 'Object B {{c1::expands}}.' }] },
+]) test(`invalid targeted repair cannot replace any original: ${JSON.stringify(repair)}`, async () => {
+  const f = fixture({ audit: repairableAudit, repair }); await f.view.onOpen();
+  const expected = structuredClone(f.h);
+  f.star('Split into cards'); await Promise.all(f.runs);
+  assert.equal(f.requests.length, 3); assert.deepEqual(f.h, expected); assert.deepEqual(f.revisions, []);
+  await f.view.onClose();
+});
+
+test('a failed final split audit reports its reason without looping or partially replacing', async () => {
+  const f = fixture({ audit: repairableAudit, repair: repairOutput, finalAudit: repairableAudit }); await f.view.onOpen();
+  const expected = structuredClone(f.h), noticeStart = notices.length;
+  f.star('Split into cards'); await Promise.all(f.runs);
+  assert.equal(f.requests.length, 4); assert.deepEqual(f.h, expected); assert.deepEqual(f.revisions, []);
+  assert.match(notices.slice(noticeStart).join('\n'), /Clarify the visible relation cue/);
+  assert.equal(f.view.checking.size, 0);
+  await f.view.onClose();
+});
+
+for (const stage of ['rewrite repair', 'rewrite final audit']) for (const reason of ['source', 'settings', 'sibling', 'view-close', 'abort', 'editor-open']) {
+  test(`explicit split cancels ${reason} during ${stage} without overwriting or dispatching again`, async () => {
+    const f = fixture({ audit: repairableAudit, repair: repairOutput, pause: stage }); await f.view.onOpen();
+    f.star('Split into cards'); await until(f.pending);
+    await invalidations[reason](f);
+    const expected = structuredClone(f.h);
+    f.release(); await Promise.all(f.runs); f.draw();
+    assert.deepEqual(f.h, expected); assert.deepEqual(f.revisions, []);
+    assert.equal(f.requests.length, stage === 'rewrite repair' ? 3 : 4);
+    await f.view.onClose();
+  });
+}
+
+for (const finalAudit of [
+  { ...repairableAudit, preservesFacts: false, reason: 'Lost a source-supported fact.' },
+  { ...repairableAudit, verdicts: [repairableAudit.verdicts[0]] },
+  { ...repairableAudit, verdicts: [repairableAudit.verdicts[0], repairableAudit.verdicts[0]] },
+  { ...repairableAudit, verdicts: [repairableAudit.verdicts[0], { index: 1, verdict: 'drop', reason: 'Unsupported replacement.' }] },
+]) test(`final split audit cannot waive coverage or source failure: ${JSON.stringify(finalAudit)}`, async () => {
+  const f = fixture({ audit: repairableAudit, repair: repairOutput, finalAudit }); await f.view.onOpen();
+  const expected = structuredClone(f.h), start = notices.length;
+  f.star('Split into cards'); await Promise.all(f.runs);
+  assert.equal(f.requests.length, 4); assert.deepEqual(f.h, expected); assert.deepEqual(f.revisions, []);
+  if (!finalAudit.preservesFacts) assert.match(notices.slice(start).join('\n'), /Lost a source-supported fact/);
+  await f.view.onClose();
+});
+
+test('rewrite rejection redacts opaque provider credentials before displaying the reason', async () => {
+  const finalAudit = structuredClone(repairableAudit);
+  const f = fixture({ audit: repairableAudit, repair: repairOutput, finalAudit });
+  finalAudit.verdicts[1].reason = `Synthetic failure: ${f.settings.deepseekApiKey}`;
+  await f.view.onOpen(); const start = notices.length;
+  f.star('Split into cards'); await Promise.all(f.runs);
+  const message = notices.slice(start).join('\n');
+  assert.match(message, /\[redacted\]/); assert.ok(!message.includes(f.settings.deepseekApiKey));
+  assert.deepEqual(f.revisions, []); await f.view.onClose();
+});
+
+for (const stage of ['rewrite repair', 'rewrite final audit']) test(`a failed ${stage} releases the lock for an explicit retry`, async () => {
+  const f = fixture({ audit: repairableAudit, repair: repairOutput }); await f.view.onOpen();
+  const complete = f.llm.deepseek.complete, expected = structuredClone(f.h); let failed = false;
+  f.llm.deepseek.complete = async req => { if (!failed && req.label === stage) { failed = true; throw Error('Synthetic offline'); } return complete(req); };
+  f.star('Split into cards'); await Promise.all(f.runs);
+  assert.ok(failed); assert.deepEqual(f.h, expected); assert.deepEqual(f.revisions, []);
+  f.star('Split into cards'); await Promise.all(f.runs);
+  assert.equal(f.h.cards.filter(c => c.rewrite).length, 2); assert.equal(f.revisions.length, 1);
   await f.view.onClose();
 });

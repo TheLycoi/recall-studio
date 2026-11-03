@@ -908,7 +908,7 @@ export class InboxView extends ItemView {
     this.checking.add(c.id);
     let notice: Notice | undefined;
     try {
-      const instruction = preset ?? (await askInstruction(this.plugin.app, "Rewrite card", "e.g. make the answer shorter, ask about the date instead"));
+      const instruction = preset ?? (await askInstruction(this.plugin.app, "Rewrite card", "e.g. split into separate cards, make the answer shorter"));
       if (!instruction || !current()) return;
       notice = new Notice("Recall Studio: rewriting…", 0);
       const was = snapshot(c);
@@ -919,11 +919,12 @@ export class InboxView extends ItemView {
         if (!current()) return;
         const candidates = rewriteCandidates(c, h, drafts);
         const revision = applyExplicitRewrite(c, h, candidates, instruction);
-        if (!revision) return;
+        if (!revision) { new Notice("Recall Studio: no changes returned. The original is unchanged."); return; }
         this.plugin.store.recordRevision(revision);
         if (savedEditor || c.status === "deleted") this.editing = null;
         this.plugin.store.touch();
         if (this.editing === c.id) this.render();
+        new Notice(candidates.length > 1 ? `Recall Studio: Rewrote into ${candidates.length} cards.` : "Recall Studio: card rewritten.");
         return true;
       }
       const d = await this.plugin.llm.rewriteCard(source, structuredClone(c), instruction, current);

@@ -9,6 +9,21 @@ The repository and BRAT target are `TheLycoi/recall-studio`, formerly
 `TheLycoi/review-inbox`. Plugin ID `review-inbox` and the default data folder
 `Review Inbox/` stay unchanged.
 
+## 0.1.26 beta: repair requested card splits
+
+Rewrite can create separate editable cards when you ask it to split a note.
+If its first check finds repairable wording issues, it repairs only those
+replacements once, then checks the complete set again. Clean replacements are
+not regenerated. A failed check keeps the original and shows a concise reason.
+Successful splits retain the original in history, with its source and export
+receipts. Nothing is exported automatically.
+
+Explicit rewrites use two model requests when clean and at most four when a
+repair is needed. This does not increase the automatic generation budget or
+retry existing captures. The shared writer method and stored-data format stay
+unchanged. A copied-data live replay produced five separate cloze notes and
+passed its audit; this small check is not a general card-quality guarantee.
+
 ## 0.1.25 beta: constrain audits and isolate incomplete verdicts
 
 Audit output contracts now specify the requested card identities, review ordinals
