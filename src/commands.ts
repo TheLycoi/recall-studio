@@ -92,6 +92,10 @@ const IMPLEMENTATIONS: Record<string, Implementation> = {
     available: () => true,
     run: (p) => void p.openInbox(),
   },
+  "open-learn": {
+    available: () => true,
+    run: (p) => p.openLearn(),
+  },
   "open-source-history": {
     available: () => true,
     run: (p) => openCurrentSourceHistory(p),

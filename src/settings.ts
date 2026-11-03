@@ -14,6 +14,12 @@ export type LintMode = "badge" | "hide" | "drop";
 export type Provider = "codex" | "deepseek" | "opencode";
 
 export interface RecallSettings extends SrRecognitionSettings {
+  /** External pinned LearnHarness skill; empty uses the explicit installer's location. */
+  learnSkillPath?: string;
+  /** Empty uses LearnHarness's desktop data directory. */
+  learnDataPath?: string;
+  /** Absolute Python 3.10+ executable; empty checks standard locations. */
+  learnPythonPath?: string;
   // LLM
   /** Which provider writes and checks the cards. */
   provider: Provider;
@@ -86,6 +92,9 @@ const CUSTOM_MODEL = "__custom__";
 
 export const DEFAULT_SETTINGS: RecallSettings = {
   ...SR_RECOGNITION_DEFAULTS,
+  learnSkillPath: "",
+  learnDataPath: "",
+  learnPythonPath: "",
   provider: "codex",
   codexPath: "",
   codexModel: "gpt-5.5",
@@ -171,6 +180,16 @@ export class RecallSettingTab extends PluginSettingTab {
     containerEl.empty();
     const s = this.plugin.settings;
     const save = () => void this.plugin.saveSettings();
+
+    new Setting(containerEl).setName("LearnHarness skill").setHeading();
+    new Setting(containerEl).setName("Open Learn").setDesc("Read-only chat using the upstream LearnHarness skill and your configured provider. Requires its pinned skill installation and Python 3.10+; this does not run the teaching application.").addButton(b => b.setButtonText("Open Learn").onClick(() => void this.plugin.openLearn()));
+    for (const [key, label, description] of [
+      ["learnSkillPath", "Skill folder", "Folder containing SKILL.md, scripts and references. Leave empty for the pinned installer's location. No code is downloaded on startup."],
+      ["learnDataPath", "LearnHarness data folder", "Absolute folder containing chats/ and graph/. Leave empty for LearnHarness's desktop default. Records stay read-only."],
+      ["learnPythonPath", "Python executable", "Absolute path to Python 3.10+. Leave empty to check standard installations."],
+    ] as const) {
+      new Setting(containerEl).setName(label).setDesc(description).addText(t => t.setValue(s[key] ?? "").onChange(value => { s[key] = value.trim(); save(); }));
+    }
 
     new Setting(containerEl).setName("Card writer").setHeading();
 

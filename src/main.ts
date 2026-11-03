@@ -9,6 +9,7 @@ import { paletteCommands } from "./commandTable";
 import { Generator } from "./generator";
 import { Highlighter } from "./highlighter";
 import { InboxView, VIEW_TYPE_INBOX } from "./inboxView";
+import { LearnView, VIEW_TYPE_LEARN } from "./learnView";
 import { LlmClient } from "./llm";
 import { askInstruction, pickDeck, confirmExport } from "./modals";
 import { summarizeExport, exportSelectionKey } from "./exportSummary";
@@ -20,6 +21,7 @@ import { registerSourceVisibility } from "./sourceVisibility";
 import { buildAnkiTextImport } from "./util";
 
 export default class RecallPlugin extends Plugin {
+  readonly learnViews = new Set<LearnView>();
   settings: RecallSettings = { ...DEFAULT_SETTINGS };
   store!: InboxStore;
   generator!: Generator;
@@ -43,6 +45,7 @@ export default class RecallPlugin extends Plugin {
     this.generator = new Generator(this, { release: this.manifest.version });
 
     this.registerView(VIEW_TYPE_INBOX, (leaf) => new InboxView(leaf, this));
+    this.registerView(VIEW_TYPE_LEARN, (leaf) => new LearnView(leaf, this));
 
     this.addSettingTab(new RecallSettingTab(this.app, this));
 
@@ -117,6 +120,7 @@ export default class RecallPlugin extends Plugin {
   }
 
   private async finishUnload(): Promise<void> {
+    for (const view of this.learnViews) view.cancel();
     let failure: unknown;
     const stopped = Promise.resolve(this.generator?.stop()).catch(e => {
       console.error("Recall Studio: generation cleanup failed during unload", e);
@@ -191,6 +195,14 @@ export default class RecallPlugin extends Plugin {
     const leaf = existing[0] ?? this.app.workspace.getRightLeaf(false);
     if (!leaf) return;
     if (!existing[0]) await leaf.setViewState({ type: VIEW_TYPE_INBOX, active: true });
+    await this.app.workspace.revealLeaf(leaf);
+  }
+
+  async openLearn(): Promise<void> {
+    const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_LEARN)[0];
+    const leaf = existing ?? this.app.workspace.getRightLeaf(true);
+    if (!leaf) return;
+    if (!existing) await leaf.setViewState({ type: VIEW_TYPE_LEARN, active: true });
     await this.app.workspace.revealLeaf(leaf);
   }
 
