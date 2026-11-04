@@ -9,6 +9,23 @@ The repository and BRAT target are `TheLycoi/recall-studio`, formerly
 `TheLycoi/review-inbox`. Plugin ID `review-inbox` and the default data folder
 `Review Inbox/` stay unchanged.
 
+## 0.1.27 beta: configurable agents and Learn pane
+
+The Agents settings separate the Strong main model from an optional Cheap model
+for the same provider. Strong plans and checks cards; Cheap reads the captured
+source context and writes, rewrites and repairs. Each role can have its own
+reasoning effort. Empty Cheap settings inherit Strong, so upgrading preserves
+the existing model selection. Both roles may use the same model.
+
+The shared writing prompts, original-source payloads, schemas and automatic
+preparation/write/audit workflow are unchanged. Gathering context remains local
+code; this adds no reader request or separate adjudicator. Changing effective
+routing invalidates incompatible generation checkpoints and pending results.
+
+The pending native Learn pane is included. It uses the main model and a pinned,
+explicitly installed LearnHarness history-reading skill. It does not install
+executable code on startup or run the full LearnHarness teaching application.
+
 ## 0.1.26 beta: repair requested card splits
 
 Rewrite can create separate editable cards when you ask it to split a note.

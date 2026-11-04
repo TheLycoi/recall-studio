@@ -38,6 +38,9 @@ export interface RecallSettings extends SrRecognitionSettings {
   /** opencode model id, in the `provider/model` form `opencode models` prints, e.g. deepseek/deepseek-flash. */
   opencodeModel: string;
   effort: Effort;
+  /** Cheap overrides belong to the selected provider; omitted values inherit Strong. */
+  cheapModels?: Partial<Record<Provider, string>>;
+  cheapEffort?: Effort;
   /** Retained only for compatibility with saved settings; no writing quota. */
   maxCardsPerHighlight: number;
   contextChars: number;
@@ -191,7 +194,8 @@ export class RecallSettingTab extends PluginSettingTab {
       new Setting(containerEl).setName(label).setDesc(description).addText(t => t.setValue(s[key] ?? "").onChange(value => { s[key] = value.trim(); save(); }));
     }
 
-    new Setting(containerEl).setName("Card writer").setHeading();
+    new Setting(containerEl).setName("Agents").setHeading();
+    new Setting(containerEl).setName("Model roles").setDesc("Strong is the main model for thinking, planning and quality checks. Cheap reads the captured source context and writes or repairs cards. Context collection stays local; no extra model stage is added. Prompts and checks are unchanged. Unset Cheap options inherit Strong.");
 
     new Setting(containerEl)
       .setName("Provider")
@@ -239,7 +243,7 @@ export class RecallSettingTab extends PluginSettingTab {
       const options = modelOptions(s.knownModels, s.deepseekModel, DEEPSEEK_FALLBACK_MODELS);
       const known = s.knownModels.length;
       const custom = new Setting(containerEl)
-        .setName("DeepSeek model: type an id")
+        .setName("Strong model: type an id")
         .setDesc("For a model the list does not show.")
         .addText((t) =>
           t.setPlaceholder("model id").onChange((v) => {
@@ -249,9 +253,9 @@ export class RecallSettingTab extends PluginSettingTab {
           }),
         );
       const row = new Setting(containerEl)
-        .setName("DeepSeek model")
+        .setName("Strong model")
         .setDesc(
-          `Model id sent to api.deepseek.com. deepseek-v4-pro reasons harder and costs more; deepseek-flash is the cheap one. ${known > 0 ? `${known} model${known === 1 ? "" : "s"} listed by the last Test.` : "Click Test to load the list."}`,
+          `Main model id sent to api.deepseek.com for planning and quality checks. ${known > 0 ? `${known} model${known === 1 ? "" : "s"} listed by the last Test.` : "Click Test to load the list."}`,
         )
         .addDropdown((d) => {
           for (const m of options) d.addOption(m, m);
@@ -285,7 +289,7 @@ export class RecallSettingTab extends PluginSettingTab {
       const options = modelOptions(s.knownModels, s.opencodeModel, OPENCODE_FALLBACK_MODELS);
       const known = s.knownModels.length;
       const custom = new Setting(containerEl)
-        .setName("OpenCode model: type an id")
+        .setName("Strong model: type an id")
         .setDesc("For a model the list does not show.")
         .addText((t) =>
           t.setPlaceholder("provider/model").onChange((v) => {
@@ -295,7 +299,7 @@ export class RecallSettingTab extends PluginSettingTab {
           }),
         );
       const row = new Setting(containerEl)
-        .setName("OpenCode model")
+        .setName("Strong model")
         .setDesc(
           `Model id in the provider/model form \`opencode models\` prints, e.g. deepseek/deepseek-flash. A model from a keyed provider is listed only once that provider has a key, so it can be missing before you sign in. ${known > 0 ? `${known} model${known === 1 ? "" : "s"} listed by the last Test.` : "Click Test to load the list."}`,
         )
@@ -331,7 +335,7 @@ export class RecallSettingTab extends PluginSettingTab {
       const options = modelOptions(s.knownModels, s.codexModel, CODEX_FALLBACK_MODELS);
       const known = s.knownModels.length;
       const custom = new Setting(containerEl)
-        .setName("Codex model: type an id")
+        .setName("Strong model: type an id")
         .setDesc("For a model the list does not show.")
         .addText((t) =>
           t.setPlaceholder("model id").onChange((v) => {
@@ -341,9 +345,9 @@ export class RecallSettingTab extends PluginSettingTab {
           }),
         );
       const row = new Setting(containerEl)
-        .setName("Codex model")
+        .setName("Strong model")
         .setDesc(
-          `Model slug passed to codex exec. gpt-5.5 is the lightest on your usage limit; gpt-5.6-luna and gpt-5.6-terra are newer and heavier. ${known > 0 ? `${known} model${known === 1 ? "" : "s"} listed by the last Test.` : "Click Test to load the list."}`,
+          `Main model slug passed to codex exec for planning and quality checks. ${known > 0 ? `${known} model${known === 1 ? "" : "s"} listed by the last Test.` : "Click Test to load the list."}`,
         )
         .addDropdown((d) => {
           for (const m of options) d.addOption(m, m);
@@ -362,7 +366,7 @@ export class RecallSettingTab extends PluginSettingTab {
     }
 
     new Setting(containerEl)
-      .setName("Effort")
+      .setName("Strong effort")
       .setDesc(
         s.provider === "deepseek"
           ? "How much reasoning DeepSeek spends per call. It accepts low, high and max; medium and xhigh both land on high, which is the level the API maps them to. Thinking is always on."
@@ -379,6 +383,39 @@ export class RecallSettingTab extends PluginSettingTab {
             save();
           }),
       );
+
+    const cheap = s.cheapModels?.[s.provider] ?? "";
+    const fallback = s.provider === "deepseek" ? DEEPSEEK_FALLBACK_MODELS : s.provider === "opencode" ? OPENCODE_FALLBACK_MODELS : CODEX_FALLBACK_MODELS;
+    const setCheap = (value: string) => {
+      s.cheapModels = { ...s.cheapModels };
+      if (value.trim()) s.cheapModels[s.provider] = value.trim();
+      else delete s.cheapModels[s.provider];
+      save();
+    };
+    const cheapCustom = new Setting(containerEl).setName("Cheap model: type an id")
+      .setDesc("An exact model id for the selected provider. Clear it to inherit Strong.")
+      .addText(t => t.setValue(cheap).setPlaceholder("model id").onChange(setCheap));
+    const cheapRow = new Setting(containerEl).setName("Cheap model")
+      .setDesc("Reads the original source context and writes, rewrites and repairs cards. Strong independently checks the result. No cost or quality ranking is implied by the role name.")
+      .addDropdown(d => {
+        d.addOption("", "Same as Strong");
+        for (const model of modelOptions(s.knownModels, cheap, fallback)) d.addOption(model, model);
+        d.addOption(CUSTOM_MODEL, "Other…");
+        d.setValue(cheap).onChange(value => {
+          if (value === CUSTOM_MODEL) { cheapCustom.settingEl.show(); return; }
+          setCheap(value); this.display();
+        });
+      });
+    containerEl.insertBefore(cheapRow.settingEl, cheapCustom.settingEl);
+    cheapCustom.settingEl.hide();
+    new Setting(containerEl).setName("Cheap effort")
+      .setDesc("Overrides Strong effort for writing and repairs. OpenCode uses model-id variants instead; the selected provider's supported levels still apply.")
+      .addDropdown(d => d.addOptions({ "": "Same as Strong", low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" })
+        .setValue(s.cheapEffort ?? "").onChange(value => {
+          if (value) s.cheapEffort = value as Effort;
+          else delete s.cheapEffort;
+          save();
+        }));
 
     new Setting(containerEl)
       .setName("Context window (characters)")

@@ -8,17 +8,17 @@ const pkg = JSON.parse(readFileSync("package.json", "utf8"));
 const lock = JSON.parse(readFileSync("package-lock.json", "utf8"));
 const versions = JSON.parse(readFileSync("versions.json", "utf8"));
 
-test("Recall Studio 0.1.26 preserves the Review Inbox identity", () => {
+test("Recall Studio 0.1.27 preserves the Review Inbox identity", () => {
   assert.equal(manifest.id, "review-inbox");
   assert.equal(manifest.name, "Recall Studio");
   assert.equal(pkg.name, "review-inbox");
-  assert.equal(manifest.version, "0.1.26");
+  assert.equal(manifest.version, "0.1.27");
   assert.equal(manifest.minAppVersion, "1.7.2");
   assert.equal(manifest.isDesktopOnly, true);
-  assert.equal(pkg.version, "0.1.26");
-  assert.equal(lock.version, "0.1.26");
-  assert.equal(lock.packages[""].version, "0.1.26");
-  assert.deepEqual(versions, { "0.1.0": "1.7.2", "0.1.1": "1.7.2", "0.1.2": "1.7.2", "0.1.3": "1.7.2", "0.1.4": "1.7.2", "0.1.5": "1.7.2", "0.1.6": "1.7.2", "0.1.8": "1.7.2", "0.1.9": "1.7.2", "0.1.10": "1.7.2", "0.1.11": "1.7.2", "0.1.12": "1.7.2", "0.1.13": "1.7.2", "0.1.14": "1.7.2", "0.1.15": "1.7.2", "0.1.16": "1.7.2", "0.1.17": "1.7.2", "0.1.18": "1.7.2", "0.1.19": "1.7.2", "0.1.20": "1.7.2", "0.1.21": "1.7.2", "0.1.22": "1.7.2", "0.1.23": "1.7.2", "0.1.24": "1.7.2", "0.1.25": "1.7.2", "0.1.26": "1.7.2" });
+  assert.equal(pkg.version, "0.1.27");
+  assert.equal(lock.version, "0.1.27");
+  assert.equal(lock.packages[""].version, "0.1.27");
+  assert.deepEqual(versions, { "0.1.0": "1.7.2", "0.1.1": "1.7.2", "0.1.2": "1.7.2", "0.1.3": "1.7.2", "0.1.4": "1.7.2", "0.1.5": "1.7.2", "0.1.6": "1.7.2", "0.1.8": "1.7.2", "0.1.9": "1.7.2", "0.1.10": "1.7.2", "0.1.11": "1.7.2", "0.1.12": "1.7.2", "0.1.13": "1.7.2", "0.1.14": "1.7.2", "0.1.15": "1.7.2", "0.1.16": "1.7.2", "0.1.17": "1.7.2", "0.1.18": "1.7.2", "0.1.19": "1.7.2", "0.1.20": "1.7.2", "0.1.21": "1.7.2", "0.1.22": "1.7.2", "0.1.23": "1.7.2", "0.1.24": "1.7.2", "0.1.25": "1.7.2", "0.1.26": "1.7.2", "0.1.27": "1.7.2" });
 });
 
 test("the runtime Zod pin includes the GHSA-mrhx-c7xc-m3w5 patch", () => {

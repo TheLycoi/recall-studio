@@ -30,7 +30,7 @@ export interface CompletionRequest<T> extends SourceAuthorization {
    * from evidence already on screen does not improve with extended thinking,
    * but it does wait for it.
    */
-  effort?: "low" | "medium" | "high";
+  effort?: "low" | "medium" | "high" | "xhigh" | "max";
   /** The model for this one call, else the configured model. */
   model?: string;
 }
@@ -53,7 +53,7 @@ export interface TextRequest extends SourceAuthorization {
   user: string;
   maxTokens: number;
   /** As in CompletionRequest. */
-  effort?: "low" | "medium" | "high";
+  effort?: "low" | "medium" | "high" | "xhigh" | "max";
   /** As in CompletionRequest. */
   model?: string;
   /** Cancels this one call: the Codex backend kills its child process. */

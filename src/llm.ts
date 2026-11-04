@@ -3,7 +3,8 @@ import { lintCard } from "./lint";
 import { AssessmentFields, cardChecks } from "./qualityAcceptance";
 import { z } from "zod";
 import { assertAuthorized } from "./backend";
-import type { LlmBackend } from "./backend";
+import type { CompletionRequest, LlmBackend } from "./backend";
+import { agentRoute } from "./modelRoles";
 import { CodexBackend, CodexError } from "./codex";
 import { DeepSeekBackend } from "./deepseek";
 import { OpenCodeBackend, OpenCodeError } from "./opencode";
@@ -125,6 +126,10 @@ export class LlmClient {
     return this.codex;
   }
 
+  private complete<T>(role: "strong" | "cheap", request: CompletionRequest<T>): Promise<T> {
+    return this.backend().complete({ ...request, ...agentRoute(this.getSettings(), role) });
+  }
+
   /** One tiny request, so the settings tab can say whether the provider works. */
   probe(model?: string): Promise<{ model: string; via: string }> {
     return this.backend().probe(model);
@@ -159,7 +164,7 @@ export class LlmClient {
     const authorization = { authorized: this.requestAuthorization(authorized) };
     assertAuthorized(authorization);
     const safeContext = writingContext(context);
-    const result = await this.backend().complete({
+    const result = await this.complete("strong", {
       ...authorization,
       system: PREPARATION_SYSTEM,
       user: JSON.stringify({ captured: h.text, sourceTitle: h.sourceTitle, heading: h.heading, contextBefore: h.before, contextAfter: h.after, instruction: h.instruction, ...safeContext, capturedOriginal, existing }),
@@ -173,7 +178,7 @@ export class LlmClient {
     const authorization = { authorized: this.requestAuthorization(authorized) };
     assertAuthorized(authorization);
     const safeContext = writingContext(context);
-    const result = await this.backend().complete({
+    const result = await this.complete("cheap", {
       ...authorization,
       system: WRITER_SYSTEM + "\n\n" + GROUNDED_WRITING_EXAMPLE + "\n\nWrite exactly one card per supplied plan row with its planId and exact factIds. Respect exclusions and omissions; the inventory is not independent evidence.",
       user: JSON.stringify({ captured: h.text, sourceTitle: h.sourceTitle, heading: h.heading, contextBefore: h.before, contextAfter: h.after, instruction: h.instruction, ...safeContext, preparation, existing }),
@@ -188,7 +193,7 @@ export class LlmClient {
     const authorization = { authorized: this.requestAuthorization(authorized) };
     assertAuthorized(authorization);
     const safeContext = writingContext(context);
-    const result = await this.backend().complete({
+    const result = await this.complete("cheap", {
       ...authorization,
       system: WRITER_SYSTEM + "\n\n" + GROUNDED_WRITING_EXAMPLE + "\n\nRepair only the supplied rejected candidates using all findings, captured source, plan/fact links and siblings. Return exactly one replacement per supplied candidate with its planId, exact factIds and all planned meaning. Do not return clean siblings, split rows, waive findings or shorten away required context. If a sound one-card repair is impossible, retain supported coverage for the independent final audit to hold; do not approve it.",
       user: JSON.stringify({ captured: h.text, sourceTitle: h.sourceTitle, heading: h.heading, contextBefore: h.before, contextAfter: h.after, instruction: h.instruction, ...safeContext, preparation, candidates: cards.map(c => ({ ...cardData(c), planId: c.generation?.planId, factIds: c.generation?.factIds })), findings, existing: existing.map(cardData) }),
@@ -203,7 +208,7 @@ export class LlmClient {
     assertAuthorized(authorization);
     const safeContext = writingContext(context);
     const checks = cards.map(c => cardChecks(c, h, [...existing, ...cards.filter(s => s.id !== c.id)]));
-    const result = await this.backend().complete({
+    const result = await this.complete("strong", {
       ...authorization,
       system: AUDIT_SYSTEM,
       user: JSON.stringify({ captured: h.text, sourceTitle: h.sourceTitle, heading: h.heading, contextBefore: h.before, contextAfter: h.after, instruction: h.instruction, ...safeContext, capturedOriginal, sourceFindings, preparation, cards: cards.map((c, index) => ({ index, ...cardData(c), planId: c.generation?.planId, factIds: c.generation?.factIds, reviews: renderedCardReviews(c), targetContext: (() => { const row = preparation.plan.find(p => p.id === c.generation?.planId); return row ? { entity: row.entity, aspect: row.aspect } : null; })(), checks: checks[index].map(id => ({ id, finding: LINT_FIX_INSTRUCTIONS[id as keyof typeof LINT_FIX_INSTRUCTIONS] })) })), existing }),
@@ -216,7 +221,7 @@ export class LlmClient {
   /** "write cards": one highlight (plus context) in, a handful of cards out. */
   async writeCards(h: Highlight, existing: Card[] = []): Promise<CardDraft[]> {
     const s = this.getSettings();
-    const parsed = await this.backend().complete({
+    const parsed = await this.complete("cheap", {
       system: WRITER_SYSTEM,
       user: JSON.stringify({
         source: { title: h.sourceTitle, heading: h.heading, contextBefore: h.before, highlight: h.text, contextAfter: h.after },
@@ -247,7 +252,7 @@ export class LlmClient {
     assertAuthorized(authorization);
     const s = this.getSettings();
     assertAuthorized(authorization);
-    const parsed = await this.backend().complete({
+    const parsed = await this.complete("strong", {
       system: CRITIC_SYSTEM,
       ...authorization,
       user: JSON.stringify({
@@ -274,7 +279,7 @@ export class LlmClient {
     // card's wording can walk it straight into the card next to it.
     const siblings = h.cards.filter((c) => c.id !== card.id && c.status !== "deleted");
     assertAuthorized(authorization);
-    const result = await this.backend().complete({
+    const result = await this.complete("cheap", {
       system: WRITER_SYSTEM,
       user: JSON.stringify({
         source: { title: h.sourceTitle, heading: h.heading, contextBefore: h.before, highlight: h.text, contextAfter: h.after },
@@ -298,7 +303,7 @@ export class LlmClient {
     const source = { title: h.sourceTitle, heading: h.heading, contextBefore: h.before, highlight: h.text, contextAfter: h.after };
     const context = { source, currentCard: cardData(card), rewriteInstruction: instruction, siblings: siblings.map(cardData),
       ...writingContext(s), highlightInstruction: h.instruction };
-    const result = await this.backend().complete({ system: WRITER_SYSTEM + EXPLICIT_REWRITE_SCOPE,
+    const result = await this.complete("cheap", { system: WRITER_SYSTEM + EXPLICIT_REWRITE_SCOPE,
       user: JSON.stringify({ ...context, task: `Rewrite the requested card as one card, or split it into focused cards when requested or necessary. Return 1 to ${MAX_REWRITE_CARDS} cards; this is an operational bound, not a quota. Retain every source-supported fact tested by the original, including necessary conditions and relationships. Do not silently drop facts or duplicate siblings. If the request cannot fit safely, fail rather than truncate.` }),
       schema: RewriteCardsOut, label: "rewrite cards", maxTokens: 8000, retryInvalidResponse: false, ...authorization });
     assertAuthorized(authorization);
@@ -309,7 +314,7 @@ export class LlmClient {
     };
     const check = async (label: string) => {
       assertAuthorized(authorization);
-      const audit = await this.backend().complete({ system: cardSystem("You are the independent checker, not the writer. Judge every answer-hidden review against the supplied source and writing method. Return only the requested set-coverage result and indexed keep/revise/drop verdicts with concrete reasons; do not write or repair cards.") + EXPLICIT_REWRITE_SCOPE,
+      const audit = await this.complete("strong", { system: cardSystem("You are the independent checker, not the writer. Judge every answer-hidden review against the supplied source and writing method. Return only the requested set-coverage result and indexed keep/revise/drop verdicts with concrete reasons; do not write or repair cards.") + EXPLICIT_REWRITE_SCOPE,
       user: JSON.stringify({ ...context, cards: candidates.map((c, index) => ({ index, ...cardData(c), reviews: renderedCardReviews(c),
         checks: (() => { const lint = lintCard(c, h, [...siblings, ...candidates.filter(other => other !== c)]); return [...lint.failures, ...lint.warnings].map(id => ({ id, finding: LINT_FIX_INSTRUCTIONS[id] })); })() })),
         task: "Independently check every replacement against the source, current writing rules, its fellow replacements and existing siblings. Return exactly one indexed verdict per replacement. Separately compare the complete replacement set with currentCard: preservesFacts is true only if no source-supported fact or necessary condition/relationship tested by the original has been lost or changed. For unsupported original facts, require their omission instead of preserving an error. Judge grounding, self-contained context, retrieval quality, cloze syntax/leaks and duplicate retrievals. Any missing fact, unsupported claim, unadjudicated warning or quality failure must not receive keep. Do not write or repair cards in this check." }),
@@ -327,7 +332,7 @@ export class LlmClient {
     const findings = audit.verdicts.filter(v => v.verdict === "revise").map(({ index, reason }) => ({ index, reason }));
     if (findings.length) {
       const indices = new Set(findings.map(v => v.index));
-      const repair = await this.backend().complete({ system: WRITER_SYSTEM + EXPLICIT_REWRITE_SCOPE,
+      const repair = await this.complete("cheap", { system: WRITER_SYSTEM + EXPLICIT_REWRITE_SCOPE,
         user: JSON.stringify({ ...context, candidates: candidates.flatMap((c, index) => indices.has(index) ? [{ index, ...cardData(c) }] : []),
           accepted: candidates.filter((_, index) => !indices.has(index)).map(cardData), findings,
           task: "Repair only the supplied rejected replacement cards, using every finding and the captured source. Return exactly one changed card for each supplied index, preserving that index, supported facts, conditions and relationships. Do not return or alter the accepted siblings, add cards, waive findings or invent distinguishing facts. The complete replacement set will be independently checked again." }),

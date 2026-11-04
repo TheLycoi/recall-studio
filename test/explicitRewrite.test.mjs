@@ -495,3 +495,14 @@ for (const stage of ['rewrite repair', 'rewrite final audit']) test(`a failed ${
   assert.equal(f.h.cards.filter(c => c.rewrite).length, 2); assert.equal(f.revisions.length, 1);
   await f.view.onClose();
 });
+
+test('explicit split uses Cheap for draft and repair, Strong for both checks', async () => {
+  const f = fixture({ audit: { preservesFacts: true, reason: '', verdicts: [{ index: 0, verdict: 'revise', reason: 'Clarify the question.' }, { index: 1, verdict: 'keep', reason: '' }] }, repair: { cards: [{ index: 0, kind: 'qa', front: 'What happens to Object A?', back: 'contracts', text: '' }] } });
+  // The mounted fixture owns its client settings; no live provider is called.
+  f.host.settings.cheapModels = { deepseek: 'synthetic-cheap' }; f.host.settings.effort = 'high'; f.host.settings.cheapEffort = 'medium';
+  await f.host.llm.rewriteCards(f.h, f.c, 'Split into separate cards.');
+  assert.deepEqual(f.requests.map(r => [r.label, r.model, r.effort]), [
+    ['rewrite cards', 'synthetic-cheap', 'medium'], ['rewrite audit', 'synthetic', 'high'],
+    ['rewrite repair', 'synthetic-cheap', 'medium'], ['rewrite final audit', 'synthetic', 'high'],
+  ]);
+});

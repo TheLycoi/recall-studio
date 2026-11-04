@@ -1,3 +1,4 @@
+import { agentRoute } from "./modelRoles";
 import { createHash } from "crypto";
 import { z } from "zod";
 import { cardSystem, CARD_FIELD_DESCRIPTIONS, writingContext } from "./writerMethod";
@@ -265,9 +266,11 @@ export function generationSource(h: Highlight): string {
 
 /** Hash inputs, never persist credentials or the house rules as another database. */
 export function generationKey(h: Highlight, context: GenerationContext, settings: RecallSettings, batchId: string): string {
+  const strong = agentRoute(settings, "strong"), cheap = agentRoute(settings, "cheap");
+  const agents = cheap.model === strong.model && cheap.effort === strong.effort ? {} : { cheap };
   const provider = settings.provider;
   const routing = provider === "deepseek" ? [settings.deepseekModel, settings.deepseekApiKey] : provider === "opencode" ? [settings.opencodeModel, settings.opencodePath] : [settings.codexModel, settings.codexPath];
-  return createHash("sha256").update(JSON.stringify({ version: 2, source: generationSource(h), instruction: h.generation?.instruction ?? "", context: writingContext(context), provider, routing, effort: settings.effort, audit: settings.critiquePass, lint: settings.lintMode, language: settings.language,
+  return createHash("sha256").update(JSON.stringify({ version: 2, ...agents, source: generationSource(h), instruction: h.generation?.instruction ?? "", context: writingContext(context), provider, routing, effort: settings.effort, audit: settings.critiquePass, lint: settings.lintMode, language: settings.language,
     existing: h.cards.filter(c => c.generation?.batchId !== batchId).map(c => [c.id, cardAuditContent(c), c.extra, c.status]),
   })).digest("hex");
 }

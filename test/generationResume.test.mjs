@@ -171,3 +171,25 @@ for (const boundary of ['initial context', 'replacement context']) for (const mu
   assert.match(f.h.error, /inputs changed/i);
   assert.deepEqual(f.h.cards, []);
 });
+
+test('configured agents preserve the three-call clean generation workflow', async () => {
+  const f = fixture(), routes = [];
+  f.settings.effort = 'high'; f.settings.cheapModels = { codex: 'cheap-writer' }; f.settings.cheapEffort = 'medium';
+  const complete = f.llm.codex.complete;
+  f.llm.codex.complete = req => { routes.push([req.label, req.model, req.effort]); return complete(req); };
+  await f.g.run(f.h);
+  assert.deepEqual(routes, [['preparation', 'synthetic', 'high'], ['grounded cards', 'cheap-writer', 'medium'], ['audit', 'synthetic', 'high']]);
+  assert.equal(f.h.cards.length, 1);
+});
+for (const setting of ['cheapModels', 'cheapEffort']) test(`changing ${setting} during writing holds stale output without auditing or publishing`, async () => {
+  const f = fixture();
+  const complete = f.llm.codex.complete;
+  f.llm.codex.complete = async req => {
+    const result = await complete(req);
+    if (req.label === 'grounded cards') f.settings[setting] = setting === 'cheapModels' ? { codex: 'different' } : 'medium';
+    return result;
+  };
+  await f.g.run(f.h);
+  assert.deepEqual(f.calls, ['preparation', 'grounded cards']);
+  assert.equal(f.h.cards.length, 0); assert.equal(f.h.status, 'error');
+});
