@@ -9,6 +9,18 @@ The repository and BRAT target are `TheLycoi/recall-studio`, formerly
 `TheLycoi/review-inbox`. Plugin ID `review-inbox` and the default data folder
 `Review Inbox/` stay unchanged.
 
+## 0.1.28 beta: unified model dropdown
+
+Settings now default to **Unified model**, with one Model and Effort selection
+for every stage. Choose **Strong / Cheap** in Model mode to reveal the separate
+role controls. Switching back ignores Cheap overrides but retains them for the
+next switch. Existing model choices are not erased. Configurations without a
+saved mode use Unified, including upgrades from 0.1.27.
+
+Prompts, source context, audit and repair stages are unchanged. Mode changes
+that alter effective routing invalidate incompatible checkpoints and hold
+stale in-flight output.
+
 ## 0.1.27 beta: configurable agents and Learn pane
 
 The Agents settings separate the Strong main model from an optional Cheap model

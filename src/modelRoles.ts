@@ -9,9 +9,10 @@ import type { RecallSettings } from "./settings";
 /** Strong retains the existing main model; Cheap never borrows another provider's override. */
 export function agentRoute(settings: RecallSettings, role: "strong" | "cheap") {
   const model = settings.provider === "deepseek" ? settings.deepseekModel : settings.provider === "opencode" ? settings.opencodeModel : settings.codexModel;
+  const cheap = settings.modelMode === "split" && role === "cheap";
   return {
-    model: role === "cheap" ? settings.cheapModels?.[settings.provider]?.trim() || model : model,
-    effort: role === "cheap" ? settings.cheapEffort ?? settings.effort : settings.effort,
+    model: cheap ? settings.cheapModels?.[settings.provider]?.trim() || model : model,
+    effort: cheap ? settings.cheapEffort ?? settings.effort : settings.effort,
   };
 }
 

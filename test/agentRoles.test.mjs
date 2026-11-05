@@ -10,7 +10,7 @@ before(async () => {
   mod._compile(out.outputFiles[0].text, 'agent-roles'); m = mod.exports;
 });
 function fixture(provider = 'codex', overrides = true) {
-  const settings = { provider, codexModel: 'sol', deepseekModel: 'pro', opencodeModel: 'vendor/strong', effort: 'high', ...(overrides ? { cheapModels: { codex: 'terra', deepseek: 'flash', opencode: 'vendor/cheap#low' }, cheapEffort: 'medium' } : {}) };
+  const settings = { provider, modelMode: 'split', codexModel: 'sol', deepseekModel: 'pro', opencodeModel: 'vendor/strong', effort: 'high', ...(overrides ? { cheapModels: { codex: 'terra', deepseek: 'flash', opencode: 'vendor/cheap#low' }, cheapEffort: 'medium' } : {}) };
   const calls = [], llm = new m.LlmClient(() => settings);
   const h = m.makeHighlight({ sourcePath: 'synthetic.md', sourceTitle: 'Vela', text: 'Accepted records must be signed.', before: 'Revision C.', after: 'Rejected records stay quarantined.' });
   const card = m.makeCard(h.id, { kind: 'qa', front: 'What must happen before accepted records are archived?', back: 'They must be signed.' });
@@ -61,4 +61,21 @@ test('Cheap model and effort changes invalidate checkpoints; inheritance preserv
   f.settings.cheapModels.codex = 'terra'; assert.notEqual(key(), legacy);
   const routed = key(); f.settings.cheapEffort = 'medium'; assert.notEqual(key(), routed);
   delete f.settings.cheapModels.codex; delete f.settings.cheapEffort; assert.equal(key(), legacy);
+});
+
+for (const provider of ['codex', 'deepseek', 'opencode']) test(`${provider}: unified mode ignores retained Cheap choices and preserves checkpoint identity`, async () => {
+  const f = fixture(provider), main = f.settings[`${provider}Model`];
+  const key = () => m.generationKey(f.h, {}, f.settings, 'batch');
+  const splitKey = key();
+  delete f.settings.modelMode;
+  const unifiedKey = key();
+  assert.notEqual(unifiedKey, splitKey);
+  await stages(f);
+  assert.ok(f.calls.every(r => r.model === main && r.effort === 'high'));
+  f.settings.modelMode = 'unified'; assert.equal(key(), unifiedKey);
+  f.settings.cheapModels[provider] = 'retained-choice'; f.settings.cheapEffort = 'low';
+  assert.equal(key(), unifiedKey);
+  f.settings.modelMode = 'split'; assert.notEqual(key(), unifiedKey);
+  f.calls.length = 0; await stages(f);
+  assert.equal(f.calls[1].model, 'retained-choice'); assert.equal(f.calls[1].effort, 'low');
 });

@@ -38,6 +38,8 @@ export interface RecallSettings extends SrRecognitionSettings {
   /** opencode model id, in the `provider/model` form `opencode models` prints, e.g. deepseek/deepseek-flash. */
   opencodeModel: string;
   effort: Effort;
+  /** Unified uses the main model for every stage; split enables saved Cheap overrides. */
+  modelMode?: "unified" | "split";
   /** Cheap overrides belong to the selected provider; omitted values inherit Strong. */
   cheapModels?: Partial<Record<Provider, string>>;
   cheapEffort?: Effort;
@@ -107,6 +109,7 @@ export const DEFAULT_SETTINGS: RecallSettings = {
   opencodePath: "",
   opencodeModel: "deepseek/deepseek-flash",
   effort: "high",
+  modelMode: "unified",
   maxCardsPerHighlight: 5,
   contextChars: 700,
   language: "",
@@ -195,7 +198,16 @@ export class RecallSettingTab extends PluginSettingTab {
     }
 
     new Setting(containerEl).setName("Agents").setHeading();
-    new Setting(containerEl).setName("Model roles").setDesc("Strong is the main model for thinking, planning and quality checks. Cheap reads the captured source context and writes or repairs cards. Context collection stays local; no extra model stage is added. Prompts and checks are unchanged. Unset Cheap options inherit Strong.");
+    const split = s.modelMode === "split";
+    new Setting(containerEl).setName("Model mode")
+      .setDesc("Use one model for every stage, or configure separate Strong and Cheap roles. Switching to Unified keeps your saved role choices.")
+      .addDropdown(d => d.addOptions({ unified: "Unified model", split: "Strong / Cheap" })
+        .setValue(split ? "split" : "unified").onChange(value => {
+          s.modelMode = value === "split" ? "split" : "unified";
+          save();
+          this.display();
+        }));
+    if (split) new Setting(containerEl).setName("Model roles").setDesc("Strong is the main model for thinking, planning and quality checks. Cheap reads the captured source context and writes or repairs cards. Context collection stays local; no extra model stage is added. Prompts and checks are unchanged. Unset Cheap options inherit Strong.");
 
     new Setting(containerEl)
       .setName("Provider")
@@ -243,7 +255,7 @@ export class RecallSettingTab extends PluginSettingTab {
       const options = modelOptions(s.knownModels, s.deepseekModel, DEEPSEEK_FALLBACK_MODELS);
       const known = s.knownModels.length;
       const custom = new Setting(containerEl)
-        .setName("Strong model: type an id")
+        .setName(split ? "Strong model: type an id" : "Model: type an id")
         .setDesc("For a model the list does not show.")
         .addText((t) =>
           t.setPlaceholder("model id").onChange((v) => {
@@ -253,9 +265,9 @@ export class RecallSettingTab extends PluginSettingTab {
           }),
         );
       const row = new Setting(containerEl)
-        .setName("Strong model")
+        .setName(split ? "Strong model" : "Model")
         .setDesc(
-          `Main model id sent to api.deepseek.com for planning and quality checks. ${known > 0 ? `${known} model${known === 1 ? "" : "s"} listed by the last Test.` : "Click Test to load the list."}`,
+          `Model id sent to api.deepseek.com. Unified uses it for every stage; Strong / Cheap uses it for planning and quality checks. ${known > 0 ? `${known} model${known === 1 ? "" : "s"} listed by the last Test.` : "Click Test to load the list."}`,
         )
         .addDropdown((d) => {
           for (const m of options) d.addOption(m, m);
@@ -289,7 +301,7 @@ export class RecallSettingTab extends PluginSettingTab {
       const options = modelOptions(s.knownModels, s.opencodeModel, OPENCODE_FALLBACK_MODELS);
       const known = s.knownModels.length;
       const custom = new Setting(containerEl)
-        .setName("Strong model: type an id")
+        .setName(split ? "Strong model: type an id" : "Model: type an id")
         .setDesc("For a model the list does not show.")
         .addText((t) =>
           t.setPlaceholder("provider/model").onChange((v) => {
@@ -299,7 +311,7 @@ export class RecallSettingTab extends PluginSettingTab {
           }),
         );
       const row = new Setting(containerEl)
-        .setName("Strong model")
+        .setName(split ? "Strong model" : "Model")
         .setDesc(
           `Model id in the provider/model form \`opencode models\` prints, e.g. deepseek/deepseek-flash. A model from a keyed provider is listed only once that provider has a key, so it can be missing before you sign in. ${known > 0 ? `${known} model${known === 1 ? "" : "s"} listed by the last Test.` : "Click Test to load the list."}`,
         )
@@ -335,7 +347,7 @@ export class RecallSettingTab extends PluginSettingTab {
       const options = modelOptions(s.knownModels, s.codexModel, CODEX_FALLBACK_MODELS);
       const known = s.knownModels.length;
       const custom = new Setting(containerEl)
-        .setName("Strong model: type an id")
+        .setName(split ? "Strong model: type an id" : "Model: type an id")
         .setDesc("For a model the list does not show.")
         .addText((t) =>
           t.setPlaceholder("model id").onChange((v) => {
@@ -345,9 +357,9 @@ export class RecallSettingTab extends PluginSettingTab {
           }),
         );
       const row = new Setting(containerEl)
-        .setName("Strong model")
+        .setName(split ? "Strong model" : "Model")
         .setDesc(
-          `Main model slug passed to codex exec for planning and quality checks. ${known > 0 ? `${known} model${known === 1 ? "" : "s"} listed by the last Test.` : "Click Test to load the list."}`,
+          `Model slug passed to codex exec. Unified uses it for every stage; Strong / Cheap uses it for planning and quality checks. ${known > 0 ? `${known} model${known === 1 ? "" : "s"} listed by the last Test.` : "Click Test to load the list."}`,
         )
         .addDropdown((d) => {
           for (const m of options) d.addOption(m, m);
@@ -366,7 +378,7 @@ export class RecallSettingTab extends PluginSettingTab {
     }
 
     new Setting(containerEl)
-      .setName("Strong effort")
+      .setName(split ? "Strong effort" : "Effort")
       .setDesc(
         s.provider === "deepseek"
           ? "How much reasoning DeepSeek spends per call. It accepts low, high and max; medium and xhigh both land on high, which is the level the API maps them to. Thinking is always on."
@@ -384,38 +396,40 @@ export class RecallSettingTab extends PluginSettingTab {
           }),
       );
 
-    const cheap = s.cheapModels?.[s.provider] ?? "";
-    const fallback = s.provider === "deepseek" ? DEEPSEEK_FALLBACK_MODELS : s.provider === "opencode" ? OPENCODE_FALLBACK_MODELS : CODEX_FALLBACK_MODELS;
-    const setCheap = (value: string) => {
-      s.cheapModels = { ...s.cheapModels };
-      if (value.trim()) s.cheapModels[s.provider] = value.trim();
-      else delete s.cheapModels[s.provider];
-      save();
-    };
-    const cheapCustom = new Setting(containerEl).setName("Cheap model: type an id")
-      .setDesc("An exact model id for the selected provider. Clear it to inherit Strong.")
-      .addText(t => t.setValue(cheap).setPlaceholder("model id").onChange(setCheap));
-    const cheapRow = new Setting(containerEl).setName("Cheap model")
-      .setDesc("Reads the original source context and writes, rewrites and repairs cards. Strong independently checks the result. No cost or quality ranking is implied by the role name.")
-      .addDropdown(d => {
-        d.addOption("", "Same as Strong");
-        for (const model of modelOptions(s.knownModels, cheap, fallback)) d.addOption(model, model);
-        d.addOption(CUSTOM_MODEL, "Other…");
-        d.setValue(cheap).onChange(value => {
-          if (value === CUSTOM_MODEL) { cheapCustom.settingEl.show(); return; }
-          setCheap(value); this.display();
+    if (split) {
+      const cheap = s.cheapModels?.[s.provider] ?? "";
+      const fallback = s.provider === "deepseek" ? DEEPSEEK_FALLBACK_MODELS : s.provider === "opencode" ? OPENCODE_FALLBACK_MODELS : CODEX_FALLBACK_MODELS;
+      const setCheap = (value: string) => {
+        s.cheapModels = { ...s.cheapModels };
+        if (value.trim()) s.cheapModels[s.provider] = value.trim();
+        else delete s.cheapModels[s.provider];
+        save();
+      };
+      const cheapCustom = new Setting(containerEl).setName("Cheap model: type an id")
+        .setDesc("An exact model id for the selected provider. Clear it to inherit Strong.")
+        .addText(t => t.setValue(cheap).setPlaceholder("model id").onChange(setCheap));
+      const cheapRow = new Setting(containerEl).setName("Cheap model")
+        .setDesc("Reads the original source context and writes, rewrites and repairs cards. Strong independently checks the result. No cost or quality ranking is implied by the role name.")
+        .addDropdown(d => {
+          d.addOption("", "Same as Strong");
+          for (const model of modelOptions(s.knownModels, cheap, fallback)) d.addOption(model, model);
+          d.addOption(CUSTOM_MODEL, "Other…");
+          d.setValue(cheap).onChange(value => {
+            if (value === CUSTOM_MODEL) { cheapCustom.settingEl.show(); return; }
+            setCheap(value); this.display();
+          });
         });
-      });
-    containerEl.insertBefore(cheapRow.settingEl, cheapCustom.settingEl);
-    cheapCustom.settingEl.hide();
-    new Setting(containerEl).setName("Cheap effort")
-      .setDesc("Overrides Strong effort for writing and repairs. OpenCode uses model-id variants instead; the selected provider's supported levels still apply.")
-      .addDropdown(d => d.addOptions({ "": "Same as Strong", low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" })
-        .setValue(s.cheapEffort ?? "").onChange(value => {
-          if (value) s.cheapEffort = value as Effort;
-          else delete s.cheapEffort;
-          save();
-        }));
+      containerEl.insertBefore(cheapRow.settingEl, cheapCustom.settingEl);
+      cheapCustom.settingEl.hide();
+      new Setting(containerEl).setName("Cheap effort")
+        .setDesc("Overrides Strong effort for writing and repairs. OpenCode uses model-id variants instead; the selected provider's supported levels still apply.")
+        .addDropdown(d => d.addOptions({ "": "Same as Strong", low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" })
+          .setValue(s.cheapEffort ?? "").onChange(value => {
+            if (value) s.cheapEffort = value as Effort;
+            else delete s.cheapEffort;
+            save();
+          }));
+    }
 
     new Setting(containerEl)
       .setName("Context window (characters)")
