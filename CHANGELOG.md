@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.29 beta: rewrite compliance and editable card agents
+
+Explicit rewrites now check whether the result follows the latest instruction,
+not only whether it preserves facts. An unchanged original triggers one repair
+attempt even if the model approves it. A requested split can produce separate
+notes during that repair; a failed repair keeps the original and reports why.
+Source holds, unrelated cards and the four-request maximum remain intact.
+
+The existing stages use editable reader, writer and grader prompts. Strong/Cheap
+mode routes preparation to Cheap and writing/repair to Strong; an optional
+Grader model handles audits. Unified mode still uses one model. System prompts
+can be edited or restored to defaults without changing application-owned schemas
+and evidence boundaries. The default method requires one-sentence cards.
+
+New Markdown captures include a bounded source-body snapshot for reader context.
+Only the selected passage supplies answer facts. Existing cards are not rewritten
+on upgrade; no extra model stage or automatic export is added.
+
 ## 0.1.28 beta: unified model dropdown
 
 Settings now default to **Unified model**, with one Model and Effort selection

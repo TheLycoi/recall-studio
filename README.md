@@ -9,7 +9,13 @@ The repository and BRAT target are `TheLycoi/recall-studio`, formerly
 `TheLycoi/review-inbox`. Plugin ID `review-inbox` and the default data folder
 `Review Inbox/` stay unchanged.
 
-## Unreleased: editable card agents
+## 0.1.29 beta: rewrite compliance and editable card agents
+
+Explicit rewrites now check whether the result follows the latest instruction,
+not only whether it preserves facts. An unchanged original triggers one repair
+attempt even if the model approves it. A requested split can produce separate
+notes during that repair; a failed repair keeps the original and reports why.
+Source holds, unrelated cards and the four-request maximum remain intact.
 
 The existing preparation, writing and audit stages now use reader, writer and
 grader instructions. In **Strong / Cheap** mode, Cheap reads and plans, Strong
