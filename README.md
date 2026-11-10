@@ -9,6 +9,36 @@ The repository and BRAT target are `TheLycoi/recall-studio`, formerly
 `TheLycoi/review-inbox`. Plugin ID `review-inbox` and the default data folder
 `Review Inbox/` stay unchanged.
 
+## Unreleased: editable card agents
+
+The existing preparation, writing and audit stages now use reader, writer and
+grader instructions. In **Strong / Cheap** mode, Cheap reads and plans, Strong
+writes and repairs, and the Grader has its own optional model and effort.
+Unset secondary choices inherit Strong. **Unified model** still uses one model
+for every stage. This does not add another model call or increase repair limits.
+
+Under **System prompts**, open the shared writing method or an individual role
+to edit its instructions. **Save** persists changes; **Cancel** discards them.
+**Restore default** changes the editor draft until saved. Output schemas,
+source-evidence boundaries and plan/fact identifiers remain application-owned.
+Changing prompts or effective routing rejects stale pending results and
+invalidates incompatible checkpoints; it does not rewrite existing cards.
+
+The default method requires at most one sentence per cloze note, or one question
+sentence and one answer sentence for Q&A. Useful bidirectional clozes and closed
+lists remain supported within that limit. The shared accuracy instructions
+require checking doubtful interpretations against the supplied evidence,
+stating unresolved uncertainty explicitly and revisiting it in the final audit
+or an explicit retry. These are prompt and audit requirements, not a guarantee
+that a model will detect every error. There is no web-research stage.
+
+New Markdown captures store up to 24,000 characters of the source body, excluding
+frontmatter. Longer notes use a window around the selection, marked truncated;
+PDF captures use available page text. This snapshot goes to the configured reader
+and grader. The writer receives quoted context terms and the existing short
+neighboring context. Only the selected highlight supplies answer facts. Older
+captures retain their existing context without an automatic reread.
+
 ## 0.1.28 beta: unified model dropdown
 
 Settings now default to **Unified model**, with one Model and Effort selection
@@ -94,7 +124,7 @@ content, history, export receipts and dependency versions stay unchanged.
 1. Select text in a note or PDF and run **Send selection to inbox**. Use
    **Send selection to inbox with instructions…** for an instruction specific to
    that capture. Highlighter mode also captures drag selections when enabled.
-2. Return to the Inbox after generation. Recall uses one built-in writing method
+2. Return to the Inbox after generation. Recall uses one editable shared writing method
    for source-grounded Q&A and cloze cards. It prepares source facts and a card
    plan, writes drafts, checks their structure and source support, and attempts
    one bounded repair followed by an independent recheck when needed.

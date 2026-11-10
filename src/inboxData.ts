@@ -48,6 +48,7 @@ const BatchRecord = z.object({
 const HighlightRecord = z.object({
   id: z.string(), sourcePath: z.string(), sourceTitle: z.string(), text: z.string(),
   before: z.string(), after: z.string(), instruction: z.string(), status: z.enum(["queued", "generating", "ready", "exported", "error", "dismissed"]),
+  noteContext: z.object({ text: z.string().max(24000), truncated: z.boolean() }).optional(),
   cards: z.array(CardRecord), archived: z.boolean().optional(),
   line: z.number().optional(), page: z.number().nullable().optional(),
   heading: z.string().nullable().optional(), blockId: z.string().nullable().optional(),

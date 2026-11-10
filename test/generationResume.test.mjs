@@ -174,11 +174,12 @@ for (const boundary of ['initial context', 'replacement context']) for (const mu
 
 test('configured agents preserve the three-call clean generation workflow', async () => {
   const f = fixture(), routes = [];
-  f.settings.modelMode = 'split'; f.settings.effort = 'high'; f.settings.cheapModels = { codex: 'cheap-writer' }; f.settings.cheapEffort = 'medium';
+  f.settings.modelMode = 'split'; f.settings.effort = 'high'; f.settings.cheapModels = { codex: 'cheap-reader' }; f.settings.cheapEffort = 'medium';
+  f.settings.graderModels = { codex: 'separate-grader' }; f.settings.graderEffort = 'low';
   const complete = f.llm.codex.complete;
   f.llm.codex.complete = req => { routes.push([req.label, req.model, req.effort]); return complete(req); };
   await f.g.run(f.h);
-  assert.deepEqual(routes, [['preparation', 'synthetic', 'high'], ['grounded cards', 'cheap-writer', 'medium'], ['audit', 'synthetic', 'high']]);
+  assert.deepEqual(routes, [['preparation', 'cheap-reader', 'medium'], ['grounded cards', 'synthetic', 'high'], ['audit', 'separate-grader', 'low']]);
   assert.equal(f.h.cards.length, 1);
 });
 for (const setting of ['cheapModels', 'cheapEffort', 'modelMode']) test(`changing ${setting} during writing holds stale output without auditing or publishing`, async () => {

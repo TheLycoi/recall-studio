@@ -39,7 +39,7 @@ test("every command's aliases are documented", () => {
 });
 
 test('README describes the authoring workflow and discloses retired prompt inputs', () => {
-  assert.match(readme, /one built-in writing method/i);
+  assert.match(readme, /one editable shared writing method/i);
   assert.match(readme, /legacy.*(?:rules|rule).*files.*(?:ignored|not read)/i);
   assert.match(readme, /(?:not proof of truth|not truth verification)/i);
   assert.match(readme, /(?:no hidden global prompts|does not use global standing instructions)/i);

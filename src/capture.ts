@@ -24,6 +24,15 @@ function stripMarks(s: string): string {
   return s.replace(/==/g, "");
 }
 
+/** Keep the source body, not frontmatter; long notes use a selection-centered window. */
+function noteContext(raw: string, start: number, end: number): Highlight["noteContext"] {
+  const { body, offset } = splitFrontmatter(raw);
+  const limit = 24000;
+  const center = Math.max(0, (start + end) / 2 - offset);
+  const from = Math.max(0, Math.min(body.length - limit, Math.floor(center - limit / 2)));
+  return { text: body.slice(from, from + limit), truncated: body.length > limit };
+}
+
 export interface CaptureOptions {
   /** Free-text instruction for the card writer. */
   instruction?: string;
@@ -96,6 +105,7 @@ export async function captureSelection(
     before: stripMarks(ctx.before),
     after: stripMarks(ctx.after),
     line: from.line,
+    noteContext: noteContext(full, start, end),
     heading: headingAbove(full, start),
     instruction,
     origin: opts.gesture ? "highlighter" : "selection",
@@ -148,6 +158,7 @@ export async function captureMarkdownHighlights(plugin: RecallPlugin, file: TFil
       before: stripMarks(ctx.before),
       after: stripMarks(ctx.after),
       line: lineOf(raw, offset + sp.start),
+      noteContext: noteContext(raw, offset + sp.start, offset + sp.end),
       heading: headingAbove(body, sp.start),
       instruction,
       origin: "markdown-highlight",
@@ -203,6 +214,7 @@ async function captureSpans(
         before: stripMarks(ctx.before),
         after: stripMarks(ctx.after),
         line: lineOf(raw, offset + l.start),
+        noteContext: noteContext(raw, offset + l.start, offset + l.end),
         heading: headingAbove(body, l.start),
         instruction,
         origin,
@@ -307,6 +319,7 @@ export function capturePdfSelection(
     after,
     line: 0,
     page: sel.page,
+    noteContext: sel.pageText ? noteContext(sel.pageText, locateQuote(sel.pageText, text)?.start ?? 0, locateQuote(sel.pageText, text)?.end ?? 0) : undefined,
     heading: `page ${sel.page}`,
     instruction: opts.instruction ?? "",
     origin: "pdf",

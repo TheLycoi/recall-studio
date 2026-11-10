@@ -1,4 +1,6 @@
 import { CODEX_FALLBACK_MODELS, modelOptions } from "./modelRoles";
+import type { SystemPromptOverrides, PromptId } from "./systemPrompts";
+import { PROMPT_LABELS, SystemPromptModal } from "./systemPromptModal";
 import { DEEPSEEK_FALLBACK_MODELS } from "./deepseekModels";
 import { OPENCODE_FALLBACK_MODELS } from "./opencode";
 import { forgetCachedKey } from "./deepseekKey";
@@ -43,6 +45,10 @@ export interface RecallSettings extends SrRecognitionSettings {
   /** Cheap overrides belong to the selected provider; omitted values inherit Strong. */
   cheapModels?: Partial<Record<Provider, string>>;
   cheapEffort?: Effort;
+  /** Independent grader; omitted values inherit the main writer model. */
+  graderModels?: Partial<Record<Provider, string>>;
+  graderEffort?: Effort;
+  systemPrompts?: SystemPromptOverrides;
   /** Retained only for compatibility with saved settings; no writing quota. */
   maxCardsPerHighlight: number;
   contextChars: number;
@@ -200,14 +206,14 @@ export class RecallSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("Agents").setHeading();
     const split = s.modelMode === "split";
     new Setting(containerEl).setName("Model mode")
-      .setDesc("Use one model for every stage, or configure separate Strong and Cheap roles. Switching to Unified keeps your saved role choices.")
+      .setDesc("Use one model for every stage, or separate reader, main writer and grader models. Unified keeps your saved role choices.")
       .addDropdown(d => d.addOptions({ unified: "Unified model", split: "Strong / Cheap" })
         .setValue(split ? "split" : "unified").onChange(value => {
           s.modelMode = value === "split" ? "split" : "unified";
           save();
           this.display();
         }));
-    if (split) new Setting(containerEl).setName("Model roles").setDesc("Strong is the main model for thinking, planning and quality checks. Cheap reads the captured source context and writes or repairs cards. Context collection stays local; no extra model stage is added. Prompts and checks are unchanged. Unset Cheap options inherit Strong.");
+    if (split) new Setting(containerEl).setName("Model roles").setDesc("Cheap is the reader: it reads the source note and plans supported targets. Strong is the main writer and repairs drafts. The independent Grader checks the original evidence. These use the existing preparation, writing and audit stages, with no extra model call. Unset secondary models inherit Strong.");
 
     new Setting(containerEl)
       .setName("Provider")
@@ -267,7 +273,7 @@ export class RecallSettingTab extends PluginSettingTab {
       const row = new Setting(containerEl)
         .setName(split ? "Strong model" : "Model")
         .setDesc(
-          `Model id sent to api.deepseek.com. Unified uses it for every stage; Strong / Cheap uses it for planning and quality checks. ${known > 0 ? `${known} model${known === 1 ? "" : "s"} listed by the last Test.` : "Click Test to load the list."}`,
+          `Model id sent to api.deepseek.com. Unified uses it for every stage; Strong / Cheap uses it for writing and repairs; the Grader inherits it unless overridden. ${known > 0 ? `${known} model${known === 1 ? "" : "s"} listed by the last Test.` : "Click Test to load the list."}`,
         )
         .addDropdown((d) => {
           for (const m of options) d.addOption(m, m);
@@ -359,7 +365,7 @@ export class RecallSettingTab extends PluginSettingTab {
       const row = new Setting(containerEl)
         .setName(split ? "Strong model" : "Model")
         .setDesc(
-          `Model slug passed to codex exec. Unified uses it for every stage; Strong / Cheap uses it for planning and quality checks. ${known > 0 ? `${known} model${known === 1 ? "" : "s"} listed by the last Test.` : "Click Test to load the list."}`,
+          `Model slug passed to codex exec. Unified uses it for every stage; Strong / Cheap uses it for writing and repairs; the Grader inherits it unless overridden. ${known > 0 ? `${known} model${known === 1 ? "" : "s"} listed by the last Test.` : "Click Test to load the list."}`,
         )
         .addDropdown((d) => {
           for (const m of options) d.addOption(m, m);
@@ -409,7 +415,7 @@ export class RecallSettingTab extends PluginSettingTab {
         .setDesc("An exact model id for the selected provider. Clear it to inherit Strong.")
         .addText(t => t.setValue(cheap).setPlaceholder("model id").onChange(setCheap));
       const cheapRow = new Setting(containerEl).setName("Cheap model")
-        .setDesc("Reads the original source context and writes, rewrites and repairs cards. Strong independently checks the result. No cost or quality ranking is implied by the role name.")
+        .setDesc("The reader uses this model to inspect the captured note context and identify terms, definitions and supported targets. No cost or quality ranking is implied by the role name.")
         .addDropdown(d => {
           d.addOption("", "Same as Strong");
           for (const model of modelOptions(s.knownModels, cheap, fallback)) d.addOption(model, model);
@@ -422,7 +428,7 @@ export class RecallSettingTab extends PluginSettingTab {
       containerEl.insertBefore(cheapRow.settingEl, cheapCustom.settingEl);
       cheapCustom.settingEl.hide();
       new Setting(containerEl).setName("Cheap effort")
-        .setDesc("Overrides Strong effort for writing and repairs. OpenCode uses model-id variants instead; the selected provider's supported levels still apply.")
+        .setDesc("Overrides Strong effort for the reader and planning. OpenCode uses model-id variants instead; the selected provider's supported levels still apply.")
         .addDropdown(d => d.addOptions({ "": "Same as Strong", low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" })
           .setValue(s.cheapEffort ?? "").onChange(value => {
             if (value) s.cheapEffort = value as Effort;
@@ -430,6 +436,49 @@ export class RecallSettingTab extends PluginSettingTab {
             save();
           }));
     }
+
+    if (split) {
+      const grader = s.graderModels?.[s.provider] ?? "";
+      const fallback = s.provider === "deepseek" ? DEEPSEEK_FALLBACK_MODELS : s.provider === "opencode" ? OPENCODE_FALLBACK_MODELS : CODEX_FALLBACK_MODELS;
+      const setGrader = (value: string) => {
+        s.graderModels = { ...s.graderModels };
+        if (value.trim()) s.graderModels[s.provider] = value.trim();
+        else delete s.graderModels[s.provider];
+        save();
+      };
+      const custom = new Setting(containerEl).setName("Grader model: type an id")
+        .setDesc("An exact model id for this provider. Clear it to inherit Strong.")
+        .addText(t => t.setValue(grader).onChange(setGrader));
+      const row = new Setting(containerEl).setName("Grader model")
+        .setDesc("Independent source and retrieval-quality checks, including the final recheck. Research is confined to supplied source material, not web browsing.")
+        .addDropdown(d => {
+          d.addOption("", "Same as Strong");
+          for (const model of modelOptions(s.knownModels, grader, fallback)) d.addOption(model, model);
+          d.addOption(CUSTOM_MODEL, "Other…");
+          d.setValue(grader).onChange(value => {
+            if (value === CUSTOM_MODEL) { custom.settingEl.show(); return; }
+            setGrader(value); this.display();
+          });
+        });
+      containerEl.insertBefore(row.settingEl, custom.settingEl);
+      custom.settingEl.hide();
+      new Setting(containerEl).setName("Grader effort")
+        .setDesc("Overrides Strong effort for grading. OpenCode uses model-id variants instead.")
+        .addDropdown(d => d.addOptions({ "": "Same as Strong", low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" })
+          .setValue(s.graderEffort ?? "").onChange(value => {
+            if (value) s.graderEffort = value as Effort; else delete s.graderEffort;
+            save();
+          }));
+    }
+
+    new Setting(containerEl).setName("System prompts").setHeading();
+    for (const id of Object.keys(PROMPT_LABELS) as PromptId[]) {
+      new Setting(containerEl).setName(PROMPT_LABELS[id])
+        .setDesc(id === "method" ? "Shared rules for every card-writing stage, including accuracy and the one-sentence default." : "Instructions for this role within the existing workflow.")
+        .addButton(b => b.setButtonText("Open prompt").onClick(() => new SystemPromptModal(this.app, this.plugin, id).open()));
+    }
+    new Setting(containerEl).setName("Reader note context")
+      .setDesc("New Markdown captures include up to 24,000 characters of the source body, excluding frontmatter. Long notes use a window around the selection; PDF captures use available page text. This snapshot is stored in Recall Studio and sent to the configured reader and grader. Older captures use their saved neighboring context. Only the highlight supplies answers.");
 
     new Setting(containerEl)
       .setName("Context window (characters)")

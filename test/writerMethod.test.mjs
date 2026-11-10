@@ -64,7 +64,7 @@ for (const stage of ['prepareGeneration', 'writeGroundedCards', 'repairGeneratio
     assert.match(req.system, /grammatical subject.*negative feedback.*specific system/i);
     assert.match(req.system, /shared entity words.*whole answer/i);
     assert.match(req.system, /cite exact visible words for the identifying cue AND requested relation/i);
-    assert.equal(req.system.split('<writing_method id="recall-writing-method-v11">').length, 2, 'one current versioned method per request');
+    assert.equal(req.system.split('<writing_method id="recall-writing-method-v12">').length, 2, 'one current versioned method per request');
     assert.match(req.system, /classification.*not.*beacon is/i);
     assert.match(req.system, /transition.*amber.*destination/i);
     assert.ok(req.system.includes('<bad>The fictional Orin beacon is {{c1::a coastal marker}}.</bad>'));
@@ -178,7 +178,7 @@ test('assembled highlight requests carry the approved method without changing ap
   });
   await t.test('transport retains the exact schema fields and plan/fact identities', () => {
     const expected = {
-      preparation: ['conflicts', 'exclusions', 'facts', 'omissions', 'plan'],
+      preparation: ['conflicts', 'contextTerms', 'exclusions', 'facts', 'omissions', 'plan'],
       'rewrite audit': ['preservesFacts', 'reason', 'verdicts'],
     };
     for (const req of f.calls) {

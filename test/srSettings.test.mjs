@@ -31,7 +31,7 @@ before(async () => {
   const out = path.join(dir, "settings.cjs");
   await build({ ...sharedBuildOptions(), entryPoints: ["src/settings.ts"], outfile: out, logLevel: "silent" });
   const mod = new Module(out); mod.filename = out; mod.paths = Module._nodeModulePaths(process.cwd());
-  mod.require = name => name === "obsidian" ? { Setting, PluginSettingTab } : require(name);
+  mod.require = name => name === "obsidian" ? { Setting, PluginSettingTab, Modal: class {} } : require(name);
   mod._compile(readFileSync(out, "utf8"), out); api = mod.exports;
 });
 after(() => { if (dir) rmSync(dir, { recursive: true, force: true }); });

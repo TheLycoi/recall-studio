@@ -2,10 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadQuiz } from './quizHarness.mjs';
 
-test('v11 keeps one shared contract and bounded stage-specific tasks', async () => {
+test('v12 keeps one shared contract and bounded stage-specific tasks', async () => {
   const { WRITING_METHOD_ID, CARD_WRITING_METHOD, writingContext } = await loadQuiz('src/writerMethod.ts');
   const { PREPARATION_SYSTEM, AUDIT_SYSTEM } = await loadQuiz('src/generation.ts');
-  assert.equal(WRITING_METHOD_ID, 'recall-writing-method-v11');
+  assert.equal(WRITING_METHOD_ID, 'recall-writing-method-v12');
   assert.equal(writingContext({ language: 'English' }).rules, WRITING_METHOD_ID);
   for (const system of [PREPARATION_SYSTEM, AUDIT_SYSTEM]) {
     assert.equal(system.split(CARD_WRITING_METHOD).length, 2);

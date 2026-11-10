@@ -1159,3 +1159,10 @@ body.wikilm-highlighter-active .textLayer ::selection {
     flex-wrap: wrap;
   }
 }
+
+textarea.ri-system-prompt-editor {
+  width: 100%;
+  min-width: min(32rem, 60vw);
+  min-height: 18rem;
+  resize: vertical;
+}

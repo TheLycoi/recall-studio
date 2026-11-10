@@ -44,7 +44,7 @@ test('planner clarifies statements before grouping without rewriting evidence or
   const input = JSON.parse(calls[0].user);
   assert.equal(input.captured, h.text);
   assert.equal(input.capturedOriginal, h.text);
-  assert.deepEqual(m.validatePreparation(output, h.text), preparation);
+  assert.deepEqual(m.validatePreparation(output, h.text), { ...preparation, contextTerms: [] });
 });
 
 test('grounded writer receives a schema-valid dense-passage example with exact coverage and independent reviews', async () => {
@@ -56,7 +56,7 @@ test('grounded writer receives a schema-valid dense-passage example with exact c
   const system = calls[0].system;
   const example = system.match(/<grounded_example>([\s\S]*?)<\/grounded_example>/)?.[1];
   assert.ok(example, 'a complete input/output demonstration must reach the grounded writer');
-  assert.ok(Buffer.byteLength(m.CARD_WRITING_METHOD + m.GROUNDED_WRITING_EXAMPLE) <= Math.floor(15865 * 1.2), 'shared method plus example stays within 20% of measured v10 shared bytes, not a token estimate');
+  assert.ok(Buffer.byteLength(m.CARD_WRITING_METHOD + m.GROUNDED_WRITING_EXAMPLE) <= 21000, 'v12 method plus example has a 21,000-byte ceiling including the new accuracy and sentence rules, not a token estimate');
   assert.match(example, /example.*not.*evidence/i);
   const input = JSON.parse(example.match(/<input>([\s\S]*?)<\/input>/)[1]);
   const output = JSON.parse(example.match(/<output>([\s\S]*?)<\/output>/)[1]);

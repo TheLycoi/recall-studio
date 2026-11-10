@@ -23,8 +23,8 @@ function card(line, h) {
   return m.makeCard(h.id, { kind: 'cloze', text: line.replace(/^cloze \| /, '') });
 }
 
-test('v11 writer composes the relation before markup and revises hidden-answer fronts inside one existing request', async () => {
-  assert.equal(m.WRITING_METHOD_ID, 'recall-writing-method-v11');
+test('v12 writer composes the relation before markup and revises hidden-answer fronts inside one existing request', async () => {
+  assert.equal(m.WRITING_METHOD_ID, 'recall-writing-method-v12');
   const method = m.CARD_WRITING_METHOD;
   assert.match(method, /first identify.*supported target.*relation/i);
   assert.match(method, /then write.*self-contained.*before adding cloze markup/i);

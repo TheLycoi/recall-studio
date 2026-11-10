@@ -115,7 +115,7 @@ test('source-grounded context repair is private, bounded and independently reche
   const request = f.calls.find(r => r.label === 'generation repair');
   const payload = JSON.parse(request.user);
   assert.equal(payload.captured, f.h.text);
-  assert.deepEqual(payload.preparation, f.p);
+  assert.deepEqual(payload.preparation, { ...f.p, contextTerms: [] });
   assert.match(JSON.stringify(payload), /Extra does not fix/);
   for (const label of ['grounded cards', 'generation repair', 'final audit']) {
     const req = f.calls.find(r => r.label === label);

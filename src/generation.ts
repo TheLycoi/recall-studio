@@ -1,4 +1,5 @@
 import { agentRoute } from "./modelRoles";
+import { promptConfiguration } from "./systemPrompts";
 import { createHash } from "crypto";
 import { z } from "zod";
 import { cardSystem, CARD_FIELD_DESCRIPTIONS, writingContext } from "./writerMethod";
@@ -22,6 +23,7 @@ export const GenerationProvenanceOut = z.object({
   inputKey: z.string().regex(/^(?:[a-f0-9]{64})?$/),
 });
 export const PreparationOut = z.object({
+  contextTerms: z.preprocess(v => v === undefined ? [] : v, z.array(z.object({ term: text, definition: text, quote: text })).max(100)).describe("Terminology and explicit definitions from noteContext (or neighboring context if unavailable), each with an exact contiguous context quote. Context only, never extra answer facts."),
   facts: z.array(z.object({ id: text, statement: text, quote: text })),
   plan: z.array(z.object({ id: text, factIds: ids.describe("All inventoried fact IDs covered by this coherent group; retain every selected target's link."), entity: text, aspect: z.string(), value: text.describe("The coherent supported targets for one note, using distinct cloze numbers for independently cued targets when appropriate."), reason: text })),
   exclusions: z.array(disposition),
@@ -82,8 +84,11 @@ Report findings only: never repair cards, add facts, delete or merge rows. Repor
 For each sourceFinding reassessed, echo its findingId, cardId, sourceKey and content with resolution resolved, framing or unresolved, a concrete reason and exact captured supporting quote. Resolved needs evidence settling that original concern; framing requires repair/recheck. Omitted/unresolved findings stay held. Generic verified and other targets never clear source holds or authorize changing facts.`);
 
 /** Only saved legacy stages may also use their former readable snapshot for quotes. */
-export function validatePreparation(raw: unknown, snapshot: string, _legacyMaxCards?: number, legacySnapshot?: string): GenerationPreparation {
+export function validatePreparation(raw: unknown, snapshot: string, _legacyMaxCards?: number, legacySnapshot?: string, noteContext = ""): GenerationPreparation {
   const p = PreparationOut.parse(raw);
+  for (const term of p.contextTerms) {
+    if (!term.quote.trim() || !noteContext.includes(term.quote)) throw new Error("Context term quote is not in the supplied note context.");
+  }
   const facts = new Set<string>();
   for (const f of p.facts) {
     if (!/^F[1-9]\d*$/.test(f.id) || facts.has(f.id)) throw new Error("Invalid or duplicate fact ID.");
@@ -261,16 +266,17 @@ export function cardAuditContent(c: Card): string {
 }
 
 export function generationSource(h: Highlight): string {
-  return JSON.stringify([h.sourcePath, h.sourceTitle, h.text, h.before, h.after, h.heading, h.line, h.page, h.blockId, h.subpath, h.instruction]);
+  return JSON.stringify([h.sourcePath, h.sourceTitle, h.text, h.before, h.after, h.heading, h.line, h.page, h.blockId, h.subpath, h.instruction, ...(h.noteContext ? [h.noteContext.text, h.noteContext.truncated] : [])]);
 }
 
 /** Hash inputs, never persist credentials or the house rules as another database. */
 export function generationKey(h: Highlight, context: GenerationContext, settings: RecallSettings, batchId: string): string {
   const strong = agentRoute(settings, "strong"), cheap = agentRoute(settings, "cheap");
   const agents = cheap.model === strong.model && cheap.effort === strong.effort ? {} : { cheap };
+  const grader = agentRoute(settings, "grader");
   const provider = settings.provider;
   const routing = provider === "deepseek" ? [settings.deepseekModel, settings.deepseekApiKey] : provider === "opencode" ? [settings.opencodeModel, settings.opencodePath] : [settings.codexModel, settings.codexPath];
-  return createHash("sha256").update(JSON.stringify({ version: 2, ...agents, source: generationSource(h), instruction: h.generation?.instruction ?? "", context: writingContext(context), provider, routing, effort: settings.effort, audit: settings.critiquePass, lint: settings.lintMode, language: settings.language,
+  return createHash("sha256").update(JSON.stringify({ version: 3, ...agents, grader, prompts: promptConfiguration(settings.systemPrompts), source: generationSource(h), instruction: h.generation?.instruction ?? "", context: writingContext(context), provider, routing, effort: settings.effort, audit: settings.critiquePass, lint: settings.lintMode, language: settings.language,
     existing: h.cards.filter(c => c.generation?.batchId !== batchId).map(c => [c.id, cardAuditContent(c), c.extra, c.status]),
   })).digest("hex");
 }

@@ -213,12 +213,12 @@ export class Generator {
         await save();
         const raw = await this.plugin.llm.prepareGeneration(words, structuredClone(existing), context, authorized, h.text);
         await checkContext();
-        batch.preparation = validatePreparation(raw, h.text, context.maxCards);
+        batch.preparation = validatePreparation(raw, h.text, context.maxCards, undefined, h.noteContext?.text ?? `${h.before}\n${h.after}`);
         batch.phase = "writing";
         changed();
         await save();
       }
-      const preparation = validatePreparation(batch.preparation, h.text, context.maxCards, batch.provenance ? undefined : words.text);
+      const preparation = validatePreparation(batch.preparation, h.text, context.maxCards, batch.provenance ? undefined : words.text, h.noteContext?.text ?? `${h.before}\n${h.after}`);
       if (!batch.drafts) {
         if (!batch.writerOutput) {
           if (batch.writingRequested) throw new Error("The prior writer outcome is unknown. Use Retry held drafts to authorize another request.");

@@ -112,10 +112,10 @@ test('transport field descriptions allow definition-cued terms for QA and cloze'
   }
 });
 
-test('current v11 identity carries the reciprocal contract without inheriting older approval', () => {
-  assert.equal(m.WRITING_METHOD_ID, 'recall-writing-method-v11');
+test('current v12 identity carries the reciprocal contract without inheriting older approval', () => {
+  assert.equal(m.WRITING_METHOD_ID, 'recall-writing-method-v12');
   for (const req of requests) {
-    assert.equal(req.system.split('<writing_method id="recall-writing-method-v11">').length, 2);
-    assert.equal(JSON.parse(req.user).rules, 'recall-writing-method-v11');
+    assert.equal(req.system.split('<writing_method id="recall-writing-method-v12">').length, 2);
+    assert.equal(JSON.parse(req.user).rules, 'recall-writing-method-v12');
   }
 });

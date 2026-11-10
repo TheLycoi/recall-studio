@@ -28,12 +28,12 @@ async function stages(f) {
   await f.llm.rewriteCard(f.h, f.card, 'Keep the meaning.');
   await f.llm.critiqueCards(f.h, [f.card]);
 }
-for (const provider of ['codex', 'deepseek', 'opencode']) test(`${provider}: Strong plans and checks; Cheap writes and repairs with original context`, async () => {
+for (const provider of ['codex', 'deepseek', 'opencode']) test(`${provider}: Cheap reads; Strong writes and repairs; Grader checks original context`, async () => {
   const f = fixture(provider); await stages(f);
   const strong = { codex: 'sol', deepseek: 'pro', opencode: 'vendor/strong' }[provider];
   assert.equal(f.calls.length, 8);
   for (const req of f.calls) {
-    const thinking = ['preparation', 'audit', 'final audit', 'verdicts'].includes(req.label);
+    const thinking = req.label !== 'preparation';
     assert.equal(req.model, thinking ? strong : f.settings.cheapModels[provider], req.label);
     assert.equal(req.effort, thinking ? 'high' : 'medium', req.label);
     const p = JSON.parse(req.user);
@@ -77,5 +77,5 @@ for (const provider of ['codex', 'deepseek', 'opencode']) test(`${provider}: uni
   assert.equal(key(), unifiedKey);
   f.settings.modelMode = 'split'; assert.notEqual(key(), unifiedKey);
   f.calls.length = 0; await stages(f);
-  assert.equal(f.calls[1].model, 'retained-choice'); assert.equal(f.calls[1].effort, 'low');
+  assert.equal(f.calls[0].model, 'retained-choice'); assert.equal(f.calls[0].effort, 'low');
 });

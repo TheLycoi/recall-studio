@@ -48,6 +48,8 @@ export interface SourceFinding { quote: string; reason: string; kind?: "framing"
 export interface ScopedSourceFinding extends SourceFinding { id: string; cardId: string; sourceKey: string; content: string }
 export interface SourceReassessment { findingId: string; cardId: string; sourceKey: string; content: string; resolution: "resolved" | "framing" | "unresolved"; quote: string; reason: string }
 export interface GenerationPreparation {
+  /** Note-only terminology; never additional answer evidence. Absent on legacy batches. */
+  contextTerms?: { term: string; definition: string; quote: string }[];
   facts: { id: string; statement: string; quote: string }[];
   plan: { id: string; factIds: string[]; entity: string; aspect: string; value: string; reason: string }[];
   exclusions: { factIds: string[]; reason: string }[];
@@ -185,6 +187,8 @@ export interface Highlight {
   text: string;
   before: string;
   after: string;
+  /** Bounded source body captured at selection time, separate from answer evidence. */
+  noteContext?: { text: string; truncated: boolean };
   line: number;
   /** 1-indexed PDF page when the source is a PDF; null for markdown notes. */
   page: number | null;
