@@ -49,7 +49,7 @@ async function fixture(t, { rewriteOutput = rewritten } = {}) {
     const body = JSON.parse(req.body), payload = JSON.parse(body.messages[1].content);
     requests.push(body);
     const output = payload.task.startsWith('Independently check every replacement')
-      ? { preservesFacts: true, reason: '', verdicts: [{ index: 0, verdict: 'keep', reason: '' }] }
+      ? { preservesFacts: true, followsInstruction: true, reason: '', verdicts: [{ index: 0, verdict: 'keep', reason: '' }] }
       : typeof rewriteOutput === 'function' ? rewriteOutput() : rewriteOutput;
     const result = payload.task.startsWith('Rewrite the requested card') ? { cards: [output] } : output;
     return { status: 200, json: { choices: [{ message: { content: JSON.stringify(result) }, finish_reason: 'stop' }] } };

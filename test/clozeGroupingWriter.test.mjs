@@ -36,11 +36,11 @@ before(async () => {
   backend.exec = async req => {
     requests.push(req);
     if (req.label === 'preparation') return JSON.stringify(preparation);
-    if (['grounded cards', 'generation repair', 'cards', 'rewrite cards'].includes(req.label)) return JSON.stringify({ cards: [draft] });
+    if (['grounded cards', 'generation repair', 'cards', 'rewrite cards'].includes(req.label)) return JSON.stringify({ cards: [req.label === 'rewrite cards' ? { ...draft, text: combined.replace('reports exactly two', 'reports these two') } : draft] });
     if (req.label === 'card') return JSON.stringify(draft);
     if (['audit', 'final audit'].includes(req.label)) return JSON.stringify({ verdicts: [auditVerdict(card, { index: 0, cardId: card.id, status: 'verified', reason: 'Synthetic transport, not a semantic judgment.', conflicts: [] })] });
     if (req.label === 'verdicts') return JSON.stringify({ verdicts: [{ index: 0, verdict: 'keep', reason: '', bloom: 'remember', kind: 'cloze', front: '', back: '', text: '' }] });
-    if (req.label === 'rewrite audit') return JSON.stringify({ preservesFacts: true, reason: 'Synthetic transport.', verdicts: [{ index: 0, verdict: 'keep', reason: '' }] });
+    if (req.label === 'rewrite audit') return JSON.stringify({ preservesFacts: true, followsInstruction: true, reason: 'Synthetic transport.', verdicts: [{ index: 0, verdict: 'keep', reason: '' }] });
     throw Error(req.label);
   };
   llm.codex = backend;

@@ -34,7 +34,7 @@ function fixture({ output = revised } = {}) {
   llm.codex = { complete: async req => {
     requests.push(req);
     if (req.label === 'rewrite cards') return req.schema.parse({ cards: [typeof output === 'function' ? output() : output] });
-    if (req.label === 'rewrite audit') return req.schema.parse({ preservesFacts: true, reason: '', verdicts: [{ index: 0, verdict: 'keep', reason: '' }] });
+    if (req.label === 'rewrite audit') return req.schema.parse({ preservesFacts: true, followsInstruction: true, reason: '', verdicts: [{ index: 0, verdict: 'keep', reason: '' }] });
     if (req.label === 'verdicts') return req.schema.parse(verdict);
     throw Error(`Unexpected provider request: ${req.label}`);
   } };

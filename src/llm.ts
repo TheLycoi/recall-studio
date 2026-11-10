@@ -34,7 +34,8 @@ const RewriteCardOut = CardOut.extend({
 const RewriteCardsOut = z.object({ cards: z.array(RewriteCardOut).min(1).max(MAX_REWRITE_CARDS) });
 const RewriteAuditOut = z.object({
   preservesFacts: z.boolean().describe("True only when the replacement set retains every supported fact tested by the original, with its conditions and relationships."),
-  reason: z.string(),
+  followsInstruction: z.boolean().describe("True only when the complete replacement set fulfills rewriteInstruction, including requested splitting, format and wording; factual correctness alone is insufficient."),
+  reason: z.string().describe("Explain any lost supported fact or unmet rewrite instruction; identify the requested change that is still missing."),
   verdicts: z.array(z.object({ index: z.number().int(), verdict: z.enum(["keep", "revise", "drop"]), reason: z.string() })).max(MAX_REWRITE_CARDS),
 });
 
@@ -93,7 +94,7 @@ const WRITER_SYSTEM = cardSystem("You are the writer. Write source-grounded flas
 const CRITIC_SYSTEM = cardSystem(`You are the independent checker for the supplied cards, not their writer. Judge grounding and retrieval quality, including siblings and existing duplicates. Report the Bloom level actually supported, not a higher level the capture cannot supply. When verdict fields request a revision, only a source-supported wording repair is allowed: keep/drop echo kind and leave front/back/text empty; revise returns the whole corrected variant with its unused fields empty. Drop flags the card for human review, never deletes it. Give a concrete reader-facing reason and exactly one verdict per supplied index. When the task asks for findings only, do not write or repair cards.
 Assess the ORIGINAL supplied card, not a proposed revision. Return contractVersion 1 and reviews covering every supplied ordinal exactly once (QA null), each with status, reason, identifyingCue and relationCue quoted from that answer-hidden visibleCue, and answerable/effortful booleans. Verified requires both booleans and actual nonempty cue quotations. Return checks covering every supplied ID once, with resolution accepted or defect and a concrete reason. Only soft findings can be accepted; hard checks remain defects. Keep requires all rendered reviews verified and all checks accepted. Revise/drop must still supply complete findings, using empty cue quotations for missing cues rather than inventing them.`);
 
-const EXPLICIT_REWRITE_SCOPE = "\nAn explicit user request to split overrides the default grouping preference: produce separate note records, not just extra cloze numbers in one note. Keep a self-contained supported cue in every note and restart cloze numbering at c1 in each note. Do not add unsupported categories or explanations to distinguish the cards. Shared condition words alone are not an answer leak; judge the complete hidden target in its visible cue. Source, coverage and retrieval-quality requirements still apply.";
+const EXPLICIT_REWRITE_SCOPE = "\nrewriteInstruction is the current user request and takes precedence over the earlier highlightInstruction, examples and default grouping or format preferences when they conflict. An explicit user request to split overrides the default grouping preference: produce separate note records, not just extra cloze numbers in one note. Keep a self-contained supported cue in every note and restart cloze numbering at c1 in each note. Do not return the original unchanged as a successful rewrite. Do not add unsupported categories or explanations to distinguish the cards. Shared condition words alone are not an answer leak; judge the complete hidden target in its visible cue. Source, coverage and retrieval-quality requirements still apply.";
 
 /**
  * Prompts and schemas live here. The backend for the chosen provider — the
@@ -318,8 +319,10 @@ export class LlmClient {
       schema: RewriteCardsOut, label: "rewrite cards", maxTokens: 8000, retryInvalidResponse: false, ...authorization });
     assertAuthorized(authorization);
     let drafts = result.cards, candidates = rewriteCandidates(card, h, drafts);
+    const unchangedOriginal = () => drafts.length === 1 && (["kind", "front", "back", "text"] as const)
+      .every(key => drafts[0][key].trim().replace(/\s+/g, " ") === card[key].trim().replace(/\s+/g, " "));
     const rejected = (audit: z.infer<typeof RewriteAuditOut>): Error => {
-      const reason = (!audit.preservesFacts ? audit.reason.trim() : audit.verdicts.find(v => v.verdict !== "keep")?.reason.trim()) || audit.reason.trim();
+      const reason = (!audit.preservesFacts || !audit.followsInstruction ? audit.reason.trim() : audit.verdicts.find(v => v.verdict !== "keep")?.reason.trim()) || audit.reason.trim();
       return Error(`Rewrite kept the original. ${sanitizeDiagnostic(reason, [s.deepseekApiKey]).replace(/\s+/g, " ").slice(0, 300) || "The replacement set did not pass its source, coverage and quality check."}`);
     };
     const check = async (label: string) => {
@@ -327,7 +330,7 @@ export class LlmClient {
       const audit = await this.complete("grader", { system: cardSystem("You are the independent checker, not the writer. Judge every answer-hidden review against the supplied source and writing method. Return only the requested set-coverage result and indexed keep/revise/drop verdicts with concrete reasons; do not write or repair cards.") + EXPLICIT_REWRITE_SCOPE,
       user: JSON.stringify({ ...context, cards: candidates.map((c, index) => ({ index, ...cardData(c), reviews: renderedCardReviews(c),
         checks: (() => { const lint = lintCard(c, h, [...siblings, ...candidates.filter(other => other !== c)]); return [...lint.failures, ...lint.warnings].map(id => ({ id, finding: LINT_FIX_INSTRUCTIONS[id] })); })() })),
-        task: "Independently check every replacement against the source, current writing rules, its fellow replacements and existing siblings. Return exactly one indexed verdict per replacement. Separately compare the complete replacement set with currentCard: preservesFacts is true only if no source-supported fact or necessary condition/relationship tested by the original has been lost or changed. For unsupported original facts, require their omission instead of preserving an error. Judge grounding, self-contained context, retrieval quality, cloze syntax/leaks and duplicate retrievals. Any missing fact, unsupported claim, unadjudicated warning or quality failure must not receive keep. Do not write or repair cards in this check." }),
+        task: "Independently check every replacement against the source, current writing rules, its fellow replacements and existing siblings. Return exactly one indexed verdict per replacement. Separately compare the complete replacement set with currentCard: preservesFacts is true only if no source-supported fact or necessary condition/relationship tested by the original has been lost or changed. For unsupported original facts, require their omission instead of preserving an error. Set followsInstruction only when the complete set fulfills the current rewriteInstruction, not a conflicting earlier highlightInstruction. A factual card that ignores a requested split, format or wording change fails this check. Explain unmet instructions in reason. Judge grounding, self-contained context, retrieval quality, cloze syntax/leaks and duplicate retrievals. Any missing fact, unsupported claim, unadjudicated warning or quality failure must not receive keep. Use revise for correctable wording or format defects; do not use drop merely because a supported card needs splitting. Do not write or repair cards in this check." }),
       schema: RewriteAuditOut, outputSchema: RewriteAuditOut.extend({ verdicts: z.array(RewriteAuditOut.shape.verdicts.element.extend({ index: z.number().int().min(0).max(candidates.length - 1) })).length(candidates.length) }),
       label, maxTokens: 4000, retryInvalidResponse: false, ...authorization });
       assertAuthorized(authorization);
@@ -340,7 +343,21 @@ export class LlmClient {
     };
     const audit = await check("rewrite audit");
     const findings = audit.verdicts.filter(v => v.verdict === "revise").map(({ index, reason }) => ({ index, reason }));
-    if (findings.length) {
+    const instructionFailure = unchangedOriginal() ? "The writer returned the original unchanged instead of carrying out rewriteInstruction."
+      : !audit.followsInstruction ? audit.reason || "The requested change is still missing." : null;
+    if (instructionFailure !== null) {
+      // An unmet set-level instruction cannot be repaired with a fixed card count.
+      const repair = await this.complete("writer", { system: WRITER_SYSTEM + EXPLICIT_REWRITE_SCOPE,
+        user: JSON.stringify({ ...context, candidates: candidates.map(cardData), instructionFailure, findings,
+          task: `The previous result did not carry out rewriteInstruction. Return the complete corrected replacement set, from 1 to ${MAX_REWRITE_CARDS} cards. You may change its card count to perform the requested split. Preserve every supported fact, condition and relationship from currentCard, address every finding, and leave existing siblings unchanged. Do not repeat the unchanged original, add unsupported facts or waive source checks. This is the only repair attempt; the whole set will be independently checked again.` }),
+        schema: RewriteCardsOut, label: "rewrite repair", maxTokens: 8000, retryInvalidResponse: false, ...authorization });
+      assertAuthorized(authorization);
+      drafts = repair.cards;
+      candidates = rewriteCandidates(card, h, drafts);
+      if (unchangedOriginal()) throw Error("Rewrite kept the original. The writer returned it unchanged after one repair attempt.");
+      const final = await check("rewrite final audit");
+      if (!final.followsInstruction || final.verdicts.some(v => v.verdict !== "keep")) throw rejected(final);
+    } else if (findings.length) {
       const indices = new Set(findings.map(v => v.index));
       const repair = await this.complete("writer", { system: WRITER_SYSTEM + EXPLICIT_REWRITE_SCOPE,
         user: JSON.stringify({ ...context, candidates: candidates.flatMap((c, index) => indices.has(index) ? [{ index, ...cardData(c) }] : []),
@@ -357,8 +374,9 @@ export class LlmClient {
         drafts[index] = draft;
       }
       candidates = rewriteCandidates(card, h, drafts);
+      if (unchangedOriginal()) throw Error("Rewrite kept the original. The writer returned it unchanged after one repair attempt.");
       const final = await check("rewrite final audit");
-      if (final.verdicts.some(v => v.verdict !== "keep")) throw rejected(final);
+      if (!final.followsInstruction || final.verdicts.some(v => v.verdict !== "keep")) throw rejected(final);
     }
     return drafts;
   }

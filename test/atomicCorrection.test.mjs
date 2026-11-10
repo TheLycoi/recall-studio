@@ -26,7 +26,7 @@ function fixture(source, fields, replacement = fields, rejectInitial = false) {
     if (req.label === 'grounded cards') return JSON.stringify({ cards: [draft(fields)] });
     if (req.label === 'generation repair') return JSON.stringify({ cards: [draft(replacement)] });
     if (req.label === 'rewrite cards') return JSON.stringify({ cards: [draft(replacement)] });
-    if (req.label === 'rewrite audit') return JSON.stringify({ preservesFacts: true, reason: 'Synthetic source/coverage check.', verdicts: [{ index: 0, verdict: 'keep', reason: '' }] });
+    if (req.label === 'rewrite audit') return JSON.stringify({ preservesFacts: true, followsInstruction: true, reason: 'Synthetic source/coverage check.', verdicts: [{ index: 0, verdict: 'keep', reason: '' }] });
     const payload = JSON.parse(req.user);
     const failed = rejectInitial && (req.label === 'audit' || JSON.stringify(fields) === JSON.stringify(replacement));
     return JSON.stringify({ verdicts: payload.cards.map((c, index) => (auditVerdict(c, { index, cardId: c.id, status: failed ? 'failed' : 'verified', reason: failed ? 'Synthetic regression verdict: requested classification/transition has no visible relation words.' : 'Synthetic positive audit, not live inference.', conflicts: [] }))) });
@@ -68,7 +68,9 @@ for (const [attribute, answer] of [['title', 'War and Peace'], ['author', 'Crosb
     });
     test(`R3 explicit singular ${attribute} ${fields.kind} survives rewrite audit`, async () => {
       const f = fixture(source, fields);
-      const card = m.makeCard(f.h.id, fields);
+      const original = fields.kind === 'cloze' ? { ...fields, text: `The ${attribute} of the list is {{c1::${answer}}}.` }
+        : { ...fields, front: `What is the list’s ${attribute}?` };
+      const card = m.makeCard(f.h.id, original);
       const results = await f.llm.rewriteCards(f.h, card, 'Keep this single attribute.');
       assert.equal(results.length, 1);
       assert.equal(results[0].kind, fields.kind);
@@ -122,7 +124,8 @@ for (const front of ['Why does the list cache retain results?', 'How does the li
   assert.deepEqual(f.calls.map(r => r.label), ['preparation', 'grounded cards', 'audit']);
   assert.ok(f.saves.some(h => h.cards.length === 1));
   const rewrite = fixture(source, fields);
-  assert.equal((await rewrite.llm.rewriteCards(rewrite.h, m.makeCard(rewrite.h.id, fields), 'Keep the causal explanation.')).length, 1);
+  const original = { ...fields, front: 'What purpose does the list cache serve by retaining results?' };
+  assert.equal((await rewrite.llm.rewriteCards(rewrite.h, m.makeCard(rewrite.h.id, original), 'Keep the causal explanation.')).length, 1);
   assert.equal(f.h.text, source);
   const repaired = fixture(source, { kind: 'qa', front: 'What are the list features?', back: 'red casing and blue trim.' }, fields);
   await repaired.run();

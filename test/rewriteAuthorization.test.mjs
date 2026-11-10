@@ -25,7 +25,7 @@ async function fixture({ pause = 'before-dispatch', output = converted } = {}) {
     const body = JSON.parse(req.body), payload = JSON.parse(body.messages[1].content);
     requests.push(body);
     if (pause === 'transport') { pending = true; await barrier.promise; }
-    if (payload.task.startsWith('Independently check every replacement')) return response({ preservesFacts: true, reason: '',
+    if (payload.task.startsWith('Independently check every replacement')) return response({ preservesFacts: true, followsInstruction: true, reason: '',
       verdicts: payload.cards.map((_, index) => ({ index, verdict: 'keep', reason: '' })) });
     const result = typeof output === 'function' ? output(req) : response(output);
     if (payload.task.startsWith('Rewrite the requested card') && result?.json?.choices?.[0]?.message) {

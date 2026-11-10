@@ -88,7 +88,7 @@ test('G3: a procedure accepted by generation can be explicitly reworded without 
   f.backend.complete = async req => {
     f.calls.push(req);
     return req.schema.parse(req.label === 'rewrite cards' ? { cards: [replacement] }
-      : { preservesFacts: true, reason: 'Same complete procedure', verdicts: [{ index: 0, verdict: 'keep', reason: 'Meaningful procedural unit' }] });
+      : { preservesFacts: true, followsInstruction: true, reason: 'Same complete procedure', verdicts: [{ index: 0, verdict: 'keep', reason: 'Meaningful procedural unit' }] });
   };
   const result = await f.llm.rewriteCards(f.h, f.h.cards[0], 'Keep the full procedure and condition; improve the cue.', () => true);
   assert.equal(result[0].back, answer);

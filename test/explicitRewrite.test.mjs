@@ -37,7 +37,7 @@ before(async () => {
   mod._compile(out.outputFiles[0].text, 'explicit-rewrite');
   ({ InboxView, InboxStore, LlmClient, makeHighlight, makeCard, parseInboxJson, schemaJson } = mod.exports);
 });
-const fixtureAudit = cards => ({ preservesFacts: true, reason: 'All supported original facts retained.', verdicts: cards.map((_, index) => ({ index, verdict: 'keep', reason: '' })) });
+const fixtureAudit = cards => ({ preservesFacts: true, followsInstruction: true, reason: 'All supported original facts retained.', verdicts: cards.map((_, index) => ({ index, verdict: 'keep', reason: '' })) });
 const drafts = [
   { kind: 'cloze', front: '', back: '', text: 'Object A {{c1::contracts}}.' },
   { kind: 'qa', front: 'What happens to Object B?', back: 'stays constant', text: '' },
@@ -70,7 +70,7 @@ function fixture({ output = { cards: drafts }, audit, repair, finalAudit, pause 
     assert.equal(req.authorized(), true, 'Check authorization at transport');
     if (pause === req.label) { pending = true; await barrier.promise; }
     const value = req.label === 'rewrite audit'
-      ? audit ?? { preservesFacts: true, reason: 'Both original facts retained.', verdicts: drafts.map((_, index) => ({ index, verdict: 'keep', reason: '' })) }
+      ? audit ?? { preservesFacts: true, followsInstruction: true, reason: 'Both original facts retained.', verdicts: drafts.map((_, index) => ({ index, verdict: 'keep', reason: '' })) }
       : req.label === 'rewrite repair' ? repair ?? { cards: [] }
       : req.label === 'rewrite final audit' ? finalAudit ?? fixtureAudit(drafts)
       : typeof output === 'function' ? output(req) : output;
@@ -103,7 +103,7 @@ for (const kind of ['qa', 'cloze']) for (const focused of [true, false]) test(`G
   const output = { cards: [kind === 'qa'
     ? { kind, front: focused ? 'During Zeta sensor calibration, what ordered actions and reconnection condition apply?' : 'Zeta sensor calibration: what actions, identifying details, surroundings and equipment must be recalled?', back: answer, text: '' }
     : { kind, front: '', back: '', text: focused ? `Zeta sensor calibration requires {{c1::${procedure}}}.` : `Zeta sensor calibration requires {{c1::${procedure}}}; record {{c1::the serial number}}, identify {{c1::the cable manufacturer}}, name {{c1::the room}}, and list {{c1::the tools}}.` }] };
-  const audit = { preservesFacts: true, reason: 'Synthetic source comparison', verdicts: [{ index: 0, verdict: focused ? 'keep' : 'revise', reason: focused ? 'One procedural unit with its essential condition' : 'Combines independent retrieval targets' }] };
+  const audit = { preservesFacts: true, followsInstruction: true, reason: 'Synthetic source comparison', verdicts: [{ index: 0, verdict: focused ? 'keep' : 'revise', reason: focused ? 'One procedural unit with its essential condition' : 'Combines independent retrieval targets' }] };
   const f = fixture({ output, audit });
   f.h.text = source;
   Object.assign(f.c, { kind: 'qa', front: 'Zeta sensor calibration: what is its procedure?', back: procedure, text: '' });
@@ -130,13 +130,44 @@ for (const kind of ['qa', 'cloze']) for (const focused of [true, false]) test(`G
 test('G3: over-sixty-word unfocused card reaches audit with its actual findings and remains unchanged', async () => {
   const back = `${procedure}; ${'record the serial number and list the tools; '.repeat(8)}`;
   const output = { cards: [{ kind: 'qa', front: 'Zeta calibration: what procedure and independent inventory details apply?', back, text: '' }] };
-  const f = fixture({ output, audit: { preservesFacts: true, reason: 'Synthetic', verdicts: [{ index: 0, verdict: 'revise', reason: 'Unfocused inventory and procedural targets' }] } });
+  const f = fixture({ output, audit: { preservesFacts: true, followsInstruction: true, reason: 'Synthetic', verdicts: [{ index: 0, verdict: 'revise', reason: 'Unfocused inventory and procedural targets' }] } });
   f.h.text = back;
   const before = structuredClone(f.h);
   await f.view.onOpen(); f.star('Improve the cue'); await Promise.all(f.runs);
   assert.equal(f.requests.length, 3, 'A failed repair still preserves the original');
   assert.deepEqual(JSON.parse(f.requests[1].user).cards[0].checks.map(c => c.id), ['qa-answer-long', 'card-long']);
   assert.deepEqual(f.h, before); assert.deepEqual(f.revisions, []);
+  await f.view.onClose();
+});
+
+test('a returned original gets one structural retry that can satisfy the split instruction', async () => {
+  const original = { kind: 'cloze', front: '', back: '', text: 'Object A {{c1::contracts}}. Object B {{c2::stays constant}}.' };
+  const f = fixture({ output: { cards: [original] },
+    audit: { ...fixtureAudit([original]), followsInstruction: false, reason: 'The request requires separate cards, not the original combined note.' },
+    repair: { cards: drafts }, finalAudit: { ...fixtureAudit(drafts), followsInstruction: true } });
+  f.h.instruction = 'Keep both objects in one cloze note.';
+  await f.view.onOpen();
+  const before = structuredClone(f.c);
+  f.star('Split into separate cards'); await Promise.all(f.runs); f.draw();
+  const children = f.h.cards.filter(c => c.rewrite);
+  assert.equal(children.length, 2, 'Instruction failure must not be accepted as an unchanged rewrite');
+  assert.deepEqual(f.requests.map(r => r.label), ['rewrite cards', 'rewrite audit', 'rewrite repair', 'rewrite final audit']);
+  assert.deepEqual(f.c, { ...before, status: 'deleted' });
+  assert.equal(f.revisions.length, 1);
+  const retry = JSON.parse(f.requests[2].user);
+  assert.equal(retry.rewriteInstruction, 'Split into separate cards');
+  assert.equal(f.requests[2].schema.safeParse({ cards: drafts }).success, true, 'Structural retry must allow a different card count');
+  await f.view.onClose();
+});
+
+test('an unchanged original cannot pass solely because the grader claims instruction compliance', async () => {
+  const original = { kind: 'cloze', front: '', back: '', text: 'Object A {{c1::contracts}}. Object B {{c2::stays constant}}.' };
+  const f = fixture({ output: { cards: [original] }, audit: fixtureAudit([original]), repair: { cards: drafts } });
+  await f.view.onOpen();
+  f.star('Split into separate cards'); await Promise.all(f.runs); f.draw();
+  assert.equal(f.h.cards.filter(c => c.rewrite).length, 2);
+  assert.deepEqual(f.requests.map(r => r.label), ['rewrite cards', 'rewrite audit', 'rewrite repair', 'rewrite final audit']);
+  assert.match(JSON.parse(f.requests[2].user).instructionFailure, /unchanged/i);
   await f.view.onClose();
 });
 
@@ -392,6 +423,20 @@ test('a changed one-card explicit response forks a receipted record instead of r
   await f.view.onClose();
 });
 
+test('a targeted repair cannot turn a changed candidate back into the unchanged original', async () => {
+  const original = { kind: 'cloze', front: '', back: '', text: 'Object A {{c1::contracts}}. Object B {{c2::stays constant}}.' };
+  const changed = { ...original, text: 'Object B {{c1::stays constant}}. Object A {{c2::contracts}}.' };
+  const f = fixture({ output: { cards: [changed] },
+    audit: { ...fixtureAudit([changed]), verdicts: [{ index: 0, verdict: 'revise', reason: 'Make the cue more explicit.' }] },
+    repair: { cards: [{ index: 0, ...original }] }, finalAudit: fixtureAudit([original]) });
+  await f.view.onOpen(); const before = structuredClone(f.h), start = notices.length;
+  f.star('Improve the cue'); await Promise.all(f.runs);
+  assert.deepEqual(f.h, before); assert.deepEqual(f.revisions, []);
+  assert.match(notices.slice(start).join('\n'), /unchanged after one repair attempt/i);
+  assert.equal(f.requests.length, 3, 'Do not spend another audit on a known unchanged original');
+  await f.view.onClose();
+});
+
 const repairableAudit = { ...fixtureAudit(drafts), verdicts: [
   { index: 0, verdict: 'keep', reason: 'Supported focused retrieval.' },
   { index: 1, verdict: 'revise', reason: 'Clarify the visible relation cue.' },
@@ -496,8 +541,93 @@ for (const stage of ['rewrite repair', 'rewrite final audit']) test(`a failed ${
   await f.view.onClose();
 });
 
+const ignoredSplit = { kind: 'cloze', front: '', back: '', text: 'Object B {{c1::stays constant}}; Object A {{c2::contracts}}.' };
+const instructionMismatch = { ...fixtureAudit([ignoredSplit]), followsInstruction: false, reason: 'Separate notes were requested, but the facts remain in one note.' };
+
+for (const action of ['star', 'Save']) test(`${action} corrects a cosmetically changed but unsplit result without touching existing siblings`, async () => {
+  const f = fixture({ output: { cards: [ignoredSplit] }, audit: instructionMismatch, repair: { cards: drafts } });
+  f.h.instruction = 'Keep both objects in one cloze note.';
+  Object.assign(f.c, { ankiNoteId: 19, srNote: 'review.md' });
+  await f.view.onOpen(); const before = structuredClone(f.c), siblings = structuredClone([f.left, f.right]);
+  if (action === 'star') f.star('Split into separate cards'); else f.save('Split into separate cards');
+  await Promise.all(f.runs); f.draw();
+  const children = f.h.cards.filter(c => c.rewrite);
+  assert.equal(children.length, 2);
+  assert.deepEqual([f.left, f.right], siblings);
+  assert.deepEqual(f.c, { ...before, status: 'deleted' });
+  assert.ok(children.every(c => !c.ankiNoteId && !c.srNote && c.status === 'pending'));
+  assert.equal(f.revisions.length, 1);
+  for (const req of f.requests) {
+    assert.match(req.system, /rewriteInstruction.*takes precedence.*highlightInstruction/);
+    assert.equal(JSON.parse(req.user).rewriteInstruction, 'Split into separate cards');
+    assert.equal(req.retryInvalidResponse, false);
+  }
+  for (const req of [f.requests[1], f.requests[3]]) {
+    assert.ok(schemaJson(req.schema).required.includes('followsInstruction'));
+    assert.ok(schemaJson(req.outputSchema).required.includes('followsInstruction'));
+  }
+  const parsed = parseInboxJson(JSON.stringify({ version: 1, highlights: [f.h], revisions: f.revisions }));
+  assert.ok(parsed.ok); assert.deepEqual(parsed.data.highlights[0].cards, JSON.parse(JSON.stringify(f.h.cards)));
+  await f.view.onClose();
+});
+
+for (const failure of ['coverage', 'source', 'missing-compliance', 'wrong-type']) test(`instruction retry cannot waive initial ${failure} failure`, async () => {
+  const audit = structuredClone(instructionMismatch);
+  if (failure === 'coverage') audit.preservesFacts = false;
+  if (failure === 'source') audit.verdicts[0].verdict = 'drop';
+  if (failure === 'missing-compliance') delete audit.followsInstruction;
+  if (failure === 'wrong-type') audit.followsInstruction = 'yes';
+  const f = fixture({ output: { cards: [ignoredSplit] }, audit, repair: { cards: drafts } });
+  await f.view.onOpen(); const before = structuredClone(f.h);
+  f.star('Split into separate cards'); await Promise.all(f.runs);
+  assert.equal(f.requests.length, 2); assert.deepEqual(f.h, before); assert.deepEqual(f.revisions, []);
+  await f.view.onClose();
+});
+
+for (const failure of ['instruction', 'coverage', 'source', 'quality', 'missing-index']) test(`instruction retry preserves the original on final ${failure} failure`, async () => {
+  const finalAudit = fixtureAudit(drafts);
+  if (failure === 'instruction') { finalAudit.followsInstruction = false; finalAudit.reason = 'Requested format is still missing.'; }
+  if (failure === 'coverage') finalAudit.preservesFacts = false;
+  if (failure === 'source') finalAudit.verdicts[0].verdict = 'drop';
+  if (failure === 'quality') finalAudit.verdicts[0].verdict = 'revise';
+  if (failure === 'missing-index') finalAudit.verdicts.pop();
+  const f = fixture({ output: { cards: [ignoredSplit] }, audit: instructionMismatch, repair: { cards: drafts }, finalAudit });
+  await f.view.onOpen(); const before = structuredClone(f.h), start = notices.length;
+  f.star('Split into separate cards'); await Promise.all(f.runs);
+  assert.equal(f.requests.length, 4); assert.deepEqual(f.h, before); assert.deepEqual(f.revisions, []);
+  if (failure === 'instruction') assert.match(notices.slice(start).join('\n'), /Requested format is still missing/);
+  assert.equal(f.view.checking.size, 0);
+  await f.view.onClose();
+});
+
+for (const failure of ['unchanged', 'whitespace-only', 'empty', 'over-limit', 'unsupported', 'duplicate']) test(`instruction retry stops after one ${failure} repair`, async () => {
+  const original = { kind: 'cloze', front: '', back: '', text: 'Object A {{c1::contracts}}. Object B {{c2::stays constant}}.' };
+  const repair = { cards: failure === 'empty' ? [] : failure === 'over-limit' ? Array.from({ length: 13 }, () => drafts[0])
+    : failure === 'unsupported' ? [{ ...drafts[0], text: 'Object A {{c1::expands}}.' }]
+    : failure === 'duplicate' ? [drafts[0], drafts[0]]
+    : [{ ...original, text: failure === 'whitespace-only' ? `  ${original.text.replace('. ', '.\n  ')}  ` : original.text }] };
+  const f = fixture({ output: { cards: [ignoredSplit] }, audit: instructionMismatch, repair });
+  await f.view.onOpen(); const before = structuredClone(f.h), start = notices.length;
+  f.star('Split into separate cards'); await Promise.all(f.runs);
+  assert.equal(f.requests.length, 3); assert.deepEqual(f.h, before); assert.deepEqual(f.revisions, []);
+  if (['unchanged', 'whitespace-only'].includes(failure)) assert.match(notices.slice(start).join('\n'), /unchanged after one repair attempt/i);
+  await f.view.onClose();
+});
+
+for (const stage of ['rewrite repair', 'rewrite final audit']) for (const reason of ['source', 'settings', 'sibling', 'view-close', 'abort', 'editor-open']) {
+  test(`instruction retry cancels ${reason} during ${stage}`, async () => {
+    const f = fixture({ output: { cards: [ignoredSplit] }, audit: instructionMismatch, repair: { cards: drafts }, pause: stage });
+    await f.view.onOpen(); f.star('Split into separate cards'); await until(f.pending);
+    await invalidations[reason](f); const expected = structuredClone(f.h);
+    f.release(); await Promise.all(f.runs); f.draw();
+    assert.deepEqual(f.h, expected); assert.deepEqual(f.revisions, []);
+    assert.equal(f.requests.length, stage === 'rewrite repair' ? 3 : 4);
+    await f.view.onClose();
+  });
+}
+
 test('explicit split uses Strong for draft and repair, the independent grader for both checks', async () => {
-  const f = fixture({ audit: { preservesFacts: true, reason: '', verdicts: [{ index: 0, verdict: 'revise', reason: 'Clarify the question.' }, { index: 1, verdict: 'keep', reason: '' }] }, repair: { cards: [{ index: 0, kind: 'qa', front: 'What happens to Object A?', back: 'contracts', text: '' }] } });
+  const f = fixture({ audit: { preservesFacts: true, followsInstruction: true, reason: '', verdicts: [{ index: 0, verdict: 'revise', reason: 'Clarify the question.' }, { index: 1, verdict: 'keep', reason: '' }] }, repair: { cards: [{ index: 0, kind: 'qa', front: 'What happens to Object A?', back: 'contracts', text: '' }] } });
   // The mounted fixture owns its client settings; no live provider is called.
   f.host.settings.modelMode = 'split'; f.host.settings.cheapModels = { deepseek: 'synthetic-cheap' }; f.host.settings.effort = 'high'; f.host.settings.cheapEffort = 'medium';
   f.host.settings.graderModels = { deepseek: 'synthetic-grader' }; f.host.settings.graderEffort = 'low';

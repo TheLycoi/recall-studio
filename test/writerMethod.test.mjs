@@ -34,10 +34,10 @@ function fixture() {
     if (req.label === 'preparation') return JSON.stringify(preparation);
     if (['grounded cards', 'generation repair'].includes(req.label)) return JSON.stringify({ cards: [draft] });
     if (['audit', 'final audit'].includes(req.label)) return JSON.stringify({ verdicts: p.cards.map((c, index) => (auditVerdict(c, { index, cardId: c.id, status: 'verified', reason: 'Synthetic source check.', conflicts: [] }))) });
-    if (['cards', 'rewrite cards'].includes(req.label)) return JSON.stringify({ cards: [draft] });
+    if (['cards', 'rewrite cards'].includes(req.label)) return JSON.stringify({ cards: [req.label === 'rewrite cards' ? { ...draft, front: draft.front.replace('How does', 'By what mechanism does') } : draft] });
     if (req.label === 'card') return JSON.stringify(draft);
     if (req.label === 'verdicts') return JSON.stringify({ verdicts: [{ index: 0, verdict: 'keep', reason: '', bloom: 'understand', kind: 'qa', front: '', back: '', text: '' }] });
-    if (req.label === 'rewrite audit') return JSON.stringify({ preservesFacts: true, reason: '', verdicts: [{ index: 0, verdict: 'keep', reason: '' }] });
+    if (req.label === 'rewrite audit') return JSON.stringify({ preservesFacts: true, followsInstruction: true, reason: '', verdicts: [{ index: 0, verdict: 'keep', reason: '' }] });
     throw Error(req.label);
   };
   llm.codex = backend;
@@ -98,7 +98,7 @@ for (const stage of ['prepareGeneration', 'writeGroundedCards', 'repairGeneratio
   }
 });
 
-test('assembled highlight requests carry the approved method without changing application schemas', async t => {
+test('assembled highlight requests carry the approved method and stage-specific schemas', async t => {
   const f = fixture(), context = await f.llm.generationContext();
   await f.llm.prepareGeneration(f.h, [], context);
   await f.llm.writeGroundedCards(f.h, [], f.preparation, context);
@@ -179,7 +179,7 @@ test('assembled highlight requests carry the approved method without changing ap
   await t.test('transport retains the exact schema fields and plan/fact identities', () => {
     const expected = {
       preparation: ['conflicts', 'contextTerms', 'exclusions', 'facts', 'omissions', 'plan'],
-      'rewrite audit': ['preservesFacts', 'reason', 'verdicts'],
+      'rewrite audit': ['followsInstruction', 'preservesFacts', 'reason', 'verdicts'],
     };
     for (const req of f.calls) {
       const schema = m.toStrictSchema(req.schema);

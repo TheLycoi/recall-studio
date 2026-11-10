@@ -15,7 +15,7 @@ function fixture(provider = 'codex', overrides = true) {
   const h = m.makeHighlight({ sourcePath: 'synthetic.md', sourceTitle: 'Vela', text: 'Accepted records must be signed.', before: 'Revision C.', after: 'Rejected records stay quarantined.' });
   const card = m.makeCard(h.id, { kind: 'qa', front: 'What must happen before accepted records are archived?', back: 'They must be signed.' });
   const draft = { kind: 'qa', front: card.front, back: card.back, text: '' };
-  llm[provider] = { async complete(req) { calls.push(req); return { cards: [draft], verdicts: [], preservesFacts: true, ...draft }; }, async probe(model) { return { model, via: provider }; } };
+  llm[provider] = { async complete(req) { calls.push(req); return { cards: [draft], verdicts: [], preservesFacts: true, followsInstruction: true, ...draft }; }, async probe(model) { return { model, via: provider }; } };
   return { settings, calls, llm, h, card, preparation: { facts: [], plan: [], conflicts: [], exclusions: [], omissions: [] } };
 }
 async function stages(f) {
