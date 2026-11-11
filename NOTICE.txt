@@ -1,17 +1,9 @@
 Recall Studio (plugin ID review-inbox)
 
-This private derivative retains the Recall source history through the local
-opencode branch at 38639dd. Capture, generation, providers and Anki export derive
-from TheLycoi/obsidian-recall. Selected-source Chat adapts the structured Ask and
-citation checks from TheLycoi/wikipedia-lm (13392ce and d18d76b). Approval and
-passage-provenance behavior was informed by TheLycoi/obsidian-loopback at 8262821.
+Recall Studio derives from TheLycoi/obsidian-recall and TheLycoi/wikipedia-lm.
+Approval and passage-provenance behavior was informed by TheLycoi/obsidian-loopback.
 These projects carry the MIT license, Copyright (c) 2026 Conrad Kelonu; its full
 text is in LICENSE and included in the production JavaScript banner.
-
-The Anki repositories anki-wiki-sync, anki-loopback and anki-bury-explain are
-reference material for later stages, not imported dependencies. No True Recall
-implementation or assets are included; the provided screenshots informed the
-independent Inbox layout only.
 
 Bundled runtime dependency: Zod
 MIT License

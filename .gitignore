@@ -11,3 +11,19 @@ installed-backups/
 
 .eval-build/
 data.json
+
+# Local credentials, vault configuration and diagnostics
+.env
+.env.*
+.obsidian/
+.hermes/
+*.pem
+*.key
+*.p12
+*.pfx
+*.log
+
+# Private working material belongs outside the public plugin repository
+private/
+backups/
+docs/plans/

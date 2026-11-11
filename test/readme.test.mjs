@@ -6,7 +6,7 @@
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -58,4 +58,23 @@ test("the README has a Network and data section", () => {
   // What leaves the machine is the first question a stranger installing the
   // plugin asks; the answer has to stay in the README, under this heading.
   assert.match(readme, /^## Network and data$/m, "README has no '## Network and data' heading");
+});
+
+test('README describes the current beta without internal evaluation notes', () => {
+  const { version } = JSON.parse(readFileSync('manifest.json', 'utf8'));
+  assert.ok(readme.includes(`Current beta: **${version}**.`));
+  assert.doesNotMatch(readme, /^## 0\./m);
+  assert.doesNotMatch(readme, /private copies|unblinded|live replay|Luna comparison/i);
+});
+
+test('the public source tree excludes internal plans and the manual scratch probe', () => {
+  assert.equal(existsSync('docs/plans'), false);
+  assert.equal(existsSync('scripts/e2e-opencode.mjs'), false);
+});
+
+test('local credentials, vault state and working notes are ignored', () => {
+  const ignored = new Set(readFileSync('.gitignore', 'utf8').split(/\r?\n/));
+  for (const entry of ['.env', '.env.*', '.obsidian/', '.hermes/', 'private/', 'backups/', 'docs/plans/', '*.log']) {
+    assert.ok(ignored.has(entry), `Missing ignore rule: ${entry}`);
+  }
 });

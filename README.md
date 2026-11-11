@@ -1,129 +1,34 @@
 # Recall Studio
 
+Current beta: **0.1.30**.
+
 Recall Studio turns captured note and PDF passages into source-linked flashcard
 drafts. Capture a passage, let it generate cards, edit or rewrite them, then
 explicitly export the cards you choose to Anki. Recall does not schedule reviews
 or export automatically.
 
-The repository and BRAT target are `TheLycoi/recall-studio`, formerly
-`TheLycoi/review-inbox`. Plugin ID `review-inbox` and the default data folder
-`Review Inbox/` stay unchanged.
+The repository and BRAT target are `TheLycoi/recall-studio`. Plugin ID
+`review-inbox` and the default data folder `Review Inbox/` preserve compatibility
+with existing installations.
 
-## 0.1.29 beta: rewrite compliance and editable card agents
+## Card writing and models
 
-Explicit rewrites now check whether the result follows the latest instruction,
-not only whether it preserves facts. An unchanged original triggers one repair
-attempt even if the model approves it. A requested split can produce separate
-notes during that repair; a failed repair keeps the original and reports why.
-Source holds, unrelated cards and the four-request maximum remain intact.
+The shared method supports Q&A and cloze cards. Each rendered review needs a
+meaningful cue and a source-supported answer. The default method allows at most
+one sentence per cloze note, or one question sentence and one answer sentence
+for Q&A. Closed lists and bidirectional term-definition clozes remain supported
+within that limit.
 
-The existing preparation, writing and audit stages now use reader, writer and
-grader instructions. In **Strong / Cheap** mode, Cheap reads and plans, Strong
-writes and repairs, and the Grader has its own optional model and effort.
-Unset secondary choices inherit Strong. **Unified model** still uses one model
-for every stage. This does not add another model call or increase repair limits.
+**Unified model** uses one model for every stage. In **Strong / Cheap** mode,
+Cheap reads and plans, Strong writes and repairs, and an optional Grader model
+handles audits. Unset secondary choices inherit Strong. Changing effective
+routing or prompts invalidates incompatible checkpoints and stale pending
+results, but does not rewrite existing cards.
 
-Under **System prompts**, open the shared writing method or an individual role
-to edit its instructions. **Save** persists changes; **Cancel** discards them.
-**Restore default** changes the editor draft until saved. Output schemas,
-source-evidence boundaries and plan/fact identifiers remain application-owned.
-Changing prompts or effective routing rejects stale pending results and
-invalidates incompatible checkpoints; it does not rewrite existing cards.
-
-The default method requires at most one sentence per cloze note, or one question
-sentence and one answer sentence for Q&A. Useful bidirectional clozes and closed
-lists remain supported within that limit. The shared accuracy instructions
-require checking doubtful interpretations against the supplied evidence,
-stating unresolved uncertainty explicitly and revisiting it in the final audit
-or an explicit retry. These are prompt and audit requirements, not a guarantee
-that a model will detect every error. There is no web-research stage.
-
-New Markdown captures store up to 24,000 characters of the source body, excluding
-frontmatter. Longer notes use a window around the selection, marked truncated;
-PDF captures use available page text. This snapshot goes to the configured reader
-and grader. The writer receives quoted context terms and the existing short
-neighboring context. Only the selected highlight supplies answer facts. Older
-captures retain their existing context without an automatic reread.
-
-## 0.1.28 beta: unified model dropdown
-
-Settings now default to **Unified model**, with one Model and Effort selection
-for every stage. Choose **Strong / Cheap** in Model mode to reveal the separate
-role controls. Switching back ignores Cheap overrides but retains them for the
-next switch. Existing model choices are not erased. Configurations without a
-saved mode use Unified, including upgrades from 0.1.27.
-
-Prompts, source context, audit and repair stages are unchanged. Mode changes
-that alter effective routing invalidate incompatible checkpoints and hold
-stale in-flight output.
-
-## 0.1.27 beta: configurable agents and Learn pane
-
-The Agents settings separate the Strong main model from an optional Cheap model
-for the same provider. Strong plans and checks cards; Cheap reads the captured
-source context and writes, rewrites and repairs. Each role can have its own
-reasoning effort. Empty Cheap settings inherit Strong, so upgrading preserves
-the existing model selection. Both roles may use the same model.
-
-The shared writing prompts, original-source payloads, schemas and automatic
-preparation/write/audit workflow are unchanged. Gathering context remains local
-code; this adds no reader request or separate adjudicator. Changing effective
-routing invalidates incompatible generation checkpoints and pending results.
-
-Historical note: 0.1.27 included an unfinished Learn pane. The current beta
-removes that integration and its installer. Existing saved settings and external
-LearnHarness files are preserved, but this plugin no longer reads or runs them.
-
-## 0.1.26 beta: repair requested card splits
-
-Rewrite can create separate editable cards when you ask it to split a note.
-If its first check finds repairable wording issues, it repairs only those
-replacements once, then checks the complete set again. Clean replacements are
-not regenerated. A failed check keeps the original and shows a concise reason.
-Successful splits retain the original in history, with its source and export
-receipts. Nothing is exported automatically.
-
-Explicit rewrites use two model requests when clean and at most four when a
-repair is needed. This does not increase the automatic generation budget or
-retry existing captures. The shared writer method and stored-data format stay
-unchanged. A copied-data live replay produced five separate cloze notes and
-passed its audit; this small check is not a general card-quality guarantee.
-
-## 0.1.25 beta: constrain audits and isolate incomplete verdicts
-
-Audit output contracts now specify the requested card identities, review ordinals
-and deterministic-check IDs. When one assessment is incomplete, that card stays
-held without discarding valid sibling verdicts. Unknown or duplicate card
-identities still reject the response. Genuine source holds survive reload and
-generic positive retry; only scoped evidence can resolve them.
-
-Writer v11, saved data and the automatic request budget are unchanged. Two live
-audits of private copies of the reported drafts returned complete contracts;
-two drafts still failed retrieval-quality checks. This fixes audit-format
-handling, not every card-writing defect, and does not retry existing captures.
-
-### Mixed-format writing
-
-Writer method v11 supports Q&A and cloze cards. Closed lists can hide one member
-per review while the others remain visible; selected meanings and relationships
-can use direct questions. Grouped notes and reversed term-definition retrieval
-still need a meaningful cue for every rendered review.
-
-Preparation decomposes supported facts before grouping. A compact worked example
-shows the writer how to preserve source quotes, exact values, selected fact links
-and the output schema. Audit coverage is required for every rendered review.
-Source holds survive retries, duplicate plan targets are rejected, and accepted
-soft findings remain tied to the wording and source that were checked.
-
-The earlier removal of verification-status decoration remains. Actual findings,
-source conflicts and saved evidence stay available. Export still requires an
-explicit user action; existing cards are not rewritten in the background.
-
-This release retains the better-performing baseline from a small, unblinded Luna
-comparison, not the unsuccessful v12 revision. Compound planning and answer
-leakage remain possible. The results do not establish broad model reliability,
-medical accuracy or learning outcomes. Plugin identity and saved settings,
-content, history, export receipts and dependency versions stay unchanged.
+Explicit rewrites check the latest instruction as well as source support. An
+unchanged result triggers one repair attempt; a failed attempt preserves the
+original. A rewrite uses two model requests when clean and at most four when
+repair is needed. Unresolved source concerns must be addressed before rewriting.
 
 ## Workflow
 
@@ -237,6 +142,12 @@ read-only SR recognition, and Anki deck, note types, fields and tags.
 
 ## Network and data
 
+New Markdown captures store up to 24,000 characters of the source body, excluding
+frontmatter. Longer notes use a marked window around the selection; PDFs use
+available page text. The reader and grader receive this snapshot. The writer
+receives quoted context terms and short neighboring context. Only the selected
+highlight supplies answer facts. Older captures are not reread automatically.
+
 Card requests send the captured passage, surrounding context, source title and
 heading, language, explicit capture/rewrite instructions and relevant existing
 cards to the selected provider. Later stages also send saved preparation,
@@ -269,11 +180,10 @@ npm run build
 ```
 
 Install beta releases through BRAT using `TheLycoi/recall-studio` and the intended
-release tag. Private releases require authorized repository access. Do not copy
-builds over an existing installation. A passing synthetic test suite and build
+release tag. Do not copy builds over an existing installation. A passing synthetic test suite and build
 do not establish live provider, Obsidian or Anki acceptance.
 
-Recall Studio derives from Obsidian Recall, carved out of WikiLM 0.17.0.
-The MIT licence is in `LICENSE`. The older native quiz and rule-learning
-workflows remain retired; saved legacy data is untouched. The unfinished Learn
-integration and direct-copy installers are removed. Use BRAT for beta updates.
+The MIT license is in `LICENSE`; dependency and source attributions are in
+`NOTICE.txt`. Native quiz, rule learning and the unfinished Learn integration
+are not active features. Existing legacy data is preserved. Use BRAT for beta
+updates.
