@@ -61,6 +61,7 @@ const TEXT_PREAMBLE = "Answer in plain text. Do not use any tools.";
 
 export class DeepSeekBackend implements LlmBackend {
   readonly name = "deepseek" as const;
+  private pending = new Set<() => void>();
 
   constructor(private getSettings: () => RecallSettings) {}
 
@@ -102,6 +103,7 @@ export class DeepSeekBackend implements LlmBackend {
     const aborted = new Promise<never>((_, reject) => {
       onAbort = () => reject(new DeepSeekError("aborted", "Cancelled."));
       signal?.addEventListener("abort", onAbort, { once: true });
+      this.pending.add(onAbort);
     });
     try {
       const request = {
@@ -135,6 +137,7 @@ export class DeepSeekBackend implements LlmBackend {
       // The listener outlives the request otherwise: the caller's signal is
       // long-lived, and every request would add another listener to it.
       signal?.removeEventListener("abort", onAbort);
+      this.pending.delete(onAbort);
       if (timer) clearTimeout(timer);
     }
   }
@@ -300,6 +303,7 @@ export class DeepSeekBackend implements LlmBackend {
   }
 
   async abort(): Promise<void> {
-    // HTTP requests are left to time out; requestUrl cannot be cancelled.
+    // The remote request may continue, but local generation must drain now.
+    for (const cancel of this.pending) cancel();
   }
 }

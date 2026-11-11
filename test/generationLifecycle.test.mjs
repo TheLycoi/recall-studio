@@ -137,7 +137,8 @@ test('unexpected queue rejection is observed and does not leave an unhandled cle
     f.g.enqueue(f.h);
     await logged.promise;
     await f.g.stop();
-    assert.ok(errors.some(args => args[0] === 'Recall Studio: generation failed' && /synthetic listener failure/.test(args[1]?.message)));
+    assert.ok(errors.some(args => args.length === 1 && args[0] === 'Recall Studio: generation failed'));
+    assert.ok(errors.every(args => !JSON.stringify(args).includes('synthetic listener failure')));
     assert.equal(f.g.running.size, 0);
     assert.equal(f.g.pending.size, 0);
     await f.plugin.onunload();

@@ -1,13 +1,12 @@
 {
   "name": "review-inbox",
-  "version": "0.1.29",
+  "version": "0.1.30",
   "description": "Flashcards from what you highlight, a source-linked inbox to review them, and export to Anki. Runs on the Codex CLI, the DeepSeek API, or the opencode CLI.",
   "main": "main.js",
   "private": true,
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
-    "install:vault": "npm run build && node scripts/install.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "license": "MIT",

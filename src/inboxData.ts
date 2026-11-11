@@ -13,6 +13,7 @@ const CardRecord = z.object({
   id: z.string(), kind: z.enum(["qa", "cloze"]), status: z.enum(["pending", "approved", "exported", "duplicate", "deleted", "flagged"]),
   front: z.string(), back: z.string(), text: z.string(), extra: z.string(),
   highlightId: z.string().optional(), edited: z.boolean().optional(), ankiNoteId: z.number().optional(),
+  textExport: z.object({ path: z.string(), content: z.string() }).passthrough().optional(),
   srNote: z.string().optional(), createdAt: z.string().optional(), critiqueReason: z.string().optional(),
   bloom: z.string().optional(), critiqueRan: z.boolean().optional(),
   lintFailures: z.array(z.string()).optional(), lintWarnings: z.array(z.string()).optional(),
@@ -52,7 +53,7 @@ const HighlightRecord = z.object({
   cards: z.array(CardRecord), archived: z.boolean().optional(),
   line: z.number().optional(), page: z.number().nullable().optional(),
   heading: z.string().nullable().optional(), blockId: z.string().nullable().optional(),
-  title: z.string().optional(), origin: z.string().optional(), subpath: z.string().optional(),
+  title: z.string().optional(), origin: z.string().optional(), subpath: z.string().optional(), topicPath: z.string().optional(),
   error: z.string().nullable().optional(), createdAt: z.string().optional(),
   generatedAt: z.string().nullable().optional(), exportedAt: z.string().nullable().optional(),
   generation: BatchRecord.optional(), generationHistory: z.array(BatchRecord).optional(),
@@ -84,7 +85,7 @@ export function emptyInbox(): InboxData {
 
 export type ParsedInbox =
   | { ok: true; data: InboxData; fresh: boolean }
-  | { ok: false; reason: "invalid-json" | "bad-shape"; detail: string };
+  | { ok: false; reason: "invalid-json" | "bad-shape" | "unsupported-version"; detail: string };
 
 /**
  * Parse the raw contents of inbox.json. Never throws: a truncated write or a
@@ -105,6 +106,10 @@ export function parseInboxJson(raw: string): ParsedInbox {
     parsed = JSON.parse(raw);
   } catch (e) {
     return { ok: false, reason: "invalid-json", detail: (e as Error).message };
+  }
+  if (parsed && typeof parsed === "object" && "version" in parsed
+    && typeof parsed.version === "number" && parsed.version > 1) {
+    return { ok: false, reason: "unsupported-version", detail: "Inbox uses a newer file version; update Recall Studio before opening it." };
   }
   const checked = InboxFile.safeParse(parsed);
   if (!checked.success) {

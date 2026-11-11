@@ -24,9 +24,9 @@ test('Inbox mounts alone without Chat, study controls or a message composer', as
 
 test('retired study commands and aliases are unavailable without invoking a model', async () => {
   const { RECALL_COMMANDS, runNamedCommand } = await loadQuiz('src/commands.ts');
-  assert.equal(RECALL_COMMANDS.some(c => ['open-chat', 'make-flashcards'].includes(c.id)), false);
+  assert.equal(RECALL_COMMANDS.some(c => ['open-chat', 'make-flashcards', 'open-learn'].includes(c.id)), false);
   const host = new Proxy({}, { get() { throw Error('Retired command accessed the host'); } });
-  for (const name of ['open-chat', '/chat', 'Open quiz', 'Open quiz (Experimental)',
+  for (const name of ['open-learn', '/learn', 'Open Learn', 'open-chat', '/chat', 'Open quiz', 'Open quiz (Experimental)',
     'make-flashcards', '/flashcards', 'Make flashcards', 'Make flashcards (Experimental)']) {
     assert.equal(await runNamedCommand(host, name), null, name);
   }

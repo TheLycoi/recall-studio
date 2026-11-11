@@ -135,7 +135,7 @@ function obsidianStub() {
       this.savedDuringLoad++;
       await this.app.vault.adapter.write(`${this.manifest.dir}/data.json`, JSON.stringify(d, null, 2));
     }
-    registerView() {}
+    registerView(type) { (this.views ??= []).push(type); }
     addSettingTab() {}
     addRibbonIcon() {
       return el();
@@ -289,7 +289,8 @@ function instance(mod, files) {
 
 test('legacy true settings cannot restore schema startup work or rules commands, and files survive', async () => {
   const saved = { provider: 'codex', schemaFolder: 'Recall', schemaLearning: true, historyExamples: true,
-    writerInstructions: 'Legacy global instruction', unknownFutureField: { preserve: ['all', 'values'] } };
+    writerInstructions: 'Legacy global instruction', unknownFutureField: { preserve: ['all', 'values'] },
+    learnSkillPath: '/legacy/skill', learnDataPath: '/legacy/data', learnPythonPath: '/legacy/python' };
   const { mod, files } = load(JSON.stringify(saved));
   for (const name of ['recall-rules.md', 'recall-suggestions.md', 'history.json']) files.set(`Recall/${name}`, `Original ${name}`);
   files.set('Recall', ''); // The store may ensure its data directory, not rule files.
@@ -300,6 +301,10 @@ test('legacy true settings cannot restore schema startup work or rules commands,
   await plugin.onload();
   try {
     assert.equal(plugin.schema, undefined, 'No rules collaborator is instantiated');
+    assert.deepEqual(plugin.views, ['review-inbox'], 'Only the Inbox view is registered');
+    assert.equal(plugin.openLearn, undefined);
+    assert.equal(plugin.learnViews, undefined);
+    assert.ok(!plugin.commands.some(c => c.id === 'open-learn'));
     assert.deepEqual(reads.filter(p => /rules|suggestions|history/.test(p)), []);
     assert.deepEqual(files, before, 'Loading must neither create nor change legacy files');
     assert.ok(!plugin.commands.some(c => /schema/.test(c.id)));

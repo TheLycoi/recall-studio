@@ -1,4 +1,5 @@
 import { cardContent } from "./cardActions";
+import { exportSelectionKey } from "./exportSummary";
 import { requestUrl } from "obsidian";
 import { createHash } from "crypto";
 import type { Card, Highlight } from "./model";
@@ -93,6 +94,9 @@ export interface ExportContext {
   settings: RecallSettings;
   vaultName: string;
   deck: string;
+  /** Caller-owned membership/settings checks; unload stops dispatch, not confirmed receipts. */
+  isCurrent?: (card: Card, highlight: Highlight) => boolean;
+  canDispatch?: () => boolean;
   /**
    * Resolve a vault-relative media link (as it appears in a card's text) to the
    * file's path and bytes, for a local upload. Returns null for anything that
@@ -184,6 +188,10 @@ export function buildNote(card: Card, h: Highlight, ctx: ExportContext): AnkiNot
   const extra = buildExtra(h, ctx);
   const extraHtml = [inlineMarkdownToHtml(card.extra), extra].filter(Boolean).join("<br>");
   if (card.kind === "qa") {
+    const mapped = [s.basicFrontField, s.basicBackField, ...(s.basicExtraField ? [s.basicExtraField] : [])];
+    if (mapped.some(field => !field.trim() || field !== field.trim()) || new Set(mapped).size !== mapped.length) {
+      throw new Error("Configure distinct, nonempty Basic front and back fields; the optional Basic extra field must be separate.");
+    }
     modelName = s.basicModel;
     fields[s.basicFrontField] = inlineMarkdownToHtml(card.front);
     if (s.basicExtraField) {
@@ -253,14 +261,14 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 }
 
 /** Upload every local media embed in the note's fields, replacing each with an Anki media reference. */
-async function resolveMediaInFields(anki: AnkiClient, fields: Record<string, string>, ctx: ExportContext, sourcePath: string): Promise<void> {
+async function resolveMediaInFields(anki: AnkiClient, fields: Record<string, string>, ctx: ExportContext, sourcePath: string, authorized: () => boolean): Promise<void> {
   if (!ctx.resolveMedia) return;
   for (const key of Object.keys(fields)) {
-    fields[key] = await replaceMediaEmbeds(anki, fields[key], ctx, sourcePath);
+    fields[key] = await replaceMediaEmbeds(anki, fields[key], ctx, sourcePath, authorized);
   }
 }
 
-async function replaceMediaEmbeds(anki: AnkiClient, html: string, ctx: ExportContext, sourcePath: string): Promise<string> {
+async function replaceMediaEmbeds(anki: AnkiClient, html: string, ctx: ExportContext, sourcePath: string, authorized: () => boolean): Promise<string> {
   const matches = [...html.matchAll(MEDIA_EMBED)];
   if (matches.length === 0) return html;
   const replacements = new Map<string, string>();
@@ -274,6 +282,7 @@ async function replaceMediaEmbeds(anki: AnkiClient, html: string, ctx: ExportCon
       const ext = resolved.path.slice(resolved.path.lastIndexOf(".")).toLowerCase();
       const digest = createHash("sha256").update(new Uint8Array(resolved.data)).digest("hex");
       const name = `review-inbox-${digest}${ext}`;
+      if (!authorized()) throw new Error("Export changed before media upload.");
       const stored = await anki.storeMediaFile(name, arrayBufferToBase64(resolved.data));
       if (stored !== name) throw new Error("Anki did not confirm the media upload.");
       replacements.set(m[0], mediaReference(name));
@@ -308,7 +317,13 @@ export function exportToAnki(
   items: Array<{ card: Card; highlight: Highlight }>,
   ctx: ExportContext,
 ): Promise<ExportResult> {
-  const run = () => exportToAnkiInner(anki, items, ctx);
+  const snapshot = (card: Card, highlight: Highlight) => exportSelectionKey([{ card, highlight }],
+    [ctx.settings, ctx.vaultName, ctx.deck, buildNote(card, highlight, ctx)]);
+  const accepted = new Map(items.map(({ card, highlight }) => [card, snapshot(card, highlight)]));
+  const unchanged = (card: Card, highlight: Highlight) => card.status === "approved" && highlight.status === "ready"
+    && !highlight.archived && highlight.cards.includes(card) && ctx.isCurrent?.(card, highlight) !== false
+    && accepted.get(card) === snapshot(card, highlight);
+  const run = () => exportToAnkiInner(anki, items, ctx, unchanged);
   const next = exportChain.then(run, run);
   // The chain must survive a failed run so the next export still runs.
   exportChain = next.then(
@@ -341,16 +356,15 @@ async function exportToAnkiInner(
   anki: AnkiClient,
   items: Array<{ card: Card; highlight: Highlight }>,
   ctx: ExportContext,
+  unchanged: (card: Card, highlight: Highlight) => boolean,
 ): Promise<ExportResult> {
   const result: ExportResult = { added: 0, alreadyExported: 0, duplicates: 0, failed: [] };
   if (items.length === 0) return result;
-  // Include the rendered model, fields and source links, not only the editable text.
-  const snapshot = (card: Card, highlight: Highlight) => JSON.stringify([cardContent(card, highlight), buildNote(card, highlight, ctx)]);
-  const accepted = new Map(items.map(({ card, highlight }) => [card, snapshot(card, highlight)]));
-  const unchanged = (card: Card, highlight: Highlight) => card.status === "approved" && highlight.status === "ready" && accepted.get(card) === snapshot(card, highlight);
+  const canSend = (card: Card, highlight: Highlight) => ctx.canDispatch?.() !== false && unchanged(card, highlight);
+  if (!items.some(({ card, highlight }) => canSend(card, highlight))) return result;
   await anki.createDeck(ctx.deck);
   for (const { card, highlight } of items) {
-    if (!unchanged(card, highlight)) {
+    if (!canSend(card, highlight)) {
       // Defence in depth: the caller filters to approved cards, and the gate
       // is repeated here so no future caller can push a draft or flagged card
       // into Anki through this function.
@@ -360,7 +374,7 @@ async function exportToAnkiInner(
     const identity = cardIdentityTag(ctx.vaultName, card.id);
     // 1. Find our identity; an existing note must also match the outgoing content.
     const existing = await anki.findNotes(identityQuery(identity));
-    if (!unchanged(card, highlight)) {
+    if (!canSend(card, highlight)) {
       result.failed.push({ card, error: "Card changed during export; review this card again." });
       continue;
     }
@@ -368,8 +382,8 @@ async function exportToAnkiInner(
     let note: AnkiNote;
     try {
       note = buildNote(card, highlight, ctx);
-      await resolveMediaInFields(anki, note.fields, ctx, highlight.sourcePath);
-      if (!unchanged(card, highlight)) throw new Error("Card changed during export.");
+      await resolveMediaInFields(anki, note.fields, ctx, highlight.sourcePath, () => canSend(card, highlight));
+      if (!canSend(card, highlight)) throw new Error("Card changed during export.");
       note.tags = Array.from(new Set([...note.tags, identity]));
     } catch (e) {
       result.failed.push({ card, error: (e as Error).message });
@@ -407,6 +421,10 @@ async function exportToAnkiInner(
       continue;
     }
 
+    if (!canSend(card, highlight)) {
+      result.failed.push({ card, error: "Export changed; no recovery request was sent. Retry after reviewing the destination." });
+      continue;
+    }
     // A lost response may hide a successful write. Verify the exact sent note,
     // not just its identity, before treating that outcome as a receipt.
     let found: number[] = [];
@@ -414,6 +432,10 @@ async function exportToAnkiInner(
       found = await anki.findNotes(identityQuery(identity));
     } catch {
       // Keep the add error when Anki is still unreachable.
+    }
+    if (!canSend(card, highlight)) {
+      result.failed.push({ card, error: "Export changed during recovery." });
+      continue;
     }
     if (found.length > 0) {
       try {

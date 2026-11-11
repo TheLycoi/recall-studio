@@ -131,7 +131,7 @@ export function parseOpencodeEvents(stdout: string): RunEvents {
           : err && typeof err === "object" && typeof (err as { message?: unknown }).message === "string"
             ? ((err as { message: string }).message)
             : null;
-      if (msg) error = msg;
+      error = msg || "Provider reported a terminal failure.";
       continue;
     }
 
@@ -455,7 +455,7 @@ export class OpenCodeBackend implements LlmBackend {
     // turn a good answer into an error either way.
     forgetSession(bin, cwd, events.sessionId);
     if (r.aborted && req.signal?.aborted) throw new OpenCodeError("aborted", "Cancelled.");
-    if (!events.text) throw classify(r, events, model);
+    if (r.spawnError || r.timedOut || r.aborted || r.code !== 0 || events.error || !events.text) throw classify(r, events, model);
     return events.text;
   }
 
@@ -495,7 +495,7 @@ export class OpenCodeBackend implements LlmBackend {
     }
     const parsed = req.schema.safeParse(value);
     if (!parsed.success) {
-      throw new OpenCodeError("failed", `OpenCode returned ${req.label} in the wrong shape: ${parsed.error.issues[0]?.message ?? "schema mismatch"}.`);
+      throw new OpenCodeError("failed", `OpenCode returned ${req.label} in the wrong shape: schema validation failed.`);
     }
     return parsed.data;
   }

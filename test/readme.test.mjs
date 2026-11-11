@@ -47,6 +47,13 @@ test('README describes the authoring workflow and discloses retired prompt input
   assert.doesNotMatch(readme, /Verify sits beside Export|editor's separate draft Check/);
 });
 
+test('README documents current prompt editing and omits retired Learn installation', () => {
+  assert.doesNotMatch(readme, /scripts\/install-learnharness|\*\*Open Learn\*\*|\| Open Learn \|/);
+  assert.doesNotMatch(readme, /Writing customization is limited to/);
+  assert.match(readme, /Settings.*Recall Studio.*System prompts.*Open prompt/);
+  for (const name of ['Shared writing method', 'Reader prompt', 'Writer prompt', 'Grader prompt']) assert.ok(readme.includes(name));
+});
+
 test("the README has a Network and data section", () => {
   // What leaves the machine is the first question a stranger installing the
   // plugin asks; the answer has to stay in the README, under this heading.

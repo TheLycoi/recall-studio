@@ -213,8 +213,10 @@ export function retainedSourceFindings(p: GenerationPreparation, records: (Gener
     sourceConflictsForCard(p, card).forEach(c => add(c, cardAuditContent(card)));
     for (const a of records) {
       for (const f of a?.sourceFindings ?? []) if (f.cardId === card.id && f.sourceKey === sourceKey) add(f, f.content);
-      const v = a?.verdicts.find(v => v.cardId === card.id && originals[v.index]?.id === card.id);
-      for (const c of v?.conflicts ?? []) add(c, a?.contents?.[v!.index] ?? cardAuditContent(card), a?.provenance?.sourceKey ?? sourceKey);
+      for (const v of a?.verdicts ?? []) {
+        if (v.cardId !== card.id || originals[v.index]?.id !== card.id) continue;
+        for (const c of v.conflicts ?? []) add(c, a?.contents?.[v.index] ?? cardAuditContent(card), a?.provenance?.sourceKey ?? sourceKey);
+      }
     }
   }
   return findings;

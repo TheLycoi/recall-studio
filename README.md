@@ -70,9 +70,9 @@ preparation/write/audit workflow are unchanged. Gathering context remains local
 code; this adds no reader request or separate adjudicator. Changing effective
 routing invalidates incompatible generation checkpoints and pending results.
 
-The pending native Learn pane is included. It uses the main model and a pinned,
-explicitly installed LearnHarness history-reading skill. It does not install
-executable code on startup or run the full LearnHarness teaching application.
+Historical note: 0.1.27 included an unfinished Learn pane. The current beta
+removes that integration and its installer. Existing saved settings and external
+LearnHarness files are preserved, but this plugin no longer reads or runs them.
 
 ## 0.1.26 beta: repair requested card splits
 
@@ -175,54 +175,12 @@ files in Anki. A file export is not confirmation of an Anki import.
 
 ## Commands
 
-### LearnHarness chat
-
-**Open Learn** opens a separate pane running the upstream `skills/learnharness`
-instructions and its read-only Python readers through the configured model.
-This is a learning-history chat, not a port of LearnHarness's teaching runtime.
-It does not search the Obsidian vault, create cards, update learning records,
-or change scheduling. Existing Inbox generation stays independent.
-
-Install the exact upstream skill once from this source checkout:
-
-```sh
-node scripts/install-learnharness.mjs
-```
-
-The installer downloads six files from `amosblomqvist/learnharness` at
-`e69e85269c064c6c9c49a8b06ae78c06e79c4a63`, verifies their SHA-256 hashes and
-preserves the upstream AGPL-3.0-only license. The skill is stored separately at
-`~/.local/share/recall-studio/learnharness/<commit>/`; it is not bundled or
-relicensed under Recall's MIT license. Chat startup never downloads code.
-
-Python 3.10+ and a local LearnHarness data folder are required. Learn settings
-accept absolute skill, data and Python paths; empty values use the defaults.
-macOS data defaults to `~/Library/Application Support/LearnHarness/data`.
-Enable the permission checkbox in each pane before sending a message.
-Relevant records and the conversation go to the selected model provider.
-Replies and drafts persist in Obsidian workspace state and may follow its sync
-configuration; reader output and permission are not persisted. New chat clears
-this pane's conversation, not backups or provider-side history.
-
-The runner permits only the upstream session/graph readers, with no model-chosen
-shell commands, diagnostic flags or arbitrary file reads. Each message allows
-at most six model calls and five reader calls. Oversized/incomplete records
-fail rather than being silently truncated. Stop cancels this chat without
-aborting card generation; already dispatched HTTP requests may still finish
-remotely. Failed requests retain the draft and do not retry
-automatically. Skill interpretation and model answers can still be wrong.
-
-The optional real-reader checks run after installing the skill:
-`node --test test/learnHarness.integration.mjs`. They use synthetic records,
-not the user's learning history.
-
 | Command | Aliases | What it does |
 | --- | --- | --- |
 | Send selection to inbox | `capture`, `send`, `pdf` | Captures selected text; PDF captures retain the page locator. |
 | Send selection to inbox with instructions… | `capture-instruct`, `pdf-instruct` | Captures with an explicit instruction for that passage. |
 | Open inbox | `inbox` | Opens the card workspace. |
 | Open source history | `source-history` | Opens retained captures and cards for the current source, or a source picker. |
-| Open Learn | `learn` | Chats through the pinned LearnHarness learning-data skill. |
 | Export to Anki | `export` | Accepts and exports all eligible drafts. Inbox buttons use visible cards in their scope. |
 | Send all ==highlights== in this note to inbox | `highlights`, `sweep` | Captures unrecorded highlights in the current note; available by alias. |
 | Retry failed highlights | `retry` | Retries failed captures and held drafts, including partial batches; available by alias. |
@@ -261,9 +219,12 @@ Desktop Obsidian 1.7.2 or later and one provider:
 Anki with AnkiConnect is optional when using text-file export. Provider **Test**
 sends a small request and tries to load that provider's model list.
 
-Writing customization is limited to card language and explicit instructions for
-a capture or rewrite. Recall does not use global standing instructions or infer
-preferences from edit history. Legacy rule and suggestions files are ignored
+Edit prompts under **Settings → Recall Studio → System prompts → Open prompt**.
+The editors are **Shared writing method**, **Reader prompt**, **Writer prompt**
+and **Grader prompt**. Save persists changes; Restore default changes only the
+draft until you save it. Card language and explicit capture/rewrite instructions
+remain available. Recall does not use global standing instructions from legacy
+rule files or infer preferences from edit history. Legacy rule and suggestions files are ignored
 and preserved. Saved legacy settings and existing history are not deleted or
 migrated; they cannot re-enable rule learning or hidden global prompts.
 
@@ -314,5 +275,5 @@ do not establish live provider, Obsidian or Anki acceptance.
 
 Recall Studio derives from Obsidian Recall, carved out of WikiLM 0.17.0.
 The MIT licence is in `LICENSE`. The older native quiz and rule-learning
-workflows remain retired; saved legacy data is untouched. Learn is a separate
-read-only upstream-skill interface.
+workflows remain retired; saved legacy data is untouched. The unfinished Learn
+integration and direct-copy installers are removed. Use BRAT for beta updates.

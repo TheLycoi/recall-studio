@@ -52,12 +52,6 @@ export const COMMAND_TABLE: CommandSpec[] = [
     hint: "current note or PDF; choose a source otherwise",
   },
   {
-    id: "open-learn",
-    name: "Open Learn",
-    aliases: ["learn"],
-    hint: "requires the pinned LearnHarness skill and Python 3.10+",
-  },
-  {
     id: "export-reviewed",
     name: "Export to Anki",
     aliases: ["export"],

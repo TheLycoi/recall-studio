@@ -423,6 +423,19 @@ test('a changed one-card explicit response forks a receipted record instead of r
   await f.view.onClose();
 });
 
+test('a changed one-card explicit response forks a text-file receipt instead of repurposing import history', async () => {
+  const cards = [{ kind: 'cloze', front: '', back: '', text: 'Object B {{c1::stays constant}}; Object A {{c2::contracts}}.' }];
+  const f = fixture({ output: { cards }, audit: fixtureAudit(cards) });
+  Object.assign(f.c, { textExport: { path: 'exports/prior.txt', content: 'prior accepted content' } });
+  const before = structuredClone(f.c);
+  await f.view.onOpen(); f.star('Keep both facts'); await Promise.all(f.runs);
+  const child = f.h.cards.find(c => c.rewrite);
+  assert.ok(child); assert.notEqual(child.id, before.id);
+  assert.equal(child.ankiNoteId, undefined); assert.equal(child.srNote, undefined); assert.equal(child.textExport, undefined);
+  assert.deepEqual(f.c, { ...before, status: 'deleted' });
+  await f.view.onClose();
+});
+
 test('a targeted repair cannot turn a changed candidate back into the unchanged original', async () => {
   const original = { kind: 'cloze', front: '', back: '', text: 'Object A {{c1::contracts}}. Object B {{c2::stays constant}}.' };
   const changed = { ...original, text: 'Object B {{c1::stays constant}}. Object A {{c2::contracts}}.' };

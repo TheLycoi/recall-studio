@@ -9,7 +9,6 @@ import { paletteCommands } from "./commandTable";
 import { Generator } from "./generator";
 import { Highlighter } from "./highlighter";
 import { InboxView, VIEW_TYPE_INBOX } from "./inboxView";
-import { LearnView, VIEW_TYPE_LEARN } from "./learnView";
 import { LlmClient } from "./llm";
 import { askInstruction, pickDeck, confirmExport } from "./modals";
 import { summarizeExport, exportSelectionKey } from "./exportSummary";
@@ -21,7 +20,6 @@ import { registerSourceVisibility } from "./sourceVisibility";
 import { buildAnkiTextImport } from "./util";
 
 export default class RecallPlugin extends Plugin {
-  readonly learnViews = new Set<LearnView>();
   settings: RecallSettings = { ...DEFAULT_SETTINGS };
   store!: InboxStore;
   generator!: Generator;
@@ -45,7 +43,6 @@ export default class RecallPlugin extends Plugin {
     this.generator = new Generator(this, { release: this.manifest.version });
 
     this.registerView(VIEW_TYPE_INBOX, (leaf) => new InboxView(leaf, this));
-    this.registerView(VIEW_TYPE_LEARN, (leaf) => new LearnView(leaf, this));
 
     this.addSettingTab(new RecallSettingTab(this.app, this));
 
@@ -120,7 +117,6 @@ export default class RecallPlugin extends Plugin {
   }
 
   private async finishUnload(): Promise<void> {
-    for (const view of this.learnViews) view.cancel();
     let failure: unknown;
     const stopped = Promise.resolve(this.generator?.stop()).catch(e => {
       console.error("Recall Studio: generation cleanup failed during unload", e);
@@ -198,14 +194,6 @@ export default class RecallPlugin extends Plugin {
     await this.app.workspace.revealLeaf(leaf);
   }
 
-  async openLearn(): Promise<void> {
-    const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_LEARN)[0];
-    const leaf = existing ?? this.app.workspace.getRightLeaf(true);
-    if (!leaf) return;
-    if (!existing) await leaf.setViewState({ type: VIEW_TYPE_LEARN, active: true });
-    await this.app.workspace.revealLeaf(leaf);
-  }
-
   async chooseDeck(): Promise<string | null> {
     let decks: string[] = [];
     try {
@@ -279,6 +267,7 @@ export default class RecallPlugin extends Plugin {
       // Persist explicit acceptance before transport; it is not a model verdict.
       this.store.touch();
       await this.store.flush();
+      if (this.store.hasUnsavedChanges) throw new Error("Export acceptance was not saved. Fix inbox storage and retry.");
       if (!unchanged()) throw new Error("The export selection or destination changed. Review it and export again.");
       this.exportTransport = withExportAcceptance(items, () => send(items)).finally(() => this.store.touch());
       await this.exportTransport;
@@ -301,7 +290,11 @@ export default class RecallPlugin extends Plugin {
   private async sendToAnki(items: ExportItem[]): Promise<void> {
     const notice = new Notice(`Recall Studio: exporting ${items.length} card${items.length === 1 ? "" : "s"} to “${this.settings.defaultDeck}”…`, 0);
     try {
+      const settingsKey = JSON.stringify(this.settings), vaultName = this.app.vault.getName();
       const res: ExportResult = await exportToAnki(this.anki, items, {
+        isCurrent: (card, highlight) => this.store.get(highlight.id) === highlight
+          && highlight.cards.includes(card) && JSON.stringify(this.settings) === settingsKey && this.app.vault.getName() === vaultName,
+        canDispatch: () => !this.unloading,
         settings: this.settings,
         vaultName: this.app.vault.getName(),
         deck: this.settings.defaultDeck,
@@ -331,7 +324,7 @@ export default class RecallPlugin extends Plugin {
 
   /** Fallback when Anki is not running: write a text file Anki can import. */
   private async writeTextFile(items: ExportItem[]): Promise<void> {
-    const contents = items.map(({ card, highlight }) => cardContent(card, highlight));
+    const settingsKey = JSON.stringify(this.settings);
     const ctx = { settings: this.settings, vaultName: this.app.vault.getName(), deck: this.settings.defaultDeck };
     const rows = items.map(({ card, highlight }) => {
       const n = buildNote(card, highlight, ctx);
@@ -339,7 +332,12 @@ export default class RecallPlugin extends Plugin {
         card.kind === "qa"
           ? [this.settings.basicFrontField, this.settings.basicBackField, this.settings.basicExtraField]
           : [this.settings.clozeTextField, this.settings.clozeExtraField];
-      return { notetype: n.modelName, deck: n.deckName, tags: n.tags, fields: order.filter(Boolean).map((f) => n.fields[f] ?? "") };
+      const accepted = exportSelectionKey([{ card, highlight }], [ctx, n]);
+      const current = () => card.status === "approved" && highlight.status === "ready" && !highlight.archived
+        && highlight.cards.includes(card) && this.store.get(highlight.id) === highlight
+        && JSON.stringify(this.settings) === settingsKey && this.app.vault.getName() === ctx.vaultName
+        && exportSelectionKey([{ card, highlight }], [ctx, buildNote(card, highlight, ctx)]) === accepted;
+      return { card, highlight, current, content: JSON.stringify(n), notetype: n.modelName, deck: n.deckName, tags: n.tags, fields: order.filter(Boolean).map((f) => n.fields[f] ?? "") };
     });
     const folder = normalizePath(this.settings.exportFolder);
     if (!(await this.app.vault.adapter.exists(folder))) await this.app.vault.createFolder(folder);
@@ -357,15 +355,21 @@ export default class RecallPlugin extends Plugin {
     if (qa.length && cloze.length) {
       files.push([path.replace(/\.txt$/, "-qa.txt"), qa], [path.replace(/\.txt$/, "-cloze.txt"), cloze]);
     } else files.push([path, rows]);
-    const unchanged = () => items.every(({ card, highlight }, i) => card.status === "approved" && highlight.status === "ready" && cardContent(card, highlight) === contents[i]);
+    const unchanged = () => !this.unloading && rows.every(row => row.current());
     if (!unchanged()) throw new Error("Cards changed during export. Review and export again.");
-    for (const [p, rs] of files) await this.app.vault.create(p, buildAnkiTextImport(rs));
-    items.forEach(({ card, highlight }, i) => {
-      if (card.status === "approved" && highlight.status === "ready" && cardContent(card, highlight) === contents[i]) card.status = "exported";
-    });
-    finalizeHighlights(items.map((i) => i.highlight));
-    this.store.touch();
-    new Notice(`Recall Studio: wrote ${files.map(([p]) => p).join(" and ")}. In Anki: File → Import.`, 8000);
+    for (const [p, rs] of files) {
+      if (this.unloading || !rs.every(row => row.current())) throw new Error("Cards or destination changed during export. Confirmed files remain recorded.");
+      await this.app.vault.create(p, buildAnkiTextImport(rs));
+      for (const { card, current, content } of rs) {
+        card.textExport = { path: p, content };
+        if (current()) card.status = "exported";
+      }
+      finalizeHighlights(rs.map(row => row.highlight));
+      this.store.touch();
+      new Notice(`Recall Studio: wrote ${p}. In Anki: File → Import.`, 8000);
+      await this.store.flush();
+      if (this.store.hasUnsavedChanges) throw new Error("The file was written, but its receipt was not saved. Fix inbox storage before retrying.");
+    }
   }
 
   /** Used by the settings tab and tests; resolves a TFile from a path. */

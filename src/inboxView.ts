@@ -1,3 +1,4 @@
+import { sourceConcernsForCard } from "./generation";
 import { ItemView, MarkdownView, Menu, Notice, TFile, WorkspaceLeaf, setIcon } from "obsidian";
 import type RecallPlugin from "./main";
 import {
@@ -888,6 +889,10 @@ export class InboxView extends ItemView {
   }
 
   private async rewrite(h: Highlight, c: Card, preset?: string, savedEditor?: () => boolean): Promise<boolean | void> {
+    if (sourceConcernsForCard(c, h).length) {
+      new Notice("Resolve this card’s source concern before rewriting its wording.");
+      return;
+    }
     const epoch = this.checkEpoch;
     const settings = JSON.stringify(this.plugin.settings);
     const editing = this.editing;

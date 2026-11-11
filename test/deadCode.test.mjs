@@ -6,7 +6,8 @@ import { loadQuiz } from './quizHarness.mjs';
 
 const retired = ['chatRetrieval', 'examples', 'preferences', 'prompt', 'quizPrompt', 'quizSchemas',
   'quizSources', 'quizTarget', 'quizValidation', 'quizView', 'recall', 'reviewChat', 'reviewChatView',
-  'schemaFile', 'schemaNote', 'sentences', 'study', 'studyGuidePdf', 'studySchemas'];
+  'schemaFile', 'schemaNote', 'sentences', 'study', 'studyGuidePdf', 'studySchemas',
+  'learnHarness', 'learnHarnessPin', 'learnView'];
 test('retired feature modules are absent from disk and the production dependency graph', async () => {
   const out = await build({ entryPoints: ['src/main.ts'], bundle: true, write: false, format: 'cjs',
     platform: 'node', packages: 'external', metafile: true, logLevel: 'silent' });
@@ -15,6 +16,11 @@ test('retired feature modules are absent from disk and the production dependency
     assert.equal(Object.hasOwn(out.metafile.inputs, file), false, file);
     assert.equal(existsSync(file), false, file);
   }
+  assert.equal(existsSync('scripts/install-learnharness.mjs'), false);
+  assert.equal(existsSync('scripts/install.mjs'), false);
+  assert.equal(existsSync('scripts/candidate-host.mjs'), false);
+  assert.equal(existsSync('scripts/verify-candidate-host.mjs'), false);
+  assert.equal(JSON.parse(readFileSync('package.json', 'utf8')).scripts['install:vault'], undefined);
   // These names are shared capture, storage, source/export and safety code, not retirement candidates.
   for (const name of ['capture', 'pageIndex', 'quiz', 'unitSource', 'sourceVisibility', 'srRecognition',
     'store', 'inboxData', 'anki', 'paths', 'generation', 'writerMethod']) {

@@ -211,7 +211,7 @@ test("optional inbox collections reject malformed members rather than hiding his
   for (const extra of bad) await t.test(JSON.stringify(extra), () => {
     const parsed = d.parseInboxJson(JSON.stringify({ highlights: [savedHighlight()], ...extra }));
     assert.equal(parsed.ok, false);
-    assert.equal(parsed.reason, "bad-shape");
+    assert.equal(parsed.reason, extra.version === 2 ? "unsupported-version" : "bad-shape");
   });
 });
 

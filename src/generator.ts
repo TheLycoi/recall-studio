@@ -122,7 +122,7 @@ export class Generator {
         this.kick();
       });
       this.pending.add(task);
-      void task.catch(e => console.error("Recall Studio: generation failed", e));
+      void task.catch(() => console.error("Recall Studio: generation failed"));
     }
     this.plugin.refreshStatusBar();
   }

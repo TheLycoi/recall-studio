@@ -151,6 +151,8 @@ export interface Card {
    * by that export, so it also records which destination the card left to.
    */
   srNote?: string;
+  /** Confirmed Anki import-file write, not a receipt of import into Anki. */
+  textExport?: { path: string; content: string };
   createdAt: string;
   /** Deterministic lint failures recorded when the card was generated. */
   lintFailures?: LintFailureId[];
@@ -213,7 +215,7 @@ export interface Highlight {
   origin: "selection" | "markdown-highlight" | "ai" | "highlighter" | "pdf" | "quiz" | "ask";
   /** PDF++ subpath (page=…&selection=…|annotation=…|rect=…) when the highlight came from a PDF++ link; lets the inbox open the exact highlight. */
   subpath?: string;
-  /** Unused by Recall. Kept so an inbox file written by an earlier version still parses. */
+  /** Optional legacy topic backlink used by source history and configured export provenance. */
   topicPath?: string;
 }
 

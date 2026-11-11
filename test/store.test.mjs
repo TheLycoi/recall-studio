@@ -586,8 +586,9 @@ test("usable live records win even when the stale backup has malformed records",
   const badBackup = '{"version":1,"highlights":[null]}';
   const v = memoryVault({ [INBOX]: REAL, [`${INBOX}.backup`]: badBackup });
   const read = v.app.vault.adapter.read;
+  let backupReads = 0;
   v.app.vault.adapter.read = async p => {
-    assert.notEqual(p, `${INBOX}.backup`, "a completed usable live save does not need its superseded backup");
+    if (p === `${INBOX}.backup`) backupReads++;
     return read(p);
   };
   const store = new s.InboxStore(v.app, "wiki/_schema");
@@ -596,6 +597,7 @@ test("usable live records win even when the stale backup has malformed records",
     assert.equal(store.get("h1").text, "kept");
     assert.equal(store.readOnly, false);
     assert.deepEqual([...v.files.entries()], [[INBOX, REAL]]);
+    assert.equal(backupReads, 1, "inspect the backup version before discarding it");
   } finally { store.close(); }
 });
 
@@ -883,12 +885,15 @@ test("closing with a queued flush prevents its stale snapshot from committing", 
   const second = old.flush();
   old.close();
   const fresh = new s.InboxStore(v.app, "wiki/_schema");
-  await fresh.load();
+  let loaded = false;
+  const loading = fresh.load().then(() => { loaded = true; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(loaded, false, "successor waits for the previous owner’s staging write");
+  release();
+  await Promise.all([first, second, loading]);
   fresh.all()[0].text = "replacement";
   fresh.touch();
   await fresh.flush();
-  release();
-  await Promise.all([first, second]);
   assert.equal(JSON.parse(v.files.get(INBOX)).highlights[0].text, "replacement");
   assert.equal(old.hasUnsavedChanges, true);
   assert.equal([...v.files.keys()].some(p => p.includes(".pending-")), false);

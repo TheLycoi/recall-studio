@@ -1,13 +1,5 @@
 /* WikiLM — inbox and modals */
 
-.recall-learn { padding: var(--size-4-4); min-width: 0; }
-.recall-learn-consent { display: flex; align-items: start; gap: var(--size-4-2); }
-.recall-learn-messages { display: grid; gap: var(--size-4-3); margin: var(--size-4-4) 0; }
-.recall-learn-message { padding: var(--size-4-3); border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m); }
-.recall-learn-text { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
-.recall-learn-input { width: 100%; min-height: 6em; margin-top: var(--size-4-3); resize: vertical; }
-.recall-learn-actions { display: flex; flex-wrap: wrap; gap: var(--size-4-2); margin-top: var(--size-4-2); }
-
 /* Icon scale. The custom set in src/icon.ts is drawn on one grid, so the
    rendered sizes are shared here rather than set per-button: sm for icons
    that sit inside a text label, md for standalone clickable icons (which

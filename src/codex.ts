@@ -117,7 +117,7 @@ export function parseCodexEvents(stdout: string): { text: string | null; error: 
         (err && typeof err.message === "string" && err.message) ||
         (typeof rec.error === "string" && rec.error) ||
         null;
-      if (msg) error = msg;
+      error = msg || "Provider reported a terminal failure.";
       continue;
     }
 
@@ -381,7 +381,7 @@ export class CodexBackend implements LlmBackend {
     }
     const parsed = req.schema.safeParse(value);
     if (!parsed.success) {
-      throw new CodexError("failed", `Codex returned ${req.label} in the wrong shape: ${parsed.error.issues[0]?.message ?? "schema mismatch"}.`);
+      throw new CodexError("failed", `Codex returned ${req.label} in the wrong shape: schema validation failed.`);
     }
     return parsed.data;
   }
@@ -439,7 +439,7 @@ export class CodexBackend implements LlmBackend {
       });
       if (r.aborted && req.signal?.aborted) throw new CodexError("aborted", "Cancelled.");
       const { text, error } = parseCodexEvents(r.stdout);
-      const failed = r.spawnError || r.timedOut || r.aborted || r.code !== 0;
+      const failed = r.spawnError || r.timedOut || r.aborted || r.code !== 0 || error;
       if (failed) throw classify(r, error);
       if (!text) {
         throw error ? classify(r, error) : new CodexError("failed", `Codex produced no final message for the ${label}.`);

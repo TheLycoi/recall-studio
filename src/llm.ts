@@ -14,7 +14,7 @@ import { sanitizeDiagnostic } from "./providerDiagnostic";
 import { writingContext, cardSystem, CARD_WRITING_METHOD, CARD_FIELD_DESCRIPTIONS, GROUNDED_WRITING_EXAMPLE } from "./writerMethod";
 import { LINT_FIX_INSTRUCTIONS } from "./lint";
 import type { BloomLevel, Card, Highlight, GenerationContext, GenerationPreparation, ScopedSourceFinding } from "./model";
-import { PreparationOut, GroundedCardsOut, AuditTransportOut, auditOutputSchema, PREPARATION_SYSTEM, AUDIT_SYSTEM, renderedCardReviews, type GroundedDraft, type GenerationAudit } from "./generation";
+import { sourceConcernsForCard, PreparationOut, GroundedCardsOut, AuditTransportOut, auditOutputSchema, PREPARATION_SYSTEM, AUDIT_SYSTEM, renderedCardReviews, type GroundedDraft, type GenerationAudit } from "./generation";
 import type { RecallSettings } from "./settings";
 
 const CardOut = z.object({
@@ -283,6 +283,7 @@ export class LlmClient {
 
   /** Rewrite one card according to an instruction ("convert to cloze", "shorter", ...). */
   async rewriteCard(h: Highlight, card: Card, instruction: string, authorized?: () => boolean): Promise<CardDraft> {
+    if (sourceConcernsForCard(card, h).length) throw Error("Resolve this card’s source concern before rewriting its wording.");
     const authorization = { authorized: this.requestAuthorization(authorized) };
     assertAuthorized(authorization);
     const s = this.getSettings();
@@ -306,6 +307,7 @@ export class LlmClient {
 
   /** Explicit user rewrites may split. Repairs and Convert keep rewriteCard's single-card contract. */
   async rewriteCards(h: Highlight, card: Card, instruction: string, authorized?: () => boolean): Promise<CardDraft[]> {
+    if (sourceConcernsForCard(card, h).length) throw Error("Resolve this card’s source concern before rewriting its wording.");
     const settings = JSON.stringify(this.getSettings());
     const authorization = { authorized: this.requestAuthorization(() => (!authorized || authorized()) && JSON.stringify(this.getSettings()) === settings) };
     assertAuthorized(authorization);

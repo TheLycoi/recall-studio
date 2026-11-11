@@ -106,6 +106,21 @@ test('system prompt editor saves, reloads, cancels and restores only its selecte
   assert.equal(host.settings.systemPrompts.reader, 'Keep reader unchanged');
 });
 
+test('retired Learn controls stay absent while every system prompt remains editable', () => {
+  const legacy = { learnSkillPath: '/old/skill', learnDataPath: '/old/data', learnPythonPath: '/old/python' };
+  const host = { settings: { ...m.DEFAULT_SETTINGS, ...legacy }, saveSettings() { throw Error('Rendering must not save'); } };
+  const tab = new m.RecallSettingTab({}, host); tab.display();
+  const names = tab.containerEl.rows.map(r => r.name ?? '');
+  assert.ok(!names.some(n => /LearnHarness|Open Learn|Skill folder|Python executable/.test(n)));
+  for (const name of ['Shared writing method', 'Reader prompt', 'Writer prompt', 'Grader prompt']) {
+    assert.equal(tab.containerEl.rows.find(r => r.name === name)?.button?.label, 'Open prompt', name);
+  }
+  for (const [key, value] of Object.entries(legacy)) {
+    assert.equal(host.settings[key], value);
+    assert.equal(Object.hasOwn(m.DEFAULT_SETTINGS, key), false);
+  }
+});
+
 test('prompt editor refuses invalid or stale changes and retains a failed-save draft', async () => {
   const host = { settings: { ...m.DEFAULT_SETTINGS }, async saveSettings() { throw Error('Synthetic disk failure'); } };
   const tab = new m.RecallSettingTab({}, host); tab.display();

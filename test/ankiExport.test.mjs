@@ -346,7 +346,12 @@ async function loadedPlugin(over = {}) {
   await plugin.onload();
   plugin.settings = settings(over);
   plugin.__realStore = plugin.store;
-  plugin.store = { all: () => [], touch() {}, async flush() {} };
+  plugin.__exportInputs = [];
+  plugin.store = { all: () => [], get: id => plugin.__exportInputs.find(h => h.id === id), touch() {}, async flush() {} };
+  for (const method of ['exportHighlights', 'exportAsTextFile']) {
+    const action = plugin[method];
+    plugin[method] = function(list, ...rest) { this.__exportInputs = list; return action.call(this, list, ...rest); };
+  }
   plugin.__app = app;
   return plugin;
 }
@@ -771,7 +776,7 @@ for (const method of ['exportHighlights', 'exportAsTextFile']) {
         assert.equal(card.status, 'exported');
         assert.deepEqual(card.exportAcceptance.issues, ['answer used elsewhere']);
         assert.equal(card.generation.audit.status, 'verified');
-        assert.equal(flushes, 1);
+        assert.equal(flushes, method === 'exportAsTextFile' ? 2 : 1);
         assert.equal(fake.notes.size, method === 'exportHighlights' ? 1 : 0);
         assert.equal(files.length, method === 'exportAsTextFile' ? 1 : 0);
         if (files.length) assert.ok(!plugin.__app.__files.get(files[0]).includes(partner.card.front));

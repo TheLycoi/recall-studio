@@ -19,7 +19,7 @@ export function explicitRewriteAuthorization(card: Card, highlight: Highlight, a
 /** Validate the entire set before auditing it or changing the original. */
 export function rewriteCandidates(card: Card, highlight: Highlight, drafts: Draft[]): Card[] {
   if (!Array.isArray(drafts) || !drafts.length || drafts.length > MAX_REWRITE_CARDS) throw Error("The rewrite must return a bounded, nonempty card list. The original is unchanged.");
-  const fork = drafts.length > 1 || card.ankiNoteId !== undefined || card.srNote !== undefined;
+  const fork = drafts.length > 1 || card.ankiNoteId !== undefined || card.srNote !== undefined || card.textExport !== undefined;
   const candidates = drafts.map(draft => {
     if (!draft || !["qa", "cloze"].includes(draft.kind) || ![draft.front, draft.back, draft.text].every(v => typeof v === "string" && v.length <= 4000)
       || (draft.kind === "qa" ? !!draft.text || !draft.front.trim() || !draft.back.trim() : !!draft.front || !!draft.back || !draft.text.trim())) {
@@ -46,7 +46,7 @@ export function rewriteCandidates(card: Card, highlight: Highlight, drafts: Draf
 export function applyExplicitRewrite(card: Card, highlight: Highlight, candidates: Card[], instruction: string): RewriteRevision | undefined {
   if (candidates.length === 1 && cardContent(candidates[0], highlight) === cardContent(card, highlight)) return;
   const at = new Date().toISOString(), before = snapshot(card);
-  const fork = candidates.length > 1 || card.ankiNoteId !== undefined || card.srNote !== undefined;
+  const fork = candidates.length > 1 || card.ankiNoteId !== undefined || card.srNote !== undefined || card.textExport !== undefined;
   const index = highlight.cards.indexOf(card);
   if (index < 0) throw Error("The original card is no longer present.");
   const replacementHighlight = { ...highlight, cards: [...highlight.cards.slice(0, index), ...candidates, ...highlight.cards.slice(index + 1)] };

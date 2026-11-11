@@ -20,6 +20,25 @@ function handovers(): WeakMap<object, Map<string, Promise<void>>> {
   return host[handoverKey] ??= new WeakMap();
 }
 
+// Commit ownership is shared across bundle reloads and desktop adapters for one vault.
+const writesKey = Symbol.for("recall-studio.inbox-writes.v1");
+function serializeInbox(adapter: App["vault"]["adapter"], path: string, work: () => Promise<void>): Promise<void> {
+  const host = globalThis as typeof globalThis & { [writesKey]?: Map<object | string, Map<string, Promise<void>>> };
+  const registry = host[writesKey] ??= new Map();
+  const desktop = adapter as typeof adapter & { getBasePath?: () => string };
+  const identity = desktop.getBasePath?.() || adapter;
+  let paths = registry.get(identity);
+  if (!paths) registry.set(identity, paths = new Map());
+  const attempt = (paths.get(path) ?? Promise.resolve()).then(work);
+  const settled = attempt.catch(() => {});
+  paths.set(path, settled);
+  void settled.then(() => {
+    if (paths.get(path) === settled) paths.delete(path);
+    if (!paths.size) registry.delete(identity);
+  });
+  return attempt;
+}
+
 /**
  * Persistent inbox. Lives in the Recall folder (the Recall folder
  * setting) as inbox.json, beside the house rules, so everything the plugin
@@ -52,6 +71,7 @@ export class InboxStore {
   private handingOver?: Promise<void>;
   private loading?: Promise<void>;
   private loaded = false;
+  private persistedRaw: string | null = null;
 
   constructor(
     private app: App,
@@ -92,40 +112,51 @@ export class InboxStore {
   }
 
   load(): Promise<void> {
-    return this.loading ??= this.readInbox();
+    return this.loading ??= (async () => {
+      this.readOnly = true;
+      await handovers().get(this.app.vault.adapter)?.get(this.path);
+      await serializeInbox(this.app.vault.adapter, this.path, () => this.readInbox());
+    })();
   }
 
   private async readInbox(): Promise<void> {
     const adapter = this.app.vault.adapter;
     // Native Component.unload does not await onunload. Do not even inspect
     // recovery files until the previous instance's rollback and save settle.
-    this.readOnly = true;
-    await handovers().get(adapter)?.get(this.path);
     if (this.closed) return;
     this.readOnly = false;
     const backup = `${this.path}.backup`;
     let loaded = false;
     try {
       if (await adapter.exists(backup)) {
+        const backupVersion = parseInboxJson(await adapter.read(backup));
+        if (!backupVersion.ok && backupVersion.reason === "unsupported-version") throw new Error(backupVersion.detail);
         if (await adapter.exists(this.path)) {
-          const live = parseInboxJson(await adapter.read(this.path));
+          const liveRaw = await adapter.read(this.path);
+          const live = parseInboxJson(liveRaw);
+          if (!live.ok && live.reason === "unsupported-version") throw new Error(live.detail);
           if (live.ok && !live.fresh) {
             await adapter.remove(backup);
             this.data = live.data;
+            this.persistedRaw = liveRaw;
           } else {
-            const saved = parseInboxJson(await adapter.read(backup));
+            const savedRaw = await adapter.read(backup);
+            const saved = parseInboxJson(savedRaw);
             if (!saved.ok || saved.fresh) throw new Error(`Neither inbox nor backup is readable: ${saved.ok ? "backup is blank" : saved.detail}`);
             const moved = `${this.path}.corrupt-${timestamp(new Date())}`;
             await adapter.rename(this.path, moved);
             await adapter.rename(backup, this.path);
             this.data = saved.data;
+            this.persistedRaw = savedRaw;
             new Notice(`Recall Studio: recovered inbox.json from backup; damaged file kept at ${moved}.`, 0);
           }
         } else {
-          const saved = parseInboxJson(await adapter.read(backup));
+          const savedRaw = await adapter.read(backup);
+          const saved = parseInboxJson(savedRaw);
           if (!saved.ok || saved.fresh) throw new Error(`Inbox backup is unreadable: ${saved.ok ? "backup is blank" : saved.detail}`);
           await adapter.rename(backup, this.path);
           this.data = saved.data;
+          this.persistedRaw = savedRaw;
           new Notice("Recall Studio: recovered inbox.json from an interrupted save.");
         }
         // Consume the exact snapshot that justified removing recovery data.
@@ -153,6 +184,7 @@ export class InboxStore {
         const parsed = parseInboxJson(raw);
         if (parsed.ok) {
           this.data = parsed.data;
+          this.persistedRaw = raw;
         } else {
           // Without a usable snapshot, keep the original in place and refuse
           // writes rather than turning uncertain history into an empty inbox.
@@ -191,7 +223,7 @@ export class InboxStore {
     }
     const snapshot = JSON.stringify(this.data, null, 2);
     const revision = this.revision;
-    const attempt = this.flushing.then(async () => {
+    const attempt = serializeInbox(this.app.vault.adapter, this.path, async () => {
       if (this.closed || this.readOnly) return;
       const adapter = this.app.vault.adapter;
       const staged = `${this.path}.pending-${randomUUID()}`;
@@ -204,13 +236,22 @@ export class InboxStore {
         // Keep the previous file recoverable across the gap between renames.
         const existing = await adapter.exists(this.path);
         if (this.closed || this.readOnly) return;
+        const current = existing ? await adapter.read(this.path) : null;
+        if (current !== this.persistedRaw) throw new Error("Inbox changed outside this store; reload before saving. Unsaved changes remain in memory.");
+        if (this.closed || this.readOnly) return;
         if (existing) await adapter.rename(this.path, backup);
         if (this.closed || this.readOnly) {
           if (existing && !(await adapter.exists(this.path))) await adapter.rename(backup, this.path);
           return;
         }
         try {
+          if (existing && await adapter.read(backup) !== this.persistedRaw) throw new Error("Inbox changed during save; the newer snapshot is preserved.");
+          if (this.closed || this.readOnly) {
+            if (existing && !(await adapter.exists(this.path))) await adapter.rename(backup, this.path);
+            return;
+          }
           await adapter.rename(staged, this.path);
+          this.persistedRaw = snapshot;
         } catch (e) {
           if (existing && !(await adapter.exists(this.path))) await adapter.rename(backup, this.path);
           throw e;
