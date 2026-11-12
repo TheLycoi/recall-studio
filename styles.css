@@ -43,6 +43,20 @@
   font-size: var(--font-ui-smaller);
 }
 
+/* Edit requests update independently of the mounted card editor. */
+.wikilm-edit-queue:not(:empty) {
+  max-height: 16rem;
+  overflow-y: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  padding: var(--size-4-2);
+  margin: var(--size-4-2) 0;
+}
+.wikilm-edit-queue h3 { margin: 0 0 var(--size-4-2); font-size: var(--font-ui-small); }
+.wikilm-edit-request { padding: var(--size-4-2) 0; border-top: 1px solid var(--background-modifier-border); }
+.wikilm-edit-instruction { white-space: pre-wrap; overflow-wrap: anywhere; }
+.wikilm-edit-request button { margin: var(--size-4-1) var(--size-4-1) 0 0; }
+
 /* Header ------------------------------------------------------------- */
 .wikilm-header {
   position: sticky;

@@ -38,13 +38,15 @@ function fixture({ output = revised } = {}) {
     if (req.label === 'verdicts') return req.schema.parse(verdict);
     throw Error(`Unexpected provider request: ${req.label}`);
   } };
-  const root = element();
+  const root = element(), edits = [];
   const host = { app: { vault: { getFiles: () => [], configDir: '.obsidian' }, workspace: {}, metadataCache: {} }, settings, llm,
-    store: { all: () => [h], onChange: () => () => {}, touch() {}, recordRevision: r => revisions.push(r) } };
+    store: { editRequests: () => edits, isWritable: true, hasUnsavedChanges: false, flush: async () => {}, all: () => [h], onChange: () => () => {}, touch() {}, recordRevision: r => revisions.push(r) } };
   const view = new InboxView({ contentEl: root }, host);
+  const runs = [], rewrite = view.rewrite.bind(view);
+  view.rewrite = (...args) => { const run = rewrite(...args); runs.push(run); return run; };
   view.renderCard(root, h, c);
   const star = () => nodes(root).find(n => n.tagName === 'BUTTON' && /rewrite/i.test(n.title ?? ''));
-  return { h, c, root, view, llm, requests, revisions, star };
+  return { h, c, root, view, llm, requests, revisions, star, runs };
 }
 
 test('the card star asks for the change instead of running a best-practices check', async () => {
@@ -65,7 +67,7 @@ test('submitting the star instruction rewrites the card and records a rewrite re
   assert.equal(modal.title, 'Rewrite card');
   modal.value = 'ask about the process, not "it"';
   modal.submit();
-  await until(() => f.view.checking.size === 0);
+  await Promise.all(f.runs);
   assert.equal(f.requests.length, 2);
   assert.deepEqual(f.requests.map(r => r.label), ['rewrite cards', 'rewrite audit']);
   assert.equal(f.c.front, 'What does dormancy delay?');
@@ -81,7 +83,7 @@ test('cancelling the star prompt sends nothing and leaves the card unchanged', a
   await until(() => modal);
   modal.value = '';
   modal.submit();
-  await until(() => f.view.checking.size === 0);
+  await Promise.all(f.runs);
   assert.deepEqual(f.requests, []);
   assert.deepEqual(f.c, before);
   assert.deepEqual(f.revisions, []);
@@ -94,7 +96,7 @@ test('a failed star rewrite keeps the original card and its history', async () =
   await until(() => modal);
   modal.value = 'shorten the answer';
   modal.submit();
-  await until(() => f.view.checking.size === 0);
+  await Promise.all(f.runs);
   assert.deepEqual(f.c, before);
   assert.deepEqual(f.revisions, []);
 });

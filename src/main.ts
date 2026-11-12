@@ -7,6 +7,7 @@ import { captureSelection } from "./capture";
 import { RECALL_COMMANDS } from "./commands";
 import { paletteCommands } from "./commandTable";
 import { Generator } from "./generator";
+import { CardEditQueue } from "./cardEditQueue";
 import { Highlighter } from "./highlighter";
 import { InboxView, VIEW_TYPE_INBOX } from "./inboxView";
 import { LlmClient } from "./llm";
@@ -23,6 +24,7 @@ export default class RecallPlugin extends Plugin {
   settings: RecallSettings = { ...DEFAULT_SETTINGS };
   store!: InboxStore;
   generator!: Generator;
+  editQueue?: CardEditQueue;
   llm!: LlmClient;
   anki!: AnkiClient;
   highlighter!: Highlighter;
@@ -39,6 +41,7 @@ export default class RecallPlugin extends Plugin {
     await this.store.load();
     if (this.unloading) return;
     this.llm = new LlmClient(() => this.settings);
+    this.editQueue = new CardEditQueue(this);
     this.anki = new AnkiClient(() => this.settings.ankiConnectUrl);
     this.generator = new Generator(this, { release: this.manifest.version });
 
@@ -118,6 +121,7 @@ export default class RecallPlugin extends Plugin {
 
   private async finishUnload(): Promise<void> {
     let failure: unknown;
+    const editsStopped = this.editQueue?.stop();
     const stopped = Promise.resolve(this.generator?.stop()).catch(e => {
       console.error("Recall Studio: generation cleanup failed during unload", e);
       failure ??= e;
@@ -142,6 +146,7 @@ export default class RecallPlugin extends Plugin {
     }
     // A cancelled run can still roll back cards after its final write resumes.
     await stopped;
+    await editsStopped;
     // A dispatched export can still record receipts or restore draft statuses.
     await this.exportTransport?.catch(() => {});
     try {

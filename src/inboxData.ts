@@ -61,6 +61,13 @@ const HighlightRecord = z.object({
 const CardSnapshot = CardRecord.pick({ kind: true, front: true, back: true, text: true, extra: true });
 const InboxFile = z.object({
   version: z.literal(1).optional(), highlights: z.array(HighlightRecord),
+  cardEdits: z.array(z.object({
+    id: z.string().min(1), highlightId: z.string().min(1), cardId: z.string().min(1),
+    instruction: z.string().min(1).max(8000), createdAt: z.string(),
+    state: z.enum(["queued", "running", "failed", "interrupted", "completed", "cancelled"]),
+    sourceKey: z.string().regex(/^[a-f0-9]{64}$/), settingsKey: z.string().regex(/^[a-f0-9]{64}$/),
+    message: z.string().optional(),
+  })).refine(items => new Set(items.map(item => item.id)).size === items.length, "Duplicate edit request IDs").optional(),
   highlightInstructions: z.record(z.string(), z.string()).optional(),
   ingested: z.record(z.string(), z.string()).optional(),
   transcripts: z.record(z.string(), z.object({

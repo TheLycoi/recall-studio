@@ -76,10 +76,11 @@ function fixture({ output = { cards: drafts }, audit, repair, finalAudit, pause 
       : typeof output === 'function' ? output(req) : output;
     return { status: 200, json: { choices: [{ message: { content: JSON.stringify(value) }, finish_reason: 'stop' }] } };
   };
+  const edits = [];
   const host = { app: { vault: { getFiles: () => [], configDir: '.obsidian' }, workspace: {}, metadataCache: {} }, settings, llm,
     schema: { openCount: () => 0, learn: async () => { learning++; return 0; } },
     exportHighlights() { assert.fail('Rewrite must never export'); },
-    store: { all: () => highlights, onChange: () => () => {}, counts: () => ({ toReview: 3, queued: 0, generating: 0, errors: 0 }), touch: () => view.scheduleRender(), recordRevision: r => revisions.push(r) } };
+    store: { editRequests: () => edits, isWritable: true, hasUnsavedChanges: false, flush: async () => {}, all: () => highlights, onChange: () => () => {}, counts: () => ({ toReview: 3, queued: 0, generating: 0, errors: 0 }), touch: () => view.scheduleRender(), recordRevision: r => revisions.push(r) } };
   const view = new InboxView({ contentEl: root }, host);
   const runs = [], rewrite = view.rewrite.bind(view);
   view.rewrite = (...args) => { const run = rewrite(...args); runs.push(run); return run; };
@@ -95,6 +96,40 @@ function fixture({ output = { cards: drafts }, audit, repair, finalAudit, pause 
   return { h, c, left, right, highlights, requests, revisions, host, view, root, llm, settings, draw, click, fields, star, save,
     pending: () => pending, release: () => barrier.resolve(), runs, learning: () => learning, rules: value => { rules = value; } };
 }
+
+test('rapid instructions for the same card are remembered and applied in FIFO order', async () => {
+  const first = { kind: 'cloze', front: '', back: '', text: 'Object B {{c1::stays constant}}; Object A {{c2::contracts}}.' };
+  const second = { kind: 'cloze', front: '', back: '', text: 'Object A {{c1::contracts}}, while Object B {{c2::stays constant}}.' };
+  const f = fixture({ pause: 'rewrite cards', output: req => ({ cards: [req.user.includes('Second edit') ? second : first] }), audit: fixtureAudit([first]) });
+  await f.view.onOpen();
+  f.star('First edit: put Object B first'); await until(f.pending);
+  const count = modals.length;
+  f.star('Second edit: put Object A first with while');
+  const opened = modals.length;
+  f.release(); await Promise.all(f.runs);
+  assert.equal(opened, count + 1, 'A busy card must still accept the next instruction');
+  assert.deepEqual(f.revisions.map(r => r.instruction), ['First edit: put Object B first', 'Second edit: put Object A first with while']);
+  assert.equal(f.revisions[1].before.text, first.text, 'The second request starts from the first result');
+  assert.equal(f.c.text, second.text);
+  await f.view.onClose();
+});
+
+test('the queue stays visible and cancellable while another card editor stays mounted', async () => {
+  const f = fixture({ pause: 'before-dispatch' }); await f.view.onOpen();
+  f.star('Save this request even when I move on'); await until(f.pending);
+  f.click('Edit (e)');
+  const e = f.fields(); e.fields[0].value = 'Keep this unsaved draft';
+  const queue = nodes(f.root).find(n => n.hasClass('wikilm-edit-queue'));
+  const cancel = queue && nodes(queue).find(n => n.text === 'Cancel edit');
+  f.release(); await Promise.all(f.runs);
+  assert.ok(queue, 'Saved edit requests must be visible independently of the card editor');
+  assert.ok(cancel, 'Every pending request needs cancellation');
+  await cancel.events.click();
+  assert.equal(f.fields().form, e.form);
+  assert.equal(e.fields[0].value, 'Keep this unsaved draft');
+  assert.equal(f.host.editQueue.items[0].state, 'cancelled');
+  await f.view.onClose();
+});
 
 const procedure = 'disconnect the power, attach the reference cable, and reconnect power only after the indicator turns green';
 for (const kind of ['qa', 'cloze']) for (const focused of [true, false]) test(`G3: ${kind} ${focused ? 'meaningful procedure passes' : 'unfocused unit is held'} only after length adjudication`, async () => {
@@ -362,7 +397,7 @@ for (const stage of ['rewrite cards', 'rewrite audit']) test(`a failed ${stage} 
   await f.view.onClose();
 });
 
-test('two mounted panes share the rewrite lock through the independent audit', async () => {
+test('two mounted panes accept saved instructions but share one rewrite worker', async () => {
   const f = fixture({ pause: 'rewrite audit' }); await f.view.onOpen();
   const otherRoot = dom(), other = new InboxView({ contentEl: otherRoot }, f.host);
   await other.onOpen();
@@ -370,8 +405,13 @@ test('two mounted panes share the rewrite lock through the independent audit', a
   const count = modals.length;
   const otherCard = nodes(otherRoot).find(n => n.hasClass('wikilm-card') && n.dataset.id === f.c.id);
   nodes(otherCard).find(n => n.title === 'Rewrite card with AI (asks what to change)').events.click({ stopPropagation() {} });
-  assert.equal(modals.length, count, 'A second pane cannot start a competing instruction');
-  f.release(); await Promise.all(f.runs); f.draw();
+  const opened = modals.length;
+  modals.at(-1).value = 'Keep this second request'; modals.at(-1).submit();
+  await turn();
+  f.release(); await Promise.all(f.runs); await f.host.editQueue.idle(); f.draw();
+  assert.equal(opened, count + 1, 'A second pane may save the next request without competing transport');
+  assert.equal(f.host.editQueue.items.length, 2);
+  assert.equal(f.host.editQueue.items[1].state, 'failed', 'A split does not retarget the next instruction to an arbitrary child');
   assert.equal(f.requests.length, 2); assert.equal(f.revisions.length, 1);
   await other.onClose(); await f.view.onClose();
 });
@@ -649,4 +689,48 @@ test('explicit split uses Strong for draft and repair, the independent grader fo
     ['rewrite cards', 'synthetic', 'high'], ['rewrite audit', 'synthetic-grader', 'low'],
     ['rewrite repair', 'synthetic', 'high'], ['rewrite final audit', 'synthetic-grader', 'low'],
   ]);
+});
+
+test('rapid Save instructions do not cancel an earlier submitted instruction', async () => {
+  const first = { kind: 'cloze', front: '', back: '', text: 'Object B {{c1::stays constant}}; Object A {{c2::contracts}}.' };
+  const second = { kind: 'cloze', front: '', back: '', text: 'Object A {{c1::contracts}}, while Object B {{c2::stays constant}}.' };
+  const f = fixture({ pause: 'rewrite cards', output: req => ({ cards: [req.user.includes('Second instruction') ? second : first] }), audit: fixtureAudit([first]) });
+  await f.view.onOpen();
+  const e = f.save('First instruction: B first'); await until(f.pending);
+  e.fields[4].value = 'Second instruction: A first'; button(e.form, 'Save').events.click();
+  await turn(); f.release(); await Promise.all(f.runs); await f.host.editQueue.idle();
+  assert.deepEqual(f.revisions.map(r => r.instruction), ['First instruction: B first', 'Second instruction: A first']);
+  assert.equal(f.c.text, second.text);
+  await f.view.onClose();
+});
+
+test('an unsaved editor in a different pane blocks stale queue replacement', async () => {
+  const first = { kind: 'cloze', front: '', back: '', text: 'Object B {{c1::stays constant}}; Object A {{c2::contracts}}.' };
+  const f = fixture({ pause: 'before-dispatch', output: { cards: [first] }, audit: fixtureAudit([first]) }); await f.view.onOpen();
+  const otherRoot = dom(), other = new InboxView({ contentEl: otherRoot }, f.host); await other.onOpen();
+  const before = structuredClone(f.h);
+  f.star('Reword this card'); await until(f.pending);
+  const otherCard = nodes(otherRoot).find(n => n.dataset.id === f.c.id);
+  nodes(otherCard).find(n => n.title === 'Edit (e)').events.click({ stopPropagation() {} });
+  const otherField = nodes(otherRoot).find(n => n.tagName === 'TEXTAREA'); otherField.value = 'Do not overwrite this draft';
+  f.release(); await Promise.all(f.runs); await f.host.editQueue.idle();
+  assert.equal(f.requests.length, 0);
+  assert.deepEqual(f.h, before);
+  assert.equal(otherField.value, 'Do not overwrite this draft');
+  assert.equal(f.host.editQueue.items[0].state, 'failed');
+  await other.onClose(); await f.view.onClose();
+});
+
+test('an instruction submitted after its modal became stale remains saved for explicit retry', async () => {
+  const first = { kind: 'cloze', front: '', back: '', text: 'Object B {{c1::stays constant}}; Object A {{c2::contracts}}.' };
+  const f = fixture({ pause: 'rewrite cards', output: { cards: [first] }, audit: fixtureAudit([first]) }); await f.view.onOpen();
+  f.star('Put B first'); await until(f.pending);
+  f.click('Rewrite card with AI (asks what to change)'); const secondModal = modals.at(-1);
+  f.release(); await f.runs[0];
+  secondModal.value = 'Remember this newer instruction'; secondModal.submit(); await Promise.all(f.runs);
+  assert.equal(f.host.editQueue.items.length, 2);
+  assert.equal(f.host.editQueue.items[1].instruction, 'Remember this newer instruction');
+  assert.equal(f.host.editQueue.items[1].state, 'failed');
+  assert.equal(f.revisions.length, 1); assert.equal(f.c.text, first.text);
+  await f.view.onClose();
 });

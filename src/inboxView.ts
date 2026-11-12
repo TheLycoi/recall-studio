@@ -25,7 +25,8 @@ import { resolveCardEvidence } from "./cardEvidence";
 import { auditFinding, summarizeExport } from "./exportSummary";
 import { findCrossInterference, lintCard, LINT_LABELS, wrapCloze } from "./lint";
 import { DEFAULT_SETTINGS } from "./settings";
-import { applyExplicitRewrite, explicitRewriteAuthorization, rewriteCandidates } from "./explicitRewrite";
+import { explicitRewriteAuthorization } from "./explicitRewrite";
+import { CardEditQueue } from "./cardEditQueue";
 import { beginCardRewrite, cardAuthorization, cardContent, cardReplacement, currentCardCheck } from "./cardActions";
 
 export const VIEW_TYPE_INBOX = "review-inbox";
@@ -64,8 +65,11 @@ const ORIGIN_LABELS: Partial<Record<Highlight["origin"], string>> = {
  * Export accepts drafts. The Inbox is the only workspace.
  */
 export class InboxView extends ItemView {
+  private static views = new WeakMap<RecallPlugin, Set<InboxView>>();
+  private peers: Set<InboxView>;
   private headerEl!: HTMLElement;
   private inboxHeaderEl!: HTMLElement;
+  private editQueueEl?: HTMLElement;
   private cardsEl!: HTMLElement;
   private unsubscribe: (() => void) | null = null;
   private filter: Filter = "review";
@@ -74,7 +78,7 @@ export class InboxView extends ItemView {
   private checkEpoch = 0;
   private collapsed = new Set<string>();
   private editing: string | null = null;
-  private editorDraft?: { content: () => string; saved: () => boolean };
+  private editorDraft?: { content: () => string; fields: () => string; saved: () => boolean };
   private focusedCard: string | null = null;
   /** Highlight ids whose flagged-card group is expanded under lintMode "hide". */
   private expandedFlagged = new Set<string>();
@@ -100,6 +104,10 @@ export class InboxView extends ItemView {
     private plugin: RecallPlugin,
   ) {
     super(leaf);
+    let peers = InboxView.views.get(plugin);
+    if (!peers) InboxView.views.set(plugin, peers = new Set());
+    this.peers = peers;
+    peers.add(this);
   }
 
   getViewType(): string {
@@ -114,10 +122,12 @@ export class InboxView extends ItemView {
 
   async onOpen(): Promise<void> {
     this.closed = false;
+    this.peers.add(this);
     this.contentEl.empty();
     this.contentEl.addClass("wikilm-notebook");
     this.headerEl = this.contentEl.createDiv();
     this.inboxHeaderEl = this.headerEl.createDiv();
+    this.editQueueEl = this.headerEl.createDiv({ cls: "wikilm-edit-queue" });
     this.cardsEl = this.contentEl.createDiv({ cls: "review-inbox-cards" });
     this.contentEl.tabIndex = 0;
     this.registerDomEvent(this.contentEl, "keydown", (e) => this.onKey(e));
@@ -127,6 +137,7 @@ export class InboxView extends ItemView {
 
   async onClose(): Promise<void> {
     this.closed = true;
+    this.peers.delete(this);
     this.checkEpoch++;
     this.unsubscribe?.();
   }
@@ -138,6 +149,7 @@ export class InboxView extends ItemView {
    * (`dirty`) and drawn when the editor closes.
    */
   private scheduleRender() {
+    this.renderEditQueue();
     if (this.editorOpen()) {
       this.dirty = true;
       this.rebuildCrossInterference();
@@ -200,6 +212,7 @@ export class InboxView extends ItemView {
     root.empty();
     this.inboxHeaderEl.empty();
     this.renderHeader(this.inboxHeaderEl);
+    this.renderEditQueue();
     this.rebuildCrossInterference();
 
     const hs = this.visibleHighlights();
@@ -240,6 +253,47 @@ export class InboxView extends ItemView {
       }
     }
     this.crossInterference = findCrossInterference(items);
+  }
+
+  private peerEditorsAllow(cardId: string): boolean {
+    return [...this.peers].every(view => view === this || view.editing !== cardId || !!view.editorDraft?.saved());
+  }
+
+  private renderEditQueue(): void {
+    const root = this.editQueueEl, queue = this.plugin.editQueue;
+    if (!root || this.closed) return;
+    root.empty();
+    if (!queue?.items.length && !queue?.saveError) return;
+    const pending = queue.items.filter(r => r.state === "queued" || r.state === "running").length;
+    root.createEl("h3", { text: `Edit queue · ${pending} pending` });
+    const action = (parent: HTMLElement, label: string, run: () => Promise<unknown>) => {
+      const button = parent.createEl("button", { text: label });
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try { await run(); } catch (e) { new Notice(`Recall Studio: ${describeError(e)}`); }
+        finally { this.renderEditQueue(); }
+      });
+    };
+    if (queue.saveError) {
+      root.createDiv({ text: "Queue not saved. Requests remain in memory; fix storage before closing Obsidian." });
+      action(root, "Save queue", () => queue.save());
+    }
+    for (const request of queue.items) {
+      const row = root.createDiv({ cls: "wikilm-edit-request" });
+      const h = this.plugin.store.all().find(h => h.id === request.highlightId);
+      row.createDiv({ text: `${h?.sourceTitle ?? "Unavailable source"} · ${request.cardId} · ${request.state}` });
+      row.createDiv({ cls: "wikilm-edit-instruction", text: request.instruction });
+      if (request.message) row.createDiv({ cls: "wikilm-muted", text: request.message });
+      if (["failed", "interrupted"].includes(request.state) && !queue.saveError) {
+        action(row, "Retry on current card", () => {
+          const epoch = this.checkEpoch;
+          return queue.retry(request.id, () => !this.closed && this.checkEpoch === epoch && this.peerEditorsAllow(request.cardId)
+            && (this.editing !== request.cardId || !!this.editorDraft?.saved()));
+        });
+      }
+      if (!["completed", "cancelled"].includes(request.state)) action(row, "Cancel edit", () => queue.cancel(request.id));
+    }
+    if (queue.items.some(r => r.state === "completed" || r.state === "cancelled")) action(root, "Clear finished edits", () => queue.clearFinished());
   }
 
   private renderHeader(root: HTMLElement): void {
@@ -760,6 +814,7 @@ export class InboxView extends ItemView {
     sync();
 
     const editor = this.editorDraft = {
+      fields: () => JSON.stringify([kindSel.value, front.value, back.value, text.value, extra.value]),
       content: () => JSON.stringify([kindSel.value, front.value, back.value, text.value, extra.value, instruction.value]),
       saved: () => kindSel.value === c.kind && front.value.trim() === c.front && back.value.trim() === c.back
         && text.value.trim() === c.text && extra.value.trim() === c.extra && !instruction.value.trim(),
@@ -901,13 +956,29 @@ export class InboxView extends ItemView {
       new Notice("Save or cancel this card's edits before converting it.");
       return;
     }
-    const draftContent = editor?.content();
+    const draftContent = editor?.content(), draftFields = editor?.fields();
     const current = this.plugin.llm.requestAuthorization(explicitRewriteAuthorization(c, h, () => !this.closed && this.checkEpoch === epoch
       && (!savedEditor || savedEditor())
-      && this.editing === editing && (!editor || (this.editorDraft === editor && editor.content() === draftContent))
+      && (this.editing !== c.id || (this.editorDraft === editor && editor?.content() === draftContent))
       && JSON.stringify(this.plugin.settings) === settings
       && this.plugin.store.all().includes(h) && h.cards.includes(c)));
     if (!current()) return;
+    if (!preset || savedEditor) {
+      const instruction = preset ?? await askInstruction(this.plugin.app, "Rewrite card", "e.g. split into separate cards, make the answer shorter");
+      if (!instruction) return;
+      const submittedCurrent = current();
+      const active = this.plugin.llm.requestAuthorization(() => submittedCurrent && !this.closed && this.checkEpoch === epoch && this.peerEditorsAllow(c.id)
+        && (this.editing !== c.id || (this.editorDraft === editor && editor?.fields() === draftFields)));
+      try {
+        const queue = this.plugin.editQueue ??= new CardEditQueue(this.plugin);
+        const changed = await queue.enqueue(h, c, instruction, active);
+        if (changed && active() && this.editing === c.id && editor?.content() === draftContent) {
+          if (savedEditor || c.status === "deleted") this.editing = null;
+          this.scheduleRender();
+        }
+        return changed;
+      } catch (e) { new Notice(`Recall Studio: ${describeError(e)}`); return; }
+    }
     const release = beginCardRewrite(c);
     if (!release) return;
     this.checking.add(c.id);
@@ -919,19 +990,6 @@ export class InboxView extends ItemView {
       const was = snapshot(c);
       const source = structuredClone(h);
       source.text = plainText(source.text);
-      if (!preset || savedEditor) {
-        const drafts = await this.plugin.llm.rewriteCards(source, structuredClone(c), instruction, current);
-        if (!current()) return;
-        const candidates = rewriteCandidates(c, h, drafts);
-        const revision = applyExplicitRewrite(c, h, candidates, instruction);
-        if (!revision) { new Notice("Recall Studio: no changes returned. The original is unchanged."); return; }
-        this.plugin.store.recordRevision(revision);
-        if (savedEditor || c.status === "deleted") this.editing = null;
-        this.plugin.store.touch();
-        if (this.editing === c.id) this.render();
-        new Notice(candidates.length > 1 ? `Recall Studio: Rewrote into ${candidates.length} cards.` : "Recall Studio: card rewritten.");
-        return true;
-      }
       const d = await this.plugin.llm.rewriteCard(source, structuredClone(c), instruction, current);
       if (!current()) return;
       const candidate = cardReplacement(c, h, d);

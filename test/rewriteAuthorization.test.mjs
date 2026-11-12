@@ -44,8 +44,9 @@ async function fixture({ pause = 'before-dispatch', output = converted } = {}) {
     return post(...args);
   };
   const root = element();
+  const edits = [];
   const host = { app: { vault: { getFiles: () => [], configDir: '.obsidian' }, workspace: {}, metadataCache: {} }, settings, llm,
-    store: { all: () => highlights, onChange: () => () => {}, touch() {}, recordRevision: r => revisions.push(r) } };
+    store: { editRequests: () => edits, isWritable: true, hasUnsavedChanges: false, flush: async () => {}, all: () => highlights, onChange: () => () => {}, touch() {}, recordRevision: r => revisions.push(r) } };
   const view = new InboxView({ contentEl: root }, host);
   const runs = [], rewrite = view.rewrite.bind(view);
   view.rewrite = (...args) => { const run = rewrite(...args); runs.push(run); return run; };
@@ -148,7 +149,7 @@ test('Convert does not discard an already unsaved editor draft', async () => {
   assert.equal(e.front.value, 'Unsubmitted wording');
 });
 
-for (const action of ['Convert', 'Save']) test(`rapid duplicate ${action} actions spend one rewrite and preserve pending drafts`, async () => {
+for (const action of ['Convert', 'Save']) test(`rapid ${action} actions retain submitted edits without overlapping transport`, async () => {
   const f = await fixture();
   const e = action === 'Save' ? openEditor(f) : undefined;
   if (e) { e.instruction.value = 'Convert to cloze'; e.save(); }
@@ -157,12 +158,15 @@ for (const action of ['Convert', 'Save']) test(`rapid duplicate ${action} action
   if (e) { e.front.value = 'Newer draft, not submitted twice'; e.save(); }
   else f.click();
   f.release(); await Promise.all(f.runs);
-  assert.equal(f.requests.length, e ? 0 : 1);
-  assert.equal(f.revisions.length, e ? 0 : 1);
+  assert.equal(f.requests.length, e ? 2 : 1);
+  assert.equal(f.revisions.length, e ? 2 : 1);
   if (e) {
-    assert.equal(f.c.front, 'What does dormancy delay?');
+    assert.equal(f.c.text, converted.text);
+    assert.equal(f.revisions[0].via, 'edit');
+    assert.equal(f.revisions[0].after.front, 'Newer draft, not submitted twice');
+    assert.deepEqual(f.host.editQueue.items.map(r => r.state), ['failed', 'completed']);
     assert.equal(e.front.value, 'Newer draft, not submitted twice');
-    assert.equal(f.view.editing, f.c.id);
+    assert.equal(f.view.editing, null);
   }
 });
 

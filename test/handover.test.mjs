@@ -613,3 +613,27 @@ test('unloading a successor still waiting to load cannot bypass the original han
     f.store.close(); next.store?.close(); third.close();
   }
 });
+
+test('native unload drains the edit queue before a fresh bundle resumes storage ownership', async () => {
+  const f = await fixture(); f.store.close();
+  const old = new bundles[0].RecallPlugin(f.app), next = new bundles[1].RecallPlugin(f.app), barrier = deferred();
+  let writerStarted = false, newCalls = 0;
+  try {
+    await old.onload();
+    const h = old.store.all()[0]; h.status = 'ready';
+    const card = { id: 'synthetic-edit-card', highlightId: h.id, kind: 'qa', front: 'What does Amber store?', back: 'heat', text: '', extra: '', status: 'pending', edited: false }; h.cards.push(card);
+    old.llm.rewriteCards = async () => { writerStarted = true; await barrier.promise; return [{ kind: 'qa', front: 'What is stored by Amber?', back: 'heat', text: '' }]; };
+    const request = old.editQueue.enqueue(h, card, 'Keep this pending instruction', () => true);
+    await until(() => writerStarted);
+    old.unload(); const start = next.onload();
+    barrier.resolve(); await Promise.all([request, start, old.onunload()]);
+    next.llm.rewriteCards = async () => { newCalls++; throw Error('Must not replay'); };
+    await next.editQueue.idle();
+    assert.equal(old.store.isWritable, false); assert.equal(next.store.isWritable, true);
+    assert.equal(newCalls, 0); assert.equal(next.store.revisions().length, 0);
+    assert.equal(next.store.all()[0].cards[0].front, 'What does Amber store?');
+    assert.equal(next.editQueue.items[0].instruction, 'Keep this pending instruction');
+    assert.equal(next.editQueue.items[0].state, 'interrupted');
+    assert.equal(JSON.parse(f.files.get('study/inbox.json')).cardEdits[0].state, 'interrupted');
+  } finally { barrier.resolve(); await Promise.allSettled([old.onunload(), next.onunload()]); }
+});

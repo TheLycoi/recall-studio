@@ -92,6 +92,10 @@ export class InboxStore {
     return this.dirty;
   }
 
+  get isWritable(): boolean { return this.loaded && !this.readOnly && !this.closed; }
+
+  editRequests(create = false): import("./cardEditQueue").CardEditRequest[] { return this.data.cardEdits ?? (create ? this.data.cardEdits = [] : []); }
+
   /** Move a plugin-folder inbox.json into the Recall folder, once, when no inbox is there yet. */
   private async migrate(): Promise<void> {
     if (this.closed) return;

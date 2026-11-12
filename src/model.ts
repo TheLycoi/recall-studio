@@ -258,6 +258,7 @@ export interface CardRevision {
 export interface InboxData {
   version: 1;
   highlights: Highlight[];
+  cardEdits?: import("./cardEditQueue").CardEditRequest[];
   transcripts?: Record<string, TranscriptRecord>;
   /** Unused by Recall. Kept so an inbox file written by an earlier version still parses. */
   ingested?: Record<string, string>;

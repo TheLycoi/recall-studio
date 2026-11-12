@@ -30,6 +30,28 @@ unchanged result triggers one repair attempt; a failed attempt preserves the
 original. A rewrite uses two model requests when clean and at most four when
 repair is needed. Unresolved source concerns must be addressed before rewriting.
 
+## Saved edit queue (unreleased)
+
+Star rewrites and editor Save-with-instruction requests are saved against their
+card before running. One worker processes them in submission order, including
+requests from multiple Inbox panes. Consecutive edits to the same draft use the
+last successful result. Repeated clicks with the same pending instruction do not
+start duplicate work. Convert keeps its existing single-card behavior.
+
+The Inbox queue shows each instruction and its state. Cancel stops a waiting edit
+or rejects a running result. Failed or interrupted requests stay available for
+**Retry on current card**. A restart never automatically repeats an uncertain
+model request. If the card changes while its instruction dialog is open, the
+submitted instruction is saved for review rather than applied to stale text.
+A split does not redirect later instructions to a replacement card.
+
+At most 100 unresolved requests may wait; a full queue refuses new submissions
+without evicting old ones. **Clear finished edits** removes completed/cancelled
+queue entries, not card revision history. A **Save queue** warning means storage
+failed: requests remain in memory, but do not close Obsidian before saving them.
+Saved instructions are part of the Recall data folder and inherit its sync and
+backup behavior. No queue action exports to Anki.
+
 ## Workflow
 
 1. Select text in a note or PDF and run **Send selection to inbox**. Use
